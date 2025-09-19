@@ -2,6 +2,30 @@ using System.ComponentModel.DataAnnotations;
 
 namespace ErpSystem.Api.Models
 {
+    // Step 1: Get available tenants for user
+    public class GetUserTenantsRequest
+    {
+        [Required]
+        [StringLength(100, MinimumLength = 3)]
+        public required string Username { get; set; }
+    }
+
+    public class UserTenantInfo
+    {
+        public required Guid TenantId { get; set; }
+        public required string TenantCode { get; set; }
+        public required string TenantName { get; set; }
+        public bool IsDefault { get; set; }
+        public string AccessLevel { get; set; } = "Standard";
+    }
+
+    public class GetUserTenantsResponse
+    {
+        public List<UserTenantInfo> Tenants { get; set; } = new();
+        public UserTenantInfo? DefaultTenant { get; set; }
+    }
+
+    // Step 2: Login with selected tenant
     public class LoginRequest
     {
         [Required]
@@ -43,7 +67,15 @@ namespace ErpSystem.Api.Models
         public required string Email { get; set; }
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
-        public Guid? TenantId { get; set; }
+        
+        // Current session tenant info
+        public Guid? CurrentTenantId { get; set; }
+        public string? CurrentTenantCode { get; set; }
+        public string? CurrentTenantName { get; set; }
+        
+        // All accessible tenants
+        public List<UserTenantInfo> AccessibleTenants { get; set; } = new();
+        
         public bool IsActive { get; set; }
         public List<string> Roles { get; set; } = new();
     }

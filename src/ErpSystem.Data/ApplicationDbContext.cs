@@ -24,6 +24,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // Core entities
     public DbSet<Tenant> Tenants { get; set; }
     public DbSet<TenantModule> TenantModules { get; set; }
+    public DbSet<UserTenant> UserTenants { get; set; }
     
     // Settings entities
     public DbSet<EmailSettings> EmailSettings { get; set; }
@@ -44,8 +45,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.ToTable("Users");
             entity.Property(e => e.FirstName).IsRequired().HasMaxLength(100);
             entity.Property(e => e.LastName).IsRequired().HasMaxLength(100);
-            entity.HasIndex(e => new { e.TenantId, e.UserName }).IsUnique();
-            entity.HasOne(e => e.Tenant).WithMany(t => t.Users).HasForeignKey(e => e.TenantId);
+            entity.HasIndex(e => e.UserName).IsUnique();
+            
+            // Configure relationship to UserTenants
+            entity.HasMany(u => u.UserTenants)
+                  .WithOne(ut => ut.User)
+                  .HasForeignKey(ut => ut.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<ApplicationRole>(entity =>
@@ -65,6 +71,31 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.HasIndex(e => e.Code).IsUnique();
             entity.HasIndex(e => e.Name).IsUnique();
+            
+            // Configure relationship to UserTenants
+            entity.HasMany(t => t.UserTenants)
+                  .WithOne(ut => ut.Tenant)
+                  .HasForeignKey(ut => ut.TenantId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+        
+        // Configure UserTenant junction entity
+        builder.Entity<UserTenant>(entity =>
+        {
+            entity.ToTable("UserTenants");
+            
+            // Create composite unique index to prevent duplicate user-tenant assignments
+            entity.HasIndex(ut => new { ut.UserId, ut.TenantId }).IsUnique();
+            
+            // Create index for efficient lookups
+            entity.HasIndex(ut => ut.UserId);
+            entity.HasIndex(ut => ut.TenantId);
+            entity.HasIndex(ut => ut.IsDefault);
+            entity.HasIndex(ut => new { ut.UserId, ut.IsDefault });
+            
+            // Configure properties
+            entity.Property(ut => ut.AccessLevel).HasConversion<int>();
+            entity.Property(ut => ut.GrantedAt).IsRequired();
         });
 
         // Configure TenantModule entity

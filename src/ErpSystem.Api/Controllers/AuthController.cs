@@ -281,7 +281,9 @@ namespace ErpSystem.Api.Controllers
                         Email = user.Email!,
                         FirstName = user.FirstName,
                         LastName = user.LastName,
-                        TenantId = user.TenantId,
+                        CurrentTenantId = user.TenantId,
+                        CurrentTenantCode = tenant.Code,
+                        CurrentTenantName = tenant.Name,
                         IsActive = user.IsActive,
                         Roles = (await _userManager.GetRolesAsync(user)).ToList()
                     }
@@ -333,7 +335,7 @@ namespace ErpSystem.Api.Controllers
                         Email = user.Email!,
                         FirstName = user.FirstName,
                         LastName = user.LastName,
-                        TenantId = user.TenantId,
+                        CurrentTenantId = user.TenantId,
                         IsActive = user.IsActive,
                         Roles = (await _userManager.GetRolesAsync(user)).ToList()
                     }
@@ -416,7 +418,7 @@ namespace ErpSystem.Api.Controllers
                     Email = user.Email!,
                     FirstName = user.FirstName,
                     LastName = user.LastName,
-                    TenantId = user.TenantId,
+                    CurrentTenantId = user.TenantId,
                     IsActive = user.IsActive,
                     Roles = (await _userManager.GetRolesAsync(user)).ToList()
                 };
