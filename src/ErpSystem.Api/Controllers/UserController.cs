@@ -1,0 +1,500 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Core.Services;
+using ErpSystem.Core.Entities;
+using ErpSystem.Shared;
+
+namespace ErpSystem.Api.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class UserController : ControllerBase
+{
+    private readonly IUserService _userService;
+    private readonly ILogger<UserController> _logger;
+    private readonly IAuditLogService _auditLogService;
+    private readonly ICurrentUserService _currentUserService;
+
+    public UserController(
+        IUserService userService, 
+        ILogger<UserController> logger,
+        IAuditLogService auditLogService,
+        ICurrentUserService currentUserService)
+    {
+        _userService = userService;
+        _logger = logger;
+        _auditLogService = auditLogService;
+        _currentUserService = currentUserService;
+    }
+
+    /// <summary>
+    /// Get all users
+    /// </summary>
+    [HttpGet]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<IEnumerable<UserDto>>> GetUsers()
+    {
+        try
+        {
+            var users = await _userService.GetAllUsersAsync();
+            var userDtos = users.Select(u => new UserDto
+            {
+                Id = u.Id.ToString(),
+                Username = u.UserName ?? "",
+                Email = u.Email ?? "",
+                FirstName = u.FirstName,
+                LastName = u.LastName,
+                IsActive = u.IsActive,
+                Roles = u.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>(),
+                CreatedAt = u.CreatedAt,
+                LastLoginAt = u.LastLoginDate,
+                TenantId = u.TenantId.ToString()
+            }).ToList();
+
+            return Ok(userDtos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving users");
+            return StatusCode(500, "An error occurred while retrieving users");
+        }
+    }
+
+    /// <summary>
+    /// Get user by ID
+    /// </summary>
+    [HttpGet("{id}")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<UserDto>> GetUser(Guid id)
+    {
+        try
+        {
+            var user = await _userService.GetUserByIdAsync(id);
+            if (user == null)
+            {
+                return NotFound($"User with ID {id} not found");
+            }
+
+            var userDto = new UserDto
+            {
+                Id = user.Id.ToString(),
+                Username = user.UserName ?? "",
+                Email = user.Email ?? "",
+                FirstName = user.FirstName,
+                LastName = user.LastName,
+                IsActive = user.IsActive,
+                Roles = user.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>(),
+                CreatedAt = user.CreatedAt,
+                LastLoginAt = user.LastLoginDate,
+                TenantId = user.TenantId.ToString()
+            };
+
+            return Ok(userDto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving user {UserId}", id);
+            return StatusCode(500, "An error occurred while retrieving the user");
+        }
+    }
+
+    /// <summary>
+    /// Create a new user
+    /// </summary>
+    [HttpPost]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<UserDto>> CreateUser([FromBody] CreateUserRequest request)
+    {
+        try
+        {
+            var user = new ApplicationUser
+            {
+                UserName = request.Username,
+                Email = request.Email,
+                FirstName = request.FirstName,
+                LastName = request.LastName,
+                IsActive = request.IsActive,
+                TenantId = string.IsNullOrEmpty(request.TenantId) ? Guid.Empty : Guid.Parse(request.TenantId)
+            };
+
+            var createdUser = await _userService.CreateUserAsync(user, request.Password);
+
+            // Add roles if specified
+            if (request.Roles?.Any() == true)
+            {
+                await _userService.AddToRolesAsync(createdUser, request.Roles);
+            }
+
+            // Log audit trail for user creation
+            try
+            {
+                var currentUserId = _currentUserService.GetUserId();
+                var currentUsername = _currentUserService.GetUsername();
+                var currentTenantId = _currentUserService.GetTenantId();
+                
+                _logger.LogInformation("DEBUG: Attempting to log user creation. UserId: {UserId}, Username: {Username}, TenantId: {TenantId}", 
+                    currentUserId, currentUsername, currentTenantId);
+                
+                await _auditLogService.LogUserActionAsync(
+                    currentUserId ?? Guid.Empty,
+                    currentUsername ?? "Unknown",
+                    "Create",
+                    "User",
+                    createdUser.Id.ToString(),
+                    null,
+                    new { 
+                        Username = request.Username, 
+                        Email = request.Email,
+                        FirstName = request.FirstName,
+                        LastName = request.LastName,
+                        IsActive = request.IsActive,
+                        Roles = request.Roles,
+                        TenantId = request.TenantId
+                    },
+                    GetClientIpAddress(),
+                    GetUserAgent());
+                    
+                _logger.LogInformation("DEBUG: User creation audit log completed successfully");
+            }
+            catch (Exception logEx)
+            {
+                _logger.LogError(logEx, "Failed to log audit trail for user creation. Details: {Details}", logEx.Message);
+            }
+
+            var userDto = new UserDto
+            {
+                Id = createdUser.Id.ToString(),
+                Username = createdUser.UserName ?? "",
+                Email = createdUser.Email ?? "",
+                FirstName = createdUser.FirstName,
+                LastName = createdUser.LastName,
+                IsActive = createdUser.IsActive,
+                Roles = request.Roles ?? Array.Empty<string>(),
+                CreatedAt = createdUser.CreatedAt,
+                TenantId = createdUser.TenantId.ToString()
+            };
+
+            return CreatedAtAction(nameof(GetUser), new { id = createdUser.Id }, userDto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating user");
+            return StatusCode(500, "An error occurred while creating the user");
+        }
+    }
+
+    /// <summary>
+    /// Update user
+    /// </summary>
+    [HttpPut("{id}")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<UserDto>> UpdateUser(Guid id, [FromBody] UpdateUserRequest request)
+    {
+        try
+        {
+            var user = await _userService.GetUserByIdAsync(id);
+            if (user == null)
+            {
+                return NotFound($"User with ID {id} not found");
+            }
+
+            // Capture old values for audit logging
+            var oldValues = new 
+            {
+                Username = user.UserName,
+                Email = user.Email,
+                FirstName = user.FirstName,
+                LastName = user.LastName,
+                IsActive = user.IsActive,
+                Roles = user.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>()
+            };
+
+            user.UserName = request.Username;
+            user.Email = request.Email;
+            user.FirstName = request.FirstName;
+            user.LastName = request.LastName;
+            user.IsActive = request.IsActive;
+
+            var updatedUser = await _userService.UpdateUserAsync(user);
+
+            // Update roles if specified
+            if (request.Roles?.Any() == true)
+            {
+                await _userService.UpdateUserRolesAsync(updatedUser, request.Roles);
+            }
+
+            // Log audit trail for user update
+            try
+            {
+                var newValues = new 
+                {
+                    Username = request.Username,
+                    Email = request.Email,
+                    FirstName = request.FirstName,
+                    LastName = request.LastName,
+                    IsActive = request.IsActive,
+                    Roles = request.Roles
+                };
+
+                await _auditLogService.LogUserActionAsync(
+                    _currentUserService.GetUserId() ?? Guid.Empty,
+                    _currentUserService.GetUsername() ?? "Unknown",
+                    "Update",
+                    "User",
+                    id.ToString(),
+                    oldValues,
+                    newValues,
+                    GetClientIpAddress(),
+                    GetUserAgent());
+            }
+            catch (Exception logEx)
+            {
+                _logger.LogWarning(logEx, "Failed to log audit trail for user update");
+            }
+
+            var userDto = new UserDto
+            {
+                Id = updatedUser.Id.ToString(),
+                Username = updatedUser.UserName ?? "",
+                Email = updatedUser.Email ?? "",
+                FirstName = updatedUser.FirstName,
+                LastName = updatedUser.LastName,
+                IsActive = updatedUser.IsActive,
+                Roles = request.Roles ?? Array.Empty<string>(),
+                CreatedAt = updatedUser.CreatedAt,
+                TenantId = updatedUser.TenantId.ToString()
+            };
+
+            return Ok(userDto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating user {UserId}", id);
+            return StatusCode(500, "An error occurred while updating the user");
+        }
+    }
+
+    /// <summary>
+    /// Delete user
+    /// </summary>
+    [HttpDelete("{id}")]
+    [Authorize(Roles = Constants.Roles.SuperAdmin)]
+    public async Task<IActionResult> DeleteUser(Guid id)
+    {
+        try
+        {
+            // Get user info for audit logging before deletion
+            var userToDelete = await _userService.GetUserByIdAsync(id);
+            if (userToDelete == null)
+            {
+                return NotFound($"User with ID {id} not found");
+            }
+
+            var success = await _userService.DeleteUserAsync(id);
+            if (!success)
+            {
+                return StatusCode(500, "Failed to delete user");
+            }
+
+            // Log audit trail for user deletion
+            try
+            {
+                await _auditLogService.LogUserActionAsync(
+                    _currentUserService.GetUserId() ?? Guid.Empty,
+                    _currentUserService.GetUsername() ?? "Unknown",
+                    "Delete",
+                    "User",
+                    id.ToString(),
+                    new { 
+                        Username = userToDelete.UserName, 
+                        Email = userToDelete.Email,
+                        FirstName = userToDelete.FirstName,
+                        LastName = userToDelete.LastName
+                    },
+                    null,
+                    GetClientIpAddress(),
+                    GetUserAgent());
+            }
+            catch (Exception logEx)
+            {
+                _logger.LogWarning(logEx, "Failed to log audit trail for user deletion");
+            }
+
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting user {UserId}", id);
+            return StatusCode(500, "An error occurred while deleting the user");
+        }
+    }
+
+    /// <summary>
+    /// Update current user's profile (including tenant selection)
+    /// </summary>
+    [HttpPut("profile")]
+    [Authorize]
+    public async Task<ActionResult<UserDto>> UpdateProfile([FromBody] UpdateProfileRequest request)
+    {
+        try
+        {
+            var currentUserId = _currentUserService.GetUserId();
+            if (!currentUserId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var user = await _userService.GetUserByIdAsync(currentUserId.Value);
+            if (user == null)
+            {
+                return NotFound("User not found");
+            }
+
+            // Capture old values for audit logging
+            var oldValues = new 
+            {
+                FirstName = user.FirstName,
+                LastName = user.LastName,
+                Email = user.Email,
+                TenantId = user.TenantId.ToString()
+            };
+
+            // Update profile fields
+            if (!string.IsNullOrEmpty(request.FirstName))
+                user.FirstName = request.FirstName;
+            if (!string.IsNullOrEmpty(request.LastName))
+                user.LastName = request.LastName;
+            if (!string.IsNullOrEmpty(request.Email))
+                user.Email = request.Email;
+            
+            // Handle tenant change if provided and user has permission
+            if (request.TenantId.HasValue && request.TenantId != user.TenantId)
+            {
+                // Only allow tenant change for SuperAdmins or if it's a valid tenant assignment
+                var currentUserRoles = await _userService.GetUserRolesAsync(user);
+                if (currentUserRoles.Contains("SuperAdmin"))
+                {
+                    user.TenantId = request.TenantId.Value;
+                }
+                else
+                {
+                    return BadRequest("You do not have permission to change tenant assignment");
+                }
+            }
+
+            var updatedUser = await _userService.UpdateUserAsync(user);
+
+            // Log audit trail for profile update
+            try
+            {
+                var newValues = new 
+                {
+                    FirstName = updatedUser.FirstName,
+                    LastName = updatedUser.LastName,
+                    Email = updatedUser.Email,
+                    TenantId = updatedUser.TenantId.ToString()
+                };
+
+                await _auditLogService.LogUserActionAsync(
+                    currentUserId.Value,
+                    _currentUserService.GetUsername() ?? "Unknown",
+                    "UpdateProfile",
+                    "User",
+                    currentUserId.Value.ToString(),
+                    oldValues,
+                    newValues,
+                    GetClientIpAddress(),
+                    GetUserAgent());
+                    
+                _logger.LogInformation("DEBUG: User profile update audit log completed successfully");
+            }
+            catch (Exception logEx)
+            {
+                _logger.LogError(logEx, "Failed to log audit trail for profile update. Details: {Details}", logEx.Message);
+            }
+
+            var userDto = new UserDto
+            {
+                Id = updatedUser.Id.ToString(),
+                Username = updatedUser.UserName ?? "",
+                Email = updatedUser.Email ?? "",
+                FirstName = updatedUser.FirstName,
+                LastName = updatedUser.LastName,
+                IsActive = updatedUser.IsActive,
+                Roles = updatedUser.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>(),
+                CreatedAt = updatedUser.CreatedAt,
+                LastLoginAt = updatedUser.LastLoginDate,
+                TenantId = updatedUser.TenantId.ToString()
+            };
+
+            return Ok(userDto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating user profile");
+            return StatusCode(500, "An error occurred while updating the profile");
+        }
+    }
+
+    /// <summary>
+    /// Helper method to get client IP address
+    /// </summary>
+    private string GetClientIpAddress()
+    {
+        return HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
+    }
+
+    /// <summary>
+    /// Helper method to get user agent
+    /// </summary>
+    private string GetUserAgent()
+    {
+        return HttpContext.Request.Headers["User-Agent"].ToString();
+    }
+}
+
+// DTOs
+public class UserDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string Username { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
+    public bool IsActive { get; set; }
+    public string[] Roles { get; set; } = Array.Empty<string>();
+    public DateTime CreatedAt { get; set; }
+    public DateTime? LastLoginAt { get; set; }
+    public string? TenantId { get; set; }
+}
+
+public class CreateUserRequest
+{
+    public string Username { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string[] Roles { get; set; } = Array.Empty<string>();
+    public string? TenantId { get; set; }
+}
+
+public class UpdateUserRequest
+{
+    public string Username { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
+    public bool IsActive { get; set; }
+    public string[] Roles { get; set; } = Array.Empty<string>();
+}
+
+public class UpdateProfileRequest
+{
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
+    public string? Email { get; set; }
+    public Guid? TenantId { get; set; }
+}

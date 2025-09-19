@@ -1,0 +1,113 @@
+@using Microsoft.AspNetCore.Identity
+@using ErpSystem.Core.Entities
+@using Syncfusion.Blazor.Navigations
+@using ErpSystem.Web.Shared
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+
+@inherits LayoutComponentBase
+@inject SignInManager<ApplicationUser> SignInManager
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject ILogger<MainLayout> Logger
+
+<PageTitle>ErpSystem - Enterprise Resource Planning</PageTitle>
+
+<AuthorizeView>
+        <Authorized>
+            <!-- DEBUG: User is authenticated -->
+            <div style="position: fixed; top: 0; right: 0; background: green; color: white; padding: 10px; z-index: 9999; font-weight: bold;">
+                🟢 AUTHENTICATED: @context.User?.Identity?.Name
+            </div>
+            
+            <div class="page">
+                <div class="sidebar" style="background: red !important; visibility: visible !important; display: block !important;">
+                    <!-- DEBUG: Sidebar debug indicator -->
+                    <div style="background: red; color: yellow; padding: 10px; font-weight: bold; text-align: center;">
+                        🔴 SIDEBAR IS VISIBLE!
+                    </div>
+                    
+                    <div class="top-row navbar navbar-dark">
+                        <div class="container-fluid">
+                            <a class="navbar-brand" href="">
+                                <i class="fas fa-building"></i>
+                                <span style="margin-left: 10px;">ERP System</span>
+                            </a>
+                            <button title="Navigation menu" class="navbar-toggler" @onclick="ToggleNavMenu">
+                                <span class="navbar-toggler-icon"></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="@NavMenuCssClass nav-scrollable" @onclick="CollapseNavMenu">
+                        <nav class="flex-column">
+                            <NavMenu />
+                        </nav>
+                    </div>
+                </div>
+
+                <main>
+                    <div class="top-row px-4">
+                        <div class="nav-content">
+                            <div class="nav-title">
+                                <h4>ERP System</h4>
+                            </div>
+                            <div class="user-info">
+                                <span class="user-name">Welcome, @context.User?.Identity?.Name</span>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="HandleLogout">
+                                    <i class="fas fa-sign-out-alt"></i>
+                                    Logout
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <article class="content px-4">
+                        <!-- DEBUG: Main content debug indicator -->
+                        <div style="background: blue; color: yellow; padding: 10px; margin: 10px 0; font-weight: bold;">
+                            🔵 MAIN CONTENT (AUTHENTICATED VIEW)
+                        </div>
+                        @Body
+                    </article>
+                </main>
+            </div>
+        </Authorized>
+        <NotAuthorized>
+            <!-- DEBUG: User is not authenticated -->
+            <div style="position: fixed; top: 0; right: 0; background: red; color: white; padding: 10px; z-index: 9999; font-weight: bold;">
+                🔴 NOT AUTHENTICATED
+            </div>
+            <div style="background: orange; color: black; padding: 20px; margin: 20px; font-weight: bold; text-align: center;">
+                🟠 SHOWING UNAUTHENTICATED VIEW
+            </div>
+            @Body
+        </NotAuthorized>
+    </AuthorizeView>
+
+@code {
+    private bool collapseNavMenu = true;
+
+    private string? NavMenuCssClass => collapseNavMenu ? "collapse" : null;
+
+    protected override void OnInitialized()
+    {
+        Logger.LogInformation("MainLayout initialized");
+    }
+
+    private void ToggleNavMenu()
+    {
+        collapseNavMenu = !collapseNavMenu;
+    }
+
+    private void CollapseNavMenu()
+    {
+        collapseNavMenu = true;
+    }
+
+    private async Task HandleLogout()
+    {
+        Logger.LogInformation("Logout initiated from MainLayout");
+        await SignInManager.SignOutAsync();
+        Navigation.NavigateTo("/Account/Login", true);
+    }
+}

@@ -1,0 +1,19 @@
+Unhandled exception. System.Reflection.TargetInvocationException: Exception has been thrown by the target of an invocation.
+ ---> System.UriFormatException: Invalid URI: The format of the URI could not be determined.
+   at System.Uri.CreateThis(String uri, Boolean dontEscape, UriKind uriKind, UriCreationOptions& creationOptions)
+   at System.Uri..ctor(String uriString)
+   at Serilog.Sinks.Seq.Http.SeqIngestionApiClient..ctor(String serverUrl, String apiKey, HttpMessageHandler messageHandler)
+   at Serilog.SeqLoggerConfigurationExtensions.Seq(LoggerSinkConfiguration loggerSinkConfiguration, String serverUrl, LogEventLevel restrictedToMinimumLevel, Int32 batchPostingLimit, Nullable`1 period, String apiKey, String bufferBaseFilename, Nullable`1 bufferSizeLimitBytes, Nullable`1 eventBodyLimitBytes, LoggingLevelSwitch controlLevelSwitch, HttpMessageHandler messageHandler, Nullable`1 retainedInvalidPayloadsLimitBytes, Int32 queueSizeLimit, ITextFormatter payloadFormatter)
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithManyArgs(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+   --- End of inner exception stack trace ---
+   at System.Reflection.MethodBaseInvoker.InvokeWithManyArgs(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+   at System.Reflection.MethodBase.Invoke(Object obj, Object[] parameters)
+   at Serilog.Settings.Configuration.ConfigurationReader.CallConfigurationMethods(ILookup`2 methods, IReadOnlyCollection`1 configurationMethods, Object receiver)
+   at Serilog.Settings.Configuration.ConfigurationReader.ApplySinks(LoggerConfiguration loggerConfiguration)
+   at Serilog.Settings.Configuration.ConfigurationReader.Configure(LoggerConfiguration loggerConfiguration)
+   at Serilog.Configuration.LoggerSettingsConfiguration.Settings(ILoggerSettings settings)
+   at Serilog.ConfigurationLoggerConfigurationExtensions.Configuration(LoggerSettingsConfiguration settingConfiguration, IConfiguration configuration, ConfigurationReaderOptions readerOptions)
+   at ErpSystem.Api.Extensions.ServiceCollectionExtensions.AddErpSystemLogging(IServiceCollection services, IConfiguration configuration) in C:\Users\micha\erp-system\src\ErpSystem.Api\Extensions\ServiceCollectionExtensions.cs:line 302
+   at Program.<Main>$(String[] args) in C:\Users\micha\erp-system\src\ErpSystem.Api\Program.cs:line 43
+   at Program.<Main>(String[] args)

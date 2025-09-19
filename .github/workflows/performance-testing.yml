@@ -1,0 +1,497 @@
+name: ⚡ Performance Testing
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # Daily at 3 AM UTC
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'frontend/**'
+  pull_request:
+    branches: [ main ]
+    types: [ opened, synchronize, labeled ]
+  workflow_dispatch:
+    inputs:
+      test_duration:
+        description: 'Test duration in minutes'
+        required: false
+        default: '5'
+      concurrent_users:
+        description: 'Number of concurrent users'
+        required: false
+        default: '50'
+      target_environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  NODE_VERSION: '18.x'
+
+jobs:
+  # Job 1: API Performance Testing
+  api-performance:
+    name: 🔧 API Performance Testing
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'performance') || github.event_name != 'pull_request'
+    
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          SA_PASSWORD: PerfTest123!
+          MSSQL_PID: Express
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P PerfTest123! -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: 📦 Restore dependencies
+      run: |
+        cd src
+        dotnet restore
+
+    - name: 🏗️ Build solution
+      run: |
+        cd src
+        dotnet build --configuration Release --no-restore
+
+    - name: 🗄️ Setup performance test database
+      run: |
+        cd src
+        dotnet ef database update --project ErpSystem.Data --startup-project ErpSystem.Api
+      env:
+        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpSystemPerf;User Id=sa;Password=PerfTest123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
+
+    - name: 🚀 Start API server with performance monitoring
+      run: |
+        cd src
+        dotnet run --project ErpSystem.Api --urls http://localhost:5000 &
+        sleep 30
+      env:
+        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpSystemPerf;User Id=sa;Password=PerfTest123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
+        ConnectionStrings__Redis: "localhost:6379"
+        ASPNETCORE_ENVIRONMENT: "Production"
+        Logging__LogLevel__Default: "Warning"
+
+    - name: 🔧 Install performance testing tools
+      run: |
+        # Install k6 for load testing
+        sudo gpg -k
+        sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+        echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+        sudo apt-get update
+        sudo apt-get install k6
+
+        # Install Apache Bench as backup
+        sudo apt-get install apache2-utils
+
+        # Install curl for API testing
+        sudo apt-get install curl jq
+
+    - name: ⚡ Wait for API to be ready
+      run: |
+        timeout 60 bash -c 'until curl -f http://localhost:5000/health; do sleep 2; done'
+
+    - name: 📊 Baseline Performance Test
+      run: |
+        echo "## 📊 API Performance Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        # Test API health endpoint
+        echo "### Health Endpoint Performance" >> $GITHUB_STEP_SUMMARY
+        ab -n 1000 -c 10 http://localhost:5000/health > health_perf.txt
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        grep -E "(Requests per second|Time per request|Connection Times)" health_perf.txt >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+    - name: 🔐 Get authentication token for protected endpoints
+      run: |
+        # Login and get JWT token
+        TOKEN=$(curl -s -X POST http://localhost:5000/api/auth/login \
+          -H "Content-Type: application/json" \
+          -d '{"username":"admin","password":"Admin123!","tenantCode":"DEFAULT"}' | \
+          jq -r '.token // empty')
+        
+        if [ -z "$TOKEN" ]; then
+          echo "Failed to get authentication token"
+          exit 1
+        fi
+        
+        echo "AUTH_TOKEN=$TOKEN" >> $GITHUB_ENV
+
+    - name: 📈 Load Testing with k6
+      run: |
+        # Create k6 load test script
+        cat > load_test.js << 'EOF'
+        import http from 'k6/http';
+        import { check, sleep } from 'k6';
+
+        export let options = {
+          stages: [
+            { duration: '2m', target: 10 }, // Ramp up to 10 users
+            { duration: '5m', target: 50 }, // Stay at 50 users
+            { duration: '2m', target: 0 },  // Ramp down
+          ],
+        };
+
+        const BASE_URL = 'http://localhost:5000';
+
+        export default function () {
+          // Test health endpoint
+          let healthRes = http.get(`${BASE_URL}/health`);
+          check(healthRes, {
+            'health status is 200': (r) => r.status === 200,
+            'health response time < 100ms': (r) => r.timings.duration < 100,
+          });
+
+          // Test API endpoints with authentication
+          const token = __ENV.AUTH_TOKEN;
+          if (token) {
+            const params = {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+            };
+
+            let apiRes = http.get(`${BASE_URL}/api/user`, params);
+            check(apiRes, {
+              'API status is 200 or 401': (r) => r.status === 200 || r.status === 401,
+              'API response time < 500ms': (r) => r.timings.duration < 500,
+            });
+          }
+
+          sleep(1);
+        }
+        EOF
+
+        # Run k6 load test
+        k6 run --env AUTH_TOKEN="$AUTH_TOKEN" load_test.js --out json=load_test_results.json
+
+        # Extract and display results
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Load Testing Results (k6)" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        k6 run --env AUTH_TOKEN="$AUTH_TOKEN" load_test.js 2>&1 | tail -20 >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+    - name: 📊 Database Performance Analysis
+      run: |
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Database Performance Metrics" >> $GITHUB_STEP_SUMMARY
+        
+        # Check database performance
+        docker exec -i $(docker ps -q -f "ancestor=mcr.microsoft.com/mssql/server:2022-latest") \
+          /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P PerfTest123! -Q \
+          "SELECT 
+            DB_NAME() AS DatabaseName,
+            (SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE is_user_process = 1) AS ActiveSessions,
+            (SELECT COUNT(*) FROM sys.dm_exec_requests) AS ActiveRequests" \
+          | tail -n +3 >> db_perf.txt
+        
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        cat db_perf.txt >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+    - name: 📤 Upload performance results
+      uses: actions/upload-artifact@v4
+      with:
+        name: api-performance-results
+        path: |
+          load_test_results.json
+          health_perf.txt
+          db_perf.txt
+        retention-days: 30
+
+  # Job 2: Frontend Performance Testing
+  frontend-performance:
+    name: 🖥️ Frontend Performance Testing
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'performance') || github.event_name != 'pull_request'
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: 📦 Install dependencies
+      run: |
+        cd frontend
+        npm ci
+
+    - name: 🏗️ Build frontend for production
+      run: |
+        cd frontend
+        npm run build
+      env:
+        NEXT_PUBLIC_API_URL: http://localhost:5000/api
+
+    - name: 🚀 Start frontend server
+      run: |
+        cd frontend
+        npm start &
+        sleep 30
+      env:
+        PORT: 3000
+
+    - name: ⚡ Wait for frontend to be ready
+      run: |
+        timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
+
+    - name: 📊 Install Lighthouse CI
+      run: |
+        npm install -g @lhci/cli@0.12.x
+
+    - name: 🔍 Run Lighthouse performance audit
+      run: |
+        lhci autorun --config=./.lighthouserc.js || lhci autorun --collect.url=http://localhost:3000
+      continue-on-error: true
+
+    - name: 📊 Frontend Load Testing
+      run: |
+        echo "## 🖥️ Frontend Performance Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        # Test homepage performance
+        echo "### Homepage Load Performance" >> $GITHUB_STEP_SUMMARY
+        ab -n 100 -c 5 http://localhost:3000/ > frontend_perf.txt
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        grep -E "(Requests per second|Time per request|Connection Times)" frontend_perf.txt >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+    - name: 📤 Upload Lighthouse results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: lighthouse-results
+        path: .lighthouseci/
+        retention-days: 30
+
+  # Job 3: End-to-End Performance Testing
+  e2e-performance:
+    name: 🔄 E2E Performance Testing
+    runs-on: ubuntu-latest
+    needs: [api-performance]
+    if: contains(github.event.pull_request.labels.*.name, 'performance') || github.event_name == 'schedule'
+    
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          SA_PASSWORD: E2ETest123!
+          MSSQL_PID: Express
+        ports:
+          - 1433:1433
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: 🔧 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: 🏗️ Build and start backend
+      run: |
+        cd src
+        dotnet build --configuration Release
+        dotnet run --project ErpSystem.Api --urls http://localhost:5000 &
+        sleep 30
+      env:
+        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpSystemE2E;User Id=sa;Password=E2ETest123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
+        ConnectionStrings__Redis: "localhost:6379"
+
+    - name: 🏗️ Build and start frontend
+      run: |
+        cd frontend
+        npm ci
+        npm run build
+        npm start &
+        sleep 30
+      env:
+        NEXT_PUBLIC_API_URL: http://localhost:5000/api
+
+    - name: ⚡ Wait for services
+      run: |
+        timeout 60 bash -c 'until curl -f http://localhost:5000/health; do sleep 2; done'
+        timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
+
+    - name: 🧪 Install Playwright for E2E testing
+      run: |
+        cd frontend
+        npx playwright install chromium
+
+    - name: 🚀 Run E2E Performance Tests
+      run: |
+        cd frontend
+        
+        # Create performance test script
+        cat > e2e-performance.spec.js << 'EOF'
+        const { test, expect } = require('@playwright/test');
+
+        test.describe('ERP System E2E Performance', () => {
+          test('Login and Dashboard Load Performance', async ({ page }) => {
+            const startTime = Date.now();
+            
+            // Navigate to login page
+            await page.goto('http://localhost:3000');
+            
+            // Measure login page load time
+            const loginLoadTime = Date.now() - startTime;
+            console.log(`Login page load time: ${loginLoadTime}ms`);
+            expect(loginLoadTime).toBeLessThan(3000); // Should load within 3 seconds
+            
+            // Fill login form
+            await page.fill('input[name="username"]', 'admin');
+            await page.fill('input[name="password"]', 'Admin123!');
+            await page.selectOption('select[name="tenantCode"]', 'DEFAULT');
+            
+            // Submit login and measure dashboard load time
+            const dashboardStartTime = Date.now();
+            await page.click('button[type="submit"]');
+            await page.waitForURL('**/dashboard');
+            const dashboardLoadTime = Date.now() - dashboardStartTime;
+            
+            console.log(`Dashboard load time: ${dashboardLoadTime}ms`);
+            expect(dashboardLoadTime).toBeLessThan(5000); // Dashboard should load within 5 seconds
+            
+            // Verify dashboard elements are visible
+            await expect(page.locator('text=Dashboard')).toBeVisible();
+          });
+
+          test('API Response Times', async ({ page }) => {
+            // Test API performance through browser
+            const response = await page.request.get('http://localhost:5000/health');
+            expect(response.status()).toBe(200);
+            
+            // Measure API response time (rough estimate)
+            const startTime = Date.now();
+            await page.request.get('http://localhost:5000/health');
+            const responseTime = Date.now() - startTime;
+            
+            console.log(`Health endpoint response time: ${responseTime}ms`);
+            expect(responseTime).toBeLessThan(1000); // Should respond within 1 second
+          });
+        });
+        EOF
+
+        # Run the performance tests
+        npx playwright test e2e-performance.spec.js --reporter=json > e2e-results.json
+        
+        # Display results
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### E2E Performance Results" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        npx playwright test e2e-performance.spec.js --reporter=line >> $GITHUB_STEP_SUMMARY || true
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+    - name: 📤 Upload E2E performance results
+      uses: actions/upload-artifact@v4
+      with:
+        name: e2e-performance-results
+        path: |
+          frontend/e2e-results.json
+          frontend/test-results/
+        retention-days: 30
+
+  # Job 4: Performance Analysis & Reporting
+  performance-analysis:
+    name: 📈 Performance Analysis
+    runs-on: ubuntu-latest
+    needs: [api-performance, frontend-performance]
+    if: always() && (needs.api-performance.result == 'success' || needs.frontend-performance.result == 'success')
+    
+    steps:
+    - name: 📥 Download performance artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: '*-performance-results'
+        merge-multiple: true
+
+    - name: 📊 Generate Performance Report
+      run: |
+        echo "# 📈 Performance Test Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## Test Results Overview" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Component | Status | Notes |" >> $GITHUB_STEP_SUMMARY
+        echo "|-----------|--------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| API Performance | ${{ needs.api-performance.result == 'success' && '✅ Passed' || '❌ Failed' }} | Load testing with k6 |" >> $GITHUB_STEP_SUMMARY
+        echo "| Frontend Performance | ${{ needs.frontend-performance.result == 'success' && '✅ Passed' || '❌ Failed' }} | Lighthouse audit |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Check for performance regressions
+        if [ -f "load_test_results.json" ]; then
+          echo "## Key Performance Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "- API load testing completed" >> $GITHUB_STEP_SUMMARY
+          echo "- Database performance analyzed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ -f "frontend_perf.txt" ]; then
+          echo "- Frontend load testing completed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "📊 Detailed results are available in the job artifacts." >> $GITHUB_STEP_SUMMARY
+
+    - name: 🔔 Performance Alert
+      if: needs.api-performance.result == 'failure' || needs.frontend-performance.result == 'failure'
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        channel: '#performance-alerts'
+        webhook_url: ${{ secrets.PERFORMANCE_SLACK_WEBHOOK }}
+        fields: repo,message,commit,author,action,eventName,ref,workflow
+        text: |
+          ⚡ Performance test failures detected in ${{ github.repository }}
+          Please review the performance results and investigate any regressions.

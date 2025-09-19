@@ -1,0 +1,536 @@
+version: '3.8'
+
+services:
+  # Load Balancer (Nginx)
+  nginx:
+    image: nginx:alpine
+    container_name: erp-nginx-lb
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Admin interface
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/proxy_params:/etc/nginx/proxy_params:ro
+      - ./docker/nginx/certs:/etc/nginx/certs:ro
+      - ./docker/nginx/html:/var/www/html:ro
+    depends_on:
+      - erp-api-1
+      - erp-api-2
+      - erp-api-3
+      - erp-frontend-1
+      - erp-frontend-2
+      - erp-frontend-3
+    networks:
+      - erp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # API Instances
+  erp-api-1:
+    build:
+      context: .
+      dockerfile: src/ErpSystem.Api/Dockerfile
+      args:
+        - ASPNETCORE_ENVIRONMENT=Production
+    container_name: erp-api-1
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:5000
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - ConnectionStrings__Redis=${REDIS_CONNECTION_STRING}
+      - JwtSettings__SecretKey=${JWT_SECRET_KEY}
+      - JwtSettings__Issuer=ErpSystem.Production.Api
+      - JwtSettings__Audience=ErpSystem.Production.Client
+      - Redis__Configuration=${REDIS_CONNECTION_STRING}
+      - Redis__InstanceName=ErpSystem_Production_Api1
+      - LoadBalancer__NodeId=api-1
+      - LoadBalancer__NodeName=API Node 1
+    volumes:
+      - erp-api-logs-1:/var/log/erp-api
+      - erp-dpkeys:/var/dpkeys
+    networks:
+      - erp-network
+    depends_on:
+      - redis
+      - sqlserver
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  erp-api-2:
+    build:
+      context: .
+      dockerfile: src/ErpSystem.Api/Dockerfile
+      args:
+        - ASPNETCORE_ENVIRONMENT=Production
+    container_name: erp-api-2
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:5000
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - ConnectionStrings__Redis=${REDIS_CONNECTION_STRING}
+      - JwtSettings__SecretKey=${JWT_SECRET_KEY}
+      - JwtSettings__Issuer=ErpSystem.Production.Api
+      - JwtSettings__Audience=ErpSystem.Production.Client
+      - Redis__Configuration=${REDIS_CONNECTION_STRING}
+      - Redis__InstanceName=ErpSystem_Production_Api2
+      - LoadBalancer__NodeId=api-2
+      - LoadBalancer__NodeName=API Node 2
+    volumes:
+      - erp-api-logs-2:/var/log/erp-api
+      - erp-dpkeys:/var/dpkeys
+    networks:
+      - erp-network
+    depends_on:
+      - redis
+      - sqlserver
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  erp-api-3:
+    build:
+      context: .
+      dockerfile: src/ErpSystem.Api/Dockerfile
+      args:
+        - ASPNETCORE_ENVIRONMENT=Production
+    container_name: erp-api-3
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:5000
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - ConnectionStrings__Redis=${REDIS_CONNECTION_STRING}
+      - JwtSettings__SecretKey=${JWT_SECRET_KEY}
+      - JwtSettings__Issuer=ErpSystem.Production.Api
+      - JwtSettings__Audience=ErpSystem.Production.Client
+      - Redis__Configuration=${REDIS_CONNECTION_STRING}
+      - Redis__InstanceName=ErpSystem_Production_Api3
+      - LoadBalancer__NodeId=api-3
+      - LoadBalancer__NodeName=API Node 3
+    volumes:
+      - erp-api-logs-3:/var/log/erp-api
+      - erp-dpkeys:/var/dpkeys
+    networks:
+      - erp-network
+    depends_on:
+      - redis
+      - sqlserver
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # Backup API Instance
+  erp-api-backup:
+    build:
+      context: .
+      dockerfile: src/ErpSystem.Api/Dockerfile
+      args:
+        - ASPNETCORE_ENVIRONMENT=Production
+    container_name: erp-api-backup
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:5000
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - ConnectionStrings__Redis=${REDIS_CONNECTION_STRING}
+      - JwtSettings__SecretKey=${JWT_SECRET_KEY}
+      - JwtSettings__Issuer=ErpSystem.Production.Api
+      - JwtSettings__Audience=ErpSystem.Production.Client
+      - Redis__Configuration=${REDIS_CONNECTION_STRING}
+      - Redis__InstanceName=ErpSystem_Production_ApiBackup
+      - LoadBalancer__NodeId=api-backup
+      - LoadBalancer__NodeName=API Backup Node
+    volumes:
+      - erp-api-logs-backup:/var/log/erp-api
+      - erp-dpkeys:/var/dpkeys
+    networks:
+      - erp-network
+    depends_on:
+      - redis
+      - sqlserver
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.125'
+
+  # Frontend Instances
+  erp-frontend-1:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.production
+    container_name: erp-frontend-1
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=https://erp.company.com/api
+      - NEXTAUTH_URL=https://erp.company.com
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - NEXT_PUBLIC_APP_NAME=ERP System
+      - LoadBalancer__NodeId=frontend-1
+      - LoadBalancer__NodeName=Frontend Node 1
+    networks:
+      - erp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.125'
+
+  erp-frontend-2:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.production
+    container_name: erp-frontend-2
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=https://erp.company.com/api
+      - NEXTAUTH_URL=https://erp.company.com
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - NEXT_PUBLIC_APP_NAME=ERP System
+      - LoadBalancer__NodeId=frontend-2
+      - LoadBalancer__NodeName=Frontend Node 2
+    networks:
+      - erp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.125'
+
+  erp-frontend-3:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.production
+    container_name: erp-frontend-3
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=https://erp.company.com/api
+      - NEXTAUTH_URL=https://erp.company.com
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - NEXT_PUBLIC_APP_NAME=ERP System
+      - LoadBalancer__NodeId=frontend-3
+      - LoadBalancer__NodeName=Frontend Node 3
+    networks:
+      - erp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.125'
+
+  # Backup Frontend Instance  
+  erp-frontend-backup:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.production
+    container_name: erp-frontend-backup
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=https://erp.company.com/api
+      - NEXTAUTH_URL=https://erp.company.com
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - NEXT_PUBLIC_APP_NAME=ERP System
+      - LoadBalancer__NodeId=frontend-backup
+      - LoadBalancer__NodeName=Frontend Backup Node
+    networks:
+      - erp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.125'
+        reservations:
+          memory: 64M
+          cpus: '0.0625'
+
+  # Shared Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: erp-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    volumes:
+      - erp-redis-data:/data
+      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - erp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # Production SQL Server
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: erp-sqlserver
+    ports:
+      - "1433:1433"
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=${SQL_SA_PASSWORD}
+      - MSSQL_PID=Express
+      - MSSQL_TCP_PORT=1433
+      - MSSQL_ENABLE_HADR=1
+    volumes:
+      - erp-sql-data:/var/opt/mssql/data
+      - erp-sql-logs:/var/opt/mssql/log
+      - erp-sql-backup:/var/opt/mssql/backup
+    networks:
+      - erp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P $$SA_PASSWORD -Q 'SELECT 1' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # Monitoring and Logging
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: erp-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - erp-prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - erp-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: erp-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - erp-grafana-data:/var/lib/grafana
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - erp-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+
+  # Log aggregation
+  fluentd:
+    build:
+      context: ./docker/fluentd
+    container_name: erp-fluentd
+    volumes:
+      - erp-api-logs-1:/var/log/erp-api-1:ro
+      - erp-api-logs-2:/var/log/erp-api-2:ro
+      - erp-api-logs-3:/var/log/erp-api-3:ro
+      - erp-api-logs-backup:/var/log/erp-api-backup:ro
+      - ./docker/fluentd/conf:/fluentd/etc:ro
+    networks:
+      - erp-network
+    restart: unless-stopped
+    depends_on:
+      - elasticsearch
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.8.0
+    container_name: erp-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - erp-elastic-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - erp-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.8.0
+    container_name: erp-kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    networks:
+      - erp-network
+    restart: unless-stopped
+    depends_on:
+      - elasticsearch
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.25'
+
+volumes:
+  erp-sql-data:
+    driver: local
+  erp-sql-logs:
+    driver: local
+  erp-sql-backup:
+    driver: local
+  erp-redis-data:
+    driver: local
+  erp-api-logs-1:
+    driver: local
+  erp-api-logs-2:
+    driver: local
+  erp-api-logs-3:
+    driver: local
+  erp-api-logs-backup:
+    driver: local
+  erp-dpkeys:
+    driver: local
+  erp-prometheus-data:
+    driver: local
+  erp-grafana-data:
+    driver: local
+  erp-elastic-data:
+    driver: local
+
+networks:
+  erp-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

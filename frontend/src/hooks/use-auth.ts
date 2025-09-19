@@ -1,0 +1,93 @@
+'use client';
+
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
+import { authService } from '../services/auth';
+import { QUERY_KEYS } from '../config/api';
+import type { User, LoginRequest } from '../types';
+
+export function useAuth() {
+  const queryClient = useQueryClient();
+  const router = useRouter();
+
+  // Get current user query
+  const {
+    data: user,
+    isLoading,
+    error,
+  } = useQuery<User>({
+    queryKey: QUERY_KEYS.CURRENT_USER,
+    queryFn: authService.getCurrentUser,
+    enabled: typeof window !== 'undefined' && authService.isAuthenticated(),
+    retry: (failureCount, error: any) => {
+      // Don't retry on 401 errors
+      if (error?.response?.status === 401) {
+        return false;
+      }
+      return failureCount < 2;
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+
+  // Login mutation
+  const loginMutation = useMutation({
+    mutationFn: (credentials: LoginRequest) => authService.login(credentials),
+    onSuccess: (response) => {
+      // Update the user cache
+      queryClient.setQueryData(QUERY_KEYS.CURRENT_USER, response.user);
+      // Invalidate tenant query to ensure fresh data
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.TENANTS });
+      // Redirect to dashboard
+      router.push('/dashboard');
+    },
+    onError: (error) => {
+      console.error('Login failed:', error);
+    },
+  });
+
+  // Logout mutation
+  const logoutMutation = useMutation({
+    mutationFn: authService.logout,
+    onSuccess: () => {
+      // Clear all queries
+      queryClient.clear();
+      // Redirect to login
+      router.push('/login');
+    },
+    onError: (error) => {
+      console.error('Logout failed:', error);
+      // Still redirect to login even if API call fails
+      queryClient.clear();
+      router.push('/login');
+    },
+  });
+
+  // Helper functions
+  const isAuthenticated = authService.isAuthenticated();
+  const hasRole = (role: string) => authService.hasRole(role);
+  const hasAnyRole = (roles: string[]) => authService.hasAnyRole(roles);
+  const hasAllRoles = (roles: string[]) => authService.hasAllRoles(roles);
+
+  return {
+    // State
+    user,
+    isLoading,
+    error,
+    isAuthenticated,
+    
+    // Actions
+    login: loginMutation.mutate,
+    logout: logoutMutation.mutate,
+    
+    // Mutation states
+    isLoggingIn: loginMutation.isPending,
+    isLoggingOut: logoutMutation.isPending,
+    loginError: loginMutation.error,
+    logoutError: logoutMutation.error,
+    
+    // Authorization helpers
+    hasRole,
+    hasAnyRole,
+    hasAllRoles,
+  };
+}

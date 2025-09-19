@@ -1,0 +1,79 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.UI" Version="8.0.0" />
+    <PackageReference Include="System.ComponentModel.Annotations" Version="5.0.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.0" />
+    <PackageReference Include="Serilog.Enrichers.Environment" Version="2.3.0" />
+    <PackageReference Include="Serilog.Enrichers.Thread" Version="3.1.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.Seq" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="8.0.0" />
+    <!-- Database Providers - Uncomment the one you want to use -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.0" />
+    
+    <!-- SQL Server (Currently Active) -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.0" />
+    
+    <!-- PostgreSQL (Uncomment to use PostgreSQL) -->
+    <!-- <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.0" /> -->
+    
+    <!-- MySQL/MariaDB (Uncomment to use MySQL) -->
+    <!-- <PackageReference Include="Pomelo.EntityFrameworkCore.MySql" Version="8.0.0" /> -->
+    
+    <!-- Oracle (Uncomment to use Oracle) -->
+    <!-- <PackageReference Include="Oracle.EntityFrameworkCore" Version="8.0.0" /> -->
+    
+    <!-- SQLite (Uncomment to use SQLite) -->
+    <!-- <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.0" /> -->
+    
+    <!-- IBM DB2 (Uncomment to use IBM DB2) -->
+    <!-- <PackageReference Include="IBM.EntityFrameworkCore" Version="8.0.0" /> -->
+    
+    <!-- Firebird (Uncomment to use Firebird) -->
+    <!-- <PackageReference Include="FirebirdSql.EntityFrameworkCore.Firebird" Version="11.0.0" /> -->
+    
+    <!-- Amazon Aurora/RDS PostgreSQL (Uses PostgreSQL provider) -->
+    <!-- Same as PostgreSQL: Npgsql.EntityFrameworkCore.PostgreSQL -->
+    
+    <!-- Azure SQL Database (Uses SQL Server provider) -->
+    <!-- Same as SQL Server: Microsoft.EntityFrameworkCore.SqlServer -->
+    
+    <!-- Google Cloud SQL (Uncomment based on your choice) -->
+    <!-- For MySQL: Pomelo.EntityFrameworkCore.MySql -->
+    <!-- For PostgreSQL: Npgsql.EntityFrameworkCore.PostgreSQL -->
+    <!-- For SQL Server: Microsoft.EntityFrameworkCore.SqlServer -->
+    
+    <!-- Cosmos DB (Uncomment to use Azure Cosmos DB) -->
+    <!-- <PackageReference Include="Microsoft.EntityFrameworkCore.Cosmos" Version="8.0.0" /> -->
+    
+    <!-- In-Memory Database (For testing - Uncomment if needed) -->
+    <!-- <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.0" /> -->
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="8.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" Version="8.0.0" />
+    <PackageReference Include="StackExchange.Redis" Version="2.7.33" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Versioning" Version="5.1.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Versioning.ApiExplorer" Version="5.1.0" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.0" />
+    <PackageReference Include="AutoMapper" Version="13.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ErpSystem.Core/ErpSystem.Core.csproj" />
+    <ProjectReference Include="../ErpSystem.Data/ErpSystem.Data.csproj" />
+    <ProjectReference Include="../ErpSystem.Shared/ErpSystem.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

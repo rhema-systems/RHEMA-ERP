@@ -1,0 +1,105 @@
+@page "/testauth"
+@attribute [AllowAnonymous]
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@using ErpSystem.Core.Entities
+
+@inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
+@inject NavigationManager Navigation
+@inject ILogger<TestAuth> Logger
+
+<h3>Manual Authentication Test</h3>
+
+<div style="margin: 20px 0; padding: 20px; border: 2px solid red; background: pink;">
+    <h4>🔐 Manual Sign-In Test</h4>
+    <p>This bypasses the normal login flow and directly signs in the admin user.</p>
+    <button class="btn btn-danger" @onclick="ManualSignIn">🚀 Force Sign In Admin User</button>
+    
+    @if (!string.IsNullOrEmpty(statusMessage))
+    {
+        <div style="margin-top: 10px; padding: 10px; background: lightgray; border-left: 4px solid blue;">
+            @statusMessage
+        </div>
+    }
+</div>
+
+<div style="margin: 20px 0; padding: 20px; border: 2px solid green; background: lightgreen;">
+    <h4>📊 Current State</h4>
+    <p><strong>Sign-In Manager Available:</strong> @(SignInManager != null)</p>
+    <p><strong>User Manager Available:</strong> @(UserManager != null)</p>
+    <p><strong>Current URL:</strong> @currentUrl</p>
+</div>
+
+<AuthorizeView>
+    <Authorized>
+        <div style="margin: 20px 0; padding: 20px; border: 2px solid green; background: lightgreen;">
+            <h4>✅ YOU ARE AUTHENTICATED!</h4>
+            <p><strong>User:</strong> @context.User?.Identity?.Name</p>
+            <p><strong>Claims:</strong> @(context.User?.Claims?.Count() ?? 0)</p>
+        </div>
+    </Authorized>
+    <NotAuthorized>
+        <div style="margin: 20px 0; padding: 20px; border: 2px solid red; background: pink;">
+            <h4>❌ NOT AUTHENTICATED</h4>
+            <p>AuthorizeView shows you are not authenticated.</p>
+        </div>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private string statusMessage = "";
+    private string currentUrl = "";
+
+    protected override void OnInitialized()
+    {
+        currentUrl = Navigation.Uri;
+        Logger.LogInformation("TestAuth page loaded. Current URL: {Url}", currentUrl);
+    }
+
+    private async Task ManualSignIn()
+    {
+        statusMessage = "";
+        Logger.LogInformation("=== MANUAL SIGN-IN ATTEMPT ===");
+        
+        try
+        {
+            // Find the admin user
+            var adminUser = await UserManager.FindByNameAsync("admin");
+            if (adminUser == null)
+            {
+                statusMessage = "❌ Admin user not found in database!";
+                Logger.LogError("Admin user not found!");
+                return;
+            }
+            
+            Logger.LogInformation("Found admin user: {UserId}, Email: {Email}, Active: {Active}", 
+                adminUser.Id, adminUser.Email, adminUser.IsActive);
+            
+            if (!adminUser.IsActive)
+            {
+                statusMessage = "❌ Admin user is not active!";
+                Logger.LogError("Admin user is not active!");
+                return;
+            }
+            
+            // Sign in the user directly
+            await SignInManager.SignInAsync(adminUser, isPersistent: false);
+            
+            statusMessage = "✅ Manually signed in admin user! Check the AuthorizeView above.";
+            Logger.LogInformation("Manual sign-in completed. User should now be authenticated.");
+            
+            // Trigger a re-render to update the AuthorizeView
+            StateHasChanged();
+            
+            // Wait a moment then check
+            await Task.Delay(1000);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"❌ Error during manual sign-in: {ex.Message}";
+            Logger.LogError(ex, "Error during manual sign-in");
+        }
+    }
+}

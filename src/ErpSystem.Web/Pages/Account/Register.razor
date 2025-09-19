@@ -1,0 +1,172 @@
+@page "/Account/Register"
+@using Microsoft.AspNetCore.Identity
+@using ErpSystem.Core.Entities
+@using ErpSystem.Core.Services
+@using ErpSystem.Shared
+
+@inject ITenantService TenantService
+@inject NavigationManager Navigation
+@inject ILogger<Register> Logger
+
+<PageTitle>Register - ErpSystem</PageTitle>
+
+<div class="register-container">
+    <div class="register-card">
+        <div class="register-header">
+            <div class="logo-container">
+                <div class="logo-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2L2 7V17L12 22L22 17V7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="currentColor" opacity="0.3"/>
+                        <path d="M12 22V12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M22 17L12 12L2 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M22 7L12 12L2 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+            </div>
+            <h2 class="register-title">Create Account</h2>
+            <p class="register-subtitle">Registration is currently disabled. Please contact your administrator to create an account.</p>
+        </div>
+
+        <div class="info-box">
+            <h4>How to get access:</h4>
+            <ul>
+                <li>Contact your system administrator</li>
+                <li>Request account creation with your business email</li>
+                <li>Wait for account activation confirmation</li>
+                <li>Use the provided credentials to login</li>
+            </ul>
+        </div>
+
+        <div class="form-group text-center">
+            <a href="/Account/Login" class="back-to-login-link">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1">
+                    <path d="M19 12H5m0 0l7 7m-7-7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                Back to Login
+            </a>
+        </div>
+    </div>
+</div>
+
+@code {
+    // Registration functionality can be implemented here in the future
+}
+
+<style>
+    .register-container {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--gradient-bg);
+        padding: 24px;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .register-card {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 24px;
+        padding: 48px;
+        width: 100%;
+        max-width: 640px;
+        box-shadow: var(--shadow-xl);
+        position: relative;
+        z-index: 1;
+    }
+
+    .register-header {
+        text-align: center;
+        margin-bottom: 40px;
+    }
+
+    .logo-container {
+        margin-bottom: 24px;
+    }
+
+    .logo-icon {
+        color: var(--primary-color);
+        display: inline-block;
+        background: var(--gradient-primary);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        filter: drop-shadow(0 2px 4px rgba(79, 70, 229, 0.2));
+    }
+
+    .register-title {
+        margin: 0 0 16px 0;
+        font-size: 2.5rem;
+        font-weight: 800;
+        color: var(--text-primary);
+        background: var(--gradient-primary);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+
+    .register-subtitle {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: 16px;
+        line-height: 1.6;
+    }
+
+    .info-box {
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 32px;
+        margin-bottom: 32px;
+    }
+
+    .info-box h4 {
+        margin: 0 0 16px 0;
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .info-box ul {
+        margin: 0;
+        padding-left: 20px;
+        color: var(--text-secondary);
+    }
+
+    .info-box li {
+        margin-bottom: 8px;
+        line-height: 1.5;
+    }
+
+    .back-to-login-link {
+        color: var(--primary-color);
+        text-decoration: none;
+        font-size: 16px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        transition: all 0.2s ease;
+        padding: 12px 24px;
+        border-radius: 8px;
+        border: 2px solid var(--primary-color);
+        background: transparent;
+    }
+
+    .back-to-login-link:hover {
+        background: var(--primary-color);
+        color: white;
+        text-decoration: none;
+        transform: translateY(-1px);
+    }
+
+    .me-1 {
+        margin-right: 0.25rem;
+    }
+
+    .text-center {
+        text-align: center;
+    }
+</style>

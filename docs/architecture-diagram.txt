@@ -1,0 +1,329 @@
+ERP SYSTEM - FULL STACK ARCHITECTURE (UPDATED)
+==================================================
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                 FRONTEND LAYER                                 │
+│                              (Next.js 14 + React)                              │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ │
+│  │   Dashboard     │ │  Administration │ │  Identity Mgmt  │ │    Reports      │ │
+│  │   Components    │ │    Features     │ │   Components    │ │   Components    │ │
+│  │                 │ │                 │ │                 │ │                 │ │
+│  │ - Overview      │ │ - Tenant Mgmt   │ │ - User Mgmt     │ │ - Audit Logs    │ │
+│  │ - Metrics       │ │ - Settings      │ │ - Role Mgmt     │ │ - Security Logs │ │
+│  │ - Charts        │ │ - Config        │ │ - Permissions   │ │ - Analytics     │ │
+│  └─────────────────┘ └─────────────────┘ └─────────────────┘ └─────────────────┘ │
+│                                                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│  │                           UI COMPONENTS LAYER                              │ │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │ │
+│  │  │   Forms &   │ │   Tables &  │ │   Dialogs & │ │  Navigation │           │ │
+│  │  │ Validation  │ │   DataGrid  │ │   Modals    │ │  & Layout   │           │ │
+│  │  │             │ │             │ │             │ │             │           │ │
+│  │  │- React Hook │ │- DataTable  │ │- Dialog     │ │- Dashboard  │           │ │
+│  │  │  Form       │ │- Pagination │ │- Confirm    │ │  Layout     │           │ │
+│  │  │- Zod Schema │ │- Sorting    │ │- Form Modal │ │- Sidebar    │           │ │
+│  │  │- Validation │ │- Filtering  │ │- Toast      │ │- Breadcrumb │           │ │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│  │                        STATE MANAGEMENT LAYER ✅ UPDATED                   │ │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │ │
+│  │  │    API      │ │    Auth     │ │   Server    │ │    Local    │           │ │
+│  │  │  Services   │ │  Service    │ │    State    │ │    State    │           │ │
+│  │  │             │ │             │ │             │ │             │           │ │
+│  │  │- AdminAPI   │ │- Login      │ │- TanStack   │ │- useState   │           │ │
+│  │  │- API        │ │- Logout     │ │  Query      │ │- UI State   │           │ │
+│  │  │  Service    │ │- Token      │ │- Cache      │ │- Modals     │           │ │
+│  │  │- HTTP       │ │  Management │ │- Mutations  │ │- Toggles    │           │ │
+│  │  │  Client     │ │- Refresh    │ │- Real-time  │ │- Forms      │           │ │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │ │
+│  │                                                                             │ │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │ │
+│  │  │   React     │ │   React     │ │ LocalStorage│ │   Utils &   │           │ │
+│  │  │  Context    │ │ Hook Form   │ │ Persistence │ │  Helpers    │           │ │
+│  │  │             │ │             │ │             │ │             │           │ │
+│  │  │- Auth       │ │- Form State │ │- Token      │ │- Constants  │           │ │
+│  │  │- Tenant     │ │- Validation │ │- User Info  │ │- Types      │           │ │
+│  │  │- Global     │ │- Error      │ │- Settings   │ │- Validators │           │ │
+│  │  │  State      │ │  Handling   │ │- Cache      │ │- Formatters │           │ │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                             HTTP/HTTPS REST API
+                                 (Port 3000)
+                                      │
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                               BACKEND API LAYER                                │
+│                            (ASP.NET Core 8 Web API)                            │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│  │                      CONTROLLERS LAYER ✅ WITH AUDIT LOGGING               │ │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │ │
+│  │  │    Auth     │ │   Tenant    │ │    User     │ │    Role     │           │ │
+│  │  │ Controller  │ │ Controller  │ │ Controller  │ │ Controller  │           │ │
+│  │  │             │ │             │ │             │ │             │           │ │
+│  │  │- Login      │ │- CRUD Ops   │ │- CRUD Ops   │ │- CRUD Ops   │           │ │
+│  │  │- Register   │ │- Multi-     │ │- Role Mgmt  │ │- Permission │           │ │
+│  │  │- Refresh    │ │  Tenant     │ │- Profile    │ │  Mgmt       │           │ │
+│  │  │- Tenant Val │ │- Audit Log  │ │- Audit Log  │ │- Audit Log  │           │ │
+│  │  │- Profile    │ │- IP Track   │ │- IP Track   │ │- IP Track   │           │ │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │ │
+│  │                                                                             │ │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │ │
+│  │  │  Settings   │ │  Audit Log  │ │ Security    │ │   Health    │           │ │
+│  │  │ Controller  │ │ Controller  │ │Log Controller│ │ Controller  │           │ │
+│  │  │             │ │             │ │             │ │             │           │ │
+│  │  │- Email      │ │- Query      │ │- Query      │ │- API Status │           │ │
+│  │  │- Password   │ │- Filter     │ │- Filter     │ │- DB Status  │           │ │
+│  │  │- System     │ │- Export     │ │- Export     │ │- Services   │           │ │
+│  │  │- Audit Log  │ │- Audit Log  │ │- Enhanced   │ │- Metrics    │           │ │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│  │                            MIDDLEWARE LAYER                                │ │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │ │
+│  │  │    CORS     │ │     JWT     │ │   Request   │ │   Error     │           │ │
+│  │  │             │ │ Authentication│ │   Logging   │ │  Handling   │           │ │
+│  │  │- Cross      │ │             │ │             │ │             │           │ │
+│  │  │  Origin     │ │- Token      │ │- Serilog    │ │- Global     │           │ │
+│  │  │- Headers    │ │  Validation │ │- Request    │ │  Exception  │           │ │
+│  │  │- Methods    │ │- Claims     │ │  ID         │ │- Custom     │           │ │
+│  │  │- Preflight  │ │- Roles      │ │- Duration   │ │  Responses  │           │ │
+│  │  │- Tenant     │ │- Tenant     │ │- Audit      │ │- Logging    │           │ │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│  │                     BUSINESS LOGIC LAYER ✅ ENHANCED                       │ │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │ │
+│  │  │   Tenant    │ │    User     │ │    Role     │ │   Settings  │           │ │
+│  │  │   Service   │ │   Service   │ │   Service   │ │   Service   │           │ │
+│  │  │             │ │             │ │             │ │             │           │ │
+│  │  │- Business   │ │- User Mgmt  │ │- Role Mgmt  │ │- Config     │           │ │
+│  │  │  Rules      │ │- Identity   │ │- Permission │ │- Email      │           │ │
+│  │  │- Validation │ │- Password   │ │- Assignment │ │- Password   │           │ │
+│  │  │- Multi-     │ │- Profile    │ │- Hierarchy  │ │- Security   │           │ │
+│  │  │  Tenancy    │ │- Tenant     │ │- Audit      │ │- Audit      │           │ │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │ │
+│  │                                                                             │ │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │ │
+│  │  │  Audit Log  │ │ Security    │ │   Current   │ │     JWT     │           │ │
+│  │  │   Service   │ │Log Service  │ │User Service │ │   Token     │           │ │
+│  │  │             │ │             │ │             │ │   Service   │           │ │
+│  │  │- Action     │ │- Auth       │ │- Context    │ │- Generate   │           │ │
+│  │  │  Logging    │ │  Events     │ │- User Info  │ │  Tokens     │           │ │
+│  │  │- Change     │ │- Security   │ │- Tenant     │ │- Refresh    │           │ │
+│  │  │  Tracking   │ │  Violations │ │  Context    │ │  Tokens     │           │ │
+│  │  │- IP Track   │ │- IP Track   │ │- Claims     │ │- Validate   │           │ │
+│  │  │- Compliance │ │- Enhanced   │ │- Debug      │ │  Tokens     │           │ │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                 Entity Framework
+                                      │
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                               DATA ACCESS LAYER                                │
+│                              (Entity Framework Core)                           │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│  │                              REPOSITORIES                                  │ │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │ │
+│  │  │  Generic    │ │   Tenant    │ │    User     │ │    Role     │           │ │
+│  │  │ Repository  │ │ Repository  │ │ Repository  │ │ Repository  │           │ │
+│  │  │             │ │             │ │             │ │             │           │ │
+│  │  │- CRUD Ops   │ │- Tenant     │ │- User       │ │- Role       │           │ │
+│  │  │- Queries    │ │  Filtering  │ │  Search     │ │  Search     │           │ │
+│  │  │- Pagination │ │- Multi-     │ │- Profile    │ │- Permission │           │ │
+│  │  │- Sorting    │ │  Tenant     │ │  Mgmt       │ │  Queries    │           │ │
+│  │  │- Filtering  │ │- Code Unique│ │- Role Query │ │- Hierarchy  │           │ │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │ │
+│  │                                                                             │ │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │ │
+│  │  │  Audit Log  │ │ Security    │ │  Settings   │ │Unit of Work │           │ │
+│  │  │ Repository  │ │Log Repository│ │ Repository  │ │   Pattern   │           │ │
+│  │  │             │ │             │ │             │ │             │           │ │
+│  │  │- Audit      │ │- Security   │ │- Config     │ │- Transaction│           │ │
+│  │  │  Queries    │ │  Events     │ │  Storage    │ │- Commit     │           │ │
+│  │  │- Date Range │ │- User Track │ │- Email      │ │- Rollback   │           │ │
+│  │  │- User Track │ │- IP Filter  │ │- Password   │ │- Save Chain │           │ │
+│  │  │- Export     │ │- Enhanced   │ │- Security   │ │- Multi-Repo │           │ │
+│  │  │- Enhanced   │ │- Export     │ │- Enhanced   │ │- Tenant     │           │ │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│  │                         ENTITIES ✅ WITH AUDIT SUPPORT                     │ │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │ │
+│  │  │   Tenant    │ │Application  │ │Application  │ │  Settings   │           │ │
+│  │  │             │ │    User     │ │    Role     │ │             │           │ │
+│  │  │- Id         │ │             │ │             │ │- Id         │           │ │
+│  │  │- Name       │ │- Id         │ │- Id         │ │- Key        │           │ │
+│  │  │- Code       │ │- Username   │ │- Name       │ │- Value      │           │ │
+│  │  │- Status     │ │- Email      │ │- Desc       │ │- Type       │           │ │
+│  │  │- Domain     │ │- Password   │ │- System     │ │- Category   │           │ │
+│  │  │- Contact    │ │- FirstName  │ │- Created    │ │- TenantId   │           │ │
+│  │  │- Created    │ │- LastName   │ │- Updated    │ │- Created    │           │ │
+│  │  │- Updated    │ │- IsActive   │ │- TenantId   │ │- Updated    │           │ │
+│  │  │- TenantId   │ │- TenantId   │ │- Users      │ │- IsActive   │           │ │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │ │
+│  │                                                                             │ │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │ │
+│  │  │  AuditLog   │ │ SecurityLog │ │  UserRole   │ │  Permission │           │ │
+│  │  │   ✅ USED   │ │   ✅ USED   │ │  (Junction) │ │             │           │ │
+│  │  │- Id         │ │- Id         │ │             │ │- Id         │           │ │
+│  │  │- UserId     │ │- UserId     │ │- UserId     │ │- Name       │           │ │
+│  │  │- Username   │ │- Username   │ │- RoleId     │ │- Code       │           │ │
+│  │  │- Action     │ │- Action     │ │- Assigned   │ │- Category   │           │ │
+│  │  │- Resource   │ │- IpAddress  │ │- AssignedBy │ │- Created    │           │ │
+│  │  │- OldValues  │ │- Success    │ │- Created    │ │- Updated    │           │ │
+│  │  │- NewValues  │ │- Details    │ │- Updated    │ │- IsActive   │           │ │
+│  │  │- IpAddress  │ │- UserAgent  │ │- TenantId   │ │- TenantId   │           │ │
+│  │  │- UserAgent  │ │- Timestamp  │ │- IsActive   │ │- System     │           │ │
+│  │  │- Timestamp  │ │- TenantId   │ │- Enhanced   │ │- Enhanced   │           │ │
+│  │  │- TenantId   │ │- Enhanced   │ │             │ │             │           │ │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                 SQL Connection
+                                      │
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                               DATABASE LAYER                                   │
+│                              (SQL Server LocalDB)                              │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│  │                         DATABASE SCHEMA ✅ ENHANCED                        │ │
+│  │                                                                             │ │
+│  │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                     │ │
+│  │  │   Tenants   │    │   AspNet    │    │   AspNet    │                     │ │
+│  │  │             │    │    Users    │    │    Roles    │                     │ │
+│  │  │- Id (PK)    │    │             │    │             │                     │ │
+│  │  │- Name       │    │- Id (PK)    │    │- Id (PK)    │                     │ │
+│  │  │- Code       │◄─┐ │- UserName   │    │- Name       │                     │ │
+│  │  │- Status     │  │ │- Email      │    │- Desc       │                     │ │
+│  │  │- Domain     │  │ │- Password   │    │- System     │                     │ │
+│  │  │- Contact    │  │ │- TenantId   │────┤- TenantId   │                     │ │
+│  │  │- CreatedAt  │  │ │- IsActive   │    │- CreatedAt  │                     │ │
+│  │  │- UpdatedAt  │  │ │- Profile    │    │- UpdatedAt  │                     │ │
+│  │  │- Enhanced   │  │ │- Enhanced   │    │- Enhanced   │                     │ │
+│  │  └─────────────┘  │ └─────────────┘    └─────────────┘                     │ │
+│  │                   │                           │                            │ │
+│  │                   │  ┌─────────────┐         │                            │ │
+│  │                   │  │AspNetUser   │         │                            │ │
+│  │                   │  │   Roles     │◄────────┘                            │ │
+│  │                   │  │             │                                       │ │
+│  │                   │  │- UserId(FK) │                                       │ │
+│  │                   │  │- RoleId(FK) │                                       │ │
+│  │                   │  │- TenantId   │                                       │ │
+│  │                   │  │- Enhanced   │                                       │ │
+│  │                   │  └─────────────┘                                       │ │
+│  │                   │                                                        │ │
+│  │                   │  ┌─────────────┐    ┌─────────────┐                   │ │
+│  │                   └─►│ AuditLogs   │    │SecurityLogs │                   │ │
+│  │                      │ ✅ ACTIVE   │    │ ✅ ACTIVE   │                   │ │
+│  │                      │- Id (PK)    │    │- Id (PK)    │                   │ │
+│  │                      │- UserId     │    │- UserId     │                   │ │
+│  │                      │- Username   │    │- Username   │                   │ │
+│  │                      │- Action     │    │- Action     │                   │ │
+│  │                      │- Resource   │    │- IpAddress  │                   │ │
+│  │                      │- ResourceId │    │- UserAgent  │                   │ │
+│  │                      │- OldValues  │    │- Success    │                   │ │
+│  │                      │- NewValues  │    │- Details    │                   │ │
+│  │                      │- IpAddress  │    │- FailReason │                   │ │
+│  │                      │- UserAgent  │    │- Timestamp  │                   │ │
+│  │                      │- Timestamp  │    │- TenantId   │                   │ │
+│  │                      │- TenantId   │    │- Enhanced   │                   │ │
+│  │                      │- Enhanced   │    │             │                   │ │
+│  │                      └─────────────┘    └─────────────┘                   │ │
+│  │                                                                             │ │
+│  │                      ┌─────────────┐    ┌─────────────┐                   │ │
+│  │                      │  Settings   │    │Permissions  │                   │ │
+│  │                      │             │    │             │                   │ │
+│  │                      │- Id (PK)    │    │- Id (PK)    │                   │ │
+│  │                      │- Key        │    │- Name       │                   │ │
+│  │                      │- Value      │    │- Code       │                   │ │
+│  │                      │- Type       │    │- Category   │                   │ │
+│  │                      │- Category   │    │- IsActive   │                   │ │
+│  │                      │- TenantId   │    │- TenantId   │                   │ │
+│  │                      │- IsActive   │    │- CreatedAt  │                   │ │
+│  │                      │- Enhanced   │    │- Enhanced   │                   │ │
+│  │                      └─────────────┘    └─────────────┘                   │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│  │                      DATABASE FEATURES ✅ ENHANCED                         │ │
+│  │                                                                             │ │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │ │
+│  │  │Multi-Tenant │ │   Indexes   │ │ Constraints │ │   Security  │           │ │
+│  │  │   Filter    │ │             │ │             │ │             │           │ │
+│  │  │             │ │- Primary    │ │- Foreign    │ │- Connection │           │ │
+│  │  │- Tenant     │ │- Foreign    │ │  Keys       │ │  String     │           │ │
+│  │  │  Isolation  │ │- Unique     │ │- Unique     │ │- Integrated │           │ │
+│  │  │- Global     │ │- Composite  │ │  Indexes    │ │  Security   │           │ │
+│  │  │  Query      │ │- Clustered  │ │- Check      │ │- Local DB   │           │ │
+│  │  │  Filters    │ │- Non-Clust  │ │  Constr.    │ │- Dev Mode   │           │ │
+│  │  │- Enhanced   │ │- Enhanced   │ │- Enhanced   │ │- Enhanced   │           │ │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+TECHNOLOGY STACK SUMMARY ✅ CORRECTED:
+======================================
+Frontend: Next.js 14, React 18, TypeScript, Tailwind CSS, Shadcn/UI
+Backend:  ASP.NET Core 8, C#, Entity Framework Core, JWT Auth, Serilog
+Database: SQL Server LocalDB with Multi-Tenant Support
+State Management: TanStack Query (Server) + React Context (Client) + LocalStorage (Persist)
+Validation: Zod (Frontend) + Data Annotations (Backend)
+Logging: Serilog + Custom Audit/Security Logging ✅ FULLY IMPLEMENTED
+Architecture: Clean Architecture + Repository Pattern + Unit of Work
+
+PORTS:
+======
+Frontend: http://localhost:3000
+Backend:  http://localhost:5000 | https://localhost:5001
+
+KEY FEATURES ✅ IMPLEMENTED & VERIFIED:
+=======================================
+✅ Multi-Tenant Architecture with Proper Isolation
+✅ Role-Based Access Control (RBAC) 
+✅ Comprehensive Audit Logging (All CRUD Operations)
+✅ Enhanced Security Event Logging
+✅ JWT Authentication with Tenant Validation
+✅ Real-time Data Synchronization via TanStack Query
+✅ Responsive UI Design with Shadcn/UI
+✅ Type-Safe API Communication (TypeScript + C#)
+✅ Database Migration Support
+✅ Development & Production Ready
+✅ IP Address & User Agent Tracking
+✅ Before/After Value Comparison in Audit Logs
+✅ Tenant-Aware Authentication & Authorization
+
+STATE MANAGEMENT STRATEGY ✅ ACTUAL IMPLEMENTATION:
+===================================================
+🔥 TanStack Query (90% - Server State)
+   ├── User Management (CRUD operations)
+   ├── Tenant Management (Multi-tenant data)
+   ├── Role Management (RBAC operations)  
+   ├── Settings Management (System config)
+   ├── Audit Logs (Compliance data)
+   └── Security Logs (Security events)
+
+⚛️ React Context (5% - Global Client State)
+   ├── Authentication State
+   ├── Current Tenant Context
+   └── User Profile Information
+
+📋 React Hook Form (3% - Form State)
+   ├── Form Validation with Zod
+   ├── Complex Form Handling
+   └── Error State Management
+
+🏪 LocalStorage (2% - Persistence)
+   ├── JWT Token Storage
+   ├── User Preferences
+   └── Tenant Selection Cache

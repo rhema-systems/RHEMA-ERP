@@ -1,0 +1,33 @@
+'use client';
+
+import { ReactNode } from 'react';
+import { Sidebar } from './sidebar';
+import { Header } from './header';
+
+interface DashboardLayoutProps {
+  children: ReactNode;
+}
+
+export function DashboardLayout({ children }: DashboardLayoutProps) {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
+      <div className="flex h-screen">
+        {/* Sidebar */}
+        <Sidebar />
+
+        {/* Main Content */}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Header */}
+          <Header />
+
+          {/* Page Content */}
+          <main className="flex-1 overflow-y-auto">
+            <div className="container mx-auto p-6 space-y-6">
+              {children}
+            </div>
+          </main>
+        </div>
+      </div>
+    </div>
+  );
+}

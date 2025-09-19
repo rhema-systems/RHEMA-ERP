@@ -1,0 +1,306 @@
+name: 📊 Database Migrations
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths: 
+      - 'src/ErpSystem.Data/Migrations/**'
+      - 'src/ErpSystem.Data/ApplicationDbContext.cs'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to run migrations'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+      force:
+        description: 'Force migration (use with caution)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  DOTNET_VERSION: '8.0.x'
+
+jobs:
+  validate-migrations:
+    name: 🔍 Validate Migrations
+    runs-on: ubuntu-latest
+    
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          SA_PASSWORD: MigrationTest123!
+          MSSQL_PID: Express
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P MigrationTest123! -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: 📦 Restore dependencies
+      run: |
+        cd src
+        dotnet restore
+
+    - name: 🏗️ Build solution
+      run: |
+        cd src
+        dotnet build --configuration Release --no-restore
+
+    - name: 🔍 Check migration consistency
+      run: |
+        cd src
+        dotnet ef migrations has-pending-model-changes --project ErpSystem.Data --startup-project ErpSystem.Api
+      env:
+        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpMigrationTest;User Id=sa;Password=MigrationTest123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
+
+    - name: 📊 Apply migrations to test database
+      run: |
+        cd src
+        dotnet ef database update --project ErpSystem.Data --startup-project ErpSystem.Api --verbose
+      env:
+        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpMigrationTest;User Id=sa;Password=MigrationTest123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
+
+    - name: 🧪 Run database tests
+      run: |
+        cd src
+        dotnet test --filter "Category=DatabaseIntegration" --configuration Release --verbosity normal
+      env:
+        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpMigrationTest;User Id=sa;Password=MigrationTest123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
+
+    - name: 📋 Generate migration report
+      run: |
+        cd src
+        dotnet ef migrations list --project ErpSystem.Data --startup-project ErpSystem.Api > migration-report.txt
+        echo "### Migration Report" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        cat migration-report.txt >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+      env:
+        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpMigrationTest;User Id=sa;Password=MigrationTest123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
+
+  deploy-migrations-staging:
+    name: 🧪 Deploy to Staging Database
+    runs-on: ubuntu-latest
+    needs: validate-migrations
+    if: |
+      github.ref == 'refs/heads/develop' || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+    environment: staging-db
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: 📦 Restore dependencies
+      run: |
+        cd src
+        dotnet restore
+
+    - name: 🏗️ Build solution
+      run: |
+        cd src
+        dotnet build --configuration Release --no-restore
+
+    - name: 📊 Backup staging database
+      run: |
+        # Create backup before applying migrations
+        docker run --rm \
+          -e ACCEPT_EULA=Y \
+          -e SA_PASSWORD="${{ secrets.STAGING_DB_PASSWORD }}" \
+          mcr.microsoft.com/mssql/server:2022-latest \
+          /opt/mssql-tools/bin/sqlcmd -S "${{ secrets.STAGING_DB_HOST }}" -U sa -P "${{ secrets.STAGING_DB_PASSWORD }}" \
+          -Q "BACKUP DATABASE [${{ secrets.STAGING_DB_NAME }}] TO DISK = '/tmp/backup_$(date +%Y%m%d_%H%M%S).bak'"
+
+    - name: 📊 Apply migrations to staging
+      run: |
+        cd src
+        dotnet ef database update --project ErpSystem.Data --startup-project ErpSystem.Api --verbose
+      env:
+        ConnectionStrings__DefaultConnection: ${{ secrets.STAGING_DB_CONNECTION_STRING }}
+
+    - name: ✅ Verify migration success
+      run: |
+        cd src
+        dotnet ef migrations list --project ErpSystem.Data --startup-project ErpSystem.Api
+      env:
+        ConnectionStrings__DefaultConnection: ${{ secrets.STAGING_DB_CONNECTION_STRING }}
+
+    - name: 📊 Deployment notification
+      uses: 8398a7/action-slack@v3
+      if: always()
+      with:
+        status: ${{ job.status }}
+        channel: '#database-migrations'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        text: |
+          Database migrations deployed to staging
+          Status: ${{ job.status }}
+          Repository: ${{ github.repository }}
+          Commit: ${{ github.sha }}
+
+  deploy-migrations-production:
+    name: 🚢 Deploy to Production Database
+    runs-on: ubuntu-latest
+    needs: validate-migrations
+    if: |
+      github.ref == 'refs/heads/main' || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+    environment: production-db
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: 📦 Restore dependencies
+      run: |
+        cd src
+        dotnet restore
+
+    - name: 🏗️ Build solution
+      run: |
+        cd src
+        dotnet build --configuration Release --no-restore
+
+    - name: 📊 Create production database backup
+      run: |
+        # Create comprehensive backup before production migration
+        docker run --rm \
+          -e ACCEPT_EULA=Y \
+          -e SA_PASSWORD="${{ secrets.PROD_DB_PASSWORD }}" \
+          mcr.microsoft.com/mssql/server:2022-latest \
+          /opt/mssql-tools/bin/sqlcmd -S "${{ secrets.PROD_DB_HOST }}" -U sa -P "${{ secrets.PROD_DB_PASSWORD }}" \
+          -Q "BACKUP DATABASE [${{ secrets.PROD_DB_NAME }}] TO DISK = '/backup/prod_backup_$(date +%Y%m%d_%H%M%S).bak' WITH COMPRESSION"
+
+    - name: ⚠️ Manual approval checkpoint
+      uses: trstringer/manual-approval@v1
+      if: github.event_name != 'workflow_dispatch' || !github.event.inputs.force
+      with:
+        secret: ${{ github.TOKEN }}
+        approvers: ${{ secrets.PROD_APPROVERS }}
+        minimum-approvals: 2
+        issue-title: "Production Database Migration Approval Required"
+        issue-body: |
+          ### Production Database Migration
+          
+          **Repository:** ${{ github.repository }}
+          **Branch:** ${{ github.ref }}
+          **Commit:** ${{ github.sha }}
+          **Triggered by:** ${{ github.actor }}
+          
+          **Migrations to Apply:**
+          Please review the migration report in the validate-migrations job.
+          
+          **Impact Assessment:**
+          - [ ] Schema changes reviewed
+          - [ ] Data migration impact assessed
+          - [ ] Rollback plan prepared
+          - [ ] Maintenance window scheduled
+          
+          Please approve this deployment by commenting '/approve' on this issue.
+
+    - name: 🚢 Apply migrations to production
+      run: |
+        cd src
+        dotnet ef database update --project ErpSystem.Data --startup-project ErpSystem.Api --verbose
+      env:
+        ConnectionStrings__DefaultConnection: ${{ secrets.PROD_DB_CONNECTION_STRING }}
+
+    - name: ✅ Verify production migration
+      run: |
+        cd src
+        dotnet ef migrations list --project ErpSystem.Data --startup-project ErpSystem.Api
+        
+        # Run post-migration validation
+        dotnet test --filter "Category=PostMigrationValidation" --configuration Release
+      env:
+        ConnectionStrings__DefaultConnection: ${{ secrets.PROD_DB_CONNECTION_STRING }}
+
+    - name: 📊 Production deployment notification
+      uses: 8398a7/action-slack@v3
+      if: always()
+      with:
+        status: ${{ job.status }}
+        channel: '#production-deployments'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        text: |
+          🚢 Production database migrations completed
+          Status: ${{ job.status }}
+          Repository: ${{ github.repository }}
+          Commit: ${{ github.sha }}
+          Triggered by: ${{ github.actor }}
+          
+          ${{ job.status == 'success' && '✅ All migrations applied successfully' || '❌ Migration failed - check logs' }}
+
+  rollback-migrations:
+    name: ⏪ Rollback Migrations (Manual)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    environment: database-rollback
+
+    steps:
+    - name: ⚠️ Rollback approval
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: ${{ github.TOKEN }}
+        approvers: ${{ secrets.ROLLBACK_APPROVERS }}
+        minimum-approvals: 2
+        issue-title: "Database Rollback Approval Required"
+        issue-body: |
+          ### Database Rollback Request
+          
+          **Repository:** ${{ github.repository }}
+          **Environment:** ${{ github.event.inputs.environment }}
+          **Requested by:** ${{ github.actor }}
+          
+          ⚠️ **WARNING: This will rollback database changes**
+          
+          Please confirm:
+          - [ ] Data backup is available
+          - [ ] Rollback impact is understood
+          - [ ] Application compatibility verified
+          
+          Comment '/approve' to proceed with rollback.
+
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: ⏪ Perform database rollback
+      run: |
+        cd src
+        # This would contain your specific rollback logic
+        echo "Rollback logic would be implemented here"
+        echo "Environment: ${{ github.event.inputs.environment }}"
+        # Example: dotnet ef database update PreviousMigration --project ErpSystem.Data --startup-project ErpSystem.Api

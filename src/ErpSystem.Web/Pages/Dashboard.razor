@@ -1,0 +1,798 @@
+@page "/Dashboard"
+@attribute [Authorize]
+@using Syncfusion.Blazor.Charts
+@using Syncfusion.Blazor.Cards
+@using Syncfusion.Blazor.Buttons
+@using Syncfusion.Blazor.Calendars
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Layouts
+
+<PageTitle>Dashboard - ErpSystem</PageTitle>
+
+<div class="dashboard-container">
+    <!-- Header -->
+    <div class="dashboard-header">
+        <h1 class="dashboard-title">Dashboard</h1>
+        <div class="dashboard-actions">
+            <SfDatePicker TValue="DateTime?" @bind-Value="startDate" CssClass="date-picker" Width="150px"></SfDatePicker>
+            <span class="date-separator">to</span>
+            <SfDatePicker TValue="DateTime?" @bind-Value="endDate" CssClass="date-picker" Width="150px"></SfDatePicker>
+            <SfButton IsPrimary="true" IconCss="e-icons e-refresh" @onclick="RefreshData">
+                Refresh
+            </SfButton>
+        </div>
+    </div>
+
+    <!-- KPI Cards Row -->
+    <div class="kpi-row">
+        <SfCard class="kpi-card revenue-card">
+            <CardHeader Title="Total Revenue" />
+            <CardContent>
+                <div class="kpi-content">
+                    <div class="kpi-value">$@totalRevenue.ToString("N0")</div>
+                    <div class="kpi-change positive">+12.5% from last month</div>
+                </div>
+            </CardContent>
+        </SfCard>
+        
+        <SfCard class="kpi-card orders-card">
+            <CardHeader Title="Total Orders" />
+            <CardContent>
+                <div class="kpi-content">
+                    <div class="kpi-value">@totalOrders.ToString("N0")</div>
+                    <div class="kpi-change positive">+8.2% from last month</div>
+                </div>
+            </CardContent>
+        </SfCard>
+        
+        <SfCard class="kpi-card customers-card">
+            <CardHeader Title="Active Customers" />
+            <CardContent>
+                <div class="kpi-content">
+                    <div class="kpi-value">@totalCustomers.ToString("N0")</div>
+                    <div class="kpi-change positive">+5.7% from last month</div>
+                </div>
+            </CardContent>
+        </SfCard>
+        
+        <SfCard class="kpi-card conversion-card">
+            <CardHeader Title="Conversion Rate" />
+            <CardContent>
+                <div class="kpi-content">
+                    <div class="kpi-value">@conversionRate.ToString("F1")%</div>
+                    <div class="kpi-change negative">-2.1% from last month</div>
+                </div>
+            </CardContent>
+        </SfCard>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="charts-row">
+        <!-- Sales Trend Chart -->
+        <SfCard class="chart-card">
+            <CardHeader Title="Sales Trend" />
+            <CardContent>
+                <SfChart Width="100%" Height="300px">
+                    <ChartPrimaryXAxis ValueType="Syncfusion.Blazor.Charts.ValueType.Category" />
+                    <ChartPrimaryYAxis LabelFormat="${value}K" />
+                    <ChartSeriesCollection>
+                        <ChartSeries DataSource="salesData" XName="Month" YName="Sales" Type="ChartSeriesType.Column" Fill="#667eea">
+                            <ChartMarker Visible="true" />
+                        </ChartSeries>
+                    </ChartSeriesCollection>
+                    <ChartTooltipSettings Enable="true" />
+                    <ChartLegendSettings Visible="false" />
+                </SfChart>
+            </CardContent>
+        </SfCard>
+
+        <!-- Error Rate Chart -->
+        <SfCard class="chart-card">
+            <CardHeader Title="Error Rate Analysis" />
+            <CardContent>
+                <SfAccumulationChart Width="100%" Height="300px">
+                    <AccumulationChartSeriesCollection>
+                        <AccumulationChartSeries DataSource="errorRateData" XName="Status" YName="Count" 
+                                                 Type="AccumulationType.Pie" InnerRadius="0%">
+                            <AccumulationDataLabelSettings Visible="true" Name="Status" />
+                        </AccumulationChartSeries>
+                    </AccumulationChartSeriesCollection>
+                    <AccumulationChartTooltipSettings Enable="true" />
+                    <AccumulationChartLegendSettings Visible="true" Position="LegendPosition.Right" />
+                </SfAccumulationChart>
+            </CardContent>
+        </SfCard>
+
+        <!-- Tech Companies Growth -->
+        <SfCard class="chart-card">
+            <CardHeader Title="Tech Companies Performance" />
+            <CardContent>
+                <SfChart Width="100%" Height="300px">
+                    <ChartPrimaryXAxis ValueType="Syncfusion.Blazor.Charts.ValueType.Category" />
+                    <ChartPrimaryYAxis LabelFormat="{value}%" />
+                    <ChartSeriesCollection>
+                        <ChartSeries DataSource="oracleData" XName="Date" YName="Value" Type="ChartSeriesType.Line" Name="Oracle" />
+                        <ChartSeries DataSource="ibmData" XName="Date" YName="Value" Type="ChartSeriesType.Line" Name="IBM" />
+                        <ChartSeries DataSource="intelData" XName="Date" YName="Value" Type="ChartSeriesType.Line" Name="Intel" />
+                    </ChartSeriesCollection>
+                    <ChartTooltipSettings Enable="true" />
+                    <ChartLegendSettings Visible="true" />
+                </SfChart>
+            </CardContent>
+        </SfCard>
+    </div>
+
+    <!-- Data Grids Row -->
+    <div class="data-row">
+        <!-- Recent Orders Grid -->
+        <SfCard class="data-card">
+            <CardHeader Title="Recent Orders" />
+            <CardContent>
+                <SfGrid DataSource="recentOrders" Height="300px" AllowPaging="true">
+                    <GridPageSettings PageSize="5"></GridPageSettings>
+                    <GridColumns>
+                        <GridColumn Field="OrderId" HeaderText="Order ID" Width="120" />
+                        <GridColumn Field="CustomerName" HeaderText="Customer" Width="150" />
+                        <GridColumn Field="Amount" HeaderText="Amount" Width="120" Format="C2" />
+                        <GridColumn Field="Status" HeaderText="Status" Width="100">
+                            <Template>
+                                @{
+                                    var order = (context as OrderModel);
+                                    <span class="status-badge @(order.Status.ToLower())">
+                                        @order.Status
+                                    </span>
+                                }
+                            </Template>
+                        </GridColumn>
+                        <GridColumn Field="OrderDate" HeaderText="Date" Width="120" Format="d" />
+                    </GridColumns>
+                </SfGrid>
+            </CardContent>
+        </SfCard>
+
+        <!-- Quick Actions Panel -->
+        <SfCard class="actions-card">
+            <CardHeader Title="Quick Actions" />
+            <CardContent>
+                <div class="quick-actions-grid">
+                    <SfButton IsPrimary="true" IconCss="e-icons e-plus" CssClass="action-button">
+                        New Order
+                    </SfButton>
+                    <SfButton IsPrimary="false" IconCss="e-icons e-people" CssClass="action-button">
+                        Add Customer
+                    </SfButton>
+                    <SfButton IsPrimary="false" IconCss="e-icons e-shopping-cart" CssClass="action-button">
+                        Add Product
+                    </SfButton>
+                    <SfButton IsPrimary="false" IconCss="e-icons e-file-new" CssClass="action-button">
+                        Create Invoice
+                    </SfButton>
+                </div>
+            </CardContent>
+        </SfCard>
+    </div>
+</div>
+
+@code {
+    private DateTime? startDate = DateTime.Now.AddMonths(-1);
+    private DateTime? endDate = DateTime.Now;
+    
+    // KPI Data
+    private int totalRevenue = 1247895;
+    private int totalOrders = 8543;
+    private int totalCustomers = 2847;
+    private double conversionRate = 3.2;
+
+    // Chart Data
+    private List<ErrorRateModel> errorRateData = new();
+    private List<ExecutionModel> executionData = new();
+    private List<EditionModel> editionData = new();
+    private List<SalesModel> salesData = new();
+    private List<TechGrowthModel> techGrowthData = new();
+    
+    // Individual company data for charts
+    private List<TechGrowthModel> oracleData = new();
+    private List<TechGrowthModel> ibmData = new();
+    private List<TechGrowthModel> intelData = new();
+    private List<TechGrowthModel> amazonData = new();
+    private List<TechGrowthModel> samsungData = new();
+    private List<TechGrowthModel> appleData = new();
+    
+    // Grid data
+    private List<OrderModel> recentOrders = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDashboardData();
+    }
+
+    private async Task RefreshData()
+    {
+        await LoadDashboardData();
+        StateHasChanged();
+    }
+
+    private async Task LoadDashboardData()
+    {
+        // Simulate async data loading
+        await Task.Delay(100);
+
+        // Error Rate Data
+        errorRateData = new List<ErrorRateModel>
+        {
+            new ErrorRateModel { Status = "Success", Count = 85 },
+            new ErrorRateModel { Status = "Fault", Count = 15 }
+        };
+
+        // Execution Duration Data
+        executionData = new List<ExecutionModel>
+        {
+            new ExecutionModel { Date = "9/4/2025", Duration = 5200 },
+            new ExecutionModel { Date = "9/17/2025", Duration = 0 }
+        };
+
+        // Edition Usage Data
+        editionData = new List<EditionModel>
+        {
+            new EditionModel { Edition = "Standard", Usage = 45 },
+            new EditionModel { Edition = "Professional", Usage = 25 },
+            new EditionModel { Edition = "Enterprise", Usage = 20 },
+            new EditionModel { Edition = "Business", Usage = 10 }
+        };
+
+        // Sales Data
+        salesData = new List<SalesModel>
+        {
+            new SalesModel { Month = "Jan", Sales = 600 },
+            new SalesModel { Month = "Feb", Sales = 500 },
+            new SalesModel { Month = "Mar", Sales = 490 },
+            new SalesModel { Month = "Apr", Sales = 680 },
+            new SalesModel { Month = "May", Sales = 800 },
+            new SalesModel { Month = "Jun", Sales = 600 },
+            new SalesModel { Month = "Jul", Sales = 720 }
+        };
+
+        // Tech Companies Growth Data
+        var companies = new[] { "Oracle", "IBM", "Intel", "Amazon", "Samsung", "Apple" };
+        var dates = new[] { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+        
+        techGrowthData = new List<TechGrowthModel>();
+        var random = new Random();
+        
+        foreach (var company in companies)
+        {
+            var baseValue = random.Next(50, 90);
+            foreach (var date in dates)
+            {
+                techGrowthData.Add(new TechGrowthModel
+                {
+                    Company = company,
+                    Date = date,
+                    Value = baseValue + random.Next(-10, 20)
+                });
+            }
+        }
+        
+        // Populate individual company data
+        oracleData = techGrowthData.Where(d => d.Company == "Oracle").ToList();
+        ibmData = techGrowthData.Where(d => d.Company == "IBM").ToList();
+        intelData = techGrowthData.Where(d => d.Company == "Intel").ToList();
+        amazonData = techGrowthData.Where(d => d.Company == "Amazon").ToList();
+        samsungData = techGrowthData.Where(d => d.Company == "Samsung").ToList();
+        appleData = techGrowthData.Where(d => d.Company == "Apple").ToList();
+        
+        // Generate sample order data
+        var customers = new[] { "Acme Corp", "Tech Solutions", "Global Industries", "Innovate Ltd", "Future Systems" };
+        var statuses = new[] { "Completed", "Processing", "Pending", "Shipped" };
+        recentOrders = new List<OrderModel>();
+        
+        for (int i = 1; i <= 15; i++)
+        {
+            recentOrders.Add(new OrderModel
+            {
+                OrderId = $"ORD-{1000 + i}",
+                CustomerName = customers[random.Next(customers.Length)],
+                Amount = random.Next(100, 5000),
+                Status = statuses[random.Next(statuses.Length)],
+                OrderDate = DateTime.Now.AddDays(-random.Next(1, 30))
+            });
+        }
+    }
+
+    // Data Models
+    public class ErrorRateModel
+    {
+        public string Status { get; set; } = string.Empty;
+        public int Count { get; set; }
+    }
+
+    public class ExecutionModel
+    {
+        public string Date { get; set; } = string.Empty;
+        public double Duration { get; set; }
+    }
+
+    public class EditionModel
+    {
+        public string Edition { get; set; } = string.Empty;
+        public double Usage { get; set; }
+    }
+
+    public class SalesModel
+    {
+        public string Month { get; set; } = string.Empty;
+        public double Sales { get; set; }
+    }
+
+    public class TechGrowthModel
+    {
+        public string Company { get; set; } = string.Empty;
+        public string Date { get; set; } = string.Empty;
+        public double Value { get; set; }
+    }
+    
+    public class OrderModel
+    {
+        public string OrderId { get; set; } = string.Empty;
+        public string CustomerName { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public DateTime OrderDate { get; set; }
+    }
+}
+
+<style>
+    .dashboard-container {
+        padding: 24px;
+        background: var(--bg-secondary);
+        min-height: calc(100vh - 64px);
+        width: 100%;
+        max-width: none;
+        margin: 0;
+        box-sizing: border-box;
+    }
+
+    .dashboard-header {
+        margin-bottom: 32px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 20px;
+        padding: 24px;
+        background: var(--bg-primary);
+        border-radius: 12px;
+        box-shadow: var(--shadow-sm);
+        border: 1px solid var(--border-color);
+    }
+
+    .dashboard-title {
+        font-size: 32px;
+        font-weight: 800;
+        color: var(--text-primary);
+        margin: 0;
+        background: var(--gradient-primary);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+
+    .dashboard-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .date-input {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid var(--border-color);
+        color: var(--text-light);
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 14px;
+    }
+
+    .date-input:focus {
+        outline: none;
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+    }
+
+    .date-separator {
+        color: var(--text-muted);
+        font-size: 14px;
+    }
+
+    .kpi-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 24px;
+        margin-bottom: 32px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .kpi-card {
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        padding: 24px;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: var(--shadow-sm);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .kpi-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: var(--gradient-primary);
+    }
+
+    .kpi-card:hover {
+        transform: translateY(-4px);
+        box-shadow: var(--shadow-lg);
+        border-color: var(--hover-border);
+    }
+
+    .kpi-card.revenue-card::before { background: var(--gradient-primary); }
+    .kpi-card.orders-card::before { background: var(--gradient-secondary); }
+    .kpi-card.customers-card::before { background: linear-gradient(135deg, var(--accent-color), var(--secondary-color)); }
+    .kpi-card.conversion-card::before { background: linear-gradient(135deg, var(--warning-color), var(--danger-color)); }
+
+    .kpi-content {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        height: 100%;
+    }
+
+    .kpi-value {
+        font-size: 36px;
+        font-weight: 800;
+        margin: 0;
+        color: var(--text-primary);
+        line-height: 1.1;
+    }
+
+    .kpi-change {
+        font-size: 14px;
+        font-weight: 600;
+        padding: 6px 12px;
+        border-radius: 20px;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-top: 8px;
+    }
+
+    .kpi-change.positive {
+        color: var(--accent-color);
+        background: rgba(16, 185, 129, 0.1);
+    }
+
+    .kpi-change.positive::before {
+        content: '↗';
+        font-size: 12px;
+    }
+
+    .kpi-change.negative {
+        color: var(--danger-color);
+        background: rgba(239, 68, 68, 0.1);
+    }
+
+    .kpi-change.negative::before {
+        content: '↘';
+        font-size: 12px;
+    }
+
+    /* Charts Layout */
+    .charts-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 24px;
+        margin-bottom: 32px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .chart-card {
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        overflow: hidden;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: var(--shadow-sm);
+    }
+
+    .chart-card:hover {
+        transform: translateY(-4px);
+        box-shadow: var(--shadow-lg);
+        border-color: var(--hover-border);
+    }
+
+    /* Data Grids Layout */
+    .data-row {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 24px;
+        margin-bottom: 32px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .data-card,
+    .actions-card {
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        overflow: hidden;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: var(--shadow-sm);
+    }
+
+    .data-card:hover,
+    .actions-card:hover {
+        transform: translateY(-4px);
+        box-shadow: var(--shadow-lg);
+        border-color: var(--hover-border);
+    }
+
+    .quick-actions-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+    }
+
+    .action-button {
+        width: 100%;
+        margin-bottom: 8px;
+    }
+
+    /* Status badges */
+    .status-badge {
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+
+    .status-badge.completed {
+        background: rgba(16, 185, 129, 0.2);
+        color: #10b981;
+    }
+
+    .status-badge.processing {
+        background: rgba(59, 130, 246, 0.2);
+        color: #3b82f6;
+    }
+
+    .status-badge.pending {
+        background: rgba(245, 158, 11, 0.2);
+        color: #f59e0b;
+    }
+
+    .status-badge.shipped {
+        background: rgba(139, 92, 246, 0.2);
+        color: #8b5cf6;
+    }
+
+    .content-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 24px;
+        margin-bottom: 32px;
+        padding-left: 24px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .content-card {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        overflow: hidden;
+        transition: all 0.3s ease;
+    }
+
+    .content-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        background: rgba(255, 255, 255, 0.08);
+    }
+
+    .card-header {
+        padding: 20px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(255, 255, 255, 0.02);
+    }
+
+    .card-header h3 {
+        margin: 0;
+        color: var(--text-light);
+        font-size: 18px;
+        font-weight: 600;
+    }
+
+    .card-header i {
+        color: var(--primary-color);
+        font-size: 18px;
+    }
+
+    .card-content {
+        padding: 20px;
+    }
+
+    .activity-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .activity-item:last-child {
+        border-bottom: none;
+    }
+
+    .activity-icon {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        color: white;
+    }
+
+    .activity-icon.success { background: #10b981; }
+    .activity-icon.warning { background: #f59e0b; }
+    .activity-icon.info { background: #3b82f6; }
+
+    .activity-details {
+        flex: 1;
+    }
+
+    .activity-title {
+        margin: 0 0 4px 0;
+        color: var(--text-light);
+        font-size: 14px;
+        font-weight: 500;
+    }
+
+    .activity-time {
+        color: var(--text-muted);
+        font-size: 12px;
+    }
+
+    .status-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .status-item:last-child {
+        border-bottom: none;
+    }
+
+    .status-label {
+        color: var(--text-muted);
+        font-size: 14px;
+    }
+
+    .status-value {
+        font-size: 14px;
+        font-weight: 600;
+        padding: 4px 8px;
+        border-radius: 6px;
+    }
+
+    .status-value.online {
+        color: #10b981;
+        background: rgba(16, 185, 129, 0.1);
+    }
+
+    .quick-actions {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+    }
+
+    .action-btn {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border-color);
+        color: var(--text-light);
+        padding: 16px;
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        transition: all 0.2s ease;
+        cursor: pointer;
+    }
+
+    .action-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: var(--primary-color);
+        transform: translateY(-1px);
+    }
+
+    .action-btn i {
+        font-size: 20px;
+        color: var(--primary-color);
+    }
+
+    .action-btn span {
+        font-size: 12px;
+        font-weight: 500;
+    }
+
+    /* Responsive adjustments */
+    @@media (max-width: 1200px) {
+        .charts-row {
+            grid-template-columns: repeat(2, 1fr);
+        }
+        
+        .data-row {
+            grid-template-columns: 1fr;
+        }
+    }
+    
+    @@media (max-width: 768px) {
+        .dashboard-container {
+            padding: 16px;
+        }
+        
+        .dashboard-header {
+            flex-direction: column;
+            align-items: stretch;
+        }
+        
+        .dashboard-actions {
+            justify-content: center;
+        }
+        
+        .kpi-row {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+        
+        .charts-row {
+            grid-template-columns: 1fr;
+            gap: 16px;
+        }
+        
+        .data-row {
+            grid-template-columns: 1fr;
+            gap: 16px;
+        }
+        
+        .content-row {
+            grid-template-columns: 1fr;
+            gap: 16px;
+        }
+        
+        .quick-actions,
+        .quick-actions-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+    
+    @@media (max-width: 480px) {
+        .kpi-row {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
