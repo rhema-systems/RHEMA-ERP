@@ -1,0 +1,475 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using ErpSystem.Core.Services;
+using ErpSystem.Core.Entities;
+using ErpSystem.Api.Models;
+
+namespace ErpSystem.Api.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class UserTenantController : ControllerBase
+{
+    private readonly IUserTenantService _userTenantService;
+    private readonly ILogger<UserTenantController> _logger;
+
+    public UserTenantController(IUserTenantService userTenantService, ILogger<UserTenantController> logger)
+    {
+        _userTenantService = userTenantService;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Grant user access to a tenant
+    /// </summary>
+    [HttpPost("grant-access")]
+    public async Task<IActionResult> GrantAccess([FromBody] GrantAccessRequest request)
+    {
+        try
+        {
+            var userTenant = await _userTenantService.GrantUserAccessToTenantAsync(
+                request.UserId,
+                request.TenantId,
+                request.AccessLevel,
+                request.GrantedBy,
+                request.ExpiresAt,
+                request.Notes
+            );
+
+            return Ok(new { 
+                success = true,
+                data = MapToDto(userTenant),
+                message = "User access granted successfully"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error granting user {UserId} access to tenant {TenantId}", request.UserId, request.TenantId);
+            return StatusCode(500, new { 
+                success = false,
+                message = "An error occurred while granting access"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Revoke user access from a tenant (does not delete the user!)
+    /// </summary>
+    [HttpPost("revoke-access")]
+    public async Task<IActionResult> RevokeAccess([FromBody] RevokeAccessRequest request)
+    {
+        try
+        {
+            await _userTenantService.RevokeUserAccessFromTenantAsync(
+                request.UserId,
+                request.TenantId,
+                request.RevokedBy,
+                request.Reason
+            );
+
+            return Ok(new { 
+                success = true,
+                message = "User access revoked successfully"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error revoking user {UserId} access from tenant {TenantId}", request.UserId, request.TenantId);
+            return StatusCode(500, new ApiResponse<object>
+            {
+                Success = false,
+                Message = "An error occurred while revoking access"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Suspend user from a tenant (temporary suspension)
+    /// </summary>
+    [HttpPost("suspend")]
+    public async Task<IActionResult> SuspendUser([FromBody] SuspendUserRequest request)
+    {
+        try
+        {
+            var success = await _userTenantService.SuspendUserFromTenantAsync(
+                request.UserId,
+                request.TenantId,
+                request.SuspendedBy,
+                request.Reason
+            );
+
+            if (success)
+            {
+                return Ok(new ApiResponse<object>
+                {
+                    Success = true,
+                    Message = "User suspended successfully"
+                });
+            }
+
+            return BadRequest(new ApiResponse<object>
+            {
+                Success = false,
+                Message = "Unable to suspend user - no active relationship found"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error suspending user {UserId} from tenant {TenantId}", request.UserId, request.TenantId);
+            return StatusCode(500, new ApiResponse<object>
+            {
+                Success = false,
+                Message = "An error occurred while suspending user"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Reactivate a suspended user in a tenant
+    /// </summary>
+    [HttpPost("reactivate")]
+    public async Task<IActionResult> ReactivateUser([FromBody] ReactivateUserRequest request)
+    {
+        try
+        {
+            var success = await _userTenantService.ReactivateUserInTenantAsync(
+                request.UserId,
+                request.TenantId,
+                request.ReactivatedBy
+            );
+
+            if (success)
+            {
+                return Ok(new ApiResponse<object>
+                {
+                    Success = true,
+                    Message = "User reactivated successfully"
+                });
+            }
+
+            return BadRequest(new ApiResponse<object>
+            {
+                Success = false,
+                Message = "Unable to reactivate user - no suspended relationship found"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reactivating user {UserId} in tenant {TenantId}", request.UserId, request.TenantId);
+            return StatusCode(500, new ApiResponse<object>
+            {
+                Success = false,
+                Message = "An error occurred while reactivating user"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Set user's default tenant
+    /// </summary>
+    [HttpPost("set-default-tenant")]
+    public async Task<IActionResult> SetDefaultTenant([FromBody] SetDefaultTenantRequest request)
+    {
+        try
+        {
+            var success = await _userTenantService.SetDefaultTenantAsync(request.UserId, request.TenantId);
+
+            if (success)
+            {
+                return Ok(new ApiResponse<object>
+                {
+                    Success = true,
+                    Message = "Default tenant set successfully"
+                });
+            }
+
+            return BadRequest(new ApiResponse<object>
+            {
+                Success = false,
+                Message = "Unable to set default tenant"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error setting default tenant {TenantId} for user {UserId}", request.TenantId, request.UserId);
+            return StatusCode(500, new ApiResponse<object>
+            {
+                Success = false,
+                Message = "An error occurred while setting default tenant"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Get all active tenants for a user
+    /// </summary>
+    [HttpGet("user/{userId}/tenants")]
+    public async Task<IActionResult> GetUserTenants(Guid userId)
+    {
+        try
+        {
+            var userTenants = await _userTenantService.GetActiveUserTenantsAsync(userId);
+            var dtos = userTenants.Select(MapToDto).ToList();
+
+            return Ok(new ApiResponse<List<UserTenantDto>>
+            {
+                Success = true,
+                Data = dtos,
+                Message = $"Found {dtos.Count} active tenants for user"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting tenants for user {UserId}", userId);
+            return StatusCode(500, new ApiResponse<object>
+            {
+                Success = false,
+                Message = "An error occurred while getting user tenants"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Get all active users for a tenant
+    /// </summary>
+    [HttpGet("tenant/{tenantId}/users")]
+    public async Task<IActionResult> GetTenantUsers(Guid tenantId)
+    {
+        try
+        {
+            var users = await _userTenantService.GetActiveTenantUsersAsync(tenantId);
+            var userList = users.ToList();
+
+            return Ok(new ApiResponse<List<TenantUserDto>>
+            {
+                Success = true,
+                Data = userList.Select(u => new TenantUserDto
+                {
+                    UserId = u.Id,
+                    Username = u.UserName ?? "",
+                    Email = u.Email ?? "",
+                    FirstName = u.FirstName,
+                    LastName = u.LastName,
+                    IsActive = u.IsActive
+                }).ToList(),
+                Message = $"Found {userList.Count} active users in tenant"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting users for tenant {TenantId}", tenantId);
+            return StatusCode(500, new ApiResponse<object>
+            {
+                Success = false,
+                Message = "An error occurred while getting tenant users"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Check if user has active access to a tenant
+    /// </summary>
+    [HttpGet("check-access/{userId}/{tenantId}")]
+    public async Task<IActionResult> CheckAccess(Guid userId, Guid tenantId)
+    {
+        try
+        {
+            var hasAccess = await _userTenantService.HasActiveAccessAsync(userId, tenantId);
+            
+            return Ok(new ApiResponse<bool>
+            {
+                Success = true,
+                Data = hasAccess,
+                Message = hasAccess ? "User has active access" : "User does not have active access"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking access for user {UserId} to tenant {TenantId}", userId, tenantId);
+            return StatusCode(500, new ApiResponse<object>
+            {
+                Success = false,
+                Message = "An error occurred while checking access"
+            });
+        }
+    }
+
+    #region Bulk Operations
+
+    /// <summary>
+    /// Bulk grant access to multiple users for a tenant
+    /// </summary>
+    [HttpPost("bulk-grant-access")]
+    public async Task<IActionResult> BulkGrantAccess([FromBody] BulkGrantAccessRequest request)
+    {
+        try
+        {
+            var count = await _userTenantService.BulkGrantAccessAsync(
+                request.UserIds,
+                request.TenantId,
+                request.AccessLevel,
+                request.GrantedBy
+            );
+
+            return Ok(new ApiResponse<int>
+            {
+                Success = true,
+                Data = count,
+                Message = $"Successfully granted access to {count} users"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error bulk granting access to tenant {TenantId}", request.TenantId);
+            return StatusCode(500, new ApiResponse<object>
+            {
+                Success = false,
+                Message = "An error occurred during bulk grant operation"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Bulk revoke access from multiple users for a tenant
+    /// </summary>
+    [HttpPost("bulk-revoke-access")]
+    public async Task<IActionResult> BulkRevokeAccess([FromBody] BulkRevokeAccessRequest request)
+    {
+        try
+        {
+            var count = await _userTenantService.BulkRevokeAccessAsync(
+                request.UserIds,
+                request.TenantId,
+                request.RevokedBy
+            );
+
+            return Ok(new ApiResponse<int>
+            {
+                Success = true,
+                Data = count,
+                Message = $"Successfully revoked access from {count} users"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error bulk revoking access from tenant {TenantId}", request.TenantId);
+            return StatusCode(500, new ApiResponse<object>
+            {
+                Success = false,
+                Message = "An error occurred during bulk revoke operation"
+            });
+        }
+    }
+
+    #endregion
+
+    #region Helper Methods
+
+    private UserTenantDto MapToDto(UserTenant userTenant)
+    {
+        return new UserTenantDto
+        {
+            Id = userTenant.Id,
+            UserId = userTenant.UserId,
+            TenantId = userTenant.TenantId,
+            TenantName = userTenant.Tenant?.Name ?? "",
+            TenantCode = userTenant.Tenant?.Code ?? "",
+            AccessLevel = userTenant.AccessLevel.ToString(),
+            Status = userTenant.Status.ToString(),
+            IsDefault = userTenant.IsDefault,
+            GrantedAt = userTenant.GrantedAt,
+            ExpiresAt = userTenant.ExpiresAt,
+            GrantedBy = userTenant.GrantedBy,
+            StatusChangedBy = userTenant.StatusChangedBy,
+            Notes = userTenant.Notes
+        };
+    }
+
+    #endregion
+}
+
+#region Request/Response Models
+
+public class GrantAccessRequest
+{
+    public Guid UserId { get; set; }
+    public Guid TenantId { get; set; }
+    public UserTenantAccessLevel AccessLevel { get; set; } = UserTenantAccessLevel.Standard;
+    public string? GrantedBy { get; set; }
+    public DateTime? ExpiresAt { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class RevokeAccessRequest
+{
+    public Guid UserId { get; set; }
+    public Guid TenantId { get; set; }
+    public string? RevokedBy { get; set; }
+    public string? Reason { get; set; }
+}
+
+public class SuspendUserRequest
+{
+    public Guid UserId { get; set; }
+    public Guid TenantId { get; set; }
+    public string? SuspendedBy { get; set; }
+    public string? Reason { get; set; }
+}
+
+public class ReactivateUserRequest
+{
+    public Guid UserId { get; set; }
+    public Guid TenantId { get; set; }
+    public string? ReactivatedBy { get; set; }
+}
+
+public class SetDefaultTenantRequest
+{
+    public Guid UserId { get; set; }
+    public Guid TenantId { get; set; }
+}
+
+public class BulkGrantAccessRequest
+{
+    public List<Guid> UserIds { get; set; } = new();
+    public Guid TenantId { get; set; }
+    public UserTenantAccessLevel AccessLevel { get; set; } = UserTenantAccessLevel.Standard;
+    public string? GrantedBy { get; set; }
+}
+
+public class BulkRevokeAccessRequest
+{
+    public List<Guid> UserIds { get; set; } = new();
+    public Guid TenantId { get; set; }
+    public string? RevokedBy { get; set; }
+}
+
+public class UserTenantDto
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public Guid TenantId { get; set; }
+    public string TenantName { get; set; } = "";
+    public string TenantCode { get; set; } = "";
+    public string AccessLevel { get; set; } = "";
+    public string Status { get; set; } = "";
+    public bool IsDefault { get; set; }
+    public DateTime GrantedAt { get; set; }
+    public DateTime? ExpiresAt { get; set; }
+    public string? GrantedBy { get; set; }
+    public string? StatusChangedBy { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class TenantUserDto
+{
+    public Guid UserId { get; set; }
+    public string Username { get; set; } = "";
+    public string Email { get; set; } = "";
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
+    public bool IsActive { get; set; }
+}
+
+#endregion

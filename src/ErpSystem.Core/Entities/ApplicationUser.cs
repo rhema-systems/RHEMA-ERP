@@ -36,8 +36,22 @@ public class ApplicationUser : IdentityUser<Guid>
     public virtual ICollection<UserTenant> UserTenants { get; set; } = new List<UserTenant>();
     
     // Helper properties for accessing tenant information
-    public UserTenant? DefaultTenant => UserTenants.FirstOrDefault(ut => ut.IsDefault && !ut.IsDeleted);
-    public IEnumerable<Tenant> AccessibleTenants => UserTenants.Where(ut => !ut.IsDeleted && (ut.ExpiresAt == null || ut.ExpiresAt > DateTime.UtcNow)).Select(ut => ut.Tenant);
+    public UserTenant? DefaultTenant => UserTenants.FirstOrDefault(ut => ut.IsDefault && !ut.IsDeleted && ut.Status == UserTenantStatus.Active);
+    public IEnumerable<Tenant> AccessibleTenants => UserTenants
+        .Where(ut => !ut.IsDeleted && 
+                    ut.Status == UserTenantStatus.Active && 
+                    (ut.ExpiresAt == null || ut.ExpiresAt > DateTime.UtcNow))
+        .Select(ut => ut.Tenant);
+    
+    // Additional helper properties for different access states
+    public IEnumerable<UserTenant> ActiveTenantRelationships => UserTenants
+        .Where(ut => !ut.IsDeleted && ut.Status == UserTenantStatus.Active && (ut.ExpiresAt == null || ut.ExpiresAt > DateTime.UtcNow));
+    
+    public IEnumerable<UserTenant> SuspendedTenantRelationships => UserTenants
+        .Where(ut => !ut.IsDeleted && ut.Status == UserTenantStatus.Suspended);
+    
+    public IEnumerable<UserTenant> AllTenantRelationships => UserTenants
+        .Where(ut => !ut.IsDeleted); // Excludes only soft-deleted relationships
     
     // TEMPORARY COMPATIBILITY PROPERTY - TO BE REMOVED
     // This is to maintain compatibility during the migration
@@ -90,6 +104,9 @@ public class UserTenant : BaseEntity
     // Access level within this tenant
     public UserTenantAccessLevel AccessLevel { get; set; } = UserTenantAccessLevel.Standard;
     
+    // Current status of user access to this tenant
+    public UserTenantStatus Status { get; set; } = UserTenantStatus.Active;
+    
     // Is this the user's default tenant?
     public bool IsDefault { get; set; } = false;
     
@@ -99,8 +116,17 @@ public class UserTenant : BaseEntity
     // When the user's access expires (optional)
     public DateTime? ExpiresAt { get; set; }
     
+    // When the user was suspended from this tenant (optional)
+    public DateTime? SuspendedAt { get; set; }
+    
+    // When the user was reactivated in this tenant (optional)
+    public DateTime? ReactivatedAt { get; set; }
+    
     // Who granted access
     public string? GrantedBy { get; set; }
+    
+    // Who suspended/reactivated access
+    public string? StatusChangedBy { get; set; }
     
     // Additional metadata
     [StringLength(500)]
@@ -125,4 +151,23 @@ public enum UserTenantAccessLevel
     
     // Read-only access (view only)
     ReadOnly = 3
+}
+
+// Enum for user status within a tenant
+public enum UserTenantStatus
+{
+    // User has active access to the tenant
+    Active = 0,
+    
+    // User access is temporarily suspended
+    Suspended = 1,
+    
+    // User access is permanently revoked (soft delete alternative)
+    Revoked = 2,
+    
+    // User access is pending approval
+    Pending = 3,
+    
+    // User access has expired
+    Expired = 4
 }
