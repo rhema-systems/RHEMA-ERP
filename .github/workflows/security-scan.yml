@@ -111,7 +111,7 @@ jobs:
 
     - name: 📤 Upload OWASP results to GitHub Security
       uses: github/codeql-action/upload-sarif@v3
-      if: always()
+      if: always() && hashFiles('reports/dependency-check-report.sarif') != ''
       with:
         sarif_file: reports/dependency-check-report.sarif
       continue-on-error: true
@@ -199,7 +199,7 @@ EOF
 
     - name: 📤 Upload Trivy scan results
       uses: github/codeql-action/upload-sarif@v3
-      if: always()
+      if: always() && hashFiles('trivy-results-${{ matrix.dockerfile }}.sarif') != ''
       with:
         sarif_file: 'trivy-results-${{ matrix.dockerfile }}.sarif'
       continue-on-error: true
@@ -213,7 +213,7 @@ EOF
 
     - name: 📤 Upload Hadolint scan results
       uses: github/codeql-action/upload-sarif@v3
-      if: always()
+      if: always() && hashFiles('hadolint-results-${{ matrix.dockerfile }}.sarif') != ''
       with:
         sarif_file: 'hadolint-results-${{ matrix.dockerfile }}.sarif'
       continue-on-error: true
@@ -237,7 +237,7 @@ EOF
 
     - name: 📤 Upload Checkov scan results
       uses: github/codeql-action/upload-sarif@v3
-      if: always()
+      if: always() && hashFiles('checkov-results.sarif') != ''
       with:
         sarif_file: checkov-results.sarif
       continue-on-error: true
