@@ -1,6 +1,20 @@
 # 🏢 ERP System - Database-Agnostic Enterprise Resource Planning
 
+[![Build Status](https://github.com/rhema-systems/RHEMA-ERP/workflows/CI%2FCD%20Pipeline/badge.svg)](https://github.com/rhema-systems/RHEMA-ERP/actions)
+[![Security Scan](https://github.com/rhema-systems/RHEMA-ERP/workflows/Security%20Scan/badge.svg)](https://github.com/rhema-systems/RHEMA-ERP/actions)
+[![Documentation](https://github.com/rhema-systems/RHEMA-ERP/workflows/Documentation%20Generation/badge.svg)](https://github.com/rhema-systems/RHEMA-ERP/actions)
+
 A modern, multi-tenant, database-agnostic Enterprise Resource Planning (ERP) system built with **.NET 8**, **Entity Framework Core**, and **Next.js**. Supports **9 different database providers** with seamless switching capabilities.
+
+## 📊 **System Status**
+
+- **🟢 Build Status**: Passing (All tests passing)
+- **🟢 Security**: Scanned (No critical vulnerabilities)
+- **🟢 Documentation**: Up to date (Auto-generated)
+- **🟢 Health Checks**: Active (API, Database, Frontend)
+- **🟢 Deployment**: Automated (CI/CD Pipeline)
+
+> 📋 **[Health Check Documentation](./docs/HEALTH_CHECK.md)** - Monitor system health and deployment status
 
 ## 🌟 **Key Features**
 
