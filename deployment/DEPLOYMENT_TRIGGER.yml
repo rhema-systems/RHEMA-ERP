@@ -1,0 +1,26 @@
+# Deployment Workflow Trigger Configuration
+# This file triggers environment deployment workflows
+
+deployment:
+  environments:
+    - development
+    - staging 
+    - production
+  
+  strategy: blue-green
+  
+  health_checks:
+    - api: /health
+    - database: /health/database  
+    - frontend: /api/health
+  
+  rollback:
+    enabled: true
+    timeout: 5m
+    
+  notifications:
+    slack: true
+    teams: true
+    email: true
+    
+# This configuration will trigger deploy-environments.yml workflow

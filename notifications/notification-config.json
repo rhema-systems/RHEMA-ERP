@@ -1,0 +1,41 @@
+{
+  "notifications": {
+    "channels": {
+      "slack": {
+        "enabled": true,
+        "channels": {
+          "builds": "#ci-cd-builds",
+          "deployments": "#deployments", 
+          "security": "#security-alerts",
+          "performance": "#performance-alerts"
+        }
+      },
+      "teams": {
+        "enabled": true,
+        "webhooks": {
+          "general": "TEAMS_WEBHOOK_URL",
+          "critical": "TEAMS_CRITICAL_WEBHOOK_URL"
+        }
+      },
+      "email": {
+        "enabled": true,
+        "recipients": {
+          "devops": ["devops@company.com"],
+          "security": ["security@company.com"],
+          "management": ["management@company.com"]
+        }
+      }
+    },
+    "rules": {
+      "build_failure": ["slack", "email"],
+      "security_vulnerability": ["slack", "teams", "email"],
+      "deployment_success": ["slack"],
+      "deployment_failure": ["slack", "teams", "email"],
+      "performance_degradation": ["slack", "email"]
+    },
+    "escalation": {
+      "critical_timeout": "15m",
+      "escalate_to": ["teams", "email"]
+    }
+  }
+}

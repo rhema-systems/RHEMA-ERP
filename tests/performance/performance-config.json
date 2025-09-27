@@ -1,0 +1,40 @@
+{
+  "performance": {
+    "api": {
+      "baseUrl": "http://localhost:5000",
+      "endpoints": [
+        "/health",
+        "/api/tenant",
+        "/api/user"
+      ],
+      "loadTest": {
+        "virtualUsers": 10,
+        "duration": "30s",
+        "rampUp": "10s"
+      }
+    },
+    "frontend": {
+      "baseUrl": "http://localhost:3000",
+      "pages": [
+        "/",
+        "/login", 
+        "/dashboard"
+      ],
+      "metrics": [
+        "LCP",
+        "FID",
+        "CLS"
+      ]
+    },
+    "database": {
+      "connections": 50,
+      "queryTimeout": "30s",
+      "bulkOperations": true
+    }
+  },
+  "thresholds": {
+    "responseTime": "2000ms",
+    "errorRate": "1%",
+    "throughput": "100/s"
+  }
+}
