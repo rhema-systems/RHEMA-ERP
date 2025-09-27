@@ -1,6 +1,44 @@
 // Real admin API service that connects to the .NET backend
 import { apiService } from './api.service';
 
+// Backend response interface
+interface TenantBackendResponse {
+  id: string;
+  name: string;
+  code: string;
+  description?: string;
+  status: string;
+  isActive?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  logoUrl?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  faviconUrl?: string;
+  coverImageUrl?: string;
+  domain?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  address?: string;
+  subscriptionStartDate?: string;
+  subscriptionEndDate?: string;
+  ldapServer?: string;
+  ldapPort?: number;
+  ldapBaseDn?: string;
+  ldapBindDn?: string;
+  ldapBindPassword?: string;
+  ldapEnabled?: boolean;
+  isDefaultForPublicUsers?: boolean;
+  isDefaultForInternalUsers?: boolean;
+  allowSelfRegistration?: boolean;
+  publicRegistrationDomains?: string;
+  requireEmailVerification?: boolean;
+  userAudience?: number;
+  welcomeMessage?: string;
+  defaultPriority?: number;
+  enableAutoSelection?: boolean;
+}
+
 // Types that match the backend DTOs
 export interface User {
   id: string;
@@ -414,7 +452,7 @@ class AdminApiService {
       
       console.log('Mapped backend create data:', backendData);
       
-      const resultDto = await apiService.request<Record<string, unknown>>('/tenant', {
+      const resultDto = await apiService.request<TenantBackendResponse>('/tenant', {
         method: 'POST',
         body: JSON.stringify(backendData),
       });
@@ -542,7 +580,7 @@ class AdminApiService {
       
       console.log('Mapped backend update data:', backendData);
       
-      const resultDto = await apiService.request<Record<string, unknown>>(`/tenant/${id}`, {
+      const resultDto = await apiService.request<TenantBackendResponse>(`/tenant/${id}`, {
         method: 'PUT',
         body: JSON.stringify(backendData),
       });
