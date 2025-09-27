@@ -451,7 +451,8 @@ jobs:
 
     - name: 📊 Slack deployment notification
       uses: 8398a7/action-slack@v3
-      if: always() && secrets.SLACK_WEBHOOK != null
+      if: always()
+      continue-on-error: true
       with:
         status: ${{ job.status }}
         channel: '#deployments'
@@ -469,7 +470,8 @@ jobs:
 
     - name: 📢 Teams deployment notification
       uses: skitionek/notify-microsoft-teams@master
-      if: always() && secrets.TEAMS_WEBHOOK != null
+      if: always()
+      continue-on-error: true
       with:
         webhook_url: ${{ secrets.TEAMS_WEBHOOK }}
         needs: ${{ toJson(needs) }}
@@ -479,7 +481,8 @@ jobs:
 
     - name: 📧 Email notification
       uses: dawidd6/action-send-mail@v3
-      if: always() && secrets.EMAIL_HOST != null
+      if: always()
+      continue-on-error: true
       with:
         server_address: ${{ secrets.EMAIL_HOST }}
         server_port: ${{ secrets.EMAIL_PORT || '587' }}
