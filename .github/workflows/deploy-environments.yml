@@ -121,7 +121,6 @@ jobs:
         echo "🧪 Running quick smoke tests..."
         
         # Check for basic syntax errors
-        cd src
         dotnet restore --verbosity quiet
         dotnet build --configuration Release --verbosity quiet --no-restore
         
