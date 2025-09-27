@@ -240,14 +240,15 @@ jobs:
         echo "✅ Post-deployment tests passed"
 
     - name: 🔔 Notify success
-      uses: ./.github/workflows/notifications.yml
+      if: always()
+      uses: 8398a7/action-slack@v3
       with:
-        notification_type: 'deployment'
-        status: 'success'
-        title: 'Development Deployment Successful'
-        message: 'Application successfully deployed to development environment'
-        environment: 'development'
-      secrets: inherit
+        status: ${{ job.status }}
+        channel: '#deployments'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        text: |
+          🚀 Development deployment ${{ job.status }}
+          Application successfully deployed to development environment
 
   # Job 4: Deploy to Staging
   deploy-staging:
@@ -296,14 +297,15 @@ jobs:
         echo "✅ Integration tests passed"
 
     - name: 🔔 Notify success
-      uses: ./.github/workflows/notifications.yml
+      if: always()
+      uses: 8398a7/action-slack@v3
       with:
-        notification_type: 'deployment'
-        status: 'success'
-        title: 'Staging Deployment Successful'
-        message: 'Application successfully deployed to staging environment with integration tests passing'
-        environment: 'staging'
-      secrets: inherit
+        status: ${{ job.status }}
+        channel: '#deployments'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        text: |
+          🚀 Staging deployment ${{ job.status }}
+          Application successfully deployed to staging environment with integration tests passing
 
   # Job 5: Deploy to Production
   deploy-production:
@@ -417,14 +419,15 @@ jobs:
         echo "✅ Metrics collected"
 
     - name: 🔔 Notify production deployment success
-      uses: ./.github/workflows/notifications.yml
+      if: always()
+      uses: 8398a7/action-slack@v3
       with:
-        notification_type: 'deployment'
-        status: 'success'
-        title: 'Production Deployment Successful'
-        message: 'Application successfully deployed to production with all health checks passing'
-        environment: 'production'
-      secrets: inherit
+        status: ${{ job.status }}
+        channel: '#deployments'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        text: |
+          🚀 Production deployment ${{ job.status }}
+          Application successfully deployed to production with all health checks passing
 
   # Job 6: Rollback Capability
   rollback:
@@ -472,14 +475,15 @@ jobs:
         echo "✅ Rollback completed successfully"
 
     - name: 🔔 Notify rollback completion
-      uses: ./.github/workflows/notifications.yml
+      if: always()
+      uses: 8398a7/action-slack@v3
       with:
-        notification_type: 'deployment'
-        status: 'success'
-        title: 'Production Rollback Completed'
-        message: 'Production environment has been successfully rolled back to the previous stable version'
-        environment: 'production'
-      secrets: inherit
+        status: success
+        channel: '#deployments'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        text: |
+          ⏪ Production rollback completed
+          Production environment has been successfully rolled back to the previous stable version
 
   # Job 7: Post-deployment Summary
   deployment-summary:

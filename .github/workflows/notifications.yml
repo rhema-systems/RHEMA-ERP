@@ -68,6 +68,18 @@ jobs:
       with:
         fetch-depth: 1
 
+    - name: 🔑 Set up environment variables from secrets
+      run: |
+        echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK }}" >> $GITHUB_ENV
+        echo "TEAMS_WEBHOOK=${{ secrets.TEAMS_WEBHOOK }}" >> $GITHUB_ENV
+        echo "DISCORD_WEBHOOK=${{ secrets.DISCORD_WEBHOOK }}" >> $GITHUB_ENV
+        echo "EMAIL_HOST=${{ secrets.EMAIL_HOST }}" >> $GITHUB_ENV
+        echo "EMAIL_PORT=${{ secrets.EMAIL_PORT }}" >> $GITHUB_ENV
+        echo "EMAIL_USERNAME=${{ secrets.EMAIL_USERNAME }}" >> $GITHUB_ENV
+        echo "EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }}" >> $GITHUB_ENV
+        echo "EMAIL_FROM=${{ secrets.EMAIL_FROM }}" >> $GITHUB_ENV
+        echo "NOTIFICATION_EMAIL=${{ secrets.NOTIFICATION_EMAIL }}" >> $GITHUB_ENV
+
     - name: 🎨 Set notification colors and icons
       id: styling
       run: |
@@ -151,11 +163,11 @@ jobs:
 
     # Slack Notification
     - name: 📱 Send Slack notification
-      if: secrets.SLACK_WEBHOOK != ''
+      if: env.SLACK_WEBHOOK != ''
       uses: 8398a7/action-slack@v3
       with:
         status: custom
-        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        webhook_url: ${{ env.SLACK_WEBHOOK }}
         channel: ${{ inputs.notification_type == 'deployment' && '#deployments' || inputs.notification_type == 'security' && '#security-alerts' || inputs.notification_type == 'performance' && '#performance-alerts' || '#general' }}
         custom_payload: |
           {
@@ -206,10 +218,10 @@ jobs:
 
     # Microsoft Teams Notification
     - name: 📢 Send Teams notification
-      if: secrets.TEAMS_WEBHOOK != ''
+      if: env.TEAMS_WEBHOOK != ''
       uses: skitionek/notify-microsoft-teams@master
       with:
-        webhook_url: ${{ secrets.TEAMS_WEBHOOK }}
+        webhook_url: ${{ env.TEAMS_WEBHOOK }}
         raw: |
           {
             "@type": "MessageCard",
@@ -253,7 +265,7 @@ jobs:
 
     # Discord Notification
     - name: 🎮 Send Discord notification
-      if: secrets.DISCORD_WEBHOOK != ''
+      if: env.DISCORD_WEBHOOK != ''
       uses: Ilshidur/action-discord@master
       with:
         args: |
@@ -271,20 +283,20 @@ jobs:
           
           [View Details](${{ steps.content.outputs.action_url }})
       env:
-        DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        DISCORD_WEBHOOK: ${{ env.DISCORD_WEBHOOK }}
 
     # Email Notification
     - name: 📧 Send email notification
-      if: secrets.EMAIL_HOST != '' && secrets.NOTIFICATION_EMAIL != ''
+      if: env.EMAIL_HOST != '' && env.NOTIFICATION_EMAIL != ''
       uses: dawidd6/action-send-mail@v3
       with:
-        server_address: ${{ secrets.EMAIL_HOST }}
-        server_port: ${{ secrets.EMAIL_PORT || '587' }}
-        username: ${{ secrets.EMAIL_USERNAME }}
-        password: ${{ secrets.EMAIL_PASSWORD }}
+        server_address: ${{ env.EMAIL_HOST }}
+        server_port: ${{ env.EMAIL_PORT || '587' }}
+        username: ${{ env.EMAIL_USERNAME }}
+        password: ${{ env.EMAIL_PASSWORD }}
         subject: "ERP System - ${{ inputs.title }}"
-        to: ${{ secrets.NOTIFICATION_EMAIL }}
-        from: ${{ secrets.EMAIL_FROM || 'erp-system@noreply.com' }}
+        to: ${{ env.NOTIFICATION_EMAIL }}
+        from: ${{ env.EMAIL_FROM || 'erp-system@noreply.com' }}
         html_body: |
           <!DOCTYPE html>
           <html>
@@ -405,10 +417,10 @@ jobs:
         echo "### Channels Notified" >> $GITHUB_STEP_SUMMARY
         echo "| Channel | Status |" >> $GITHUB_STEP_SUMMARY
         echo "|---------|---------|" >> $GITHUB_STEP_SUMMARY
-        echo "| Slack | ${{ secrets.SLACK_WEBHOOK != '' && '✅ Sent' || '⚪ Not configured' }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Teams | ${{ secrets.TEAMS_WEBHOOK != '' && '✅ Sent' || '⚪ Not configured' }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Discord | ${{ secrets.DISCORD_WEBHOOK != '' && '✅ Sent' || '⚪ Not configured' }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Email | ${{ secrets.EMAIL_HOST != '' && secrets.NOTIFICATION_EMAIL != '' && '✅ Sent' || '⚪ Not configured' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Slack | ${{ env.SLACK_WEBHOOK != '' && '✅ Sent' || '⚪ Not configured' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Teams | ${{ env.TEAMS_WEBHOOK != '' && '✅ Sent' || '⚪ Not configured' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Discord | ${{ env.DISCORD_WEBHOOK != '' && '✅ Sent' || '⚪ Not configured' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Email | ${{ env.EMAIL_HOST != '' && env.NOTIFICATION_EMAIL != '' && '✅ Sent' || '⚪ Not configured' }} |" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Repository Information" >> $GITHUB_STEP_SUMMARY
         echo "- **Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
