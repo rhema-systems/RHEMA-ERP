@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -30,7 +30,8 @@ const makeLoginSchema = (requireRecaptcha: boolean) => z.object({
 
 type LoginForm = z.infer<ReturnType<typeof makeLoginSchema>>;
 
-export default function LoginPage() {
+// Component that uses useSearchParams - must be wrapped in Suspense
+function LoginFormWithSearchParams() {
   const [showPassword, setShowPassword] = useState(false);
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [successMessage, setSuccessMessage] = useState('');
@@ -343,5 +344,26 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Loading component for Suspense fallback
+function LoginPageLoading() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 p-4">
+      <div className="flex items-center space-x-2">
+        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+        <span className="text-slate-600 dark:text-slate-400">Loading login page...</span>
+      </div>
+    </div>
+  );
+}
+
+// Main page component that wraps LoginFormWithSearchParams in Suspense
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginPageLoading />}>
+      <LoginFormWithSearchParams />
+    </Suspense>
   );
 }
