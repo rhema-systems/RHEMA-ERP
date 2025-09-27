@@ -259,7 +259,7 @@ export function Sidebar({ className }: SidebarProps) {
               {/* Children */}
               {hasChildren && isExpanded && !collapsed && (
                 <div className="ml-6 mt-1 space-y-1 border-l-2 border-slate-100 dark:border-slate-800 pl-4">
-                  {item.children!.map((child) => {
+                  {(item.children || []).map((child) => {
                     const ChildIcon = child.icon;
                     const childIsActive = isActive(child.href);
                     const childHasChildren = child.children && child.children.length > 0;
@@ -306,7 +306,7 @@ export function Sidebar({ className }: SidebarProps) {
                         {/* Nested Children (3rd level) */}
                         {childHasChildren && childIsExpanded && (
                           <div className="ml-6 mt-1 space-y-1 border-l-2 border-slate-100 dark:border-slate-800 pl-4">
-                            {child.children!.map((grandChild) => {
+                            {(child.children || []).map((grandChild) => {
                               const GrandChildIcon = grandChild.icon;
                               const grandChildIsActive = isActive(grandChild.href);
 
