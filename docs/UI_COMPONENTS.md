@@ -146,6 +146,6 @@ import { PhoneInput } from '@/components/ui/phone-input';
 | Button | 19 | 19 |
 | Input | 16 | 18 |
 | Select | 4 | 4 |
-| Card | 20 | 21 |
-| Badge | 7 | 7 |
+| Card | 21 | 22 |
+| Badge | 8 | 8 |
 | PhoneInput | 2 | 2 |
