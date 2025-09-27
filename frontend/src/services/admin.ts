@@ -29,7 +29,7 @@ export interface Tenant {
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
-  settings?: Record<string, any>;
+  settings?: Record<string, unknown>;
 }
 
 export interface SecurityLog {
@@ -51,8 +51,8 @@ export interface AuditLog {
   action: string;
   resource: string;
   resourceId?: string;
-  oldValues?: Record<string, any>;
-  newValues?: Record<string, any>;
+  oldValues?: Record<string, unknown>;
+  newValues?: Record<string, unknown>;
   ipAddress: string;
   timestamp: Date;
 }
@@ -288,7 +288,7 @@ export const adminService = {
     return { ...user, ...userData };
   },
 
-  async deleteUser(id: string): Promise<void> {
+  async deleteUser(_id: string): Promise<void> {
     await delay(500);
     // In real implementation, this would delete the user
   },
@@ -325,7 +325,7 @@ export const adminService = {
     return { ...role, ...roleData, updatedAt: new Date() };
   },
 
-  async deleteRole(id: string): Promise<void> {
+  async deleteRole(_id: string): Promise<void> {
     await delay(500);
     // In real implementation, this would delete the role
   },
@@ -362,7 +362,7 @@ export const adminService = {
     return { ...tenant, ...tenantData, updatedAt: new Date() };
   },
 
-  async deleteTenant(id: string): Promise<void> {
+  async deleteTenant(_id: string): Promise<void> {
     await delay(500);
     // In real implementation, this would delete the tenant
   },

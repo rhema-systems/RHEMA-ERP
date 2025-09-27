@@ -163,8 +163,8 @@ export interface AuditLog {
   action: string;
   resource: string;
   resourceId?: string;
-  oldValues?: Record<string, any>;
-  newValues?: Record<string, any>;
+  oldValues?: Record<string, unknown>;
+  newValues?: Record<string, unknown>;
   ipAddress: string;
   timestamp: Date;
 }
@@ -414,7 +414,7 @@ class AdminApiService {
       
       console.log('Mapped backend create data:', backendData);
       
-      const resultDto = await apiService.request<any>('/tenant', {
+      const resultDto = await apiService.request<Record<string, unknown>>('/tenant', {
         method: 'POST',
         body: JSON.stringify(backendData),
       });
@@ -542,7 +542,7 @@ class AdminApiService {
       
       console.log('Mapped backend update data:', backendData);
       
-      const resultDto = await apiService.request<any>(`/tenant/${id}`, {
+      const resultDto = await apiService.request<Record<string, unknown>>(`/tenant/${id}`, {
         method: 'PUT',
         body: JSON.stringify(backendData),
       });
@@ -649,9 +649,9 @@ class AdminApiService {
       }
       console.log('Email settings saved successfully:', result.fromAddress);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       // If GET fails, assume no settings exist and use POST
-      console.log('Creating email settings (fallback):', error.message);
+      console.log('Creating email settings (fallback):', error instanceof Error ? error.message : 'Unknown error');
       try {
         const result = await apiService.request<EmailSettings>('/settings/email', {
           method: 'POST',
@@ -716,9 +716,9 @@ class AdminApiService {
       }
       console.log('Password policy saved successfully with minimum length:', result.minLength);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       // If GET fails, assume no policy exists and use POST
-      console.log('Creating password policy (fallback):', error.message);
+      console.log('Creating password policy (fallback):', error instanceof Error ? error.message : 'Unknown error');
       try {
         const result = await apiService.request<PasswordPolicy>('/settings/password-policy', {
           method: 'POST',
