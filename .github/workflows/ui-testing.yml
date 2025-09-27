@@ -215,7 +215,7 @@ jobs:
         nohup dotnet run --project ErpSystem.Api --urls http://localhost:5000 &
         sleep 30
         
-        cd ../frontend
+        cd frontend
         npm ci
         npm run build
         nohup npm start &
@@ -530,7 +530,7 @@ jobs:
         nohup dotnet run --project ErpSystem.Api --urls http://localhost:5000 &
         sleep 30
         
-        cd ../frontend
+        cd frontend
         npm ci
         npm run build
         nohup npm start &

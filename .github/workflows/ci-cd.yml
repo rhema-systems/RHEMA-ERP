@@ -296,7 +296,7 @@ jobs:
         dotnet test --filter "Category=Integration" --verbosity normal
         
         # Run E2E tests (if available)
-        cd ../frontend
+        cd frontend
         if [ -f "package.json" ] && grep -q "test:e2e" package.json; then
           npm run test:e2e
         fi

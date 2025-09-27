@@ -127,7 +127,7 @@ jobs:
         echo "✅ Build successful"
         
         # Frontend checks
-        cd ../frontend
+        cd frontend
         npm ci --silent
         npm run build > /dev/null
         
