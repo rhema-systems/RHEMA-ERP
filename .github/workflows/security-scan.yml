@@ -142,14 +142,14 @@ jobs:
         
         # Create a simple secret pattern scanner
         cat > secret_patterns.txt << 'EOF'
-password\s*=\s*["'][^"']*["']
-api[_-]?key\s*[=:]\s*["'][^"']*["']
-token\s*[=:]\s*["'][^"']*["']
-secret\s*[=:]\s*["'][^"']*["']
-connection[_-]?string\s*[=:]\s*["'][^"']*["']
-aws[_-]?access[_-]?key\s*[=:]\s*["'][^"']*["']
-aws[_-]?secret[_-]?key\s*[=:]\s*["'][^"']*["']
-EOF
+        password.*=.*["'].*["']
+        api.*key.*[=:].*["'].*["']
+        token.*[=:].*["'].*["']
+        secret.*[=:].*["'].*["']
+        connection.*string.*[=:].*["'].*["']
+        aws.*access.*key.*[=:].*["'].*["']
+        aws.*secret.*key.*[=:].*["'].*["']
+        EOF
         
         # Scan for patterns (excluding test and mock files)
         echo "Checking for potential secrets..."
