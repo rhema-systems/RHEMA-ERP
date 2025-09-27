@@ -30,6 +30,10 @@ export const API_ENDPOINTS = {
     CREATE: '/api/tenant',
     UPDATE: (id: string) => `/api/tenant/${id}`,
     DELETE: (id: string) => `/api/tenant/${id}`,
+    // User-Tenant Mapping
+    USERS: (tenantId: string) => `/api/tenant/${tenantId}/users`,
+    ADD_USER: (tenantId: string) => `/api/tenant/${tenantId}/users`,
+    REMOVE_USER: (tenantId: string, userId: string) => `/api/tenant/${tenantId}/users/${userId}`,
   },
 
   // Dashboard

@@ -54,6 +54,7 @@ builder.Services.AddErpSystemWebFarm(builder.Configuration);
 builder.Services.AddErpSystemSearch(builder.Configuration);
 builder.Services.AddErpSystemLifecycle();
 builder.Services.AddErpSystemCors(builder.Configuration);
+builder.Services.AddErpSystemFileUpload(builder.Configuration);
 builder.Services.AddDevelopmentServices(builder.Environment);
 
 var app = builder.Build();
@@ -100,6 +101,9 @@ app.UseSerilogRequestLogging();
 
 app.UseHttpsRedirection();
 app.UseResponseCaching();
+
+// Enable static file serving for uploaded files
+app.UseStaticFiles();
 
 app.UseRouting();
 

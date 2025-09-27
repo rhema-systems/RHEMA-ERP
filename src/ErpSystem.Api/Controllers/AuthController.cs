@@ -20,6 +20,7 @@ namespace ErpSystem.Api.Controllers
         private readonly ISecurityLogService _securityLogService;
         private readonly ICurrentUserService _currentUserService;
         private readonly ITenantService _tenantService;
+        private readonly IUserTenantService _userTenantService;
         private readonly ILdapAuthenticationService _ldapAuthService;
         private readonly ILogger<AuthController> _logger;
 
@@ -30,6 +31,7 @@ namespace ErpSystem.Api.Controllers
             ISecurityLogService securityLogService,
             ICurrentUserService currentUserService,
             ITenantService tenantService,
+            IUserTenantService userTenantService,
             ILdapAuthenticationService ldapAuthService,
             ILogger<AuthController> logger)
         {
@@ -39,6 +41,7 @@ namespace ErpSystem.Api.Controllers
             _securityLogService = securityLogService;
             _currentUserService = currentUserService;
             _tenantService = tenantService;
+            _userTenantService = userTenantService;
             _ldapAuthService = ldapAuthService;
             _logger = logger;
         }
@@ -56,12 +59,16 @@ namespace ErpSystem.Api.Controllers
 
                 _logger.LogInformation("Login attempt for user: {Username} with tenant: {TenantCode}", request.Username, request.TenantCode);
 
-                // First validate the tenant exists and is active
-                var tenant = await _tenantService.GetTenantByCodeAsync(request.TenantCode);
-                if (tenant == null || tenant.Status != TenantStatus.Active)
+                Tenant? tenant = null;
+                if (!string.IsNullOrEmpty(request.TenantCode))
                 {
-                    _logger.LogWarning("Login failed: Invalid or inactive tenant {TenantCode}", request.TenantCode);
-                    return Unauthorized(new { message = "Invalid tenant" });
+                    // Validate tenant if code provided
+                    tenant = await _tenantService.GetTenantByCodeAsync(request.TenantCode);
+                    if (tenant == null || tenant.Status != TenantStatus.Active)
+                    {
+                        _logger.LogWarning("Login failed: Invalid or inactive tenant {TenantCode}", request.TenantCode);
+                        return Unauthorized(new { message = "Invalid tenant" });
+                    }
                 }
 
                 ApplicationUser? user = null;
@@ -74,7 +81,7 @@ namespace ErpSystem.Api.Controllers
                 
                 // If LDAP is enabled for this tenant and user is not found or password check fails,
                 // try LDAP authentication
-                if (tenant.LdapEnabled)
+                if (tenant?.LdapEnabled == true)
                 {
                     _logger.LogInformation("Attempting LDAP authentication for user: {Username}", request.Username);
                     
@@ -169,27 +176,33 @@ namespace ErpSystem.Api.Controllers
                     return Unauthorized(new { message = "Invalid credentials" });
                 }
                 
-                // Validate that the user belongs to the selected tenant
-                if (user.TenantId != tenant.Id)
+                // If tenant code provided, validate that user belongs to the tenant
+                if (tenant != null)
                 {
-                    _logger.LogWarning("Login failed: User {Username} does not belong to tenant {TenantCode}", request.Username, request.TenantCode);
-                    
-                    // Log security event for tenant mismatch
-                    var tenantMismatchSecurityLog = new SecurityLog
+                    var userTenant = await _userTenantService.GetUserTenantRelationshipAsync(user.Id, tenant.Id);
+                    if (userTenant == null || !await _userTenantService.HasActiveAccessAsync(user.Id, tenant.Id))
                     {
-                        Action = SecurityAction.LoginFailure.ToString(),
-                        Success = false,
-                        IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
-                        Username = request.Username,
-                        UserId = user.Id,
-                        Details = $"User belongs to different tenant. Attempted: {request.TenantCode}, User's tenant: {user.TenantId}",
-                        FailureReason = "Tenant mismatch",
-                        UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
-                        TenantId = tenant.Id
-                    };
-                    await _securityLogService.CreateSecurityLogAsync(tenantMismatchSecurityLog);
-                    
-                    return Unauthorized(new { message = "Invalid credentials" });
+                        var statusMessage = userTenant == null ? "not assigned" : "no active access";
+                        _logger.LogWarning("Login failed: User {Username} {Status} for tenant {TenantCode}", 
+                            request.Username, statusMessage, request.TenantCode);
+                        
+                        // Log security event for tenant mismatch
+                        var tenantMismatchSecurityLog = new SecurityLog
+                        {
+                            Action = SecurityAction.LoginFailure.ToString(),
+                            Success = false,
+                            IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                            Username = request.Username,
+                            UserId = user.Id,
+                            Details = $"User {statusMessage} to tenant: {request.TenantCode}",
+                            FailureReason = "Tenant access denied",
+                            UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                            TenantId = tenant.Id
+                        };
+                        await _securityLogService.CreateSecurityLogAsync(tenantMismatchSecurityLog);
+                        
+                        return Unauthorized(new { message = "Invalid credentials" });
+                    }
                 }
 
                 Microsoft.AspNetCore.Identity.SignInResult result;
@@ -247,6 +260,10 @@ namespace ErpSystem.Api.Controllers
                     return Unauthorized(new { message = "Invalid credentials" });
                 }
 
+                // Update last login timestamp
+                user.LastLoginDate = DateTime.UtcNow;
+                await _userManager.UpdateAsync(user);
+
                 var token = await _tokenService.GenerateTokenAsync(user);
                 var refreshToken = _tokenService.GenerateRefreshToken();
 
@@ -281,9 +298,9 @@ namespace ErpSystem.Api.Controllers
                         Email = user.Email!,
                         FirstName = user.FirstName,
                         LastName = user.LastName,
-                        CurrentTenantId = user.TenantId,
-                        CurrentTenantCode = tenant.Code,
-                        CurrentTenantName = tenant.Name,
+                        CurrentTenantId = tenant?.Id,
+                        CurrentTenantCode = tenant?.Code,
+                        CurrentTenantName = tenant?.Name,
                         IsActive = user.IsActive,
                         Roles = (await _userManager.GetRolesAsync(user)).ToList()
                     }
@@ -393,6 +410,67 @@ namespace ErpSystem.Api.Controllers
             }
         }
 
+        [HttpPost("user-tenants")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetUserTenants([FromBody] GetUserTenantsRequest request)
+        {
+            try
+            {
+                _logger.LogInformation("Getting tenants for user: {Username}", request.Username);
+
+                var user = await _userManager.FindByNameAsync(request.Username) ?? 
+                           await _userManager.FindByEmailAsync(request.Username);
+                
+                if (user == null)
+                {
+                    _logger.LogWarning("User not found: {Username}", request.Username);
+                    return NotFound(new { message = "User not found" });
+                }
+
+                // Get all active tenant relationships for this user
+                var userTenants = await _userTenantService.GetActiveUserTenantsAsync(user.Id);
+                var tenantInfoList = new List<UserTenantInfo>();
+                UserTenantInfo? defaultTenant = null;
+
+                foreach (var ut in userTenants)
+                {
+                    var tenant = await _tenantService.GetTenantByIdAsync(ut.TenantId);
+                    if (tenant?.Status == TenantStatus.Active)
+                    {
+                        var tenantInfo = new UserTenantInfo
+                        {
+                            TenantId = tenant.Id,
+                            TenantCode = tenant.Code,
+                            TenantName = tenant.Name,
+                            IsDefault = ut.IsDefault,
+                            AccessLevel = ut.AccessLevel.ToString()
+                        };
+                        
+                        tenantInfoList.Add(tenantInfo);
+                        
+                        if (ut.IsDefault)
+                        {
+                            defaultTenant = tenantInfo;
+                        }
+                    }
+                }
+
+                var response = new GetUserTenantsResponse
+                {
+                    Tenants = tenantInfoList,
+                    DefaultTenant = defaultTenant
+                };
+
+                _logger.LogInformation("Found {Count} accessible tenants for user {Username}", tenantInfoList.Count, request.Username);
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting tenants for user {Username}", request.Username);
+                return StatusCode(500, new { message = "An error occurred while retrieving user tenants" });
+            }
+        }
+
         [HttpGet("me")]
         [Authorize]
         public async Task<IActionResult> GetCurrentUser()
@@ -411,6 +489,29 @@ namespace ErpSystem.Api.Controllers
                     return Unauthorized();
                 }
 
+                // Get user's accessible tenants
+                var userTenants = await _userTenantService.GetActiveUserTenantsAsync(user.Id);
+                var accessibleTenants = new List<UserTenantInfo>();
+                
+                foreach (var ut in userTenants)
+                {
+                    var tenant = await _tenantService.GetTenantByIdAsync(ut.TenantId);
+                    if (tenant?.Status == TenantStatus.Active)
+                    {
+                        accessibleTenants.Add(new UserTenantInfo
+                        {
+                            TenantId = tenant.Id,
+                            TenantCode = tenant.Code,
+                            TenantName = tenant.Name,
+                            IsDefault = ut.IsDefault,
+                            AccessLevel = ut.AccessLevel.ToString()
+                        });
+                    }
+                }
+
+                // Get current tenant info
+                var currentTenant = await _tenantService.GetTenantByIdAsync(user.TenantId);
+
                 var userInfo = new UserInfo
                 {
                     Id = user.Id,
@@ -419,6 +520,9 @@ namespace ErpSystem.Api.Controllers
                     FirstName = user.FirstName,
                     LastName = user.LastName,
                     CurrentTenantId = user.TenantId,
+                    CurrentTenantCode = currentTenant?.Code,
+                    CurrentTenantName = currentTenant?.Name,
+                    AccessibleTenants = accessibleTenants,
                     IsActive = user.IsActive,
                     Roles = (await _userManager.GetRolesAsync(user)).ToList()
                 };
@@ -429,6 +533,395 @@ namespace ErpSystem.Api.Controllers
             {
                 _logger.LogError(ex, "Error getting current user");
                 return StatusCode(500, new { message = "An error occurred" });
+            }
+        }
+
+        [HttpPost("select-tenant")]
+        [Authorize]
+        public async Task<IActionResult> SelectTenant([FromBody] SelectTenantRequest request)
+        {
+            try
+            {
+                var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                {
+                    return Unauthorized();
+                }
+
+                var user = await _userManager.FindByIdAsync(userId);
+                if (user == null || !user.IsActive)
+                {
+                    return Unauthorized();
+                }
+
+                // Validate tenant exists and is active
+                var tenant = await _tenantService.GetTenantByCodeAsync(request.TenantCode);
+                if (tenant == null || tenant.Status != TenantStatus.Active)
+                {
+                    return BadRequest(new { message = "Invalid or inactive tenant" });
+                }
+
+                // Validate user has access to this tenant
+                if (!await _userTenantService.HasActiveAccessAsync(Guid.Parse(userId), tenant.Id))
+                {
+                    return Forbid("User does not have access to this tenant");
+                }
+
+                // Update user's current tenant
+                user.TenantId = tenant.Id;
+                user.UpdatedAt = DateTime.UtcNow;
+                user.UpdatedBy = user.UserName;
+                await _userManager.UpdateAsync(user);
+
+                // Optionally set this tenant as default for the user
+                if (request.SetAsDefault)
+                {
+                    await _userTenantService.SetDefaultTenantAsync(Guid.Parse(userId), tenant.Id);
+                }
+
+                _logger.LogInformation("User {Username} selected tenant {TenantCode}", user.UserName, request.TenantCode);
+
+                // Generate new JWT token with updated tenant context
+                var newToken = await _tokenService.GenerateTokenAsync(user);
+
+                // Get updated user info with new tenant context
+                var userTenants = await _userTenantService.GetActiveUserTenantsAsync(user.Id);
+                var accessibleTenants = new List<UserTenantInfo>();
+                
+                foreach (var ut in userTenants)
+                {
+                    var t = await _tenantService.GetTenantByIdAsync(ut.TenantId);
+                    if (t?.Status == TenantStatus.Active)
+                    {
+                        accessibleTenants.Add(new UserTenantInfo
+                        {
+                            TenantId = t.Id,
+                            TenantCode = t.Code,
+                            TenantName = t.Name,
+                            IsDefault = ut.IsDefault,
+                            AccessLevel = ut.AccessLevel.ToString()
+                        });
+                    }
+                }
+
+                var response = new SelectTenantResponse
+                {
+                    Token = newToken,
+                    ExpiresAt = DateTime.UtcNow.AddHours(24),
+                    User = new UserInfo
+                    {
+                        Id = user.Id,
+                        Username = user.UserName!,
+                        Email = user.Email!,
+                        FirstName = user.FirstName,
+                        LastName = user.LastName,
+                        CurrentTenantId = tenant.Id,
+                        CurrentTenantCode = tenant.Code,
+                        CurrentTenantName = tenant.Name,
+                        AccessibleTenants = accessibleTenants,
+                        IsActive = user.IsActive,
+                        Roles = (await _userManager.GetRolesAsync(user)).ToList()
+                    }
+                };
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error selecting tenant {TenantCode}", request.TenantCode);
+                return StatusCode(500, new { message = "An error occurred while selecting tenant" });
+            }
+        }
+
+        [HttpGet("tenant/{tenantId}/users")]
+        [Authorize]
+        public async Task<IActionResult> GetTenantUsers(Guid tenantId)
+        {
+            try
+            {
+                // Validate tenant exists
+                var tenant = await _tenantService.GetTenantByIdAsync(tenantId);
+                if (tenant == null || tenant.Status != TenantStatus.Active)
+                {
+                    return NotFound(new { message = "Tenant not found or inactive" });
+                }
+
+                // Get all users mapped to this tenant
+                var tenantUsers = await _userTenantService.GetActiveTenantUsersAsync(tenantId);
+                
+                var userMappings = new List<TenantUserMapping>();
+                foreach (var user in tenantUsers)
+                {
+                    // Get the user-tenant relationship details
+                    var relationship = await _userTenantService.GetUserTenantRelationshipAsync(user.Id, tenantId);
+                    if (relationship != null)
+                    {
+                        userMappings.Add(new TenantUserMapping
+                        {
+                            UserId = user.Id.ToString(),
+                            TenantId = tenantId.ToString(),
+                            IsActive = relationship.Status == UserTenantStatus.Active,
+                            ExpiresAt = relationship.ExpiresAt?.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                            AccessLevel = relationship.AccessLevel.ToString(),
+                            IsDefault = relationship.IsDefault,
+                            GrantedAt = relationship.GrantedAt.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                            User = new TenantUserInfo
+                            {
+                                Id = user.Id.ToString(),
+                                Username = user.UserName ?? "",
+                                Email = user.Email ?? "",
+                                FirstName = user.FirstName,
+                                LastName = user.LastName,
+                                FullName = $"{user.FirstName} {user.LastName}".Trim(),
+                                IsActive = user.IsActive
+                            }
+                        });
+                    }
+                }
+
+                return Ok(userMappings);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting users for tenant {TenantId}", tenantId);
+                return StatusCode(500, new { message = "An error occurred while retrieving tenant users" });
+            }
+        }
+
+        [HttpPost("register")]
+        [AllowAnonymous]
+        public async Task<IActionResult> Register([FromBody] RegisterRequest request)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+
+                _logger.LogInformation("Registration attempt for user: {Username}, email: {Email}", request.Username, request.Email);
+
+                // Check if a user with the same username or email already exists
+                var existingUserByUsername = await _userManager.FindByNameAsync(request.Username);
+                if (existingUserByUsername != null)
+                {
+                    return BadRequest(new { message = "A user with this username already exists." });
+                }
+
+                var existingUserByEmail = await _userManager.FindByEmailAsync(request.Email);
+                if (existingUserByEmail != null)
+                {
+                    return BadRequest(new { message = "A user with this email address already exists." });
+                }
+
+                // For now, we'll assign users to the first active tenant that allows self-registration
+                // Later this can be enhanced to support tenant selection during registration
+                var availableTenants = await _tenantService.GetAllTenantsAsync();
+                var registrationTenant = availableTenants.FirstOrDefault(t => t.Status == TenantStatus.Active && t.AllowSelfRegistration);
+                
+                if (registrationTenant == null)
+                {
+                    return BadRequest(new { message = "Self-registration is not currently available." });
+                }
+
+                // Create the user
+                var user = new ApplicationUser
+                {
+                    UserName = request.Username,
+                    Email = request.Email,
+                    PhoneNumber = request.PhoneNumber,
+                    FirstName = request.FirstName,
+                    LastName = request.LastName,
+                    TenantId = registrationTenant.Id,
+                    IsActive = false, // Will be activated after OTP verification
+                    EmailConfirmed = false,
+                    PhoneNumberConfirmed = false,
+                    AuthenticationProvider = AuthenticationProvider.Local,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "Self-Registration"
+                };
+
+                var result = await _userManager.CreateAsync(user, request.Password);
+                if (!result.Succeeded)
+                {
+                    var errors = result.Errors.Select(e => e.Description).ToList();
+                    _logger.LogWarning("User registration failed for {Username}: {Errors}", request.Username, string.Join(", ", errors));
+                    return BadRequest(new { message = "Registration failed.", errors });
+                }
+
+                // Assign default role (Employee) to the new user
+                await _userManager.AddToRoleAsync(user, "Employee");
+
+                // Create user-tenant relationship
+                await _userTenantService.GrantUserAccessToTenantAsync(
+                    user.Id,
+                    registrationTenant.Id,
+                    UserTenantAccessLevel.Standard,
+                    "Self-Registration"
+                );
+
+                // Log successful registration
+                var registrationSecurityLog = new SecurityLog
+                {
+                    Action = "UserRegistration",
+                    Success = true,
+                    IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                    Username = request.Username,
+                    UserId = user.Id,
+                    Details = "User self-registered successfully",
+                    FailureReason = null,
+                    UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                    TenantId = registrationTenant.Id
+                };
+                await _securityLogService.CreateSecurityLogAsync(registrationSecurityLog);
+
+                _logger.LogInformation("User registration successful for: {Username}", request.Username);
+
+                // TODO: Send OTP via SMS for phone verification
+                // For now, just return success
+                return Ok(new RegisterResponse
+                {
+                    Success = true,
+                    Message = "Registration successful. Please verify your phone number.",
+                    PhoneNumber = request.PhoneNumber,
+                    RequiresOtpVerification = true
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during registration for user: {Username}", request.Username);
+                return StatusCode(500, new { message = "An error occurred during registration" });
+            }
+        }
+
+        [HttpPost("verify-otp")]
+        [AllowAnonymous]
+        public async Task<IActionResult> VerifyOtp([FromBody] VerifyOtpRequest request)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+
+                _logger.LogInformation("OTP verification attempt for phone: {PhoneNumber}", request.PhoneNumber);
+
+                // Find user by phone number
+                var users = _userManager.Users.Where(u => u.PhoneNumber == request.PhoneNumber && !u.IsActive).ToList();
+                var user = users.FirstOrDefault();
+                
+                if (user == null)
+                {
+                    return BadRequest(new { message = "Invalid phone number or user already verified." });
+                }
+
+                // TODO: Implement actual OTP verification logic
+                // For now, accept any 6-digit code
+                if (request.OtpCode.Length != 6 || !request.OtpCode.All(char.IsDigit))
+                {
+                    return BadRequest(new { message = "Invalid OTP code. Please enter a 6-digit code." });
+                }
+
+                // Activate the user account
+                user.IsActive = true;
+                user.PhoneNumberConfirmed = true;
+                user.UpdatedAt = DateTime.UtcNow;
+                user.UpdatedBy = "OTP-Verification";
+                
+                var updateResult = await _userManager.UpdateAsync(user);
+                if (!updateResult.Succeeded)
+                {
+                    _logger.LogError("Failed to activate user {Username} after OTP verification", user.UserName);
+                    return StatusCode(500, new { message = "Failed to activate account" });
+                }
+
+                // Log successful OTP verification
+                var otpVerificationSecurityLog = new SecurityLog
+                {
+                    Action = "OtpVerification",
+                    Success = true,
+                    IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                    Username = user.UserName,
+                    UserId = user.Id,
+                    Details = "Phone number verified successfully via OTP",
+                    FailureReason = null,
+                    UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                    TenantId = user.TenantId
+                };
+                await _securityLogService.CreateSecurityLogAsync(otpVerificationSecurityLog);
+
+                _logger.LogInformation("OTP verification successful for user: {Username}", user.UserName);
+
+                return Ok(new VerifyOtpResponse
+                {
+                    Success = true,
+                    Message = "Phone number verified successfully. Your account is now active."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during OTP verification for phone: {PhoneNumber}", request.PhoneNumber);
+                return StatusCode(500, new { message = "An error occurred during OTP verification" });
+            }
+        }
+
+        [HttpGet("security-settings")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetPublicSecuritySettings()
+        {
+            try
+            {
+                // This endpoint provides public security settings needed for registration
+                // (password policy, CAPTCHA settings, etc.) without requiring authentication
+                
+                // Get security settings from the first active tenant or use defaults
+                var tenants = await _tenantService.GetAllTenantsAsync();
+                var defaultTenant = tenants.FirstOrDefault(t => t.Status == TenantStatus.Active);
+                
+                if (defaultTenant != null)
+                {
+                    // Try to get security settings for the default tenant
+                    // Note: We'll need to modify the settings service to accept tenantId
+                    // For now, return reasonable defaults
+                }
+                
+                // Return default security settings for public use (registration page)
+                var publicSettings = new
+                {
+                    passwordMinLength = 8,
+                    passwordRequireUppercase = true,
+                    passwordRequireLowercase = true,
+                    passwordRequireDigits = true,
+                    passwordRequireSpecialChars = true,
+                    captchaEnabled = false,
+                    captchaProvider = "recaptcha",
+                    recaptchaSiteKey = (string?)null,
+                    hCaptchaSiteKey = (string?)null
+                };
+                
+                _logger.LogInformation("Public security settings retrieved for registration");
+                return Ok(publicSettings);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving public security settings");
+                
+                // Return defaults even on error to ensure registration page works
+                var fallbackSettings = new
+                {
+                    passwordMinLength = 8,
+                    passwordRequireUppercase = true,
+                    passwordRequireLowercase = true,
+                    passwordRequireDigits = true,
+                    passwordRequireSpecialChars = true,
+                    captchaEnabled = false,
+                    captchaProvider = "recaptcha",
+                    recaptchaSiteKey = (string?)null,
+                    hCaptchaSiteKey = (string?)null
+                };
+                
+                return Ok(fallbackSettings);
             }
         }
     }

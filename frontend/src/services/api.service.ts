@@ -26,9 +26,61 @@ export interface UserInfo {
   email: string;
   firstName?: string;
   lastName?: string;
-  tenantId?: string;
+  currentTenantId?: string;
+  currentTenantCode?: string;
+  currentTenantName?: string;
+  accessibleTenants: UserTenantInfo[];
   isActive: boolean;
   roles: string[];
+}
+
+export interface UserTenantInfo {
+  tenantId: string;
+  tenantCode: string;
+  tenantName: string;
+  isDefault: boolean;
+  accessLevel: string;
+}
+
+export interface GetUserTenantsRequest {
+  username: string;
+}
+
+export interface GetUserTenantsResponse {
+  tenants: UserTenantInfo[];
+  defaultTenant?: UserTenantInfo;
+}
+
+export interface SelectTenantRequest {
+  tenantCode: string;
+  setAsDefault?: boolean;
+}
+
+export interface SelectTenantResponse {
+  token: string;
+  expiresAt: string;
+  user: UserInfo;
+}
+
+export interface TenantUserMapping {
+  userId: string;
+  tenantId: string;
+  isActive: boolean;
+  expiresAt: string | null;
+  accessLevel: string;
+  isDefault: boolean;
+  grantedAt: string;
+  user: TenantUserInfo;
+}
+
+export interface TenantUserInfo {
+  id: string;
+  username: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  isActive: boolean;
 }
 
 export interface TenantDto {
@@ -36,14 +88,48 @@ export interface TenantDto {
   name: string;
   code: string;
   description?: string;
+  status: 'Active' | 'Inactive' | 'Suspended';
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  
+  // Branding
   logoUrl?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  faviconUrl?: string;
+  coverImageUrl?: string;
+  
+  // Contact Information
   domain?: string;
   contactEmail?: string;
   contactPhone?: string;
   address?: string;
+  
+  // Subscription
+  subscriptionStartDate?: string;
+  subscriptionEndDate?: string;
+  
+  // LDAP Configuration
+  ldapServer?: string;
+  ldapPort?: number;
+  ldapBaseDn?: string;
+  ldapBindDn?: string;
+  ldapBindPassword?: string;
+  ldapEnabled?: boolean;
+  
+  // Default tenant settings
+  isDefaultForPublicUsers?: boolean;
+  isDefaultForInternalUsers?: boolean;
+  
+  // Feature flags
+  allowSelfRegistration?: boolean;
+  publicRegistrationDomains?: string;
+  requireEmailVerification?: boolean;
+  userAudience?: number;
+  welcomeMessage?: string;
+  defaultPriority?: number;
+  enableAutoSelection?: boolean;
 }
 
 export interface RefreshTokenRequest {
@@ -66,12 +152,15 @@ class ApiService {
     return typeof window === 'undefined';
   }
 
-  private getHeaders(): HeadersInit {
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-    };
+  private getHeaders(isFormData: boolean = false, includeAuth: boolean = true): HeadersInit {
+    const headers: HeadersInit = {};
 
-    if (this.token) {
+    // Don't set Content-Type for FormData - browser will set it with boundary
+    if (!isFormData) {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    if (this.token && includeAuth) {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
@@ -161,14 +250,23 @@ class ApiService {
 
   // Public request method for admin service
   public async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    return this.privateRequest<T>(endpoint, options);
+    return this.privateRequest<T>(endpoint, options, true);
+  }
+
+  // Public request method without authentication
+  public async publicRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    return this.privateRequest<T>(endpoint, options, false);
   }
 
   // Rename private request method
-  private async privateRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  private async privateRequest<T>(endpoint: string, options: RequestInit = {}, includeAuth: boolean = true): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
+    
+    // Check if the body is FormData
+    const isFormData = options.body instanceof FormData;
+    
     const config: RequestInit = {
-      headers: this.getHeaders(),
+      headers: this.getHeaders(isFormData, includeAuth),
       ...options,
     };
 
@@ -238,6 +336,39 @@ class ApiService {
       throw new Error('getTenantById cannot be called during server-side rendering');
     }
     return this.privateRequest<TenantDto>(`/tenant/${encodeURIComponent(id)}`);
+  }
+
+  // User-Tenant endpoints
+  public async getUserTenants(request: GetUserTenantsRequest): Promise<GetUserTenantsResponse> {
+    if (this.isServerSide()) {
+      throw new Error('getUserTenants cannot be called during server-side rendering');
+    }
+    return this.privateRequest<GetUserTenantsResponse>('/auth/user-tenants', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  public async selectTenant(request: SelectTenantRequest): Promise<SelectTenantResponse> {
+    if (this.isServerSide()) {
+      throw new Error('selectTenant cannot be called during server-side rendering');
+    }
+    const response = await this.privateRequest<SelectTenantResponse>('/auth/select-tenant', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+
+    // Update stored token with new tenant context
+    this.setToken(response.token);
+    
+    return response;
+  }
+
+  public async getTenantUsers(tenantId: string): Promise<TenantUserMapping[]> {
+    if (this.isServerSide()) {
+      throw new Error('getTenantUsers cannot be called during server-side rendering');
+    }
+    return this.privateRequest<TenantUserMapping[]>(`/auth/tenant/${encodeURIComponent(tenantId)}/users`);
   }
 }
 

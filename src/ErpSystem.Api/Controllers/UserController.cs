@@ -45,11 +45,23 @@ public class UserController : ControllerBase
                 Email = u.Email ?? "",
                 FirstName = u.FirstName,
                 LastName = u.LastName,
+                PhoneNumber = u.PhoneNumber,
                 IsActive = u.IsActive,
                 Roles = u.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>(),
                 CreatedAt = u.CreatedAt,
                 LastLoginAt = u.LastLoginDate,
-                TenantId = u.TenantId.ToString()
+                TenantId = u.TenantId.ToString(),
+                LinkedTenants = u.UserTenants?.Where(ut => !ut.IsDeleted).Select(ut => new UserTenantDto
+                {
+                    TenantId = ut.TenantId.ToString(),
+                    TenantCode = ut.Tenant?.Code ?? "",
+                    TenantName = ut.Tenant?.Name ?? "",
+                    AccessLevel = ut.AccessLevel.ToString(),
+                    Status = ut.Status.ToString(),
+                    IsDefault = ut.IsDefault,
+                    GrantedAt = ut.GrantedAt,
+                    ExpiresAt = ut.ExpiresAt
+                }).ToArray() ?? Array.Empty<UserTenantDto>()
             }).ToList();
 
             return Ok(userDtos);
@@ -83,11 +95,23 @@ public class UserController : ControllerBase
                 Email = user.Email ?? "",
                 FirstName = user.FirstName,
                 LastName = user.LastName,
+                PhoneNumber = user.PhoneNumber,
                 IsActive = user.IsActive,
                 Roles = user.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>(),
                 CreatedAt = user.CreatedAt,
                 LastLoginAt = user.LastLoginDate,
-                TenantId = user.TenantId.ToString()
+                TenantId = user.TenantId.ToString(),
+                LinkedTenants = user.UserTenants?.Where(ut => !ut.IsDeleted).Select(ut => new UserTenantDto
+                {
+                    TenantId = ut.TenantId.ToString(),
+                    TenantCode = ut.Tenant?.Code ?? "",
+                    TenantName = ut.Tenant?.Name ?? "",
+                    AccessLevel = ut.AccessLevel.ToString(),
+                    Status = ut.Status.ToString(),
+                    IsDefault = ut.IsDefault,
+                    GrantedAt = ut.GrantedAt,
+                    ExpiresAt = ut.ExpiresAt
+                }).ToArray() ?? Array.Empty<UserTenantDto>()
             };
 
             return Ok(userDto);
@@ -112,6 +136,7 @@ public class UserController : ControllerBase
             {
                 UserName = request.Username,
                 Email = request.Email,
+                PhoneNumber = request.PhoneNumber,
                 FirstName = request.FirstName,
                 LastName = request.LastName,
                 IsActive = request.IsActive,
@@ -167,6 +192,7 @@ public class UserController : ControllerBase
                 Id = createdUser.Id.ToString(),
                 Username = createdUser.UserName ?? "",
                 Email = createdUser.Email ?? "",
+                PhoneNumber = createdUser.PhoneNumber,
                 FirstName = createdUser.FirstName,
                 LastName = createdUser.LastName,
                 IsActive = createdUser.IsActive,
@@ -204,6 +230,7 @@ public class UserController : ControllerBase
             {
                 Username = user.UserName,
                 Email = user.Email,
+                PhoneNumber = user.PhoneNumber,
                 FirstName = user.FirstName,
                 LastName = user.LastName,
                 IsActive = user.IsActive,
@@ -212,6 +239,7 @@ public class UserController : ControllerBase
 
             user.UserName = request.Username;
             user.Email = request.Email;
+            user.PhoneNumber = request.PhoneNumber;
             user.FirstName = request.FirstName;
             user.LastName = request.LastName;
             user.IsActive = request.IsActive;
@@ -231,6 +259,7 @@ public class UserController : ControllerBase
                 {
                     Username = request.Username,
                     Email = request.Email,
+                    PhoneNumber = request.PhoneNumber,
                     FirstName = request.FirstName,
                     LastName = request.LastName,
                     IsActive = request.IsActive,
@@ -258,6 +287,7 @@ public class UserController : ControllerBase
                 Id = updatedUser.Id.ToString(),
                 Username = updatedUser.UserName ?? "",
                 Email = updatedUser.Email ?? "",
+                PhoneNumber = updatedUser.PhoneNumber,
                 FirstName = updatedUser.FirstName,
                 LastName = updatedUser.LastName,
                 IsActive = updatedUser.IsActive,
@@ -462,11 +492,25 @@ public class UserDto
     public string Email { get; set; } = string.Empty;
     public string? FirstName { get; set; }
     public string? LastName { get; set; }
+    public string? PhoneNumber { get; set; }
     public bool IsActive { get; set; }
     public string[] Roles { get; set; } = Array.Empty<string>();
     public DateTime CreatedAt { get; set; }
     public DateTime? LastLoginAt { get; set; }
     public string? TenantId { get; set; }
+    public UserTenantDto[] LinkedTenants { get; set; } = Array.Empty<UserTenantDto>();
+}
+
+public class UserTenantDto
+{
+    public string TenantId { get; set; } = string.Empty;
+    public string TenantCode { get; set; } = string.Empty;
+    public string TenantName { get; set; } = string.Empty;
+    public string AccessLevel { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public bool IsDefault { get; set; }
+    public DateTime GrantedAt { get; set; }
+    public DateTime? ExpiresAt { get; set; }
 }
 
 public class CreateUserRequest
@@ -476,6 +520,7 @@ public class CreateUserRequest
     public string Password { get; set; } = string.Empty;
     public string? FirstName { get; set; }
     public string? LastName { get; set; }
+    public string? PhoneNumber { get; set; }
     public bool IsActive { get; set; } = true;
     public string[] Roles { get; set; } = Array.Empty<string>();
     public string? TenantId { get; set; }
@@ -487,6 +532,7 @@ public class UpdateUserRequest
     public string Email { get; set; } = string.Empty;
     public string? FirstName { get; set; }
     public string? LastName { get; set; }
+    public string? PhoneNumber { get; set; }
     public bool IsActive { get; set; }
     public string[] Roles { get; set; } = Array.Empty<string>();
 }

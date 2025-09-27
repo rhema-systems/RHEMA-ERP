@@ -8,6 +8,7 @@ export interface User {
   email: string;
   firstName?: string;
   lastName?: string;
+  phoneNumber?: string;
   roles: string[];
   isActive: boolean;
   lastLoginAt?: Date;
@@ -21,6 +22,7 @@ export interface CreateUserRequest {
   password: string;
   firstName?: string;
   lastName?: string;
+  phoneNumber?: string;
   isActive: boolean;
   roles: string[];
   tenantId?: string;
@@ -31,6 +33,7 @@ export interface UpdateUserRequest {
   email: string;
   firstName?: string;
   lastName?: string;
+  phoneNumber?: string;
   isActive: boolean;
   roles: string[];
 }
@@ -50,24 +53,95 @@ export interface Tenant {
   name: string;
   code: string;
   description?: string;
-  isActive: boolean;
+  status: 'Active' | 'Inactive' | 'Suspended';
   createdAt: Date;
   updatedAt: Date;
+  
+  // Branding
   logoUrl?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  faviconUrl?: string;
+  coverImageUrl?: string;
+  
+  // Contact Information
   domain?: string;
   contactEmail?: string;
   contactPhone?: string;
   address?: string;
+  
+  // Subscription
+  subscriptionStartDate?: Date;
+  subscriptionEndDate?: Date;
+  
+  // LDAP Configuration
+  ldapServer?: string;
+  ldapPort?: number;
+  ldapBaseDn?: string;
+  ldapBindDn?: string;
+  ldapBindPassword?: string;
+  ldapEnabled: boolean;
+  
+  // Default tenant settings
+  isDefaultForPublicUsers: boolean;
+  isDefaultForInternalUsers: boolean;
+  
+  // Feature flags
+  allowSelfRegistration: boolean;
+  publicRegistrationDomains?: string;
+  requireEmailVerification: boolean;
+  userAudience: number; // Internal (1), External (2), Both (3)
+  welcomeMessage?: string;
+  defaultPriority: number;
+  enableAutoSelection: boolean;
+  
+  // Computed properties (for compatibility)
+  isActive: boolean; // derived from status === 'Active'
 }
 
 export interface CreateTenantRequest {
   name: string;
   code: string;
   description?: string;
+  status?: 'Active' | 'Inactive' | 'Suspended';
+  
+  // Branding
+  logoUrl?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  faviconUrl?: string;
+  coverImageUrl?: string;
+  
+  // Contact Information
   domain?: string;
   contactEmail?: string;
   contactPhone?: string;
   address?: string;
+  
+  // Subscription
+  subscriptionStartDate?: Date;
+  subscriptionEndDate?: Date;
+  
+  // LDAP Configuration
+  ldapServer?: string;
+  ldapPort?: number;
+  ldapBaseDn?: string;
+  ldapBindDn?: string;
+  ldapBindPassword?: string;
+  ldapEnabled?: boolean;
+  
+  // Default tenant settings
+  isDefaultForPublicUsers?: boolean;
+  isDefaultForInternalUsers?: boolean;
+  
+  // Feature flags
+  allowSelfRegistration?: boolean;
+  publicRegistrationDomains?: string;
+  requireEmailVerification?: boolean;
+  userAudience?: number;
+  welcomeMessage?: string;
+  defaultPriority?: number;
+  enableAutoSelection?: boolean;
 }
 
 export interface SecurityLog {
@@ -181,14 +255,48 @@ class AdminApiService {
       name: dto.name,
       code: dto.code,
       description: dto.description,
-      isActive: dto.isActive,
+      status: dto.status as 'Active' | 'Inactive' | 'Suspended',
+      isActive: dto.status === 'Active', // computed property for compatibility
       createdAt: new Date(dto.createdAt),
       updatedAt: new Date(dto.updatedAt),
+      
+      // Branding
       logoUrl: dto.logoUrl,
+      primaryColor: dto.primaryColor,
+      secondaryColor: dto.secondaryColor,
+      faviconUrl: dto.faviconUrl,
+      coverImageUrl: dto.coverImageUrl,
+      
+      // Contact Information
       domain: dto.domain,
       contactEmail: dto.contactEmail,
       contactPhone: dto.contactPhone,
       address: dto.address,
+      
+      // Subscription
+      subscriptionStartDate: dto.subscriptionStartDate ? new Date(dto.subscriptionStartDate) : undefined,
+      subscriptionEndDate: dto.subscriptionEndDate ? new Date(dto.subscriptionEndDate) : undefined,
+      
+      // LDAP Configuration
+      ldapServer: dto.ldapServer,
+      ldapPort: dto.ldapPort,
+      ldapBaseDn: dto.ldapBaseDn,
+      ldapBindDn: dto.ldapBindDn,
+      ldapBindPassword: dto.ldapBindPassword,
+      ldapEnabled: dto.ldapEnabled || false,
+      
+      // Default tenant settings
+      isDefaultForPublicUsers: dto.isDefaultForPublicUsers || false,
+      isDefaultForInternalUsers: dto.isDefaultForInternalUsers || false,
+      
+      // Feature flags
+      allowSelfRegistration: dto.allowSelfRegistration || false,
+      publicRegistrationDomains: dto.publicRegistrationDomains,
+      requireEmailVerification: dto.requireEmailVerification || false,
+      userAudience: dto.userAudience || 2,
+      welcomeMessage: dto.welcomeMessage,
+      defaultPriority: dto.defaultPriority || 10,
+      enableAutoSelection: dto.enableAutoSelection || false,
     }));
   }
 
@@ -199,24 +307,171 @@ class AdminApiService {
       name: dto.name,
       code: dto.code,
       description: dto.description,
-      isActive: dto.isActive,
+      status: dto.status as 'Active' | 'Inactive' | 'Suspended',
+      isActive: dto.status === 'Active',
       createdAt: new Date(dto.createdAt),
       updatedAt: new Date(dto.updatedAt),
+      
+      // Branding
       logoUrl: dto.logoUrl,
+      primaryColor: dto.primaryColor,
+      secondaryColor: dto.secondaryColor,
+      faviconUrl: dto.faviconUrl,
+      coverImageUrl: dto.coverImageUrl,
+      
+      // Contact Information
       domain: dto.domain,
       contactEmail: dto.contactEmail,
       contactPhone: dto.contactPhone,
       address: dto.address,
+      
+      // Subscription
+      subscriptionStartDate: dto.subscriptionStartDate ? new Date(dto.subscriptionStartDate) : undefined,
+      subscriptionEndDate: dto.subscriptionEndDate ? new Date(dto.subscriptionEndDate) : undefined,
+      
+      // LDAP Configuration
+      ldapServer: dto.ldapServer,
+      ldapPort: dto.ldapPort,
+      ldapBaseDn: dto.ldapBaseDn,
+      ldapBindDn: dto.ldapBindDn,
+      ldapBindPassword: dto.ldapBindPassword,
+      ldapEnabled: dto.ldapEnabled || false,
+      
+      // Default tenant settings
+      isDefaultForPublicUsers: dto.isDefaultForPublicUsers || false,
+      isDefaultForInternalUsers: dto.isDefaultForInternalUsers || false,
+      
+      // Feature flags
+      allowSelfRegistration: dto.allowSelfRegistration || false,
+      publicRegistrationDomains: dto.publicRegistrationDomains,
+      requireEmailVerification: dto.requireEmailVerification || false,
+      userAudience: dto.userAudience || 2,
+      welcomeMessage: dto.welcomeMessage,
+      defaultPriority: dto.defaultPriority || 10,
+      enableAutoSelection: dto.enableAutoSelection || false,
     };
   }
 
   async createTenant(tenantData: CreateTenantRequest): Promise<Tenant> {
     console.log('Creating tenant:', tenantData.name, 'with code:', tenantData.code);
+    console.log('Full tenant data being sent:', tenantData);
+    
     try {
-      const result = await apiService.request<Tenant>('/tenant', {
+      // Helper function to clean blob URLs and file:// URLs
+      const cleanImageUrl = (url?: string) => {
+        if (!url || url.startsWith('blob:') || url.startsWith('file://')) {
+          return null; // Don't send blob URLs or file:// URLs to backend
+        }
+        return url;
+      };
+      
+      // Map the data to match backend CreateTenantRequest structure (now supports all fields!)
+      const backendData = {
+        // Core fields
+        name: tenantData.name,
+        code: tenantData.code,
+        description: tenantData.description || '',
+        status: tenantData.status || 'Active',
+        
+        // Contact Information
+        domain: tenantData.domain || null,
+        contactEmail: tenantData.contactEmail || null,
+        contactPhone: tenantData.contactPhone || null,
+        address: tenantData.address || null,
+        
+        // Branding - Filter out blob URLs
+        logoUrl: cleanImageUrl(tenantData.logoUrl),
+        primaryColor: tenantData.primaryColor || null,
+        secondaryColor: tenantData.secondaryColor || null,
+        faviconUrl: cleanImageUrl(tenantData.faviconUrl),
+        coverImageUrl: cleanImageUrl(tenantData.coverImageUrl),
+        
+        // Subscription
+        subscriptionStartDate: tenantData.subscriptionStartDate || null,
+        subscriptionEndDate: tenantData.subscriptionEndDate || null,
+        
+        // LDAP Configuration
+        ldapServer: tenantData.ldapServer || null,
+        ldapPort: tenantData.ldapPort || 389,
+        ldapBaseDn: tenantData.ldapBaseDn || null,
+        ldapBindDn: tenantData.ldapBindDn || null,
+        ldapBindPassword: tenantData.ldapBindPassword || null,
+        ldapEnabled: tenantData.ldapEnabled || false,
+        
+        // Default tenant settings
+        isDefaultForPublicUsers: tenantData.isDefaultForPublicUsers || false,
+        isDefaultForInternalUsers: tenantData.isDefaultForInternalUsers || false,
+        
+        // Feature flags
+        allowSelfRegistration: tenantData.allowSelfRegistration || false,
+        publicRegistrationDomains: tenantData.publicRegistrationDomains || null,
+        requireEmailVerification: tenantData.requireEmailVerification || false,
+        userAudience: tenantData.userAudience || 2,
+        welcomeMessage: tenantData.welcomeMessage || null,
+        defaultPriority: tenantData.defaultPriority || 10,
+        enableAutoSelection: tenantData.enableAutoSelection || false,
+      };
+      
+      console.log('Mapped backend create data:', backendData);
+      
+      const resultDto = await apiService.request<any>('/tenant', {
         method: 'POST',
-        body: JSON.stringify(tenantData),
+        body: JSON.stringify(backendData),
       });
+      
+      console.log('Raw backend create response:', resultDto);
+      
+      // Map the response back to our Tenant interface
+      // Backend now returns all fields from the expanded TenantDto!
+      const result: Tenant = {
+        id: resultDto.id,
+        name: resultDto.name,
+        code: resultDto.code,
+        description: resultDto.description || '',
+        status: (resultDto.status || 'Active') as 'Active' | 'Inactive' | 'Suspended',
+        isActive: resultDto.isActive ?? (resultDto.status === 'Active'),
+        createdAt: new Date(resultDto.createdAt),
+        updatedAt: new Date(resultDto.updatedAt),
+        
+        // Contact Information
+        domain: resultDto.domain,
+        contactEmail: resultDto.contactEmail,
+        contactPhone: resultDto.contactPhone,
+        address: resultDto.address,
+        
+        // Branding
+        logoUrl: resultDto.logoUrl,
+        primaryColor: resultDto.primaryColor,
+        secondaryColor: resultDto.secondaryColor,
+        faviconUrl: resultDto.faviconUrl,
+        coverImageUrl: resultDto.coverImageUrl,
+        
+        // Subscription
+        subscriptionStartDate: resultDto.subscriptionStartDate ? new Date(resultDto.subscriptionStartDate) : undefined,
+        subscriptionEndDate: resultDto.subscriptionEndDate ? new Date(resultDto.subscriptionEndDate) : undefined,
+        
+        // LDAP Configuration
+        ldapServer: resultDto.ldapServer,
+        ldapPort: resultDto.ldapPort ?? 389,
+        ldapBaseDn: resultDto.ldapBaseDn,
+        ldapBindDn: resultDto.ldapBindDn,
+        ldapBindPassword: resultDto.ldapBindPassword,
+        ldapEnabled: resultDto.ldapEnabled ?? false,
+        
+        // Default tenant settings
+        isDefaultForPublicUsers: resultDto.isDefaultForPublicUsers ?? false,
+        isDefaultForInternalUsers: resultDto.isDefaultForInternalUsers ?? false,
+        
+        // Feature flags
+        allowSelfRegistration: resultDto.allowSelfRegistration ?? false,
+        publicRegistrationDomains: resultDto.publicRegistrationDomains,
+        requireEmailVerification: resultDto.requireEmailVerification ?? false,
+        userAudience: resultDto.userAudience ?? 2,
+        welcomeMessage: resultDto.welcomeMessage,
+        defaultPriority: resultDto.defaultPriority ?? 10,
+        enableAutoSelection: resultDto.enableAutoSelection ?? false,
+      };
+      
       console.log('Tenant created successfully:', result.name, 'ID:', result.id);
       return result;
     } catch (error) {
@@ -227,11 +482,124 @@ class AdminApiService {
 
   async updateTenant(id: string, tenantData: Partial<CreateTenantRequest>): Promise<Tenant> {
     console.log('Updating tenant:', id, 'with data:', tenantData);
+    console.log('Full tenant update data being sent:', tenantData);
+    
     try {
-      const result = await apiService.request<Tenant>(`/tenant/${id}`, {
+      // Helper function to clean blob URLs and file:// URLs
+      const cleanImageUrl = (url?: string) => {
+        if (!url || url.startsWith('blob:') || url.startsWith('file://')) {
+          return null; // Don't send blob URLs or file:// URLs to backend
+        }
+        return url;
+      };
+      
+      // Map the data to match backend UpdateTenantRequest structure (now supports all fields!)
+      const backendData = {
+        // Core fields
+        name: tenantData.name,
+        description: tenantData.description || '',
+        status: tenantData.status || 'Active',
+        isActive: tenantData.status === 'Active' || tenantData.status !== 'Inactive',
+        
+        // Contact Information
+        domain: tenantData.domain || null,
+        contactEmail: tenantData.contactEmail || null,
+        contactPhone: tenantData.contactPhone || null,
+        address: tenantData.address || null,
+        
+        // Branding
+        logoUrl: cleanImageUrl(tenantData.logoUrl),
+        primaryColor: tenantData.primaryColor || null,
+        secondaryColor: tenantData.secondaryColor || null,
+        faviconUrl: cleanImageUrl(tenantData.faviconUrl),
+        coverImageUrl: cleanImageUrl(tenantData.coverImageUrl),
+        
+        // Subscription
+        subscriptionStartDate: tenantData.subscriptionStartDate || null,
+        subscriptionEndDate: tenantData.subscriptionEndDate || null,
+        
+        // LDAP Configuration
+        ldapServer: tenantData.ldapServer || null,
+        ldapPort: tenantData.ldapPort || 389,
+        ldapBaseDn: tenantData.ldapBaseDn || null,
+        ldapBindDn: tenantData.ldapBindDn || null,
+        ldapBindPassword: tenantData.ldapBindPassword || null,
+        ldapEnabled: tenantData.ldapEnabled || false,
+        
+        // Default tenant settings
+        isDefaultForPublicUsers: tenantData.isDefaultForPublicUsers || false,
+        isDefaultForInternalUsers: tenantData.isDefaultForInternalUsers || false,
+        
+        // Feature flags
+        allowSelfRegistration: tenantData.allowSelfRegistration || false,
+        publicRegistrationDomains: tenantData.publicRegistrationDomains || null,
+        requireEmailVerification: tenantData.requireEmailVerification || false,
+        userAudience: tenantData.userAudience || 2,
+        welcomeMessage: tenantData.welcomeMessage || null,
+        defaultPriority: tenantData.defaultPriority || 10,
+        enableAutoSelection: tenantData.enableAutoSelection || false,
+      };
+      
+      console.log('Mapped backend update data:', backendData);
+      
+      const resultDto = await apiService.request<any>(`/tenant/${id}`, {
         method: 'PUT',
-        body: JSON.stringify(tenantData),
+        body: JSON.stringify(backendData),
       });
+      
+      console.log('Raw backend update response:', resultDto);
+      
+      // Map the response back to our Tenant interface
+      // Backend now returns all fields from the expanded TenantDto!
+      const result: Tenant = {
+        id: resultDto.id,
+        name: resultDto.name,
+        code: resultDto.code,
+        description: resultDto.description,
+        status: resultDto.status as 'Active' | 'Inactive' | 'Suspended',
+        isActive: resultDto.isActive ?? (resultDto.status === 'Active'),
+        createdAt: new Date(resultDto.createdAt),
+        updatedAt: new Date(resultDto.updatedAt),
+        
+        // Contact Information
+        domain: resultDto.domain,
+        contactEmail: resultDto.contactEmail,
+        contactPhone: resultDto.contactPhone,
+        address: resultDto.address,
+        
+        // Branding
+        logoUrl: resultDto.logoUrl,
+        primaryColor: resultDto.primaryColor,
+        secondaryColor: resultDto.secondaryColor,
+        faviconUrl: resultDto.faviconUrl,
+        coverImageUrl: resultDto.coverImageUrl,
+        
+        // Subscription
+        subscriptionStartDate: resultDto.subscriptionStartDate ? new Date(resultDto.subscriptionStartDate) : undefined,
+        subscriptionEndDate: resultDto.subscriptionEndDate ? new Date(resultDto.subscriptionEndDate) : undefined,
+        
+        // LDAP Configuration
+        ldapServer: resultDto.ldapServer,
+        ldapPort: resultDto.ldapPort ?? 389,
+        ldapBaseDn: resultDto.ldapBaseDn,
+        ldapBindDn: resultDto.ldapBindDn,
+        ldapBindPassword: resultDto.ldapBindPassword,
+        ldapEnabled: resultDto.ldapEnabled ?? false,
+        
+        // Default tenant settings
+        isDefaultForPublicUsers: resultDto.isDefaultForPublicUsers ?? false,
+        isDefaultForInternalUsers: resultDto.isDefaultForInternalUsers ?? false,
+        
+        // Feature flags
+        allowSelfRegistration: resultDto.allowSelfRegistration ?? false,
+        publicRegistrationDomains: resultDto.publicRegistrationDomains,
+        requireEmailVerification: resultDto.requireEmailVerification ?? false,
+        userAudience: resultDto.userAudience ?? 2,
+        welcomeMessage: resultDto.welcomeMessage,
+        defaultPriority: resultDto.defaultPriority ?? 10,
+        enableAutoSelection: resultDto.enableAutoSelection ?? false,
+      };
+      
       console.log('Tenant updated successfully:', result.name, 'ID:', result.id);
       return result;
     } catch (error) {
@@ -436,6 +804,34 @@ class AdminApiService {
 
   async getAuditLogs(): Promise<AuditLog[]> {
     return apiService.request<AuditLog[]>('/auditlog');
+  }
+
+  // LDAP Testing
+  async testLdapConnection(ldapSettings: {
+    ldapServer?: string;
+    ldapPort?: number;
+    ldapBaseDn?: string;
+    ldapBindDn?: string;
+    ldapBindPassword?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    console.log('Testing LDAP connection:', ldapSettings.ldapServer, 'port:', ldapSettings.ldapPort);
+    try {
+      const result = await apiService.request<{ success: boolean; message: string }>('/tenant/ldap/test', {
+        method: 'POST',
+        body: JSON.stringify({
+          ldapServer: ldapSettings.ldapServer,
+          ldapPort: ldapSettings.ldapPort,
+          ldapBaseDn: ldapSettings.ldapBaseDn,
+          ldapBindDn: ldapSettings.ldapBindDn,
+          ldapBindPassword: ldapSettings.ldapBindPassword,
+        }),
+      });
+      console.log('LDAP test result:', result.success ? 'SUCCESS' : 'FAILED', result.message);
+      return result;
+    } catch (error) {
+      console.error('Failed to test LDAP connection:', error);
+      throw error;
+    }
   }
 }
 

@@ -29,15 +29,15 @@ public static class UserSeeder
 
             // Create admin user
             await CreateUserIfNotExistsAsync(userManager, logger, "admin", "admin@default.com", "Admin123!", 
-                "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin);
+                "System", "Administrator", "+233123456789", defaultTenant.Id, Constants.Roles.SuperAdmin);
 
             // Create manager user  
             await CreateUserIfNotExistsAsync(userManager, logger, "manager", "manager@default.com", "Manager123!",
-                "John", "Manager", defaultTenant.Id, Constants.Roles.Manager);
+                "John", "Manager", "+233123456788", defaultTenant.Id, Constants.Roles.Manager);
 
             // Create employee user
             await CreateUserIfNotExistsAsync(userManager, logger, "employee", "employee@default.com", "Employee123!",
-                "Jane", "Employee", defaultTenant.Id, Constants.Roles.Employee);
+                "Jane", "Employee", "+233123456787", defaultTenant.Id, Constants.Roles.Employee);
 
             logger.LogInformation("Test user seeding completed!");
         }
@@ -55,7 +55,8 @@ public static class UserSeeder
         string email, 
         string password,
         string firstName, 
-        string lastName, 
+        string lastName,
+        string phoneNumber,
         Guid tenantId, 
         string roleName)
     {
@@ -73,6 +74,7 @@ public static class UserSeeder
             EmailConfirmed = true,
             FirstName = firstName,
             LastName = lastName,
+            PhoneNumber = phoneNumber,
             TenantId = tenantId,
             AuthenticationProvider = AuthenticationProvider.Local,
             IsActive = true,

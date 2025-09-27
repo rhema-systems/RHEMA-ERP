@@ -16,6 +16,9 @@ public interface ISettingsService
     Task<PasswordPolicy?> GetPasswordPolicyAsync();
     Task<PasswordPolicy> UpdatePasswordPolicyAsync(PasswordPolicy policy);
     
+    Task<Security?> GetSecuritySettingsAsync();
+    Task<Security> UpdateSecuritySettingsAsync(Security settings);
+    
     Task<SystemSettings?> GetSystemSettingAsync(string key);
     Task<SystemSettings> SetSystemSettingAsync(string key, string value, string? description = null);
     Task<IEnumerable<SystemSettings>> GetAllSystemSettingsAsync();
@@ -216,6 +219,98 @@ public class SettingsService : ISettingsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating password policy");
+            throw;
+        }
+    }
+
+    #endregion
+
+    #region Security Settings
+
+    public async Task<Security?> GetSecuritySettingsAsync()
+    {
+        try
+        {
+            var tenantId = _currentUserService.GetTenantId();
+            if (tenantId == null)
+            {
+                throw new InvalidOperationException("Tenant ID is required");
+            }
+
+            var settings = await _unitOfWork.Repository<Security>().FindAsync(s => s.TenantId == tenantId);
+            return settings.FirstOrDefault();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving security settings");
+            throw;
+        }
+    }
+
+    public async Task<Security> UpdateSecuritySettingsAsync(Security settings)
+    {
+        try
+        {
+            var tenantId = _currentUserService.GetTenantId() ?? throw new InvalidOperationException("Tenant ID is required");
+            var existingSettings = await GetSecuritySettingsAsync();
+            
+            if (existingSettings != null)
+            {
+                // Update existing settings
+                existingSettings.PasswordMinLength = settings.PasswordMinLength;
+                existingSettings.PasswordRequireUppercase = settings.PasswordRequireUppercase;
+                existingSettings.PasswordRequireLowercase = settings.PasswordRequireLowercase;
+                existingSettings.PasswordRequireDigits = settings.PasswordRequireDigits;
+                existingSettings.PasswordRequireSpecialChars = settings.PasswordRequireSpecialChars;
+                existingSettings.PasswordMaxAge = settings.PasswordMaxAge;
+                existingSettings.PasswordPreventReuse = settings.PasswordPreventReuse;
+                
+                // CAPTCHA Settings
+                existingSettings.CaptchaEnabled = settings.CaptchaEnabled;
+                existingSettings.CaptchaProvider = settings.CaptchaProvider;
+                existingSettings.RecaptchaSiteKey = settings.RecaptchaSiteKey;
+                existingSettings.RecaptchaSecretKey = settings.RecaptchaSecretKey;
+                existingSettings.HCaptchaSiteKey = settings.HCaptchaSiteKey;
+                existingSettings.HCaptchaSecretKey = settings.HCaptchaSecretKey;
+                
+                // Session and Token Settings
+                existingSettings.SessionTimeoutMinutes = settings.SessionTimeoutMinutes;
+                existingSettings.JwtTokenLifetimeMinutes = settings.JwtTokenLifetimeMinutes;
+                existingSettings.PreventConcurrentLogin = settings.PreventConcurrentLogin;
+                
+                // Lockout Settings
+                existingSettings.MaxFailedLoginAttempts = settings.MaxFailedLoginAttempts;
+                existingSettings.AccountLockoutMinutes = settings.AccountLockoutMinutes;
+                
+                // Rate Limiting Settings
+                existingSettings.RateLimitLoginMaxAttempts = settings.RateLimitLoginMaxAttempts;
+                existingSettings.RateLimitLoginWindowMinutes = settings.RateLimitLoginWindowMinutes;
+                existingSettings.RateLimitLoginBlockDurationMinutes = settings.RateLimitLoginBlockDurationMinutes;
+                
+                existingSettings.UpdatedAt = DateTime.UtcNow;
+
+                await _unitOfWork.Repository<Security>().UpdateAsync(existingSettings);
+                await _unitOfWork.SaveChangesAsync();
+                _logger.LogInformation("Updated security settings for tenant {TenantId}", tenantId);
+                return existingSettings;
+            }
+            else
+            {
+                // Create new settings
+                settings.Id = Guid.NewGuid();
+                settings.TenantId = tenantId;
+                settings.CreatedAt = DateTime.UtcNow;
+                settings.CreatedBy = _currentUserService.GetUsername();
+                
+                var createdSettings = await _unitOfWork.Repository<Security>().AddAsync(settings);
+                await _unitOfWork.SaveChangesAsync();
+                _logger.LogInformation("Created new security settings for tenant {TenantId}", tenantId);
+                return createdSettings;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating security settings");
             throw;
         }
     }

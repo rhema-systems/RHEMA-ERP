@@ -40,6 +40,12 @@ This documentation provides comprehensive details about your **Production-Ready 
 - **[Dockerfile (API)](../src/ErpSystem.Api/Dockerfile)** - Backend containerization
 - **[Dockerfile (Frontend)](../frontend/Dockerfile)** - Frontend containerization
 
+### **Storage & File Management**
+- **[STORAGE_ABSTRACTION.md](./STORAGE_ABSTRACTION.md)** - Complete file storage abstraction guide
+- Supports Local, Azure Blob Storage, AWS S3 providers
+- Zero-downtime migration between storage providers
+- Health monitoring and migration tools included
+
 ## 🛠️ **Architecture Generation Tools**
 
 - **[generate_complete_architecture.py](./generate_complete_architecture.py)** - Comprehensive architecture diagram generator
@@ -104,6 +110,8 @@ This documentation provides comprehensive details about your **Production-Ready 
 ✅ **Enterprise**: LDAP/AD integration, multi-tenant architecture
 ✅ **CI/CD Pipeline**: Automated testing, security scanning, multi-environment deployment
 ✅ **DevOps**: Docker containerization, GitHub Actions, automated migrations
+✅ **Enhanced UI**: Compact data tables, striped rows, clickable selection, responsive design
+✅ **File Storage**: Flexible storage abstraction with provider switching capabilities
 
 ## 🚀 **Quick Start**
 
@@ -167,6 +175,7 @@ npm run dev
 | **Frontend** | Next.js 14, React 18, TypeScript, Tailwind CSS, React Query |
 | **Backend** | ASP.NET Core 8, C# 12, Entity Framework Core 8, JWT Auth |
 | **Database** | SQL Server 2022, Multi-Tenant, Connection Pooling |
+| **File Storage** | Abstracted Layer (Local, Azure Blob, AWS S3), Migration Tools |
 | **Cache** | Redis 7, Distributed Caching, Session Management |
 | **Infrastructure** | Docker, Nginx, Load Balancing, SSL/TLS |
 | **Monitoring** | Prometheus, Grafana, Serilog, Health Checks |

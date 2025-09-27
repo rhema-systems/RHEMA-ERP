@@ -23,6 +23,12 @@ A modern, multi-tenant, database-agnostic Enterprise Resource Planning (ERP) sys
 - **LDAP Integration**: Enterprise directory support
 - **Audit Logging**: Complete audit trail of all system activities
 
+### **💾 Storage Flexibility**
+- **Provider Abstraction**: Switch between Local, Azure Blob, AWS S3 via configuration
+- **Migration Tools**: Move files between storage providers seamlessly
+- **Health Monitoring**: Built-in storage provider health checks
+- **Backward Compatible**: Existing APIs continue to work unchanged
+
 ### **📊 ERP Modules**
 - **Finance Management**: Accounting, invoicing, payments
 - **Human Resources**: Employee management, payroll
@@ -36,6 +42,7 @@ A modern, multi-tenant, database-agnostic Enterprise Resource Planning (ERP) sys
 - **Backend**: .NET 8, ASP.NET Core Web API
 - **Frontend**: Next.js 14, TypeScript, Tailwind CSS
 - **Database**: Entity Framework Core with multiple providers
+- **File Storage**: Abstracted storage layer (Local, Azure Blob, AWS S3)
 - **Caching**: Redis support
 - **Logging**: Serilog with structured logging
 - **Testing**: xUnit, Integration tests
@@ -250,13 +257,39 @@ NEXT_PUBLIC_APP_NAME=ERP System
 NEXT_PUBLIC_ENVIRONMENT=development
 ```
 
+### **File Storage Configuration**
+```json
+{
+  "FileStorage": {
+    "Provider": "Local",  // Options: Local, AzureBlob, AwsS3
+    "MaxFileSizeBytes": 10485760,
+    "Local": {
+      "BasePath": "uploads",
+      "BaseUrl": "/uploads",
+      "UseWebRoot": true
+    },
+    "Azure": {
+      "ConnectionString": "your-azure-connection-string",
+      "ContainerName": "erp-uploads"
+    },
+    "Aws": {
+      "BucketName": "erp-uploads",
+      "Region": "us-east-1"
+    }
+  }
+}
+```
+
 ## 📊 **ERP Modules**
 
 ### **Core Modules**
-- ✅ **User Management**: Users, roles, permissions
-- ✅ **Tenant Management**: Multi-tenant organization
+- ✅ **User Management**: Users, roles, permissions, phone numbers with country codes
+- ✅ **Tenant Management**: Multi-tenant organization with advanced branding
 - ✅ **Settings Management**: Email, password policies
 - ✅ **Audit & Security Logs**: Complete audit trail
+- ✅ **Data Tables**: Enhanced grids with striped rows, compact design, clickable selection
+- ✅ **File Management**: Flexible storage abstraction with provider switching
+- ✅ **User Interface**: Responsive design with enhanced forms and authentication flows
 
 ### **Business Modules** (Roadmap)
 - 🔄 **Finance**: Accounting, invoicing, payments
@@ -379,6 +412,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Database Switching Guide](docs/database-switching-guide.md)
 - [Database Best Practices](docs/database-agnostic-best-practices.md)
 - [Provider Comparison](docs/database-provider-comparison.md)
+- [Storage Abstraction Guide](docs/STORAGE_ABSTRACTION.md)
 
 ### **Getting Help**
 - 📧 Create an issue for bug reports

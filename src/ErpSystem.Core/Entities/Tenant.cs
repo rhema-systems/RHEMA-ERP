@@ -25,6 +25,19 @@ public class Tenant : BaseEntity
     [StringLength(500)]
     public string? LogoUrl { get; set; }
 
+    // Branding and theme properties
+    [StringLength(7)] // Hex color code
+    public string? PrimaryColor { get; set; }
+
+    [StringLength(7)] // Hex color code
+    public string? SecondaryColor { get; set; }
+
+    [StringLength(500)]
+    public string? FaviconUrl { get; set; }
+
+    [StringLength(500)]
+    public string? CoverImageUrl { get; set; }
+
     [StringLength(200)]
     public string? ContactEmail { get; set; }
 
@@ -44,6 +57,19 @@ public class Tenant : BaseEntity
     public string? LdapBindDn { get; set; }
     public string? LdapBindPassword { get; set; }
     public bool LdapEnabled { get; set; } = false;
+
+    // Default tenant settings
+    public bool IsDefaultForPublicUsers { get; set; } = false;
+    public bool IsDefaultForInternalUsers { get; set; } = false;
+
+    // Feature flags
+    public bool AllowSelfRegistration { get; set; } = false;
+    public string? PublicRegistrationDomains { get; set; }
+    public bool RequireEmailVerification { get; set; } = false;
+    public int UserAudience { get; set; } = 2; // Internal (1), External (2), Both (3)
+    public string? WelcomeMessage { get; set; }
+    public int DefaultPriority { get; set; } = 10;
+    public bool EnableAutoSelection { get; set; } = false;
 
     // Navigation properties
     public virtual ICollection<UserTenant> UserTenants { get; set; } = new List<UserTenant>();

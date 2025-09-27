@@ -1,41 +1,83 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Building2, Eye, EyeOff, Loader2, Shield, Users } from 'lucide-react';
+import { Building2, Eye, EyeOff, Loader2, Shield, Users, UserPlus } from 'lucide-react';
+import ReCAPTCHA from 'react-google-recaptcha';
 
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { authService } from '../../services/auth';
-import { useTenant } from '../../contexts/TenantContext';
-import type { LoginRequest, Tenant } from '../../types';
+import { settingsService } from '../../services/settings';
+import { apiService } from '../../services/api.service';
+import type { LoginRequest } from '../../types';
 
-const loginSchema = z.object({
+const makeLoginSchema = (requireRecaptcha: boolean) => z.object({
   username: z.string().min(3, 'Username must be at least 3 characters'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
-  tenantCode: z.string().min(1, 'Please select a tenant'),
+  recaptchaToken: requireRecaptcha
+    ? z.string().min(1, 'Please complete the reCAPTCHA verification')
+    : z.string().optional(),
   rememberMe: z.boolean().optional(),
 });
 
-type LoginForm = z.infer<typeof loginSchema>;
+type LoginForm = z.infer<ReturnType<typeof makeLoginSchema>>;
 
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [successMessage, setSuccessMessage] = useState('');
   const router = useRouter();
-  const { tenants, isLoadingTenants } = useTenant();
+  const searchParams = useSearchParams();
 
-  // Use tenant context data
-  const isLoading = isLoadingTenants;
-  const isError = false; // Context handles errors internally
-  
-  console.log('LoginPage: tenant loading state:', { isLoading, tenantCount: tenants.length, tenants });
+  // Check for success message from URL parameters
+  useEffect(() => {
+    const message = searchParams.get('message');
+    if (message) {
+      setSuccessMessage(decodeURIComponent(message));
+      // Message will stay until user submits the form - no auto-clear
+    }
+  }, [searchParams]);
+
+  // Fetch security settings to determine if reCAPTCHA should be shown
+  const { data: securitySettings } = useQuery({
+    queryKey: ['securitySettings'],
+    queryFn: () => settingsService.getSecuritySettings(),
+  });
+
+  // Fetch tenants to check if any allow self-registration
+  const { data: tenants } = useQuery({
+    queryKey: ['tenants'],
+    queryFn: () => apiService.getTenants(),
+  });
+
+  // Check if any tenant allows self-registration
+  const allowSelfRegistration = tenants?.some(tenant => tenant.allowSelfRegistration && tenant.isActive) ?? false;
+
+  // Determine if reCAPTCHA should be shown based on settings and failed attempts
+  const shouldShowRecaptcha = () => {
+    if (!securitySettings) return false;
+    
+    // Always show if enabled in settings
+    if (securitySettings.captchaEnabled) return true;
+    
+    // Show after X failed attempts if configured
+    if (securitySettings.maxFailedLoginAttempts && 
+        failedAttempts >= Math.max(1, Math.floor(securitySettings.maxFailedLoginAttempts / 2))) {
+      return true;
+    }
+    
+    return false;
+  };
+
+  const showRecaptcha = shouldShowRecaptcha();
 
   const {
     register,
@@ -45,11 +87,11 @@ export default function LoginPage() {
     setValue,
     watch,
   } = useForm<LoginForm>({
-    resolver: zodResolver(loginSchema),
+    resolver: zodResolver(makeLoginSchema(showRecaptcha)),
     defaultValues: {
-      username: 'admin',
-      password: 'Admin123!',
-      tenantCode: '', // Always start with empty selection
+      username: '',
+      password: '',
+      recaptchaToken: '',
       rememberMe: false,
     },
   });
@@ -57,16 +99,19 @@ export default function LoginPage() {
   const loginMutation = useMutation({
     mutationFn: (data: LoginRequest) => authService.login(data),
     onSuccess: (response) => {
-      // Redirect to dashboard on successful login
-      router.push('/dashboard');
+      // After successful login, redirect to tenant selection
+      router.push('/tenant-select');
     },
     onError: (error: any) => {
       const message = error.message || 'Login failed. Please try again.';
       setError('root', { message });
+      setFailedAttempts(prev => prev + 1);
     },
   });
 
   const onSubmit = (data: LoginForm) => {
+    // Clear success message when user attempts to login
+    setSuccessMessage('');
     loginMutation.mutate(data);
   };
 
@@ -105,49 +150,6 @@ export default function LoginPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-              {/* Tenant Selection */}
-              <div className="space-y-2">
-                <Label htmlFor="tenantCode" className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  TENANT
-                </Label>
-                <div className="flex items-stretch gap-3">
-                  <div className="flex-1">
-                    <select
-                      id="tenantCode"
-                      className={`w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${errors.tenantCode ? 'border-red-500' : ''}`}
-                      {...register('tenantCode')}
-                      disabled={isLoading}
-                    >
-                      <option value="">Select a tenant</option>
-                      {tenants.map((tenant) => (
-                        <option key={tenant.code} value={tenant.code}>
-                          {tenant.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex-shrink-0">
-                    <button
-                      type="button"
-                      className="text-xs text-blue-600 hover:text-blue-500 border border-blue-600 hover:border-blue-500 px-4 py-2 rounded transition-colors whitespace-nowrap h-full"
-                    >
-                      switch
-                    </button>
-                  </div>
-                </div>
-                {errors.tenantCode && (
-                  <p className="text-sm text-red-500 flex items-center gap-1">
-                    <Shield className="h-3 w-3" />
-                    {errors.tenantCode.message}
-                  </p>
-                )}
-                {isError && (
-                  <p className="text-sm text-red-500 flex items-center gap-1">
-                    <Shield className="h-3 w-3" />
-                    Failed to load tenants. Please refresh the page.
-                  </p>
-                )}
-              </div>
 
               {/* Username Field */}
               <div className="space-y-2">
@@ -229,12 +231,47 @@ export default function LoginPage() {
                 </a>
               </div>
 
+              {/* Success Message */}
+              {successMessage && (
+                <div className="rounded-lg bg-green-50 dark:bg-green-900/20 p-4 border border-green-200 dark:border-green-800">
+                  <p className="text-sm text-green-700 dark:text-green-400 flex items-center gap-2">
+                    <Shield className="h-4 w-4" />
+                    {successMessage}
+                  </p>
+                </div>
+              )}
+
               {/* Error Message */}
               {errors.root && (
                 <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-4 border border-red-200 dark:border-red-800">
                   <p className="text-sm text-red-700 dark:text-red-400 flex items-center gap-2">
                     <Shield className="h-4 w-4" />
                     {errors.root.message}
+                  </p>
+                </div>
+              )}
+
+              {/* ReCAPTCHA - Only shown when required */}
+              {showRecaptcha && securitySettings && (
+                <div className="space-y-4">
+                  <div className="flex justify-center">
+                    <ReCAPTCHA
+                      sitekey={securitySettings.captchaProvider === 'recaptcha' 
+                        ? securitySettings.recaptchaSiteKey || '' 
+                        : securitySettings.hCaptchaSiteKey || ''}
+                      onChange={(token) => setValue('recaptchaToken', token || '')}
+                    />
+                  </div>
+                  {errors.recaptchaToken && (
+                    <p className="text-sm text-red-500 text-center">{errors.recaptchaToken.message}</p>
+                  )}
+                  {failedAttempts > 0 && (
+                    <p className="text-sm text-amber-600 dark:text-amber-400 text-center">
+                      Additional verification required due to multiple failed login attempts
+                    </p>
+                  )}
+                  <p className="text-xs text-center text-slate-500 dark:text-slate-400">
+                    Using {securitySettings.captchaProvider === 'recaptcha' ? 'Google reCAPTCHA' : 'hCAPTCHA'}
                   </p>
                 </div>
               )}
@@ -255,6 +292,35 @@ export default function LoginPage() {
                 )}
               </Button>
             </form>
+
+            {/* Create Account Link - Only shown if any tenant allows self-registration */}
+            {allowSelfRegistration && (
+              <div className="mt-6 text-center">
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t border-slate-200 dark:border-slate-700" />
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="bg-white dark:bg-slate-900 px-2 text-slate-500 dark:text-slate-400">or</span>
+                  </div>
+                </div>
+                <div className="mt-6">
+                  <Link href="/register">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full h-12 text-base font-semibold border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800"
+                    >
+                      <UserPlus className="mr-2 h-4 w-4" />
+                      Create Account
+                    </Button>
+                  </Link>
+                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    New to the platform? Create an external user account
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Demo Credentials */}
             <div className="mt-8 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">

@@ -155,14 +155,24 @@ public class ConcurrentLoginService : IConcurrentLoginService
     {
         try
         {
-            var securitySettings = await _settingsService.GetSecuritySettingsAsync();
-            var policy = securitySettings?.PreventConcurrentLogin ?? PreventConcurrentLogin.Disabled;
-            _logger.LogInformation("Retrieved concurrent login policy from settings: {Policy}", policy);
-            return policy;
+            // Try to read policy from system settings
+            var setting = await _settingsService.GetSystemSettingAsync("PreventConcurrentLogin");
+            if (setting != null && !string.IsNullOrWhiteSpace(setting.Value))
+            {
+                if (Enum.TryParse<PreventConcurrentLogin>(setting.Value, ignoreCase: true, out var parsed))
+                {
+                    _logger.LogInformation("Retrieved concurrent login policy from system settings: {Policy}", parsed);
+                    return parsed;
+                }
+                _logger.LogWarning("Invalid PreventConcurrentLogin value in system settings: {Value}. Falling back to Disabled.", setting.Value);
+            }
+
+            _logger.LogInformation("No PreventConcurrentLogin setting found. Using default: Disabled");
+            return PreventConcurrentLogin.Disabled;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting concurrent login policy from security settings");
+            _logger.LogError(ex, "Error getting concurrent login policy from system settings");
             // Fail safe - return disabled on error
             return PreventConcurrentLogin.Disabled;
         }

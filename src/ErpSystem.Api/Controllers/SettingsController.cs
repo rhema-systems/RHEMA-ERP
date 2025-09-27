@@ -7,11 +7,195 @@ using System.Security.Claims;
 
 namespace ErpSystem.Api.Controllers;
 
-[ApiController]
-[Route("api/[controller]")]
-[Authorize]
-public class SettingsController : ControllerBase
-{
+    [ApiController]
+    [Route("api/[controller]")]
+    [Authorize]
+    public class SettingsController : ControllerBase
+    {
+        [HttpGet("security")]
+        [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+        public async Task<ActionResult<SecuritySettingsDto>> GetSecuritySettings()
+        {
+            try
+            {
+                var settings = await _settingsService.GetSecuritySettingsAsync();
+                if (settings == null)
+                {
+                    // Return default security settings
+                    return Ok(new SecuritySettingsDto
+                    {
+                        // Password Policy
+                        PasswordMinLength = 8,
+                        PasswordRequireUppercase = true,
+                        PasswordRequireLowercase = true,
+                        PasswordRequireDigits = true,
+                        PasswordRequireSpecialChars = true,
+                        PasswordMaxAge = 90,
+                        PasswordPreventReuse = 5,
+
+                        // Session & Token
+                        SessionTimeoutMinutes = 30,
+                        JwtTokenLifetimeMinutes = 60,
+                        PreventConcurrentLogin = "Disabled",
+
+                        // Lockout Settings
+                        MaxFailedLoginAttempts = 5,
+                        AccountLockoutMinutes = 30,
+                        RateLimitLoginMaxAttempts = 5,
+                        RateLimitLoginWindowMinutes = 15,
+                        RateLimitLoginBlockDurationMinutes = 30,
+
+                        // CAPTCHA Settings
+                        CaptchaEnabled = false,
+                        CaptchaProvider = "recaptcha",
+                        RecaptchaSiteKey = null,
+                        RecaptchaSecretKey = null,
+                        HCaptchaSiteKey = null,
+                        HCaptchaSecretKey = null
+                    });
+                }
+
+                return Ok(new SecuritySettingsDto
+                {
+                    // Password Policy
+                    PasswordMinLength = settings.PasswordMinLength,
+                    PasswordRequireUppercase = settings.PasswordRequireUppercase,
+                    PasswordRequireLowercase = settings.PasswordRequireLowercase,
+                    PasswordRequireDigits = settings.PasswordRequireDigits,
+                    PasswordRequireSpecialChars = settings.PasswordRequireSpecialChars,
+                    PasswordMaxAge = settings.PasswordMaxAge,
+                    PasswordPreventReuse = settings.PasswordPreventReuse,
+
+                    // Session & Token
+                    SessionTimeoutMinutes = settings.SessionTimeoutMinutes,
+                    JwtTokenLifetimeMinutes = settings.JwtTokenLifetimeMinutes,
+                    PreventConcurrentLogin = settings.PreventConcurrentLogin.ToString(),
+
+                    // Lockout Settings
+                    MaxFailedLoginAttempts = settings.MaxFailedLoginAttempts,
+                    AccountLockoutMinutes = settings.AccountLockoutMinutes,
+                    RateLimitLoginMaxAttempts = settings.RateLimitLoginMaxAttempts,
+                    RateLimitLoginWindowMinutes = settings.RateLimitLoginWindowMinutes,
+                    RateLimitLoginBlockDurationMinutes = settings.RateLimitLoginBlockDurationMinutes,
+
+                    // CAPTCHA Settings
+                    CaptchaEnabled = settings.CaptchaEnabled,
+                    CaptchaProvider = settings.CaptchaProvider,
+                    RecaptchaSiteKey = settings.RecaptchaSiteKey,
+                    RecaptchaSecretKey = settings.RecaptchaSecretKey,
+                    HCaptchaSiteKey = settings.HCaptchaSiteKey,
+                    HCaptchaSecretKey = settings.HCaptchaSecretKey
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving security settings");
+                return StatusCode(500, "An error occurred while retrieving security settings");
+            }
+        }
+
+        [HttpPut("security")]
+        [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+        public async Task<ActionResult<SecuritySettingsDto>> UpdateSecuritySettings([FromBody] SecuritySettingsDto request)
+        {
+            try
+            {
+                // Get existing settings for audit logging
+                var existingSettings = await _settingsService.GetSecuritySettingsAsync();
+                
+                // Convert DTO to Security entity
+                var securitySettings = new Core.Entities.Security
+                {
+                    // Password Policy
+                    PasswordMinLength = request.PasswordMinLength,
+                    PasswordRequireUppercase = request.PasswordRequireUppercase,
+                    PasswordRequireLowercase = request.PasswordRequireLowercase,
+                    PasswordRequireDigits = request.PasswordRequireDigits,
+                    PasswordRequireSpecialChars = request.PasswordRequireSpecialChars,
+                    PasswordMaxAge = request.PasswordMaxAge,
+                    PasswordPreventReuse = request.PasswordPreventReuse,
+                    
+                    // Session & Token Settings
+                    SessionTimeoutMinutes = request.SessionTimeoutMinutes,
+                    JwtTokenLifetimeMinutes = request.JwtTokenLifetimeMinutes,
+                    PreventConcurrentLogin = Enum.Parse<Core.Enums.PreventConcurrentLogin>(request.PreventConcurrentLogin),
+                    
+                    // Lockout Settings
+                    MaxFailedLoginAttempts = request.MaxFailedLoginAttempts,
+                    AccountLockoutMinutes = request.AccountLockoutMinutes,
+                    RateLimitLoginMaxAttempts = request.RateLimitLoginMaxAttempts,
+                    RateLimitLoginWindowMinutes = request.RateLimitLoginWindowMinutes,
+                    RateLimitLoginBlockDurationMinutes = request.RateLimitLoginBlockDurationMinutes,
+                    
+                    // CAPTCHA Settings
+                    CaptchaEnabled = request.CaptchaEnabled,
+                    CaptchaProvider = request.CaptchaProvider,
+                    RecaptchaSiteKey = request.RecaptchaSiteKey,
+                    RecaptchaSecretKey = request.RecaptchaSecretKey,
+                    HCaptchaSiteKey = request.HCaptchaSiteKey,
+                    HCaptchaSecretKey = request.HCaptchaSecretKey
+                };
+
+                var updatedSettings = await _settingsService.UpdateSecuritySettingsAsync(securitySettings);
+
+                // Log the audit event
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var usernameClaim = User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst(ClaimTypes.Email)?.Value;
+                var tenantId = _currentUserService.GetTenantId();
+                
+                if (Guid.TryParse(userIdClaim, out var userId) && !string.IsNullOrEmpty(usernameClaim) && tenantId.HasValue)
+                {
+                    var auditLog = new Core.Entities.AuditLog
+                    {
+                        UserId = userId,
+                        Username = usernameClaim,
+                        Action = existingSettings == null ? "CREATE" : "UPDATE",
+                        Resource = "SecuritySettings",
+                        ResourceId = updatedSettings.Id.ToString(),
+                        OldValues = existingSettings != null ? System.Text.Json.JsonSerializer.Serialize(existingSettings) : null,
+                        NewValues = System.Text.Json.JsonSerializer.Serialize(request),
+                        IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                        UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                        TenantId = tenantId.Value
+                    };
+                    
+                    await _auditLogService.CreateAuditLogAsync(auditLog);
+                }
+
+                // Convert back to DTO for response
+                var responseDto = new SecuritySettingsDto
+                {
+                    PasswordMinLength = updatedSettings.PasswordMinLength,
+                    PasswordRequireUppercase = updatedSettings.PasswordRequireUppercase,
+                    PasswordRequireLowercase = updatedSettings.PasswordRequireLowercase,
+                    PasswordRequireDigits = updatedSettings.PasswordRequireDigits,
+                    PasswordRequireSpecialChars = updatedSettings.PasswordRequireSpecialChars,
+                    PasswordMaxAge = updatedSettings.PasswordMaxAge,
+                    PasswordPreventReuse = updatedSettings.PasswordPreventReuse,
+                    SessionTimeoutMinutes = updatedSettings.SessionTimeoutMinutes,
+                    JwtTokenLifetimeMinutes = updatedSettings.JwtTokenLifetimeMinutes,
+                    PreventConcurrentLogin = updatedSettings.PreventConcurrentLogin.ToString(),
+                    MaxFailedLoginAttempts = updatedSettings.MaxFailedLoginAttempts,
+                    AccountLockoutMinutes = updatedSettings.AccountLockoutMinutes,
+                    RateLimitLoginMaxAttempts = updatedSettings.RateLimitLoginMaxAttempts,
+                    RateLimitLoginWindowMinutes = updatedSettings.RateLimitLoginWindowMinutes,
+                    RateLimitLoginBlockDurationMinutes = updatedSettings.RateLimitLoginBlockDurationMinutes,
+                    CaptchaEnabled = updatedSettings.CaptchaEnabled,
+                    CaptchaProvider = updatedSettings.CaptchaProvider,
+                    RecaptchaSiteKey = updatedSettings.RecaptchaSiteKey,
+                    RecaptchaSecretKey = updatedSettings.RecaptchaSecretKey,
+                    HCaptchaSiteKey = updatedSettings.HCaptchaSiteKey,
+                    HCaptchaSecretKey = updatedSettings.HCaptchaSecretKey
+                };
+                
+                return Ok(responseDto);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating security settings");
+                return StatusCode(500, "An error occurred while updating security settings");
+            }
+        }
     private readonly ISettingsService _settingsService;
     private readonly IAuditLogService _auditLogService;
     private readonly ICurrentUserService _currentUserService;
@@ -397,13 +581,45 @@ public class TestEmailRequest
     public string TestEmail { get; set; } = string.Empty;
 }
 
-public class TestEmailResultDto
-{
-    public bool Success { get; set; }
-    public string Message { get; set; } = string.Empty;
-}
+    public class TestEmailResultDto
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; } = string.Empty;
+    }
 
-public class PasswordPolicyDto
+    public class SecuritySettingsDto
+    {
+        // Password Policy
+        public int PasswordMinLength { get; set; }
+        public bool PasswordRequireUppercase { get; set; }
+        public bool PasswordRequireLowercase { get; set; }
+        public bool PasswordRequireDigits { get; set; }
+        public bool PasswordRequireSpecialChars { get; set; }
+        public int? PasswordMaxAge { get; set; }
+        public int? PasswordPreventReuse { get; set; }
+
+        // Session & Token
+        public int SessionTimeoutMinutes { get; set; }
+        public int JwtTokenLifetimeMinutes { get; set; }
+        public string PreventConcurrentLogin { get; set; } = "Disabled";
+
+        // Lockout & Rate Limiting
+        public int MaxFailedLoginAttempts { get; set; }
+        public int AccountLockoutMinutes { get; set; }
+        public int RateLimitLoginMaxAttempts { get; set; }
+        public int RateLimitLoginWindowMinutes { get; set; }
+        public int RateLimitLoginBlockDurationMinutes { get; set; }
+
+        // CAPTCHA
+        public bool CaptchaEnabled { get; set; }
+        public string CaptchaProvider { get; set; } = "recaptcha";
+        public string? RecaptchaSiteKey { get; set; }
+        public string? RecaptchaSecretKey { get; set; }
+        public string? HCaptchaSiteKey { get; set; }
+        public string? HCaptchaSecretKey { get; set; }
+    }
+
+    public class PasswordPolicyDto
 {
     public int MinLength { get; set; }
     public bool RequireUppercase { get; set; }

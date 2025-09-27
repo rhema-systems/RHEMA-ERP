@@ -15,17 +15,20 @@ public class TenantController : ControllerBase
     private readonly ILogger<TenantController> _logger;
     private readonly IAuditLogService _auditLogService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ILdapAuthenticationService _ldapAuthenticationService;
 
     public TenantController(
         ITenantService tenantService, 
         ILogger<TenantController> logger,
         IAuditLogService auditLogService,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        ILdapAuthenticationService ldapAuthenticationService)
     {
         _tenantService = tenantService;
         _logger = logger;
         _auditLogService = auditLogService;
         _currentUserService = currentUserService;
+        _ldapAuthenticationService = ldapAuthenticationService;
     }
 
     /// <summary>
@@ -40,21 +43,8 @@ public class TenantController : ControllerBase
         {
             var tenants = await _tenantService.GetAllTenantsAsync();
             var tenantDtos = tenants.Where(t => t.Status == TenantStatus.Active)
-                                  .Select(t => new TenantDto
-                                  {
-                                      Id = t.Id.ToString(),
-                                      Name = t.Name,
-                                      Code = t.Code,
-                                      Description = t.Description,
-                                      IsActive = t.Status == TenantStatus.Active,
-                                      CreatedAt = t.CreatedAt,
-                                      UpdatedAt = t.UpdatedAt ?? t.CreatedAt,
-                                      LogoUrl = t.LogoUrl,
-                                      Domain = t.Domain,
-                                      ContactEmail = t.ContactEmail,
-                                      ContactPhone = t.ContactPhone,
-                                      Address = t.Address
-                                  }).ToList();
+                                  .Select(MapToTenantDto)
+                                  .ToList();
 
             return Ok(tenantDtos);
         }
@@ -81,21 +71,7 @@ public class TenantController : ControllerBase
                 return NotFound($"Tenant with ID {id} not found");
             }
 
-            var tenantDto = new TenantDto
-            {
-                Id = tenant.Id.ToString(),
-                Name = tenant.Name,
-                Code = tenant.Code,
-                Description = tenant.Description,
-                IsActive = tenant.Status == TenantStatus.Active,
-                CreatedAt = tenant.CreatedAt,
-                UpdatedAt = tenant.UpdatedAt ?? tenant.CreatedAt,
-                LogoUrl = tenant.LogoUrl,
-                Domain = tenant.Domain,
-                ContactEmail = tenant.ContactEmail,
-                ContactPhone = tenant.ContactPhone,
-                Address = tenant.Address
-            };
+            var tenantDto = MapToTenantDto(tenant);
 
             return Ok(tenantDto);
         }
@@ -123,21 +99,7 @@ public class TenantController : ControllerBase
                 return NotFound($"Tenant with code '{code}' not found");
             }
 
-            var tenantDto = new TenantDto
-            {
-                Id = tenant.Id.ToString(),
-                Name = tenant.Name,
-                Code = tenant.Code,
-                Description = tenant.Description,
-                IsActive = tenant.Status == TenantStatus.Active,
-                CreatedAt = tenant.CreatedAt,
-                UpdatedAt = tenant.UpdatedAt ?? tenant.CreatedAt,
-                LogoUrl = tenant.LogoUrl,
-                Domain = tenant.Domain,
-                ContactEmail = tenant.ContactEmail,
-                ContactPhone = tenant.ContactPhone,
-                Address = tenant.Address
-            };
+            var tenantDto = MapToTenantDto(tenant);
 
             return Ok(tenantDto);
         }
@@ -159,16 +121,58 @@ public class TenantController : ControllerBase
     {
         try
         {
+            // Parse status from request or default to Active
+            var status = TenantStatus.Active;
+            if (!string.IsNullOrEmpty(request.Status) && Enum.TryParse<TenantStatus>(request.Status, out var parsedStatus))
+            {
+                status = parsedStatus;
+            }
+
             var tenant = new Tenant
             {
+                // Core fields
                 Name = request.Name,
                 Code = request.Code,
                 Description = request.Description,
-                Status = TenantStatus.Active,
+                Status = status,
+                
+                // Contact Information
                 Domain = request.Domain,
                 ContactEmail = request.ContactEmail,
                 ContactPhone = request.ContactPhone,
-                Address = request.Address
+                Address = request.Address,
+                
+                // Branding
+                LogoUrl = request.LogoUrl,
+                PrimaryColor = request.PrimaryColor,
+                SecondaryColor = request.SecondaryColor,
+                FaviconUrl = request.FaviconUrl,
+                CoverImageUrl = request.CoverImageUrl,
+                
+                // Subscription
+                SubscriptionStartDate = request.SubscriptionStartDate,
+                SubscriptionEndDate = request.SubscriptionEndDate,
+                
+                // LDAP Configuration
+                LdapServer = request.LdapServer,
+                LdapPort = request.LdapPort,
+                LdapBaseDn = request.LdapBaseDn,
+                LdapBindDn = request.LdapBindDn,
+                LdapBindPassword = request.LdapBindPassword,
+                LdapEnabled = request.LdapEnabled,
+                
+                // Default tenant settings
+                IsDefaultForPublicUsers = request.IsDefaultForPublicUsers,
+                IsDefaultForInternalUsers = request.IsDefaultForInternalUsers,
+                
+                // Feature flags
+                AllowSelfRegistration = request.AllowSelfRegistration,
+                PublicRegistrationDomains = request.PublicRegistrationDomains,
+                RequireEmailVerification = request.RequireEmailVerification,
+                UserAudience = request.UserAudience,
+                WelcomeMessage = request.WelcomeMessage,
+                DefaultPriority = request.DefaultPriority,
+                EnableAutoSelection = request.EnableAutoSelection
             };
 
             var createdTenant = await _tenantService.CreateTenantAsync(tenant);
@@ -201,21 +205,7 @@ public class TenantController : ControllerBase
                 _logger.LogError(logEx, "Failed to log audit trail for tenant creation. Details: {Details}", logEx.Message);
             }
 
-            var tenantDto = new TenantDto
-            {
-                Id = createdTenant.Id.ToString(),
-                Name = createdTenant.Name,
-                Code = createdTenant.Code,
-                Description = createdTenant.Description,
-                IsActive = createdTenant.Status == TenantStatus.Active,
-                CreatedAt = createdTenant.CreatedAt,
-                UpdatedAt = createdTenant.UpdatedAt ?? createdTenant.CreatedAt,
-                LogoUrl = createdTenant.LogoUrl,
-                Domain = createdTenant.Domain,
-                ContactEmail = createdTenant.ContactEmail,
-                ContactPhone = createdTenant.ContactPhone,
-                Address = createdTenant.Address
-            };
+            var tenantDto = MapToTenantDto(createdTenant);
 
             return CreatedAtAction(nameof(GetTenant), new { id = createdTenant.Id }, tenantDto);
         }
@@ -247,23 +237,100 @@ public class TenantController : ControllerBase
             // Capture old values for audit logging
             var oldValues = new 
             {
+                // Core fields
                 Name = existingTenant.Name,
                 Description = existingTenant.Description,
+                Status = existingTenant.Status.ToString(),
+                IsActive = existingTenant.Status == TenantStatus.Active,
+                
+                // Contact Information
                 Domain = existingTenant.Domain,
                 ContactEmail = existingTenant.ContactEmail,
                 ContactPhone = existingTenant.ContactPhone,
                 Address = existingTenant.Address,
-                IsActive = existingTenant.Status == TenantStatus.Active
+                
+                // Branding
+                LogoUrl = existingTenant.LogoUrl,
+                PrimaryColor = existingTenant.PrimaryColor,
+                SecondaryColor = existingTenant.SecondaryColor,
+                FaviconUrl = existingTenant.FaviconUrl,
+                CoverImageUrl = existingTenant.CoverImageUrl,
+                
+                // Subscription
+                SubscriptionStartDate = existingTenant.SubscriptionStartDate,
+                SubscriptionEndDate = existingTenant.SubscriptionEndDate,
+                
+                // LDAP Configuration
+                LdapServer = existingTenant.LdapServer,
+                LdapPort = existingTenant.LdapPort,
+                LdapBaseDn = existingTenant.LdapBaseDn,
+                LdapBindDn = existingTenant.LdapBindDn,
+                LdapEnabled = existingTenant.LdapEnabled,
+                
+                // Default tenant settings
+                IsDefaultForPublicUsers = existingTenant.IsDefaultForPublicUsers,
+                IsDefaultForInternalUsers = existingTenant.IsDefaultForInternalUsers,
+                
+                // Feature flags
+                AllowSelfRegistration = existingTenant.AllowSelfRegistration,
+                PublicRegistrationDomains = existingTenant.PublicRegistrationDomains,
+                RequireEmailVerification = existingTenant.RequireEmailVerification,
+                UserAudience = existingTenant.UserAudience,
+                WelcomeMessage = existingTenant.WelcomeMessage,
+                DefaultPriority = existingTenant.DefaultPriority,
+                EnableAutoSelection = existingTenant.EnableAutoSelection
             };
 
+            // Parse status from request
+            var status = request.IsActive ? TenantStatus.Active : TenantStatus.Inactive;
+            if (!string.IsNullOrEmpty(request.Status) && Enum.TryParse<TenantStatus>(request.Status, out var parsedStatus))
+            {
+                status = parsedStatus;
+            }
+
             // Update the tenant properties
+            // Core fields
             existingTenant.Name = request.Name;
             existingTenant.Description = request.Description;
+            existingTenant.Status = status;
+            
+            // Contact Information
             existingTenant.Domain = request.Domain;
             existingTenant.ContactEmail = request.ContactEmail;
             existingTenant.ContactPhone = request.ContactPhone;
             existingTenant.Address = request.Address;
-            existingTenant.Status = request.IsActive ? TenantStatus.Active : TenantStatus.Inactive;
+            
+            // Branding
+            existingTenant.LogoUrl = request.LogoUrl;
+            existingTenant.PrimaryColor = request.PrimaryColor;
+            existingTenant.SecondaryColor = request.SecondaryColor;
+            existingTenant.FaviconUrl = request.FaviconUrl;
+            existingTenant.CoverImageUrl = request.CoverImageUrl;
+            
+            // Subscription
+            existingTenant.SubscriptionStartDate = request.SubscriptionStartDate;
+            existingTenant.SubscriptionEndDate = request.SubscriptionEndDate;
+            
+            // LDAP Configuration
+            existingTenant.LdapServer = request.LdapServer;
+            existingTenant.LdapPort = request.LdapPort;
+            existingTenant.LdapBaseDn = request.LdapBaseDn;
+            existingTenant.LdapBindDn = request.LdapBindDn;
+            existingTenant.LdapBindPassword = request.LdapBindPassword;
+            existingTenant.LdapEnabled = request.LdapEnabled;
+            
+            // Default tenant settings
+            existingTenant.IsDefaultForPublicUsers = request.IsDefaultForPublicUsers;
+            existingTenant.IsDefaultForInternalUsers = request.IsDefaultForInternalUsers;
+            
+            // Feature flags
+            existingTenant.AllowSelfRegistration = request.AllowSelfRegistration;
+            existingTenant.PublicRegistrationDomains = request.PublicRegistrationDomains;
+            existingTenant.RequireEmailVerification = request.RequireEmailVerification;
+            existingTenant.UserAudience = request.UserAudience;
+            existingTenant.WelcomeMessage = request.WelcomeMessage;
+            existingTenant.DefaultPriority = request.DefaultPriority;
+            existingTenant.EnableAutoSelection = request.EnableAutoSelection;
 
             var updatedTenant = await _tenantService.UpdateTenantAsync(existingTenant);
 
@@ -272,13 +339,48 @@ public class TenantController : ControllerBase
             {
                 var newValues = new 
                 {
+                    // Core fields
                     Name = request.Name,
                     Description = request.Description,
+                    Status = request.Status,
+                    IsActive = request.IsActive,
+                    
+                    // Contact Information
                     Domain = request.Domain,
                     ContactEmail = request.ContactEmail,
                     ContactPhone = request.ContactPhone,
                     Address = request.Address,
-                    IsActive = request.IsActive
+                    
+                    // Branding
+                    LogoUrl = request.LogoUrl,
+                    PrimaryColor = request.PrimaryColor,
+                    SecondaryColor = request.SecondaryColor,
+                    FaviconUrl = request.FaviconUrl,
+                    CoverImageUrl = request.CoverImageUrl,
+                    
+                    // Subscription
+                    SubscriptionStartDate = request.SubscriptionStartDate,
+                    SubscriptionEndDate = request.SubscriptionEndDate,
+                    
+                    // LDAP Configuration
+                    LdapServer = request.LdapServer,
+                    LdapPort = request.LdapPort,
+                    LdapBaseDn = request.LdapBaseDn,
+                    LdapBindDn = request.LdapBindDn,
+                    LdapEnabled = request.LdapEnabled,
+                    
+                    // Default tenant settings
+                    IsDefaultForPublicUsers = request.IsDefaultForPublicUsers,
+                    IsDefaultForInternalUsers = request.IsDefaultForInternalUsers,
+                    
+                    // Feature flags
+                    AllowSelfRegistration = request.AllowSelfRegistration,
+                    PublicRegistrationDomains = request.PublicRegistrationDomains,
+                    RequireEmailVerification = request.RequireEmailVerification,
+                    UserAudience = request.UserAudience,
+                    WelcomeMessage = request.WelcomeMessage,
+                    DefaultPriority = request.DefaultPriority,
+                    EnableAutoSelection = request.EnableAutoSelection
                 };
 
                 await _auditLogService.LogUserActionAsync(
@@ -297,21 +399,7 @@ public class TenantController : ControllerBase
                 _logger.LogWarning(logEx, "Failed to log audit trail for tenant update");
             }
 
-            var tenantDto = new TenantDto
-            {
-                Id = updatedTenant.Id.ToString(),
-                Name = updatedTenant.Name,
-                Code = updatedTenant.Code,
-                Description = updatedTenant.Description,
-                IsActive = updatedTenant.Status == TenantStatus.Active,
-                CreatedAt = updatedTenant.CreatedAt,
-                UpdatedAt = updatedTenant.UpdatedAt ?? updatedTenant.CreatedAt,
-                LogoUrl = updatedTenant.LogoUrl,
-                Domain = updatedTenant.Domain,
-                ContactEmail = updatedTenant.ContactEmail,
-                ContactPhone = updatedTenant.ContactPhone,
-                Address = updatedTenant.Address
-            };
+            var tenantDto = MapToTenantDto(updatedTenant);
 
             return Ok(tenantDto);
         }
@@ -370,6 +458,123 @@ public class TenantController : ControllerBase
     }
 
     /// <summary>
+    /// Test LDAP connection settings
+    /// </summary>
+    /// <param name="request">LDAP test request</param>
+    /// <returns>Test result</returns>
+    [HttpPost("ldap/test")]
+    [Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin)]
+    public async Task<ActionResult<TestLdapResultDto>> TestLdapConnection([FromBody] TestLdapRequest request)
+    {
+        try
+        {
+            // Validate required fields
+            if (string.IsNullOrEmpty(request.LdapServer))
+            {
+                return Ok(new TestLdapResultDto
+                {
+                    Success = false,
+                    Message = "LDAP server is required"
+                });
+            }
+            
+            if (!request.LdapPort.HasValue || request.LdapPort <= 0)
+            {
+                return Ok(new TestLdapResultDto
+                {
+                    Success = false,
+                    Message = "Valid LDAP port is required"
+                });
+            }
+            
+            // Create a temporary tenant object with the test settings
+            var testTenant = new Tenant
+            {
+                LdapEnabled = true, // Enable for testing
+                LdapServer = request.LdapServer,
+                LdapPort = request.LdapPort,
+                LdapBaseDn = request.LdapBaseDn,
+                LdapBindDn = request.LdapBindDn,
+                LdapBindPassword = request.LdapBindPassword
+            };
+            
+            // Use the LDAP authentication service to test the connection
+            var result = await _ldapAuthenticationService.TestConnectionAsync(testTenant);
+            
+            return Ok(new TestLdapResultDto
+            {
+                Success = result.Success,
+                Message = result.ErrorMessage ?? "LDAP connection test completed"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error testing LDAP connection");
+            return Ok(new TestLdapResultDto
+            {
+                Success = false,
+                Message = $"Error testing LDAP connection: {ex.Message}"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Helper method to map Tenant entity to TenantDto
+    /// </summary>
+    private TenantDto MapToTenantDto(Tenant tenant)
+    {
+        return new TenantDto
+        {
+            Id = tenant.Id.ToString(),
+            Name = tenant.Name,
+            Code = tenant.Code,
+            Description = tenant.Description,
+            IsActive = tenant.Status == TenantStatus.Active,
+            Status = tenant.Status.ToString(),
+            CreatedAt = tenant.CreatedAt,
+            UpdatedAt = tenant.UpdatedAt ?? tenant.CreatedAt,
+            
+            // Contact Information
+            Domain = tenant.Domain,
+            ContactEmail = tenant.ContactEmail,
+            ContactPhone = tenant.ContactPhone,
+            Address = tenant.Address,
+            
+            // Branding
+            LogoUrl = tenant.LogoUrl,
+            PrimaryColor = tenant.PrimaryColor,
+            SecondaryColor = tenant.SecondaryColor,
+            FaviconUrl = tenant.FaviconUrl,
+            CoverImageUrl = tenant.CoverImageUrl,
+            
+            // Subscription
+            SubscriptionStartDate = tenant.SubscriptionStartDate,
+            SubscriptionEndDate = tenant.SubscriptionEndDate,
+            
+            // LDAP Configuration
+            LdapServer = tenant.LdapServer,
+            LdapPort = tenant.LdapPort,
+            LdapBaseDn = tenant.LdapBaseDn,
+            LdapBindDn = tenant.LdapBindDn,
+            LdapBindPassword = tenant.LdapBindPassword,
+            LdapEnabled = tenant.LdapEnabled,
+            
+            // Default tenant settings
+            IsDefaultForPublicUsers = tenant.IsDefaultForPublicUsers,
+            IsDefaultForInternalUsers = tenant.IsDefaultForInternalUsers,
+            
+            // Feature flags
+            AllowSelfRegistration = tenant.AllowSelfRegistration,
+            PublicRegistrationDomains = tenant.PublicRegistrationDomains,
+            RequireEmailVerification = tenant.RequireEmailVerification,
+            UserAudience = tenant.UserAudience,
+            WelcomeMessage = tenant.WelcomeMessage,
+            DefaultPriority = tenant.DefaultPriority,
+            EnableAutoSelection = tenant.EnableAutoSelection
+        };
+    }
+
+    /// <summary>
     /// Helper method to get client IP address
     /// </summary>
     private string GetClientIpAddress()
@@ -394,33 +599,154 @@ public class TenantDto
     public string Code { get; set; } = string.Empty;
     public string? Description { get; set; }
     public bool IsActive { get; set; }
+    public string Status { get; set; } = "Active";
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
-    public string? LogoUrl { get; set; }
+    
+    // Contact Information
     public string? Domain { get; set; }
     public string? ContactEmail { get; set; }
     public string? ContactPhone { get; set; }
     public string? Address { get; set; }
+    
+    // Branding
+    public string? LogoUrl { get; set; }
+    public string? PrimaryColor { get; set; }
+    public string? SecondaryColor { get; set; }
+    public string? FaviconUrl { get; set; }
+    public string? CoverImageUrl { get; set; }
+    
+    // Subscription
+    public DateTime? SubscriptionStartDate { get; set; }
+    public DateTime? SubscriptionEndDate { get; set; }
+    
+    // LDAP Configuration
+    public string? LdapServer { get; set; }
+    public int? LdapPort { get; set; }
+    public string? LdapBaseDn { get; set; }
+    public string? LdapBindDn { get; set; }
+    public string? LdapBindPassword { get; set; }
+    public bool LdapEnabled { get; set; } = false;
+    
+    // Default tenant settings
+    public bool IsDefaultForPublicUsers { get; set; } = false;
+    public bool IsDefaultForInternalUsers { get; set; } = false;
+    
+    // Feature flags
+    public bool AllowSelfRegistration { get; set; } = false;
+    public string? PublicRegistrationDomains { get; set; }
+    public bool RequireEmailVerification { get; set; } = false;
+    public int UserAudience { get; set; } = 2; // Internal (1), External (2), Both (3)
+    public string? WelcomeMessage { get; set; }
+    public int DefaultPriority { get; set; } = 10;
+    public bool EnableAutoSelection { get; set; } = false;
 }
 
 public class CreateTenantRequest
 {
+    // Required fields
     public string Name { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string Status { get; set; } = "Active";
+    
+    // Contact Information
     public string? Domain { get; set; }
     public string? ContactEmail { get; set; }
     public string? ContactPhone { get; set; }
     public string? Address { get; set; }
+    
+    // Branding
+    public string? LogoUrl { get; set; }
+    public string? PrimaryColor { get; set; }
+    public string? SecondaryColor { get; set; }
+    public string? FaviconUrl { get; set; }
+    public string? CoverImageUrl { get; set; }
+    
+    // Subscription
+    public DateTime? SubscriptionStartDate { get; set; }
+    public DateTime? SubscriptionEndDate { get; set; }
+    
+    // LDAP Configuration
+    public string? LdapServer { get; set; }
+    public int? LdapPort { get; set; }
+    public string? LdapBaseDn { get; set; }
+    public string? LdapBindDn { get; set; }
+    public string? LdapBindPassword { get; set; }
+    public bool LdapEnabled { get; set; } = false;
+    
+    // Default tenant settings
+    public bool IsDefaultForPublicUsers { get; set; } = false;
+    public bool IsDefaultForInternalUsers { get; set; } = false;
+    
+    // Feature flags
+    public bool AllowSelfRegistration { get; set; } = false;
+    public string? PublicRegistrationDomains { get; set; }
+    public bool RequireEmailVerification { get; set; } = false;
+    public int UserAudience { get; set; } = 2; // Internal (1), External (2), Both (3)
+    public string? WelcomeMessage { get; set; }
+    public int DefaultPriority { get; set; } = 10;
+    public bool EnableAutoSelection { get; set; } = false;
+}
+
+public class TestLdapRequest
+{
+    public string? LdapServer { get; set; }
+    public int? LdapPort { get; set; }
+    public string? LdapBaseDn { get; set; }
+    public string? LdapBindDn { get; set; }
+    public string? LdapBindPassword { get; set; }
+}
+
+public class TestLdapResultDto
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
 }
 
 public class UpdateTenantRequest
 {
+    // Core fields
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string Status { get; set; } = "Active";
+    
+    // Contact Information
     public string? Domain { get; set; }
     public string? ContactEmail { get; set; }
     public string? ContactPhone { get; set; }
     public string? Address { get; set; }
-    public bool IsActive { get; set; } = true;
+    
+    // Branding
+    public string? LogoUrl { get; set; }
+    public string? PrimaryColor { get; set; }
+    public string? SecondaryColor { get; set; }
+    public string? FaviconUrl { get; set; }
+    public string? CoverImageUrl { get; set; }
+    
+    // Subscription
+    public DateTime? SubscriptionStartDate { get; set; }
+    public DateTime? SubscriptionEndDate { get; set; }
+    
+    // LDAP Configuration
+    public string? LdapServer { get; set; }
+    public int? LdapPort { get; set; }
+    public string? LdapBaseDn { get; set; }
+    public string? LdapBindDn { get; set; }
+    public string? LdapBindPassword { get; set; }
+    public bool LdapEnabled { get; set; } = false;
+    
+    // Default tenant settings
+    public bool IsDefaultForPublicUsers { get; set; } = false;
+    public bool IsDefaultForInternalUsers { get; set; } = false;
+    
+    // Feature flags
+    public bool AllowSelfRegistration { get; set; } = false;
+    public string? PublicRegistrationDomains { get; set; }
+    public bool RequireEmailVerification { get; set; } = false;
+    public int UserAudience { get; set; } = 2; // Internal (1), External (2), Both (3)
+    public string? WelcomeMessage { get; set; }
+    public int DefaultPriority { get; set; } = 10;
+    public bool EnableAutoSelection { get; set; } = false;
 }

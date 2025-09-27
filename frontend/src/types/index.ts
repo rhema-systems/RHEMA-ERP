@@ -22,7 +22,7 @@ export interface User {
 export interface LoginRequest {
   username: string;
   password: string;
-  tenantCode: string;
+  tenantCode?: string;
   rememberMe?: boolean;
 }
 

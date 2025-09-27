@@ -117,12 +117,13 @@ const navigationItems: NavItem[] = [
         ],
       },
       { title: 'Tenant Management', href: '/administration/tenant-management', icon: Building },
+      { title: 'User-Tenant Mapping', href: '/administration/user-tenant-mapping', icon: Users },
       {
         title: 'Settings',
         href: '/administration/settings',
         icon: Settings,
         children: [
-          { title: 'Password Policy', href: '/administration/settings/password-policy', icon: Shield },
+          { title: 'Security', href: '/administration/settings/security', icon: Shield },
           { title: 'Email Settings', href: '/administration/settings/email', icon: Mail },
         ],
       },

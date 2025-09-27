@@ -1,5 +1,5 @@
 import { apiService } from './api.service';
-import type { LoginRequest, LoginResponse, User } from '../types';
+import type { LoginRequest, LoginResponse, User, Tenant } from '../types';
 
 export class AuthService {
   async login(credentials: LoginRequest): Promise<LoginResponse> {
@@ -10,19 +10,6 @@ export class AuthService {
       localStorage.setItem('authToken', response.token);
       localStorage.setItem('refreshToken', response.refreshToken);
       localStorage.setItem('user', JSON.stringify(response.user));
-      
-      // Store the selected tenant code for header display
-      if (credentials.tenantCode) {
-        console.log('AuthService: Storing tenant code:', credentials.tenantCode);
-        localStorage.setItem('currentTenantCode', credentials.tenantCode);
-        // Dispatch custom event to notify components
-        if (typeof window !== 'undefined') {
-          console.log('AuthService: Dispatching tenant-changed event:', credentials.tenantCode);
-          window.dispatchEvent(new CustomEvent('tenant-changed', {
-            detail: credentials.tenantCode
-          }));
-        }
-      }
     }
     
     return response;
@@ -94,7 +81,31 @@ export class AuthService {
     localStorage.removeItem('authToken');
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('user');
-    localStorage.removeItem('currentTenantCode');
+    localStorage.removeItem('currentTenant');
+  }
+
+  setCurrentTenant(tenant: Tenant): void {
+    if (typeof window === 'undefined') return;
+    
+    localStorage.setItem('currentTenant', JSON.stringify(tenant));
+    window.dispatchEvent(new CustomEvent('tenant-changed', { detail: tenant }));
+  }
+
+  getCurrentTenant(): Tenant | null {
+    if (typeof window === 'undefined') return null;
+    
+    const tenantStr = localStorage.getItem('currentTenant');
+    if (!tenantStr) return null;
+    
+    try {
+      return JSON.parse(tenantStr);
+    } catch {
+      return null;
+    }
+  }
+
+  hasTenantSelected(): boolean {
+    return !!this.getCurrentTenant();
   }
 
   hasRole(role: string): boolean {

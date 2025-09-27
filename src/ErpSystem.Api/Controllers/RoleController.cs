@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.Services;
+using ErpSystem.Data.Services;
 using ErpSystem.Core.Entities;
 using ErpSystem.Shared;
-
+using IPermissionService = ErpSystem.Data.Services.IPermissionService;
+using IRolePermissionService = ErpSystem.Data.Services.IRolePermissionService;
 namespace ErpSystem.Api.Controllers;
 
 [ApiController]
@@ -12,17 +14,23 @@ namespace ErpSystem.Api.Controllers;
 public class RoleController : ControllerBase
 {
     private readonly IRoleService _roleService;
+    private readonly IPermissionService _permissionService;
+    private readonly IRolePermissionService _rolePermissionService;
     private readonly ILogger<RoleController> _logger;
     private readonly IAuditLogService _auditLogService;
     private readonly ICurrentUserService _currentUserService;
 
     public RoleController(
-        IRoleService roleService, 
+        IRoleService roleService,
+        IPermissionService permissionService,
+        IRolePermissionService rolePermissionService,
         ILogger<RoleController> logger,
         IAuditLogService auditLogService,
         ICurrentUserService currentUserService)
     {
         _roleService = roleService;
+        _permissionService = permissionService;
+        _rolePermissionService = rolePermissionService;
         _logger = logger;
         _auditLogService = auditLogService;
         _currentUserService = currentUserService;
@@ -37,13 +45,13 @@ public class RoleController : ControllerBase
     {
         try
         {
-            var roles = await _roleService.GetAllRolesAsync();
+            var roles = await _rolePermissionService.GetAllRolesWithPermissionsAsync();
             var roleDtos = roles.Select(r => new RoleDto
             {
                 Id = r.Id.ToString(),
                 Name = r.Name,
                 Description = r.Description,
-                Permissions = Array.Empty<string>(), // Permissions managed separately
+                Permissions = r.RolePermissions.Select(rp => rp.Permission.Name).ToArray(),
                 IsSystemRole = r.IsSystemRole,
                 CreatedAt = r.CreatedAt,
                 UpdatedAt = r.UpdatedAt
@@ -67,7 +75,7 @@ public class RoleController : ControllerBase
     {
         try
         {
-            var role = await _roleService.GetRoleByIdAsync(id);
+            var role = await _rolePermissionService.GetRoleWithPermissionsByIdAsync(id);
             if (role == null)
             {
                 return NotFound($"Role with ID {id} not found");
@@ -78,7 +86,7 @@ public class RoleController : ControllerBase
                 Id = role.Id.ToString(),
                 Name = role.Name,
                 Description = role.Description,
-                Permissions = Array.Empty<string>(), // Permissions managed separately
+                Permissions = role.RolePermissions.Select(rp => rp.Permission.Name).ToArray(),
                 IsSystemRole = role.IsSystemRole,
                 CreatedAt = role.CreatedAt,
                 UpdatedAt = role.UpdatedAt
@@ -107,10 +115,26 @@ public class RoleController : ControllerBase
                 Description = request.Description,
                 IsSystemRole = false
             };
-            
-            // TODO: Handle permissions - for now we'll store them as a JSON string in description or use a separate entity
 
             var createdRole = await _roleService.CreateRoleAsync(role);
+            
+            // Handle permissions
+            if (request.Permissions != null && request.Permissions.Length > 0)
+            {
+                var permissions = await _permissionService.GetAllPermissionsAsync();
+                var permissionIds = permissions
+                    .Where(p => request.Permissions.Contains(p.Name))
+                    .Select(p => p.Id)
+                    .ToList();
+                    
+                if (permissionIds.Any())
+                {
+                    await _permissionService.UpdateRolePermissionsAsync(
+                        createdRole.Id, 
+                        permissionIds, 
+                        _currentUserService.GetUsername());
+                }
+            }
 
             // Log audit trail for role creation
             try
@@ -135,12 +159,15 @@ public class RoleController : ControllerBase
                 _logger.LogWarning(logEx, "Failed to log audit trail for role creation");
             }
 
+            // Get the created role with permissions
+            var roleWithPermissions = await _rolePermissionService.GetRoleWithPermissionsByIdAsync(createdRole.Id);
+            
             var roleDto = new RoleDto
             {
                 Id = createdRole.Id.ToString(),
                 Name = createdRole.Name,
                 Description = createdRole.Description,
-                Permissions = Array.Empty<string>(), // Permissions managed separately
+                Permissions = roleWithPermissions?.RolePermissions.Select(rp => rp.Permission.Name).ToArray() ?? Array.Empty<string>(),
                 IsSystemRole = createdRole.IsSystemRole,
                 CreatedAt = createdRole.CreatedAt,
                 UpdatedAt = createdRole.UpdatedAt
@@ -186,9 +213,23 @@ public class RoleController : ControllerBase
 
             role.Name = request.Name;
             role.Description = request.Description;
-            // Permissions are managed separately in this architecture
 
             var updatedRole = await _roleService.UpdateRoleAsync(role);
+            
+            // Handle permissions update
+            if (request.Permissions != null)
+            {
+                var permissions = await _permissionService.GetAllPermissionsAsync();
+                var permissionIds = permissions
+                    .Where(p => request.Permissions.Contains(p.Name))
+                    .Select(p => p.Id)
+                    .ToList();
+                    
+                await _permissionService.UpdateRolePermissionsAsync(
+                    updatedRole.Id, 
+                    permissionIds, 
+                    _currentUserService.GetUsername());
+            }
 
             // Log audit trail for role update
             try
@@ -216,12 +257,15 @@ public class RoleController : ControllerBase
                 _logger.LogWarning(logEx, "Failed to log audit trail for role update");
             }
 
+            // Get the updated role with permissions
+            var roleWithPermissions = await _rolePermissionService.GetRoleWithPermissionsByIdAsync(updatedRole.Id);
+            
             var roleDto = new RoleDto
             {
                 Id = updatedRole.Id.ToString(),
                 Name = updatedRole.Name,
                 Description = updatedRole.Description,
-                Permissions = Array.Empty<string>(), // Permissions managed separately
+                Permissions = roleWithPermissions?.RolePermissions.Select(rp => rp.Permission.Name).ToArray() ?? Array.Empty<string>(),
                 IsSystemRole = updatedRole.IsSystemRole,
                 CreatedAt = updatedRole.CreatedAt,
                 UpdatedAt = updatedRole.UpdatedAt

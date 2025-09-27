@@ -19,6 +19,8 @@ using ErpSystem.Api.HealthChecks;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using ErpSystem.Api.Services;
+using ErpSystem.Core.Models;
+using static ErpSystem.Core.Services.StorageServiceExtensions;
 
 namespace ErpSystem.Api.Extensions
 {
@@ -134,12 +136,15 @@ namespace ErpSystem.Api.Extensions
         {
             // Core services
             services.AddScoped<ITenantService, TenantService>();
+            services.AddScoped<IUserTenantService, UserTenantService>();
             services.AddScoped<ILdapAuthenticationService, LdapAuthenticationService>();
             services.AddScoped<ISearchService, SearchService>();
             
             // Identity services
             services.AddScoped<IUserService, UserService>();
             services.AddScoped<IRoleService, RoleService>();
+            services.AddScoped<ErpSystem.Data.Services.IPermissionService, ErpSystem.Data.Services.PermissionService>();
+            services.AddScoped<ErpSystem.Data.Services.IRolePermissionService, ErpSystem.Data.Services.RolePermissionService>();
             
             // Settings services
             services.AddScoped<ISettingsService, SettingsService>();
@@ -469,6 +474,34 @@ namespace ErpSystem.Api.Extensions
             // Add database seeding service
             // services.AddDatabaseSeeding();
 
+            return services;
+        }
+        
+        /// <summary>
+        /// Add file upload services and configuration
+        /// </summary>
+        public static IServiceCollection AddErpSystemFileUpload(this IServiceCollection services, IConfiguration configuration)
+        {
+            // Legacy - kept for backward compatibility
+            services.Configure<ErpSystem.Api.Controllers.FileUploadOptions>(configuration.GetSection(ErpSystem.Api.Controllers.FileUploadOptions.SectionName));
+            
+            // Configure new storage system
+            services.Configure<StorageProviderOptions>(configuration.GetSection(StorageProviderOptions.SectionName));
+            
+            // Add storage services
+            services.AddStorageServices();
+            
+            // Configure multipart body length limit for file uploads
+            services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
+            {
+                // Set limits for file uploads
+                options.MultipartBodyLengthLimit = 50 * 1024 * 1024; // 50MB
+                options.ValueLengthLimit = 50 * 1024 * 1024; // 50MB
+                options.MultipartBoundaryLengthLimit = 128;
+                options.MultipartHeadersCountLimit = 16;
+                options.MultipartHeadersLengthLimit = 16384;
+            });
+            
             return services;
         }
 

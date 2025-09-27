@@ -143,10 +143,10 @@ export default function RolesPage() {
         description: `Role ${editingRole ? 'updated' : 'created'} successfully`,
       });
     },
-    onError: () => {
+    onError: (error: any) => {
       toast({
         title: 'Error',
-        description: `Failed to ${editingRole ? 'update' : 'create'} role`,
+        description: error?.message || `Failed to ${editingRole ? 'update' : 'create'} role`,
         variant: 'destructive',
       });
     },
@@ -163,10 +163,10 @@ export default function RolesPage() {
         description: 'Role deleted successfully',
       });
     },
-    onError: () => {
+    onError: (error: any) => {
       toast({
         title: 'Error',
-        description: 'Failed to delete role',
+        description: error?.message || 'Failed to delete role',
         variant: 'destructive',
       });
     },
@@ -179,6 +179,14 @@ export default function RolesPage() {
   };
 
   const handleEdit = (role: Role) => {
+    if (role.isSystemRole) {
+      toast({
+        title: 'Error',
+        description: 'Cannot edit system roles',
+        variant: 'destructive',
+      });
+      return;
+    }
     setEditingRole(role);
     form.reset({
       name: role.name,

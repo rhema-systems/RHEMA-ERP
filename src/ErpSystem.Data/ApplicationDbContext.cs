@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.Entities;
+using ErpSystem.Data.Configuration;
 
 namespace ErpSystem.Data;
 
@@ -30,14 +31,24 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<EmailSettings> EmailSettings { get; set; }
     public DbSet<PasswordPolicy> PasswordPolicies { get; set; }
     public DbSet<SystemSettings> SystemSettings { get; set; }
+    public DbSet<Security> Securities { get; set; }
     
     // Logging entities
     public DbSet<AuditLog> AuditLogs { get; set; }
     public DbSet<SecurityLog> SecurityLogs { get; set; }
+    
+    // Permission entities
+    public DbSet<Permission> Permissions { get; set; }
+    public DbSet<RolePermission> RolePermissions { get; set; }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        // Apply entity configurations
+        builder.ApplyConfiguration(new ApplicationUserConfiguration());
+        builder.ApplyConfiguration(new TenantConfiguration());
+        builder.ApplyConfiguration(new UserTenantConfiguration());
 
         // Configure Identity tables with custom names
         builder.Entity<ApplicationUser>(entity =>
@@ -47,36 +58,32 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.Property(e => e.LastName).IsRequired().HasMaxLength(100);
             entity.HasIndex(e => e.UserName).IsUnique();
             
+            // Primary tenant relationship
+            entity.HasOne(u => u.Tenant)
+                .WithMany()
+                .HasForeignKey(u => u.TenantId)
+                .IsRequired()
+                .OnDelete(DeleteBehavior.Restrict);
+
             // Configure relationship to UserTenants
             entity.HasMany(u => u.UserTenants)
-                  .WithOne(ut => ut.User)
-                  .HasForeignKey(ut => ut.UserId)
-                  .OnDelete(DeleteBehavior.Cascade);
+                .WithOne(ut => ut.User)
+                .HasForeignKey(ut => ut.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            
+            // Ignore computed helper properties
+            entity.Ignore(u => u.FullName);
+            entity.Ignore(u => u.DefaultTenant);
+            entity.Ignore(u => u.AccessibleTenants);
+            entity.Ignore(u => u.ActiveTenantRelationships);
+            entity.Ignore(u => u.SuspendedTenantRelationships);
+            entity.Ignore(u => u.AllTenantRelationships);
         });
-
-        builder.Entity<ApplicationRole>(entity =>
-        {
-            entity.ToTable("Roles");
-        });
-
         builder.Entity<ApplicationUserRole>(entity =>
         {
             entity.ToTable("UserRoles");
             entity.HasOne(ur => ur.User).WithMany(u => u.UserRoles).HasForeignKey(ur => ur.UserId);
             entity.HasOne(ur => ur.Role).WithMany(r => r.UserRoles).HasForeignKey(ur => ur.RoleId);
-        });
-
-        // Configure Tenant entity
-        builder.Entity<Tenant>(entity =>
-        {
-            entity.HasIndex(e => e.Code).IsUnique();
-            entity.HasIndex(e => e.Name).IsUnique();
-            
-            // Configure relationship to UserTenants
-            entity.HasMany(t => t.UserTenants)
-                  .WithOne(ut => ut.Tenant)
-                  .HasForeignKey(ut => ut.TenantId)
-                  .OnDelete(DeleteBehavior.Cascade);
         });
         
         // Configure UserTenant junction entity
@@ -84,18 +91,23 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.ToTable("UserTenants");
             
-            // Create composite unique index to prevent duplicate user-tenant assignments
-            entity.HasIndex(ut => new { ut.UserId, ut.TenantId }).IsUnique();
-            
-            // Create index for efficient lookups
-            entity.HasIndex(ut => ut.UserId);
-            entity.HasIndex(ut => ut.TenantId);
-            entity.HasIndex(ut => ut.IsDefault);
-            entity.HasIndex(ut => new { ut.UserId, ut.IsDefault });
-            
             // Configure properties
             entity.Property(ut => ut.AccessLevel).HasConversion<int>();
             entity.Property(ut => ut.GrantedAt).IsRequired();
+        });
+
+        // Configure Tenant entity
+        builder.Entity<Tenant>(entity =>
+        {
+            // Configure relationship to UserTenants
+            entity.HasMany(t => t.UserTenants)
+                .WithOne(ut => ut.Tenant)
+                .HasForeignKey(ut => ut.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            
+            // Ignore computed helper properties that shouldn't be treated as navigation properties
+            entity.Ignore(t => t.Users);
+            entity.Ignore(t => t.ActiveUserCount);
         });
 
         // Configure TenantModule entity
@@ -143,6 +155,38 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(s => s.Timestamp);
             entity.HasIndex(s => s.IpAddress);
             entity.HasIndex(s => s.Action);
+        });
+        
+        // Configure Security entity
+        builder.Entity<Security>(entity =>
+        {
+            entity.HasOne(s => s.Tenant).WithMany().HasForeignKey(s => s.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(s => s.TenantId);
+        });
+        
+        // Configure Permission entity
+        builder.Entity<Permission>(entity =>
+        {
+            entity.ToTable("Permissions");
+            entity.HasIndex(p => p.Name).IsUnique();
+            entity.HasIndex(p => p.Category);
+        });
+        
+        // Configure RolePermission junction entity
+        builder.Entity<RolePermission>(entity =>
+        {
+            entity.ToTable("RolePermissions");
+            entity.HasKey(rp => new { rp.RoleId, rp.PermissionId });
+            
+            entity.HasOne(rp => rp.Role)
+                .WithMany(r => r.RolePermissions)
+                .HasForeignKey(rp => rp.RoleId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasOne(rp => rp.Permission)
+                .WithMany(p => p.RolePermissions)
+                .HasForeignKey(rp => rp.PermissionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Apply global query filters for soft delete and multitenancy
@@ -250,6 +294,189 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 }
             );
         }
+        
+        // Seed permissions
+        SeedPermissions(builder);
+    }
+    
+    private void SeedPermissions(ModelBuilder builder)
+    {
+        var permissions = new List<Permission>();
+        var permissionId = 1;
+        
+        // User Management permissions
+        var userPermissions = new[]
+        {
+            ("users.read", "View Users", "View user accounts and details"),
+            ("users.create", "Create Users", "Create new user accounts"),
+            ("users.update", "Update Users", "Edit existing user accounts"),
+            ("users.delete", "Delete Users", "Delete user accounts")
+        };
+        
+        foreach (var (name, displayName, description) in userPermissions)
+        {
+            permissions.Add(new Permission
+            {
+                Id = Guid.Parse($"00000000-0000-0000-0000-{permissionId:000000000000}"),
+                Name = name,
+                DisplayName = displayName,
+                Description = description,
+                Category = "User Management",
+                IsSystemPermission = true,
+                CreatedAt = DateTime.UtcNow
+            });
+            permissionId++;
+        }
+        
+        // Role Management permissions
+        var rolePermissions = new[]
+        {
+            ("roles.read", "View Roles", "View role definitions"),
+            ("roles.create", "Create Roles", "Create new roles"),
+            ("roles.update", "Update Roles", "Edit existing roles"),
+            ("roles.delete", "Delete Roles", "Delete roles")
+        };
+        
+        foreach (var (name, displayName, description) in rolePermissions)
+        {
+            permissions.Add(new Permission
+            {
+                Id = Guid.Parse($"00000000-0000-0000-0000-{permissionId:000000000000}"),
+                Name = name,
+                DisplayName = displayName,
+                Description = description,
+                Category = "Role Management",
+                IsSystemPermission = true,
+                CreatedAt = DateTime.UtcNow
+            });
+            permissionId++;
+        }
+        
+        // Dashboard & Reports permissions
+        var dashboardPermissions = new[]
+        {
+            ("dashboard.read", "View Dashboard", "Access main dashboard"),
+            ("reports.read", "View Reports", "Access reporting features"),
+            ("reports.create", "Create Reports", "Generate custom reports"),
+            ("analytics.read", "View Analytics", "Access analytics data")
+        };
+        
+        foreach (var (name, displayName, description) in dashboardPermissions)
+        {
+            permissions.Add(new Permission
+            {
+                Id = Guid.Parse($"00000000-0000-0000-0000-{permissionId:000000000000}"),
+                Name = name,
+                DisplayName = displayName,
+                Description = description,
+                Category = "Dashboard & Reports",
+                IsSystemPermission = true,
+                CreatedAt = DateTime.UtcNow
+            });
+            permissionId++;
+        }
+        
+        // System Administration permissions
+        var adminPermissions = new[]
+        {
+            ("admin.read", "View Admin", "Access admin interface"),
+            ("settings.read", "View Settings", "View system settings"),
+            ("settings.update", "Update Settings", "Modify system settings"),
+            ("audit.read", "View Audit Logs", "Access audit trail")
+        };
+        
+        foreach (var (name, displayName, description) in adminPermissions)
+        {
+            permissions.Add(new Permission
+            {
+                Id = Guid.Parse($"00000000-0000-0000-0000-{permissionId:000000000000}"),
+                Name = name,
+                DisplayName = displayName,
+                Description = description,
+                Category = "System Administration",
+                IsSystemPermission = true,
+                CreatedAt = DateTime.UtcNow
+            });
+            permissionId++;
+        }
+        
+        builder.Entity<Permission>().HasData(permissions.ToArray());
+        
+        // Seed role-permission relationships
+        SeedRolePermissions(builder, permissions);
+    }
+    
+    private void SeedRolePermissions(ModelBuilder builder, List<Permission> permissions)
+    {
+        var rolePermissions = new List<RolePermission>();
+        
+        // SuperAdmin gets all permissions
+        var superAdminRoleId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        foreach (var permission in permissions)
+        {
+            rolePermissions.Add(new RolePermission
+            {
+                RoleId = superAdminRoleId,
+                PermissionId = permission.Id,
+                GrantedAt = DateTime.UtcNow,
+                GrantedBy = "System"
+            });
+        }
+        
+        // TenantAdmin gets most permissions except user management of SuperAdmin
+        var tenantAdminRoleId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var tenantAdminPermissions = permissions.Where(p => 
+            p.Category != "System Administration" || 
+            (p.Category == "System Administration" && p.Name != "admin.read")).ToList();
+            
+        foreach (var permission in tenantAdminPermissions)
+        {
+            rolePermissions.Add(new RolePermission
+            {
+                RoleId = tenantAdminRoleId,
+                PermissionId = permission.Id,
+                GrantedAt = DateTime.UtcNow,
+                GrantedBy = "System"
+            });
+        }
+        
+        // Manager gets read permissions and basic management
+        var managerRoleId = Guid.Parse("00000000-0000-0000-0000-000000000003");
+        var managerPermissions = permissions.Where(p => 
+            p.Name.EndsWith(".read") || 
+            p.Name == "users.update" || 
+            p.Name == "reports.create").ToList();
+            
+        foreach (var permission in managerPermissions)
+        {
+            rolePermissions.Add(new RolePermission
+            {
+                RoleId = managerRoleId,
+                PermissionId = permission.Id,
+                GrantedAt = DateTime.UtcNow,
+                GrantedBy = "System"
+            });
+        }
+        
+        // Employee gets basic read permissions
+        var employeeRoleId = Guid.Parse("00000000-0000-0000-0000-000000000004");
+        var employeePermissions = permissions.Where(p => 
+            p.Name == "dashboard.read" || 
+            p.Name == "reports.read" || 
+            p.Name == "users.read").ToList();
+            
+        foreach (var permission in employeePermissions)
+        {
+            rolePermissions.Add(new RolePermission
+            {
+                RoleId = employeeRoleId,
+                PermissionId = permission.Id,
+                GrantedAt = DateTime.UtcNow,
+                GrantedBy = "System"
+            });
+        }
+        
+        builder.Entity<RolePermission>().HasData(rolePermissions.ToArray());
     }
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)

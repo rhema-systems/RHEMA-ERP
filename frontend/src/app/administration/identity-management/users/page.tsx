@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DashboardLayout } from '../../../../components/layout/dashboard-layout';
 import { DataTable, Column } from '../../../../components/admin/data-table';
@@ -24,6 +24,7 @@ import {
   FormMessage,
 } from '../../../../components/ui/form';
 import { Input } from '../../../../components/ui/input';
+import { Label } from '../../../../components/ui/label';
 import { Switch } from '../../../../components/ui/switch';
 import { Textarea } from '../../../../components/ui/textarea';
 import {
@@ -38,6 +39,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { adminApiService, User, CreateUserRequest, UpdateUserRequest } from '../../../../services/admin-api.service';
 import { useToast } from '../../../../hooks/use-toast';
+import PhoneInput from '../../../../components/ui/phone-input';
 
 const userSchema = z.object({
   username: z.string().min(3, 'Username must be at least 3 characters'),
@@ -45,9 +47,11 @@ const userSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters').optional(),
   firstName: z.string().optional(),
   lastName: z.string().optional(),
+  phoneNumber: z.string().refine((val) => !val || val.length >= 10, {
+    message: 'Please enter a valid phone number'
+  }).optional(),
   roles: z.array(z.string()).min(1, 'At least one role is required'),
   isActive: z.boolean(),
-  tenant: z.string().optional(),
 });
 
 type UserFormData = z.infer<typeof userSchema>;
@@ -56,6 +60,11 @@ export default function UsersPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [deleteUser, setDeleteUser] = useState<User | null>(null);
+  const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [lastLoginFromDate, setLastLoginFromDate] = useState<string>('');
+  const [lastLoginToDate, setLastLoginToDate] = useState<string>('');
+  const [phoneNumber, setPhoneNumber] = useState('+233'); // Default to Ghana country code
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -67,11 +76,18 @@ export default function UsersPage() {
       password: '',
       firstName: '',
       lastName: '',
+      phoneNumber: '',
       roles: [],
       isActive: true,
-      tenant: '',
     },
   });
+
+  // Sync phoneNumber state with form field
+  useEffect(() => {
+    if (phoneNumber && phoneNumber !== form.getValues('phoneNumber')) {
+      form.setValue('phoneNumber', phoneNumber, { shouldValidate: false });
+    }
+  }, [phoneNumber, form]);
 
   // Fetch users data
   const { data: users = [], isLoading } = useQuery({
@@ -100,6 +116,7 @@ export default function UsersPage() {
           email: userData.email,
           firstName: userData.firstName,
           lastName: userData.lastName,
+          phoneNumber: userData.phoneNumber,
           isActive: userData.isActive,
           roles: userData.roles,
         };
@@ -111,6 +128,7 @@ export default function UsersPage() {
           password: userData.password || 'TempPassword123!',
           firstName: userData.firstName,
           lastName: userData.lastName,
+          phoneNumber: userData.phoneNumber,
           isActive: userData.isActive,
           roles: userData.roles,
         };
@@ -121,6 +139,7 @@ export default function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ['admin-users'] });
       setIsDialogOpen(false);
       setEditingUser(null);
+      setPhoneNumber('+233'); // Reset phone number state
       form.reset();
       toast({
         title: 'Success',
@@ -158,20 +177,35 @@ export default function UsersPage() {
 
   const handleAdd = () => {
     setEditingUser(null);
-    form.reset();
+    setPhoneNumber('+233'); // Reset to Ghana default
+    form.reset({
+      username: '',
+      email: '',
+      password: '',
+      firstName: '',
+      lastName: '',
+      phoneNumber: '',
+      roles: [],
+      isActive: true,
+    });
     setIsDialogOpen(true);
   };
 
   const handleEdit = (user: User) => {
     setEditingUser(user);
+    // Set phone number state from user data, fallback to Ghana default
+    const userPhoneNumber = user.phoneNumber && user.phoneNumber.trim() !== '' 
+      ? user.phoneNumber 
+      : '+233';
+    setPhoneNumber(userPhoneNumber);
     form.reset({
       username: user.username,
       email: user.email,
       firstName: user.firstName || '',
       lastName: user.lastName || '',
+      phoneNumber: user.phoneNumber || '',
       roles: user.roles,
       isActive: user.isActive,
-      tenant: user.tenantId || '',
     });
     setIsDialogOpen(true);
   };
@@ -180,8 +214,62 @@ export default function UsersPage() {
     setDeleteUser(user);
   };
 
+  const handleSelectionChange = (selectedUsers: User[]) => {
+    console.log('Selected users:', selectedUsers.map(u => u.username));
+    // You can add batch operations here like bulk delete, bulk edit, etc.
+  };
+
   const onSubmit = (data: UserFormData) => {
     createUserMutation.mutate(data);
+  };
+
+  // Filter users based on selected filters
+  const filteredUsers = users.filter(user => {
+    // Role filter
+    if (roleFilter !== 'all' && !user.roles.includes(roleFilter)) {
+      return false;
+    }
+
+    // Status filter
+    if (statusFilter === 'active' && !user.isActive) {
+      return false;
+    }
+    if (statusFilter === 'inactive' && user.isActive) {
+      return false;
+    }
+
+    // Last login date range filter
+    if (lastLoginFromDate || lastLoginToDate) {
+      if (!user.lastLoginAt) {
+        // If user never logged in, only include if we're not filtering by date
+        if (lastLoginFromDate || lastLoginToDate) return false;
+      } else {
+        const loginDate = new Date(user.lastLoginAt);
+        
+        if (lastLoginFromDate) {
+          const fromDate = new Date(lastLoginFromDate);
+          if (loginDate < fromDate) return false;
+        }
+        
+        if (lastLoginToDate) {
+          const toDate = new Date(lastLoginToDate);
+          toDate.setHours(23, 59, 59, 999); // End of day
+          if (loginDate > toDate) return false;
+        }
+      }
+    }
+
+    return true;
+  });
+
+  // Get unique roles for the filter dropdown
+  const availableRoles = Array.from(new Set(users.flatMap(user => user.roles)));
+
+  const clearFilters = () => {
+    setRoleFilter('all');
+    setStatusFilter('all');
+    setLastLoginFromDate('');
+    setLastLoginToDate('');
   };
 
   const columns: Column<User>[] = [
@@ -198,18 +286,31 @@ export default function UsersPage() {
     {
       key: 'firstName',
       label: 'Full Name',
+      sortable: true,
       render: (_, user) => {
         const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ');
         return fullName || '-';
       },
     },
     {
+      key: 'phoneNumber',
+      label: 'Phone Number',
+      sortable: true,
+      render: (phoneNumber: string) => {
+        return phoneNumber ? (
+          <span className="text-sm">{phoneNumber}</span>
+        ) : (
+          <span className="text-muted-foreground text-xs">-</span>
+        );
+      },
+    },
+    {
       key: 'roles',
       label: 'Roles',
       render: (roles: string[]) => (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-0.5">
           {roles.map((role) => (
-            <Badge key={role} variant="secondary" className="text-xs">
+            <Badge key={role} variant="secondary" className="text-xs px-1.5 py-0 h-4 leading-none">
               {role}
             </Badge>
           ))}
@@ -220,27 +321,40 @@ export default function UsersPage() {
       key: 'isActive',
       label: 'Status',
       render: (isActive: boolean) => (
-        <Badge variant={isActive ? 'default' : 'destructive'}>
+        <Badge variant={isActive ? 'default' : 'destructive'} className="text-xs px-2 py-0 h-5">
           {isActive ? 'Active' : 'Inactive'}
         </Badge>
       ),
     },
     {
-      key: 'tenant',
-      label: 'Tenant',
-      render: (tenant: string) => tenant || '-',
-    },
-    {
       key: 'lastLoginAt',
       label: 'Last Login',
-      render: (lastLoginAt: Date) => 
-        lastLoginAt ? new Date(lastLoginAt).toLocaleDateString() : 'Never',
+      render: (lastLoginAt: Date) => {
+        if (!lastLoginAt) return <span className="text-muted-foreground text-xs">Never</span>;
+        const date = new Date(lastLoginAt);
+        const day = date.getDate().toString().padStart(2, '0');
+        const month = date.toLocaleDateString('en-GB', { month: 'short' });
+        const year = date.getFullYear().toString().slice(-2);
+        const hours = date.getHours().toString().padStart(2, '0');
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        const seconds = date.getSeconds().toString().padStart(2, '0');
+        return <span className="text-xs font-mono">{`${day}-${month}-${year} ${hours}:${minutes}:${seconds}`}</span>;
+      },
     },
     {
       key: 'createdAt',
       label: 'Created',
       sortable: true,
-      render: (createdAt: Date) => new Date(createdAt).toLocaleDateString(),
+      render: (createdAt: Date) => {
+        const date = new Date(createdAt);
+        const day = date.getDate().toString().padStart(2, '0');
+        const month = date.toLocaleDateString('en-GB', { month: 'short' });
+        const year = date.getFullYear().toString().slice(-2);
+        const hours = date.getHours().toString().padStart(2, '0');
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        const seconds = date.getSeconds().toString().padStart(2, '0');
+        return <span className="text-xs font-mono">{`${day}-${month}-${year} ${hours}:${minutes}:${seconds}`}</span>;
+      },
     },
   ];
 
@@ -256,20 +370,102 @@ export default function UsersPage() {
           </div>
         </div>
 
+        {/* Filters */}
+        <div className="flex flex-wrap gap-4 p-4 bg-muted/30 rounded-lg border">
+          <div className="flex flex-wrap gap-4">
+            {/* Role Filter */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Role</Label>
+              <Select value={roleFilter} onValueChange={setRoleFilter}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="All Roles" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Roles</SelectItem>
+                  {availableRoles.map(role => (
+                    <SelectItem key={role} value={role}>{role}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Status Filter */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Status</Label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="All Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Last Login Date Range */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Last Login From</Label>
+              <Input
+                type="date"
+                value={lastLoginFromDate}
+                onChange={(e) => setLastLoginFromDate(e.target.value)}
+                className="w-40"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Last Login To</Label>
+              <Input
+                type="date"
+                value={lastLoginToDate}
+                onChange={(e) => setLastLoginToDate(e.target.value)}
+                className="w-40"
+              />
+            </div>
+
+            {/* Clear Filters Button */}
+            <div className="flex items-end">
+              <Button
+                variant="outline"
+                onClick={clearFilters}
+                className="h-11"
+              >
+                Clear Filters
+              </Button>
+            </div>
+          </div>
+
+          {/* Filter Summary */}
+          <div className="flex items-center text-sm text-muted-foreground ml-auto">
+            Showing {filteredUsers.length} of {users.length} users
+          </div>
+        </div>
+
         <DataTable
           title="Users"
           description="Manage user accounts and access levels"
-          data={users}
+          data={filteredUsers}
           columns={columns}
           loading={isLoading}
           searchPlaceholder="Search users..."
           onAdd={handleAdd}
           onEdit={handleEdit}
           onDelete={handleDelete}
+          exportable={true}
+          exportFileName="users_export.csv"
+          selectable={true}
+          onSelectionChange={handleSelectionChange}
         />
 
         {/* Add/Edit User Dialog */}
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog open={isDialogOpen} onOpenChange={(open) => {
+          setIsDialogOpen(open);
+          if (!open) {
+            setPhoneNumber('+233'); // Reset phone number state when dialog closes
+          }
+        }}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>
@@ -340,6 +536,28 @@ export default function UsersPage() {
                       </FormItem>
                     )}
                   />
+
+                  <FormField
+                    control={form.control}
+                    name="phoneNumber"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Phone Number</FormLabel>
+                        <FormControl>
+                          <PhoneInput
+                            value={phoneNumber}
+                            onChange={(value) => {
+                              setPhoneNumber(value);
+                              field.onChange(value);
+                            }}
+                            placeholder="Enter phone number"
+                            error={!!form.formState.errors.phoneNumber}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 </div>
 
                 <FormField
@@ -373,39 +591,6 @@ export default function UsersPage() {
                   )}
                 />
 
-                <FormField
-                  control={form.control}
-                  name="tenant"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Tenant</FormLabel>
-                      <FormControl>
-                        <Select
-                          value={field.value || 'none'}
-                          onValueChange={(value) => field.onChange(value === 'none' ? '' : value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a tenant" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">
-                              <span className="text-muted-foreground">No tenant (System-wide)</span>
-                            </SelectItem>
-                            {tenants.map((tenant) => (
-                              <SelectItem key={tenant.id} value={tenant.code}>
-                                {tenant.name} ({tenant.code})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </FormControl>
-                      <FormDescription>
-                        Optional tenant assignment for multi-tenant systems
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
 
                 <FormField
                   control={form.control}
@@ -432,7 +617,10 @@ export default function UsersPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setIsDialogOpen(false)}
+                    onClick={() => {
+                      setIsDialogOpen(false);
+                      setPhoneNumber('+233'); // Reset phone number state
+                    }}
                   >
                     Cancel
                   </Button>

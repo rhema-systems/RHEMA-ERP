@@ -20,6 +20,7 @@ namespace ErpSystem.Web.Services
         private readonly TaskCompletionSource<bool> _shutdownComplete;
         
         private bool _shutdownRequested = false;
+        private bool _shutdownCompleted = false;
         private readonly object _shutdownLock = new object();
 
         public GracefulShutdownService(
@@ -43,9 +44,20 @@ namespace ErpSystem.Web.Services
         public async Task StopAsync(CancellationToken cancellationToken)
         {
             _logger.LogInformation("Graceful shutdown service stopping...");
-            await BeginShutdownAsync(cancellationToken);
-            await CompleteShutdownAsync(cancellationToken);
-            _logger.LogInformation("Graceful shutdown service stopped");
+            
+            try
+            {
+                // These methods have their own synchronization to prevent duplicate execution
+                await BeginShutdownAsync(cancellationToken);
+                await CompleteShutdownAsync(cancellationToken);
+                
+                _logger.LogInformation("Graceful shutdown service stopped successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during graceful shutdown service stop");
+                // Don't rethrow - we want the application to stop gracefully even if cleanup fails
+            }
         }
 
         public async Task BeginShutdownAsync(CancellationToken cancellationToken = default)
@@ -89,10 +101,21 @@ namespace ErpSystem.Web.Services
 
         public async Task CompleteShutdownAsync(CancellationToken cancellationToken = default)
         {
-            if (!_shutdownRequested)
+            lock (_shutdownLock)
             {
-                _logger.LogDebug("Shutdown not initiated, skipping completion");
-                return;
+                if (!_shutdownRequested)
+                {
+                    _logger.LogDebug("Shutdown not initiated, skipping completion");
+                    return;
+                }
+
+                if (_shutdownCompleted)
+                {
+                    _logger.LogDebug("Shutdown already completed, skipping duplicate completion");
+                    return;
+                }
+
+                _shutdownCompleted = true;
             }
 
             _logger.LogInformation("Completing graceful shutdown...");
@@ -114,33 +137,68 @@ namespace ErpSystem.Web.Services
                 stopwatch.Stop();
                 _logger.LogInformation("Graceful shutdown completed successfully in {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
                 
-                _shutdownComplete.SetResult(true);
+                // Only set result if not already completed
+                if (!_shutdownComplete.Task.IsCompleted)
+                {
+                    _shutdownComplete.SetResult(true);
+                }
             }
             catch (Exception ex)
             {
                 stopwatch.Stop();
                 _logger.LogError(ex, "Error during graceful shutdown completion after {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
-                _shutdownComplete.SetException(ex);
+                
+                // Only set exception if not already completed
+                if (!_shutdownComplete.Task.IsCompleted)
+                {
+                    _shutdownComplete.SetException(ex);
+                }
                 throw;
             }
         }
 
         public async Task<bool> IsShutdownCompleteAsync()
         {
-            return await _shutdownComplete.Task;
+            try
+            {
+                return await _shutdownComplete.Task;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Shutdown completion task faulted, considering shutdown incomplete");
+                return false;
+            }
         }
 
         private void OnApplicationStopping()
         {
             _logger.LogInformation("Application stopping event received, initiating graceful shutdown");
             
-            // Use fire-and-forget pattern for graceful shutdown
+            // Check if shutdown is already in progress to avoid duplicate work
+            lock (_shutdownLock)
+            {
+                if (_shutdownRequested)
+                {
+                    _logger.LogDebug("Graceful shutdown already initiated, skipping duplicate request");
+                    return;
+                }
+            }
+            
+            // Use fire-and-forget pattern for graceful shutdown with timeout
             _ = Task.Run(async () =>
             {
+                var shutdownTimeout = TimeSpan.FromSeconds(60); // Give it a reasonable timeout
+                using var cts = new CancellationTokenSource(shutdownTimeout);
+                
                 try
                 {
-                    await BeginShutdownAsync(CancellationToken.None);
-                    await CompleteShutdownAsync(CancellationToken.None);
+                    await BeginShutdownAsync(cts.Token);
+                    await CompleteShutdownAsync(cts.Token);
+                    _logger.LogInformation("Application stopping graceful shutdown completed successfully");
+                }
+                catch (OperationCanceledException) when (cts.Token.IsCancellationRequested)
+                {
+                    _logger.LogWarning("Graceful shutdown timed out after {TimeoutSeconds} seconds", shutdownTimeout.TotalSeconds);
                 }
                 catch (Exception ex)
                 {

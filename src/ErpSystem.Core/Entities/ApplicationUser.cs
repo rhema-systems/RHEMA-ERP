@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Identity;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Shared;
 
 namespace ErpSystem.Core.Entities;
@@ -15,6 +16,7 @@ public class ApplicationUser : IdentityUser<Guid>
     public string LastName { get; set; } = string.Empty;
 
     [StringLength(200)]
+    [NotMapped]
     public string FullName => $"{FirstName} {LastName}";
 
     public AuthenticationProvider AuthenticationProvider { get; set; } = AuthenticationProvider.Local;
@@ -36,7 +38,10 @@ public class ApplicationUser : IdentityUser<Guid>
     public virtual ICollection<UserTenant> UserTenants { get; set; } = new List<UserTenant>();
     
     // Helper properties for accessing tenant information
+    [NotMapped]
     public UserTenant? DefaultTenant => UserTenants.FirstOrDefault(ut => ut.IsDefault && !ut.IsDeleted && ut.Status == UserTenantStatus.Active);
+    
+    [NotMapped]
     public IEnumerable<Tenant> AccessibleTenants => UserTenants
         .Where(ut => !ut.IsDeleted && 
                     ut.Status == UserTenantStatus.Active && 
@@ -44,27 +49,22 @@ public class ApplicationUser : IdentityUser<Guid>
         .Select(ut => ut.Tenant);
     
     // Additional helper properties for different access states
+    [NotMapped]
     public IEnumerable<UserTenant> ActiveTenantRelationships => UserTenants
         .Where(ut => !ut.IsDeleted && ut.Status == UserTenantStatus.Active && (ut.ExpiresAt == null || ut.ExpiresAt > DateTime.UtcNow));
     
+    [NotMapped]
     public IEnumerable<UserTenant> SuspendedTenantRelationships => UserTenants
         .Where(ut => !ut.IsDeleted && ut.Status == UserTenantStatus.Suspended);
     
+    [NotMapped]
     public IEnumerable<UserTenant> AllTenantRelationships => UserTenants
         .Where(ut => !ut.IsDeleted); // Excludes only soft-deleted relationships
     
-    // TEMPORARY COMPATIBILITY PROPERTY - TO BE REMOVED
-    // This is to maintain compatibility during the migration
-    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
-    public Guid TenantId 
-    { 
-        get => DefaultTenant?.TenantId ?? Guid.Empty;
-        set 
-        { 
-            // This setter is for backwards compatibility during migration
-            // In the new system, use UserTenants collection instead
-        } 
-    }
+    // Primary tenant relationship
+    public Guid TenantId { get; set; }
+    public virtual Tenant Tenant { get; set; } = null!;
+
 }
 
 public class ApplicationRole : IdentityRole<Guid>
@@ -84,6 +84,7 @@ public class ApplicationRole : IdentityRole<Guid>
 
     // Navigation properties
     public virtual ICollection<ApplicationUserRole> UserRoles { get; set; } = new List<ApplicationUserRole>();
+    public virtual ICollection<RolePermission> RolePermissions { get; set; } = new List<RolePermission>();
 }
 
 public class ApplicationUserRole : IdentityUserRole<Guid>

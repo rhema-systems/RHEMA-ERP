@@ -36,9 +36,8 @@ namespace ErpSystem.Api.Models
         [StringLength(100, MinimumLength = 8)]
         public required string Password { get; set; }
 
-        [Required]
         [StringLength(50, MinimumLength = 1)]
-        public required string TenantCode { get; set; }
+        public string? TenantCode { get; set; }
 
         public bool RememberMe { get; set; } = false;
     }
@@ -92,18 +91,49 @@ namespace ErpSystem.Api.Models
         public required string Email { get; set; }
 
         [Required]
-        [StringLength(100, MinimumLength = 8)]
+        [Phone]
+        [StringLength(20)]
+        public required string PhoneNumber { get; set; }
+
+        [Required]
+        [StringLength(100, MinimumLength = 1)]
         public required string Password { get; set; }
 
         [Required]
-        [Compare("Password")]
-        public required string ConfirmPassword { get; set; }
-
         [StringLength(50)]
-        public string? FirstName { get; set; }
+        public required string FirstName { get; set; }
 
+        [Required]
         [StringLength(50)]
-        public string? LastName { get; set; }
+        public required string LastName { get; set; }
+
+        public string? RecaptchaToken { get; set; }
+    }
+
+    public class RegisterResponse
+    {
+        public bool Success { get; set; }
+        public required string Message { get; set; }
+        public string? PhoneNumber { get; set; }
+        public bool RequiresOtpVerification { get; set; }
+    }
+
+    public class VerifyOtpRequest
+    {
+        [Required]
+        [Phone]
+        [StringLength(20)]
+        public required string PhoneNumber { get; set; }
+
+        [Required]
+        [StringLength(6, MinimumLength = 6)]
+        public required string OtpCode { get; set; }
+    }
+
+    public class VerifyOtpResponse
+    {
+        public bool Success { get; set; }
+        public required string Message { get; set; }
     }
 
     public class ChangePasswordRequest
@@ -143,5 +173,44 @@ namespace ErpSystem.Api.Models
         [Required]
         [Compare("Password")]
         public required string ConfirmPassword { get; set; }
+    }
+
+    public class SelectTenantRequest
+    {
+        [Required]
+        [StringLength(50, MinimumLength = 1)]
+        public required string TenantCode { get; set; }
+
+        public bool SetAsDefault { get; set; } = false;
+    }
+
+    public class SelectTenantResponse
+    {
+        public required string Token { get; set; }
+        public DateTime ExpiresAt { get; set; }
+        public required UserInfo User { get; set; }
+    }
+
+    public class TenantUserMapping
+    {
+        public required string UserId { get; set; }
+        public required string TenantId { get; set; }
+        public bool IsActive { get; set; }
+        public string? ExpiresAt { get; set; }
+        public required string AccessLevel { get; set; }
+        public bool IsDefault { get; set; }
+        public required string GrantedAt { get; set; }
+        public required TenantUserInfo User { get; set; }
+    }
+
+    public class TenantUserInfo
+    {
+        public required string Id { get; set; }
+        public required string Username { get; set; }
+        public required string Email { get; set; }
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
+        public string? FullName { get; set; }
+        public bool IsActive { get; set; }
     }
 }
