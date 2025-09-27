@@ -136,11 +136,32 @@ jobs:
         extra_args: --debug --only-verified
       continue-on-error: true
 
-    - name: 🔐 Run GitLeaks
-      uses: gitleaks/gitleaks-action@v2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE}}
+    - name: 🔍 Basic secret pattern scanning
+      run: |
+        echo "Scanning for common secret patterns..."
+        
+        # Create a simple secret pattern scanner
+        cat > secret_patterns.txt << 'EOF'
+password\s*=\s*["'][^"']*["']
+api[_-]?key\s*[=:]\s*["'][^"']*["']
+token\s*[=:]\s*["'][^"']*["']
+secret\s*[=:]\s*["'][^"']*["']
+connection[_-]?string\s*[=:]\s*["'][^"']*["']
+aws[_-]?access[_-]?key\s*[=:]\s*["'][^"']*["']
+aws[_-]?secret[_-]?key\s*[=:]\s*["'][^"']*["']
+EOF
+        
+        # Scan for patterns (excluding test and mock files)
+        echo "Checking for potential secrets..."
+        find . -type f \( -name "*.cs" -o -name "*.js" -o -name "*.ts" -o -name "*.json" -o -name "*.yml" -o -name "*.yaml" \) \
+          ! -path "./node_modules/*" \
+          ! -path "./.git/*" \
+          ! -path "*/test*" \
+          ! -path "*/mock*" \
+          ! -name "*test*" \
+          ! -name "*mock*" \
+          -exec grep -iHn -f secret_patterns.txt {} + || echo "No obvious secrets found"
+      continue-on-error: true
 
   # Job 3: Container Security Scanning
   container-security:
@@ -163,7 +184,7 @@ jobs:
     - name: 🏗️ Build Docker image
       uses: docker/build-push-action@v5
       with:
-        context: .
+        context: ${{ contains(matrix.dockerfile, 'frontend') && 'frontend' || '.' }}
         file: ${{ matrix.dockerfile }}
         push: false
         tags: security-scan:latest

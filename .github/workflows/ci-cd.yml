@@ -224,8 +224,15 @@ jobs:
           ACCEPT_EULA: Y
           SA_PASSWORD: TestPassword123!
           MSSQL_PID: Express
+          MSSQL_MEMORY_LIMIT_MB: 2048
         ports:
           - 1433:1433
+        options: >-
+          --health-cmd="/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P TestPassword123! -Q 'SELECT 1' || exit 1"
+          --health-interval=10s
+          --health-timeout=3s
+          --health-retries=10
+          --health-start-period=10s
 
       redis:
         image: redis:7-alpine
@@ -260,6 +267,18 @@ jobs:
         name: frontend-artifacts
         path: frontend/.next/
 
+    - name: ⏳ Wait for SQL Server to be ready
+      run: |
+        echo "Waiting for SQL Server to be ready..."
+        for i in {1..30}; do
+          if docker exec $(docker ps -q --filter ancestor=mcr.microsoft.com/mssql/server:2022-latest) /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'TestPassword123!' -Q 'SELECT 1' > /dev/null 2>&1; then
+            echo "SQL Server is ready!"
+            break
+          fi
+          echo "Waiting for SQL Server... ($i/30)"
+          sleep 3
+        done
+    
     - name: 🚀 Start API server
       run: |
         cd api-build
@@ -337,7 +356,7 @@ jobs:
     - name: 🏗️ Build Docker image
       uses: docker/build-push-action@v5
       with:
-        context: .
+        context: ${{ matrix.service == 'api' && '.' || 'frontend' }}
         file: ${{ matrix.service == 'api' && 'src/ErpSystem.Api/Dockerfile' || 'frontend/Dockerfile' }}
         push: false
         tags: ${{ steps.meta.outputs.tags }}
@@ -436,7 +455,6 @@ jobs:
       with:
         status: ${{ job.status }}
         channel: '#deployments'
-        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
         fields: repo,message,commit,author,action,eventName,ref,workflow
         text: |
           🚀 Production deployment ${{ job.status }}
@@ -446,6 +464,8 @@ jobs:
           Author: ${{ github.actor }}
           
           ${{ job.status == 'success' && '✅ Deployment successful!' || '❌ Deployment failed!' }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
 
     - name: 📢 Teams deployment notification
       uses: skitionek/notify-microsoft-teams@master

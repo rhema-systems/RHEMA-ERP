@@ -486,8 +486,9 @@ jobs:
       with:
         status: failure
         channel: '#performance-alerts'
-        webhook_url: ${{ secrets.PERFORMANCE_SLACK_WEBHOOK }}
         fields: repo,message,commit,author,action,eventName,ref,workflow
         text: |
           ⚡ Performance test failures detected in ${{ github.repository }}
           Please review the performance results and investigate any regressions.
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.PERFORMANCE_SLACK_WEBHOOK }}

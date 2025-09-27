@@ -173,7 +173,7 @@ jobs:
     - name: 🏗️ Build and push Docker image
       uses: docker/build-push-action@v5
       with:
-        context: .
+        context: ${{ matrix.service == 'api' && '.' || 'frontend' }}
         file: ${{ matrix.service == 'api' && 'src/ErpSystem.Api/Dockerfile' || 'frontend/Dockerfile' }}
         push: true
         tags: ${{ steps.meta.outputs.tags }}
@@ -245,10 +245,11 @@ jobs:
       with:
         status: ${{ job.status }}
         channel: '#deployments'
-        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
         text: |
           🚀 Development deployment ${{ job.status }}
           Application successfully deployed to development environment
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
 
   # Job 4: Deploy to Staging
   deploy-staging:
@@ -302,10 +303,11 @@ jobs:
       with:
         status: ${{ job.status }}
         channel: '#deployments'
-        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
         text: |
           🚀 Staging deployment ${{ job.status }}
           Application successfully deployed to staging environment with integration tests passing
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
 
   # Job 5: Deploy to Production
   deploy-production:
@@ -424,10 +426,11 @@ jobs:
       with:
         status: ${{ job.status }}
         channel: '#deployments'
-        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
         text: |
           🚀 Production deployment ${{ job.status }}
           Application successfully deployed to production with all health checks passing
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
 
   # Job 6: Rollback Capability
   rollback:
@@ -480,10 +483,11 @@ jobs:
       with:
         status: success
         channel: '#deployments'
-        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
         text: |
           ⏪ Production rollback completed
           Production environment has been successfully rolled back to the previous stable version
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
 
   # Job 7: Post-deployment Summary
   deployment-summary:

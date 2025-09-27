@@ -381,21 +381,23 @@ jobs:
         *Last updated: $(date)*
         EOF
 
-    - name: 📊 Generate component usage report
+    - name: 📆 Generate component usage report
       run: |
+        # Ensure docs directory exists
+        mkdir -p docs
         cd frontend/src
         
         # Count component usage
-        echo "## Component Usage Statistics" >> ../docs/UI_COMPONENTS.md
-        echo "" >> ../docs/UI_COMPONENTS.md
-        echo "| Component | Files | Usage Count |" >> ../docs/UI_COMPONENTS.md
-        echo "|-----------|-------|-------------|" >> ../docs/UI_COMPONENTS.md
+        echo "## Component Usage Statistics" >> ../../docs/UI_COMPONENTS.md
+        echo "" >> ../../docs/UI_COMPONENTS.md
+        echo "| Component | Files | Usage Count |" >> ../../docs/UI_COMPONENTS.md
+        echo "|-----------|-------|-------------|" >> ../../docs/UI_COMPONENTS.md
         
         # Find common components and count usage
         for component in "DataTable" "Button" "Input" "Select" "Card" "Badge" "PhoneInput"; do
           usage_count=$(grep -r "import.*$component" . 2>/dev/null | wc -l || echo "0")
           file_count=$(grep -r "import.*$component" . 2>/dev/null | cut -d: -f1 | sort -u | wc -l || echo "0")
-          echo "| $component | $file_count | $usage_count |" >> ../docs/UI_COMPONENTS.md
+          echo "| $component | $file_count | $usage_count |" >> ../../docs/UI_COMPONENTS.md
         done
 
     - name: 📤 Upload UI documentation artifacts
