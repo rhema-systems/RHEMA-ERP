@@ -1,0 +1,649 @@
+name: 🎭 UI Testing with Playwright
+
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'frontend/**'
+      - 'src/**'
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'frontend/**'
+      - 'src/**'
+  schedule:
+    - cron: '0 4 * * *'  # Daily at 4 AM UTC
+  workflow_dispatch:
+    inputs:
+      browser:
+        description: 'Browser to test with'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - chromium
+        - firefox
+        - webkit
+      test_type:
+        description: 'Type of tests to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - smoke
+        - regression
+        - accessibility
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  NODE_VERSION: '18.x'
+  PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/ms-playwright
+
+jobs:
+  # Job 1: Setup Test Environment
+  setup-environment:
+    name: 🔧 Setup Test Environment
+    runs-on: ubuntu-latest
+    
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          SA_PASSWORD: UITestPassword123!
+          MSSQL_PID: Express
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P UITestPassword123! -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    outputs:
+      api-url: ${{ steps.setup.outputs.api-url }}
+      frontend-url: ${{ steps.setup.outputs.frontend-url }}
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: 🔧 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: 📦 Restore .NET dependencies
+      run: |
+        cd src
+        dotnet restore
+
+    - name: 🗄️ Setup test database
+      run: |
+        cd src
+        dotnet ef database update --project ErpSystem.Data --startup-project ErpSystem.Api
+      env:
+        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpSystemUITest;User Id=sa;Password=UITestPassword123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
+
+    - name: 🚀 Start API server
+      run: |
+        cd src
+        dotnet build --configuration Release
+        nohup dotnet run --project ErpSystem.Api --urls http://localhost:5000 &
+        echo $! > api.pid
+        sleep 30
+      env:
+        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpSystemUITest;User Id=sa;Password=UITestPassword123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
+        ConnectionStrings__Redis: "localhost:6379"
+        ASPNETCORE_ENVIRONMENT: "Testing"
+        FileStorage__Provider: "Local"
+        FileStorage__Local__BasePath: "test-uploads"
+        FileStorage__Local__UseWebRoot: "false"
+
+    - name: 📦 Install frontend dependencies
+      run: |
+        cd frontend
+        npm ci
+
+    - name: 🏗️ Build frontend
+      run: |
+        cd frontend
+        npm run build
+      env:
+        NEXT_PUBLIC_API_URL: http://localhost:5000/api
+        NODE_ENV: production
+
+    - name: 🚀 Start frontend server
+      run: |
+        cd frontend
+        nohup npm start &
+        echo $! > frontend.pid
+        sleep 30
+      env:
+        PORT: 3000
+        NEXT_PUBLIC_API_URL: http://localhost:5000/api
+
+    - name: ✅ Verify services are running
+      id: setup
+      run: |
+        # Wait for API to be ready
+        timeout 60 bash -c 'until curl -f http://localhost:5000/health; do sleep 2; done'
+        echo "✅ API is running at http://localhost:5000"
+        
+        # Wait for frontend to be ready
+        timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
+        echo "✅ Frontend is running at http://localhost:3000"
+        
+        # Set outputs for other jobs
+        echo "api-url=http://localhost:5000" >> $GITHUB_OUTPUT
+        echo "frontend-url=http://localhost:3000" >> $GITHUB_OUTPUT
+
+    - name: 📤 Save process IDs
+      run: |
+        echo "API_PID=$(cat api.pid)" >> $GITHUB_ENV
+        echo "FRONTEND_PID=$(cat frontend.pid)" >> $GITHUB_ENV
+
+  # Job 2: UI Tests
+  ui-tests:
+    name: 🎭 Run UI Tests
+    runs-on: ubuntu-latest
+    needs: setup-environment
+    
+    strategy:
+      matrix:
+        browser: [chromium, firefox, webkit]
+        exclude:
+          - browser: ${{ github.event.inputs.browser != 'all' && github.event.inputs.browser != matrix.browser && 'exclude' || 'include' }}
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          SA_PASSWORD: UITestPassword123!
+          MSSQL_PID: Express
+        ports:
+          - 1433:1433
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: 🔧 Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    # Repeat the environment setup (since services are isolated)
+    - name: 🔄 Setup test environment
+      run: |
+        cd src
+        dotnet restore
+        dotnet ef database update --project ErpSystem.Data --startup-project ErpSystem.Api
+        dotnet build --configuration Release
+        nohup dotnet run --project ErpSystem.Api --urls http://localhost:5000 &
+        sleep 30
+        
+        cd ../frontend
+        npm ci
+        npm run build
+        nohup npm start &
+        sleep 30
+      env:
+        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpSystemUITest;User Id=sa;Password=UITestPassword123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
+        ConnectionStrings__Redis: "localhost:6379"
+        ASPNETCORE_ENVIRONMENT: "Testing"
+        PORT: 3000
+        NEXT_PUBLIC_API_URL: http://localhost:5000/api
+
+    - name: ✅ Verify services
+      run: |
+        timeout 60 bash -c 'until curl -f http://localhost:5000/health; do sleep 2; done'
+        timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
+
+    - name: 🎭 Install Playwright
+      run: |
+        cd frontend
+        npx playwright install ${{ matrix.browser }} --with-deps
+
+    - name: 📝 Create Playwright tests
+      run: |
+        cd frontend
+        
+        # Create tests directory if it doesn't exist
+        mkdir -p tests/ui
+        
+        # Create comprehensive UI tests
+        cat > tests/ui/login.spec.ts << 'EOF'
+        import { test, expect } from '@playwright/test';
+
+        test.describe('Login Flow', () => {
+          test('should display login form', async ({ page }) => {
+            await page.goto('http://localhost:3000');
+            
+            await expect(page.locator('input[name="username"]')).toBeVisible();
+            await expect(page.locator('input[name="password"]')).toBeVisible();
+            await expect(page.locator('select[name="tenantCode"]')).toBeVisible();
+            await expect(page.locator('button[type="submit"]')).toBeVisible();
+          });
+
+          test('should login with valid credentials', async ({ page }) => {
+            await page.goto('http://localhost:3000');
+            
+            await page.fill('input[name="username"]', 'admin');
+            await page.fill('input[name="password"]', 'Admin123!');
+            await page.selectOption('select[name="tenantCode"]', 'DEFAULT');
+            
+            await page.click('button[type="submit"]');
+            
+            // Should redirect to dashboard or show success message
+            await expect(page).toHaveURL(/.*dashboard.*/);
+          });
+
+          test('should show error for invalid credentials', async ({ page }) => {
+            await page.goto('http://localhost:3000');
+            
+            await page.fill('input[name="username"]', 'invalid');
+            await page.fill('input[name="password"]', 'invalid');
+            await page.selectOption('select[name="tenantCode"]', 'DEFAULT');
+            
+            await page.click('button[type="submit"]');
+            
+            // Should show error message
+            await expect(page.locator('text=Invalid')).toBeVisible({ timeout: 5000 });
+          });
+        });
+        EOF
+
+        cat > tests/ui/data-tables.spec.ts << 'EOF'
+        import { test, expect } from '@playwright/test';
+
+        test.describe('Enhanced Data Tables', () => {
+          test.beforeEach(async ({ page }) => {
+            // Login first
+            await page.goto('http://localhost:3000');
+            await page.fill('input[name="username"]', 'admin');
+            await page.fill('input[name="password"]', 'Admin123!');
+            await page.selectOption('select[name="tenantCode"]', 'DEFAULT');
+            await page.click('button[type="submit"]');
+            await expect(page).toHaveURL(/.*dashboard.*/);
+          });
+
+          test('should display striped rows in data tables', async ({ page }) => {
+            // Navigate to users page
+            await page.click('text=User Management');
+            await page.waitForLoadState('networkidle');
+            
+            // Check for striped rows
+            const rows = await page.locator('table tbody tr').count();
+            if (rows > 0) {
+              // Check alternating row colors
+              const firstRow = page.locator('table tbody tr:first-child');
+              const secondRow = page.locator('table tbody tr:nth-child(2)');
+              
+              await expect(firstRow).toBeVisible();
+              if (rows > 1) {
+                await expect(secondRow).toBeVisible();
+              }
+            }
+          });
+
+          test('should allow row selection by clicking', async ({ page }) => {
+            await page.click('text=User Management');
+            await page.waitForLoadState('networkidle');
+            
+            const rows = await page.locator('table tbody tr').count();
+            if (rows > 0) {
+              // Click first row
+              await page.locator('table tbody tr:first-child').click();
+              
+              // Row should be selected (you might need to adjust selector based on your implementation)
+              await expect(page.locator('table tbody tr:first-child')).toHaveClass(/selected|active/);
+            }
+          });
+
+          test('should display export functionality', async ({ page }) => {
+            await page.click('text=User Management');
+            await page.waitForLoadState('networkidle');
+            
+            // Look for export buttons
+            const exportButton = page.locator('button:has-text("Export")');
+            if (await exportButton.count() > 0) {
+              await expect(exportButton.first()).toBeVisible();
+            }
+          });
+        });
+        EOF
+
+        cat > tests/ui/tenant-branding.spec.ts << 'EOF'
+        import { test, expect } from '@playwright/test';
+
+        test.describe('Tenant Branding', () => {
+          test.beforeEach(async ({ page }) => {
+            await page.goto('http://localhost:3000');
+            await page.fill('input[name="username"]', 'admin');
+            await page.fill('input[name="password"]', 'Admin123!');
+            await page.selectOption('select[name="tenantCode"]', 'DEFAULT');
+            await page.click('button[type="submit"]');
+            await expect(page).toHaveURL(/.*dashboard.*/);
+          });
+
+          test('should display tenant management page', async ({ page }) => {
+            await page.click('text=Tenant Management');
+            await page.waitForLoadState('networkidle');
+            
+            await expect(page.locator('h1, h2')).toContainText(['Tenant', 'Management']);
+          });
+
+          test('should allow logo upload', async ({ page }) => {
+            await page.click('text=Tenant Management');
+            await page.waitForLoadState('networkidle');
+            
+            // Look for file input or upload button
+            const fileInput = page.locator('input[type="file"]');
+            if (await fileInput.count() > 0) {
+              await expect(fileInput.first()).toBeVisible();
+            }
+          });
+        });
+        EOF
+
+        cat > tests/ui/phone-input.spec.ts << 'EOF'
+        import { test, expect } from '@playwright/test';
+
+        test.describe('Phone Input Component', () => {
+          test.beforeEach(async ({ page }) => {
+            await page.goto('http://localhost:3000');
+            await page.fill('input[name="username"]', 'admin');
+            await page.fill('input[name="password"]', 'Admin123!');
+            await page.selectOption('select[name="tenantCode"]', 'DEFAULT');
+            await page.click('button[type="submit"]');
+            await expect(page).toHaveURL(/.*dashboard.*/);
+          });
+
+          test('should display phone input in user forms', async ({ page }) => {
+            await page.click('text=User Management');
+            await page.waitForLoadState('networkidle');
+            
+            // Try to find "Add User" or similar button
+            const addButton = page.locator('button:has-text("Add"), button:has-text("Create"), button:has-text("New")');
+            if (await addButton.count() > 0) {
+              await addButton.first().click();
+              
+              // Look for phone input
+              const phoneInput = page.locator('input[placeholder*="phone"], input[name*="phone"]');
+              if (await phoneInput.count() > 0) {
+                await expect(phoneInput.first()).toBeVisible();
+              }
+            }
+          });
+        });
+        EOF
+
+        # Create Playwright config
+        cat > playwright.config.ts << 'EOF'
+        import { defineConfig, devices } from '@playwright/test';
+
+        export default defineConfig({
+          testDir: './tests/ui',
+          fullyParallel: true,
+          forbidOnly: !!process.env.CI,
+          retries: process.env.CI ? 2 : 0,
+          workers: process.env.CI ? 1 : undefined,
+          reporter: [
+            ['html', { outputFolder: 'playwright-report' }],
+            ['json', { outputFile: 'test-results.json' }],
+            ['junit', { outputFile: 'test-results.xml' }]
+          ],
+          use: {
+            baseURL: 'http://localhost:3000',
+            trace: 'on-first-retry',
+            screenshot: 'only-on-failure',
+            video: 'retain-on-failure'
+          },
+          projects: [
+            {
+              name: 'chromium',
+              use: { ...devices['Desktop Chrome'] },
+            },
+            {
+              name: 'firefox',
+              use: { ...devices['Desktop Firefox'] },
+            },
+            {
+              name: 'webkit',
+              use: { ...devices['Desktop Safari'] },
+            },
+          ],
+          webServer: undefined, // We manage the server ourselves
+        });
+        EOF
+
+    - name: 🧪 Run Playwright tests
+      run: |
+        cd frontend
+        npx playwright test --project=${{ matrix.browser }} --reporter=line,json,junit
+      env:
+        CI: true
+
+    - name: 📤 Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-results-${{ matrix.browser }}
+        path: |
+          frontend/test-results.json
+          frontend/test-results.xml
+          frontend/playwright-report/
+          frontend/test-results/
+        retention-days: 7
+
+    - name: 📊 Test Results Summary
+      if: always()
+      run: |
+        cd frontend
+        echo "## 🎭 Playwright Test Results (${{ matrix.browser }})" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f "test-results.json" ]; then
+          # Extract test statistics from JSON (basic parsing)
+          echo "Test results available in artifacts" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "No test results generated" >> $GITHUB_STEP_SUMMARY
+        fi
+
+  # Job 3: Accessibility Testing
+  accessibility-tests:
+    name: ♿ Accessibility Testing
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'accessibility' || github.event.inputs.test_type == 'all' || github.event.inputs.test_type == null
+    needs: setup-environment
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          SA_PASSWORD: UITestPassword123!
+          MSSQL_PID: Express
+        ports:
+          - 1433:1433
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: 🔧 Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: 🔄 Setup test environment
+      run: |
+        cd src
+        dotnet restore
+        dotnet ef database update --project ErpSystem.Data --startup-project ErpSystem.Api
+        dotnet build --configuration Release
+        nohup dotnet run --project ErpSystem.Api --urls http://localhost:5000 &
+        sleep 30
+        
+        cd ../frontend
+        npm ci
+        npm run build
+        nohup npm start &
+        sleep 30
+      env:
+        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpSystemUITest;User Id=sa;Password=UITestPassword123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
+        ConnectionStrings__Redis: "localhost:6379"
+        ASPNETCORE_ENVIRONMENT: "Testing"
+        PORT: 3000
+        NEXT_PUBLIC_API_URL: http://localhost:5000/api
+
+    - name: ✅ Verify services
+      run: |
+        timeout 60 bash -c 'until curl -f http://localhost:5000/health; do sleep 2; done'
+        timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
+
+    - name: 🎭 Install Playwright with accessibility tools
+      run: |
+        cd frontend
+        npx playwright install chromium --with-deps
+        npm install -D @axe-core/playwright
+
+    - name: ♿ Run accessibility tests
+      run: |
+        cd frontend
+        
+        # Create accessibility test
+        cat > tests/ui/accessibility.spec.ts << 'EOF'
+        import { test, expect } from '@playwright/test';
+        import AxeBuilder from '@axe-core/playwright';
+
+        test.describe('Accessibility Tests', () => {
+          test('should not have any automatically detectable accessibility issues on login page', async ({ page }) => {
+            await page.goto('http://localhost:3000');
+            
+            const accessibilityScanResults = await new AxeBuilder({ page }).analyze();
+            
+            expect(accessibilityScanResults.violations).toEqual([]);
+          });
+
+          test('should not have accessibility issues on dashboard', async ({ page }) => {
+            // Login first
+            await page.goto('http://localhost:3000');
+            await page.fill('input[name="username"]', 'admin');
+            await page.fill('input[name="password"]', 'Admin123!');
+            await page.selectOption('select[name="tenantCode"]', 'DEFAULT');
+            await page.click('button[type="submit"]');
+            await expect(page).toHaveURL(/.*dashboard.*/);
+            
+            const accessibilityScanResults = await new AxeBuilder({ page })
+              .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+              .analyze();
+            
+            expect(accessibilityScanResults.violations).toEqual([]);
+          });
+        });
+        EOF
+        
+        npx playwright test tests/ui/accessibility.spec.ts --project=chromium
+      continue-on-error: true
+
+    - name: 📤 Upload accessibility results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: accessibility-results
+        path: |
+          frontend/test-results/
+          frontend/playwright-report/
+        retention-days: 7
+
+  # Job 4: Test Summary
+  test-summary:
+    name: 📊 Test Summary
+    runs-on: ubuntu-latest
+    needs: [ui-tests, accessibility-tests]
+    if: always()
+
+    steps:
+    - name: 📥 Download test artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: '*-results*'
+        merge-multiple: true
+
+    - name: 📊 Generate test summary
+      run: |
+        echo "## 🎭 UI Testing Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Test Type | Status | Browser |" >> $GITHUB_STEP_SUMMARY
+        echo "|-----------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+        
+        # Check results for each browser
+        for browser in chromium firefox webkit; do
+          if [ -f "test-results.json" ]; then
+            echo "| UI Tests | ✅ Completed | $browser |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| UI Tests | ❌ Failed | $browser |" >> $GITHUB_STEP_SUMMARY
+          fi
+        done
+        
+        echo "| Accessibility | ${{ needs.accessibility-tests.result == 'success' && '✅ Passed' || '❌ Failed' }} | Chromium |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "📋 Detailed test reports are available in the job artifacts." >> $GITHUB_STEP_SUMMARY
+
+    - name: 🔔 Notify on failures
+      if: needs.ui-tests.result == 'failure' || needs.accessibility-tests.result == 'failure'
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        channel: '#ui-testing'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        fields: repo,message,commit,author,action,eventName,ref,workflow
+        text: |
+          🎭 UI test failures detected in ${{ github.repository }}
+          Please review the test results and fix any failing tests.

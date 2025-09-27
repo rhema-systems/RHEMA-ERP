@@ -2,7 +2,7 @@ name: 📊 Database Migrations
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ master ]
     paths: 
       - 'src/ErpSystem.Data/Migrations/**'
       - 'src/ErpSystem.Data/ApplicationDbContext.cs'
@@ -101,7 +101,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate-migrations
     if: |
-      github.ref == 'refs/heads/develop' || 
+      github.ref == 'refs/heads/master' || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
     environment: staging-db
 
@@ -166,7 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate-migrations
     if: |
-      github.ref == 'refs/heads/main' || 
+      github.ref == 'refs/heads/master' || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
     environment: production-db
 

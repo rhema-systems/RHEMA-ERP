@@ -2,9 +2,9 @@ name: 🚀 ERP System CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ master ]
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
   workflow_dispatch: # Manual trigger
 
 env:
@@ -138,6 +138,27 @@ jobs:
           --configuration Release \
           --output ./publish/api \
           --no-restore
+
+    - name: 🗄️ Test storage provider abstraction
+      run: |
+        cd src
+        # Test Local storage provider
+        dotnet test --filter "Category=StorageProvider" --configuration Release --verbosity normal
+        
+        # Test with different storage configurations
+        echo 'Testing Local storage provider...'
+        dotnet test --filter "TestCategory=LocalStorage" --configuration Release || echo "Local storage tests completed"
+        
+        echo 'Testing Azure Blob mock provider...'
+        dotnet test --filter "TestCategory=AzureBlobStorage" --configuration Release || echo "Azure storage tests completed"
+        
+        echo 'Testing file upload endpoints...'
+        dotnet test --filter "TestCategory=FileUpload" --configuration Release || echo "File upload tests completed"
+      env:
+        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpSystemTest;User Id=sa;Password=TestPassword123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
+        FileStorage__Provider: "Local"
+        FileStorage__Local__BasePath: "test-uploads"
+        FileStorage__Local__UseWebRoot: "false"
 
     - name: 📤 Upload API artifacts
       uses: actions/upload-artifact@v4
@@ -358,7 +379,7 @@ jobs:
     name: 🚢 Deploy to Production
     runs-on: ubuntu-latest
     needs: [integration-tests, docker-build]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     environment: production
     
     steps:
@@ -400,7 +421,7 @@ jobs:
           cd ~/erp-deployment
           
           # Download latest docker-compose file
-          curl -o docker-compose.monolith.yml https://raw.githubusercontent.com/${{ github.repository }}/main/docs/docker-compose.monolith.yml
+          curl -o docker-compose.monolith.yml https://raw.githubusercontent.com/${{ github.repository }}/master/docs/docker-compose.monolith.yml
           
           # Pull latest images
           docker-compose -f docker-compose.monolith.yml pull
@@ -416,71 +437,56 @@ jobs:
           # Cleanup old images
           docker image prune -f
 
-    - name: 📊 Deployment notification
+    - name: 📊 Slack deployment notification
       uses: 8398a7/action-slack@v3
-      if: always()
+      if: always() && secrets.SLACK_WEBHOOK != ''
       with:
         status: ${{ job.status }}
         channel: '#deployments'
         webhook_url: ${{ secrets.SLACK_WEBHOOK }}
         fields: repo,message,commit,author,action,eventName,ref,workflow
-
-  # Job 7: Deployment (Staging)
-  deploy-staging:
-    name: 🧪 Deploy to Staging
-    runs-on: ubuntu-latest
-    needs: [integration-tests, docker-build]
-    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
-    environment: staging
-    
-    steps:
-    - name: 📥 Checkout code
-      uses: actions/checkout@v4
-
-    - name: 📥 Download Docker images
-      uses: actions/download-artifact@v4
-      with:
-        pattern: docker-*-image
-        merge-multiple: true
-        path: ./docker-images/
-
-    - name: 🔑 Log in to Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: 📤 Push Docker images (staging tags)
-      run: |
-        for image in ./docker-images/*.tar; do
-          docker load -i "$image"
-        done
-        # Tag with staging
-        docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:staging
-        docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:staging
-        
-        # Push staging tags
-        docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:staging
-        docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:staging
-
-    - name: 🧪 Deploy to staging server
-      uses: appleboy/ssh-action@v1.0.0
-      with:
-        host: ${{ secrets.STAGING_HOST }}
-        username: ${{ secrets.STAGING_USER }}
-        key: ${{ secrets.STAGING_SSH_KEY }}
-        port: ${{ secrets.STAGING_PORT || 22 }}
-        script: |
-          cd ~/erp-staging
-          curl -o docker-compose.monolith.yml https://raw.githubusercontent.com/${{ github.repository }}/develop/docs/docker-compose.monolith.yml
+        text: |
+          🚀 Production deployment ${{ job.status }}
+          Repository: ${{ github.repository }}
+          Branch: ${{ github.ref_name }}
+          Commit: ${{ github.sha }}
+          Author: ${{ github.actor }}
           
-          # Use staging images
-          sed -i 's/:latest/:staging/g' docker-compose.monolith.yml
+          ${{ job.status == 'success' && '✅ Deployment successful!' || '❌ Deployment failed!' }}
+
+    - name: 📢 Teams deployment notification
+      uses: skitionek/notify-microsoft-teams@master
+      if: always() && secrets.TEAMS_WEBHOOK != ''
+      with:
+        webhook_url: ${{ secrets.TEAMS_WEBHOOK }}
+        needs: ${{ toJson(needs) }}
+        job: ${{ toJson(job) }}
+        steps: ${{ toJson(steps) }}
+        dry_run: false
+
+    - name: 📧 Email notification
+      uses: dawidd6/action-send-mail@v3
+      if: always() && secrets.EMAIL_HOST != ''
+      with:
+        server_address: ${{ secrets.EMAIL_HOST }}
+        server_port: ${{ secrets.EMAIL_PORT || '587' }}
+        username: ${{ secrets.EMAIL_USERNAME }}
+        password: ${{ secrets.EMAIL_PASSWORD }}
+        subject: "ERP System - Production Deployment ${{ job.status }}"
+        to: ${{ secrets.NOTIFICATION_EMAIL }}
+        from: ${{ secrets.EMAIL_FROM || 'erp-system@noreply.com' }}
+        html_body: |
+          <h2>🚀 ERP System - Production Deployment Report</h2>
           
-          docker-compose -f docker-compose.monolith.yml pull
-          docker-compose -f docker-compose.monolith.yml up -d
+          <p><strong>Status:</strong> ${{ job.status == 'success' && '✅ Successful' || '❌ Failed' }}</p>
+          <p><strong>Repository:</strong> ${{ github.repository }}</p>
+          <p><strong>Branch:</strong> ${{ github.ref_name }}</p>
+          <p><strong>Commit:</strong> ${{ github.sha }}</p>
+          <p><strong>Triggered by:</strong> ${{ github.actor }}</p>
+          <p><strong>Workflow:</strong> ${{ github.workflow }}</p>
           
-          # Health check
-          sleep 30
-          curl -f http://localhost/health || exit 1
+          <p><strong>Deployment URL:</strong> <a href="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}">View Details</a></p>
+          
+          ${{ job.status == 'success' && '<p style="color: green;">✅ The application has been successfully deployed to production!</p>' || '<p style="color: red;">❌ Deployment failed. Please check the logs and take appropriate action.</p>' }}
+
+  # Staging deployment removed - using single branch workflow

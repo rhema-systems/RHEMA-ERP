@@ -4,12 +4,12 @@ on:
   schedule:
     - cron: '0 3 * * *'  # Daily at 3 AM UTC
   push:
-    branches: [ main ]
+    branches: [ master ]
     paths:
       - 'src/**'
       - 'frontend/**'
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
     types: [ opened, synchronize, labeled ]
   workflow_dispatch:
     inputs:

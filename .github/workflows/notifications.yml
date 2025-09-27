@@ -1,0 +1,417 @@
+name: 🔔 Notification System
+
+on:
+  workflow_call:
+    inputs:
+      notification_type:
+        description: 'Type of notification'
+        required: true
+        type: string
+        # Values: deployment, security, performance, test_failure, build_failure
+      status:
+        description: 'Status of the event'
+        required: true
+        type: string
+        # Values: success, failure, cancelled, skipped
+      title:
+        description: 'Title of the notification'
+        required: true
+        type: string
+      message:
+        description: 'Detailed message'
+        required: false
+        type: string
+        default: ''
+      environment:
+        description: 'Environment (production, staging, development)'
+        required: false
+        type: string
+        default: 'development'
+      workflow_name:
+        description: 'Name of the triggering workflow'
+        required: false
+        type: string
+        default: ''
+      include_artifacts:
+        description: 'Include artifact links in notification'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      SLACK_WEBHOOK:
+        required: false
+      TEAMS_WEBHOOK:
+        required: false
+      DISCORD_WEBHOOK:
+        required: false
+      EMAIL_HOST:
+        required: false
+      EMAIL_PORT:
+        required: false
+      EMAIL_USERNAME:
+        required: false
+      EMAIL_PASSWORD:
+        required: false
+      EMAIL_FROM:
+        required: false
+      NOTIFICATION_EMAIL:
+        required: false
+
+jobs:
+  send-notifications:
+    name: 📢 Send Notifications
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: 🎨 Set notification colors and icons
+      id: styling
+      run: |
+        case "${{ inputs.status }}" in
+          "success")
+            echo "color=#00ff00" >> $GITHUB_OUTPUT
+            echo "icon=✅" >> $GITHUB_OUTPUT
+            echo "teams_color=Good" >> $GITHUB_OUTPUT
+            ;;
+          "failure")
+            echo "color=#ff0000" >> $GITHUB_OUTPUT
+            echo "icon=❌" >> $GITHUB_OUTPUT
+            echo "teams_color=Attention" >> $GITHUB_OUTPUT
+            ;;
+          "cancelled")
+            echo "color=#ffff00" >> $GITHUB_OUTPUT
+            echo "icon=⚠️" >> $GITHUB_OUTPUT
+            echo "teams_color=Warning" >> $GITHUB_OUTPUT
+            ;;
+          *)
+            echo "color=#0099ff" >> $GITHUB_OUTPUT
+            echo "icon=ℹ️" >> $GITHUB_OUTPUT
+            echo "teams_color=Accent" >> $GITHUB_OUTPUT
+            ;;
+        esac
+        
+        case "${{ inputs.notification_type }}" in
+          "deployment")
+            echo "type_icon=🚀" >> $GITHUB_OUTPUT
+            ;;
+          "security")
+            echo "type_icon=🔒" >> $GITHUB_OUTPUT
+            ;;
+          "performance")
+            echo "type_icon=⚡" >> $GITHUB_OUTPUT
+            ;;
+          "test_failure")
+            echo "type_icon=🧪" >> $GITHUB_OUTPUT
+            ;;
+          "build_failure")
+            echo "type_icon=🏗️" >> $GITHUB_OUTPUT
+            ;;
+          *)
+            echo "type_icon=📊" >> $GITHUB_OUTPUT
+            ;;
+        esac
+
+    - name: 📝 Prepare notification content
+      id: content
+      run: |
+        # Prepare common variables
+        REPO_URL="https://github.com/${{ github.repository }}"
+        ACTION_URL="$REPO_URL/actions/runs/${{ github.run_id }}"
+        COMMIT_URL="$REPO_URL/commit/${{ github.sha }}"
+        
+        # Create formatted message
+        MESSAGE="${{ inputs.message }}"
+        if [ -z "$MESSAGE" ]; then
+          MESSAGE="No additional details provided."
+        fi
+        
+        # Set environment-specific details
+        ENV_DETAILS=""
+        case "${{ inputs.environment }}" in
+          "production")
+            ENV_DETAILS="🔴 **PRODUCTION ENVIRONMENT** 🔴"
+            ;;
+          "staging")
+            ENV_DETAILS="🟡 **STAGING ENVIRONMENT** 🟡"
+            ;;
+          *)
+            ENV_DETAILS="🟢 **DEVELOPMENT ENVIRONMENT** 🟢"
+            ;;
+        esac
+        
+        echo "repo_url=$REPO_URL" >> $GITHUB_OUTPUT
+        echo "action_url=$ACTION_URL" >> $GITHUB_OUTPUT
+        echo "commit_url=$COMMIT_URL" >> $GITHUB_OUTPUT
+        echo "env_details=$ENV_DETAILS" >> $GITHUB_OUTPUT
+        echo "formatted_message=$MESSAGE" >> $GITHUB_OUTPUT
+
+    # Slack Notification
+    - name: 📱 Send Slack notification
+      if: secrets.SLACK_WEBHOOK != ''
+      uses: 8398a7/action-slack@v3
+      with:
+        status: custom
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        channel: ${{ inputs.notification_type == 'deployment' && '#deployments' || inputs.notification_type == 'security' && '#security-alerts' || inputs.notification_type == 'performance' && '#performance-alerts' || '#general' }}
+        custom_payload: |
+          {
+            "attachments": [{
+              "color": "${{ steps.styling.outputs.color }}",
+              "pretext": "${{ steps.styling.outputs.type_icon }} ${{ inputs.title }}",
+              "fields": [
+                {
+                  "title": "Status",
+                  "value": "${{ steps.styling.outputs.icon }} ${{ inputs.status }}",
+                  "short": true
+                },
+                {
+                  "title": "Environment",
+                  "value": "${{ inputs.environment }}",
+                  "short": true
+                },
+                {
+                  "title": "Repository",
+                  "value": "<${{ steps.content.outputs.repo_url }}|${{ github.repository }}>",
+                  "short": true
+                },
+                {
+                  "title": "Branch",
+                  "value": "${{ github.ref_name }}",
+                  "short": true
+                },
+                {
+                  "title": "Commit",
+                  "value": "<${{ steps.content.outputs.commit_url }}|${{ github.sha }}>"[0:7]"",
+                  "short": true
+                },
+                {
+                  "title": "Triggered by",
+                  "value": "${{ github.actor }}",
+                  "short": true
+                }
+              ],
+              "actions": [{
+                "type": "button",
+                "text": "View Details",
+                "url": "${{ steps.content.outputs.action_url }}"
+              }],
+              "footer": "ERP System CI/CD",
+              "ts": ${{ github.event.head_commit.timestamp }}
+            }]
+          }
+
+    # Microsoft Teams Notification
+    - name: 📢 Send Teams notification
+      if: secrets.TEAMS_WEBHOOK != ''
+      uses: skitionek/notify-microsoft-teams@master
+      with:
+        webhook_url: ${{ secrets.TEAMS_WEBHOOK }}
+        raw: |
+          {
+            "@type": "MessageCard",
+            "@context": "http://schema.org/extensions",
+            "themeColor": "${{ steps.styling.outputs.color }}",
+            "summary": "${{ inputs.title }}",
+            "sections": [{
+              "activityTitle": "${{ steps.styling.outputs.type_icon }} ${{ inputs.title }}",
+              "activitySubtitle": "${{ steps.content.outputs.env_details }}",
+              "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+              "facts": [{
+                "name": "Status:",
+                "value": "${{ steps.styling.outputs.icon }} ${{ inputs.status }}"
+              }, {
+                "name": "Repository:",
+                "value": "${{ github.repository }}"
+              }, {
+                "name": "Branch:",
+                "value": "${{ github.ref_name }}"
+              }, {
+                "name": "Commit:",
+                "value": "${{ github.sha }}"
+              }, {
+                "name": "Triggered by:",
+                "value": "${{ github.actor }}"
+              }, {
+                "name": "Workflow:",
+                "value": "${{ inputs.workflow_name || github.workflow }}"
+              }],
+              "markdown": true
+            }],
+            "potentialAction": [{
+              "@type": "OpenUri",
+              "name": "View Action Details",
+              "targets": [{
+                "os": "default",
+                "uri": "${{ steps.content.outputs.action_url }}"
+              }]
+            }]
+          }
+
+    # Discord Notification
+    - name: 🎮 Send Discord notification
+      if: secrets.DISCORD_WEBHOOK != ''
+      uses: Ilshidur/action-discord@master
+      with:
+        args: |
+          ${{ steps.styling.outputs.type_icon }} **${{ inputs.title }}**
+          
+          ${{ steps.content.outputs.env_details }}
+          
+          **Status:** ${{ steps.styling.outputs.icon }} ${{ inputs.status }}
+          **Repository:** ${{ github.repository }}
+          **Branch:** ${{ github.ref_name }}
+          **Commit:** `${{ github.sha }}`
+          **Triggered by:** ${{ github.actor }}
+          
+          ${{ steps.content.outputs.formatted_message }}
+          
+          [View Details](${{ steps.content.outputs.action_url }})
+      env:
+        DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+
+    # Email Notification
+    - name: 📧 Send email notification
+      if: secrets.EMAIL_HOST != '' && secrets.NOTIFICATION_EMAIL != ''
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: ${{ secrets.EMAIL_HOST }}
+        server_port: ${{ secrets.EMAIL_PORT || '587' }}
+        username: ${{ secrets.EMAIL_USERNAME }}
+        password: ${{ secrets.EMAIL_PASSWORD }}
+        subject: "ERP System - ${{ inputs.title }}"
+        to: ${{ secrets.NOTIFICATION_EMAIL }}
+        from: ${{ secrets.EMAIL_FROM || 'erp-system@noreply.com' }}
+        html_body: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
+              .container { max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+              .header { background-color: ${{ steps.styling.outputs.color }}; color: white; padding: 20px; border-radius: 8px 8px 0 0; }
+              .content { padding: 20px; }
+              .status { font-size: 24px; font-weight: bold; margin-bottom: 15px; }
+              .details { background-color: #f8f9fa; padding: 15px; border-radius: 4px; margin: 15px 0; }
+              .detail-row { margin: 5px 0; }
+              .label { font-weight: bold; display: inline-block; width: 120px; }
+              .button { display: inline-block; padding: 10px 20px; background-color: #0066cc; color: white; text-decoration: none; border-radius: 4px; margin: 15px 0; }
+              .footer { text-align: center; color: #6c757d; font-size: 12px; padding: 15px; border-top: 1px solid #dee2e6; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <h1>${{ steps.styling.outputs.type_icon }} ERP System Notification</h1>
+                <p>${{ inputs.title }}</p>
+              </div>
+              <div class="content">
+                <div class="status">${{ steps.styling.outputs.icon }} Status: ${{ inputs.status }}</div>
+                
+                <div class="details">
+                  <div class="detail-row"><span class="label">Environment:</span> ${{ inputs.environment }}</div>
+                  <div class="detail-row"><span class="label">Repository:</span> ${{ github.repository }}</div>
+                  <div class="detail-row"><span class="label">Branch:</span> ${{ github.ref_name }}</div>
+                  <div class="detail-row"><span class="label">Commit:</span> ${{ github.sha }}</div>
+                  <div class="detail-row"><span class="label">Triggered by:</span> ${{ github.actor }}</div>
+                  <div class="detail-row"><span class="label">Workflow:</span> ${{ inputs.workflow_name || github.workflow }}</div>
+                </div>
+                
+                ${{ inputs.message != '' && format('<div><strong>Details:</strong><br>{0}</div>', inputs.message) || '' }}
+                
+                <a href="${{ steps.content.outputs.action_url }}" class="button">View Action Details</a>
+              </div>
+              <div class="footer">
+                <p>This notification was generated automatically by the ERP System CI/CD pipeline.</p>
+                <p>Time: ${{ github.event.head_commit.timestamp }}</p>
+              </div>
+            </div>
+          </body>
+          </html>
+
+    # GitHub Issue Creation for Critical Failures
+    - name: 🐛 Create GitHub issue for critical failures
+      if: inputs.status == 'failure' && (inputs.environment == 'production' || inputs.notification_type == 'security')
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const issueTitle = `🚨 Critical ${inputs.notification_type} failure in ${inputs.environment}`;
+          const issueBody = `
+          ## Critical Alert
+          
+          A critical failure has occurred in the ERP System.
+          
+          ### Details
+          - **Type:** ${inputs.notification_type}
+          - **Status:** ${inputs.status}
+          - **Environment:** ${inputs.environment}
+          - **Repository:** ${{ github.repository }}
+          - **Branch:** ${{ github.ref_name }}
+          - **Commit:** ${{ github.sha }}
+          - **Triggered by:** ${{ github.actor }}
+          - **Workflow:** ${{ inputs.workflow_name || github.workflow }}
+          
+          ### Action Required
+          This issue requires immediate attention from the development team.
+          
+          ### Links
+          - [Action Details](${{ steps.content.outputs.action_url }})
+          - [Commit Details](${{ steps.content.outputs.commit_url }})
+          
+          ### Message
+          ${{ inputs.message || 'No additional details provided.' }}
+          
+          ---
+          *This issue was created automatically by the CI/CD system.*
+          `;
+          
+          // Check if similar issue already exists
+          const existingIssues = await github.rest.issues.listForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            state: 'open',
+            labels: 'critical,automated'
+          });
+          
+          const similarIssue = existingIssues.data.find(issue => 
+            issue.title.includes(inputs.notification_type) && 
+            issue.title.includes(inputs.environment)
+          );
+          
+          if (!similarIssue) {
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: issueTitle,
+              body: issueBody,
+              labels: ['critical', 'automated', inputs.notification_type, inputs.environment]
+            });
+          }
+
+    # Summary
+    - name: 📊 Notification summary
+      run: |
+        echo "## 🔔 Notification Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Type:** ${{ inputs.notification_type }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Status:** ${{ steps.styling.outputs.icon }} ${{ inputs.status }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Title:** ${{ inputs.title }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Channels Notified" >> $GITHUB_STEP_SUMMARY
+        echo "| Channel | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|---------|---------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Slack | ${{ secrets.SLACK_WEBHOOK != '' && '✅ Sent' || '⚪ Not configured' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Teams | ${{ secrets.TEAMS_WEBHOOK != '' && '✅ Sent' || '⚪ Not configured' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Discord | ${{ secrets.DISCORD_WEBHOOK != '' && '✅ Sent' || '⚪ Not configured' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Email | ${{ secrets.EMAIL_HOST != '' && secrets.NOTIFICATION_EMAIL != '' && '✅ Sent' || '⚪ Not configured' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Repository Information" >> $GITHUB_STEP_SUMMARY
+        echo "- **Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Actor:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

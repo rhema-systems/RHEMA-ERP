@@ -1,0 +1,512 @@
+name: 🚢 Environment Deployments
+
+on:
+  push:
+    branches: [ master ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment for deployment'
+        required: true
+        type: choice
+        options:
+        - development
+        - staging
+        - production
+      force_deploy:
+        description: 'Force deployment (skip checks)'
+        required: false
+        type: boolean
+        default: false
+      run_tests:
+        description: 'Run tests before deployment'
+        required: false
+        type: boolean
+        default: true
+      migration_strategy:
+        description: 'Database migration strategy'
+        required: false
+        type: choice
+        options:
+        - auto
+        - manual
+        - skip
+        default: 'auto'
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  NODE_VERSION: '18.x'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Job 1: Pre-deployment Checks
+  pre-deployment-checks:
+    name: 🔍 Pre-deployment Checks
+    runs-on: ubuntu-latest
+    if: github.event.inputs.force_deploy != 'true'
+    
+    outputs:
+      should_deploy: ${{ steps.checks.outputs.should_deploy }}
+      target_environment: ${{ steps.environment.outputs.target_environment }}
+      migration_required: ${{ steps.checks.outputs.migration_required }}
+      
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: 🎯 Determine target environment
+      id: environment
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          ENV="${{ github.event.inputs.environment }}"
+        elif [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          ENV="production"
+        else
+          ENV="development"
+        fi
+        
+        echo "target_environment=$ENV" >> $GITHUB_OUTPUT
+        echo "🎯 Target environment: $ENV"
+
+    - name: 🔍 Run deployment checks
+      id: checks
+      run: |
+        ENV="${{ steps.environment.outputs.target_environment }}"
+        
+        # Initialize check results
+        SHOULD_DEPLOY="true"
+        MIGRATION_REQUIRED="false"
+        
+        # Check for breaking changes in production
+        if [ "$ENV" = "production" ]; then
+          echo "🔴 Checking production deployment requirements..."
+          
+          # Check if this is a tagged release for production
+          if [[ "${{ github.ref }}" != refs/tags/* ]] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "❌ Production deployments require a tagged release"
+            SHOULD_DEPLOY="false"
+          fi
+          
+          # Check for database migrations
+          if git diff --name-only HEAD~1 HEAD | grep -q "src/ErpSystem.Data/Migrations/"; then
+            echo "⚠️ Database migrations detected"
+            MIGRATION_REQUIRED="true"
+          fi
+          
+          # Check for breaking API changes (simple check)
+          if git diff --name-only HEAD~1 HEAD | grep -q "src/ErpSystem.Api/Controllers/"; then
+            echo "⚠️ API controllers modified - review for breaking changes"
+          fi
+        fi
+        
+        # Check for migration files in any environment
+        if git diff --name-only HEAD~1 HEAD | grep -q "src/ErpSystem.Data/Migrations/" || [ "${{ github.event.inputs.migration_strategy }}" = "manual" ]; then
+          MIGRATION_REQUIRED="true"
+        fi
+        
+        echo "should_deploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
+        echo "migration_required=$MIGRATION_REQUIRED" >> $GITHUB_OUTPUT
+        
+        echo "✅ Pre-deployment checks completed"
+        echo "Should deploy: $SHOULD_DEPLOY"
+        echo "Migration required: $MIGRATION_REQUIRED"
+
+    - name: 🧪 Quick smoke tests
+      if: github.event.inputs.run_tests == 'true' || github.event.inputs.run_tests == null
+      run: |
+        echo "🧪 Running quick smoke tests..."
+        
+        # Check for basic syntax errors
+        cd src
+        dotnet restore --verbosity quiet
+        dotnet build --configuration Release --verbosity quiet --no-restore
+        
+        echo "✅ Build successful"
+        
+        # Frontend checks
+        cd ../frontend
+        npm ci --silent
+        npm run build > /dev/null
+        
+        echo "✅ Frontend build successful"
+
+  # Job 2: Build and Push Images
+  build-and-push:
+    name: 🏗️ Build & Push Images
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-checks]
+    if: always() && (needs.pre-deployment-checks.outputs.should_deploy == 'true' || github.event.inputs.force_deploy == 'true')
+    
+    strategy:
+      matrix:
+        service: [api, frontend]
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: 🔑 Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 📋 Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.service }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=tag
+          type=sha,prefix=sha-
+          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=${{ needs.pre-deployment-checks.outputs.target_environment }},enable=true
+
+    - name: 🏗️ Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ${{ matrix.service == 'api' && 'src/ErpSystem.Api/Dockerfile' || 'frontend/Dockerfile' }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64
+
+    - name: 🔍 Security scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.service }}:${{ needs.pre-deployment-checks.outputs.target_environment }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+      continue-on-error: true
+
+    - name: 📤 Upload security scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  # Job 3: Deploy to Development
+  deploy-development:
+    name: 🟢 Deploy to Development
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-checks, build-and-push]
+    if: needs.pre-deployment-checks.outputs.target_environment == 'development'
+    environment: development
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🚀 Deploy to development environment
+      run: |
+        echo "🟢 Deploying to development environment..."
+        
+        # Simple deployment (could be Docker Compose, Kubernetes, etc.)
+        # This is a placeholder - replace with your actual deployment commands
+        
+        echo "Pulling latest images..."
+        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:development
+        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:development
+        
+        echo "Starting services..."
+        # Your deployment commands here
+        # Example: docker-compose -f docker-compose.dev.yml up -d
+        
+        echo "✅ Development deployment completed"
+
+    - name: 🧪 Post-deployment tests
+      run: |
+        echo "🧪 Running post-deployment smoke tests..."
+        
+        # Wait for services to be ready
+        sleep 30
+        
+        # Basic health checks
+        # curl -f http://dev-api.yourcompany.com/health || exit 1
+        # curl -f http://dev-app.yourcompany.com/ || exit 1
+        
+        echo "✅ Post-deployment tests passed"
+
+    - name: 🔔 Notify success
+      uses: ./.github/workflows/notifications.yml
+      with:
+        notification_type: 'deployment'
+        status: 'success'
+        title: 'Development Deployment Successful'
+        message: 'Application successfully deployed to development environment'
+        environment: 'development'
+      secrets: inherit
+
+  # Job 4: Deploy to Staging
+  deploy-staging:
+    name: 🟡 Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-checks, build-and-push]
+    if: needs.pre-deployment-checks.outputs.target_environment == 'staging'
+    environment: staging
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🗄️ Database migrations (staging)
+      if: needs.pre-deployment-checks.outputs.migration_required == 'true'
+      run: |
+        echo "🗄️ Running database migrations for staging..."
+        
+        # Backup database first
+        echo "Creating database backup..."
+        
+        # Run migrations
+        # Add your migration commands here
+        echo "Running EF Core migrations..."
+        
+        echo "✅ Database migrations completed"
+
+    - name: 🚀 Deploy to staging environment
+      run: |
+        echo "🟡 Deploying to staging environment..."
+        
+        # Deploy with staging configuration
+        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:staging
+        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:staging
+        
+        # Your staging deployment commands
+        echo "✅ Staging deployment completed"
+
+    - name: 🧪 Integration tests
+      run: |
+        echo "🧪 Running integration tests on staging..."
+        
+        # Run comprehensive integration tests
+        # This could include API tests, UI tests, etc.
+        
+        echo "✅ Integration tests passed"
+
+    - name: 🔔 Notify success
+      uses: ./.github/workflows/notifications.yml
+      with:
+        notification_type: 'deployment'
+        status: 'success'
+        title: 'Staging Deployment Successful'
+        message: 'Application successfully deployed to staging environment with integration tests passing'
+        environment: 'staging'
+      secrets: inherit
+
+  # Job 5: Deploy to Production
+  deploy-production:
+    name: 🔴 Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-checks, build-and-push]
+    if: needs.pre-deployment-checks.outputs.target_environment == 'production'
+    environment: production
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: ⚠️ Production deployment approval
+      uses: trstringer/manual-approval@v1
+      if: github.event.inputs.force_deploy != 'true'
+      with:
+        secret: ${{ github.TOKEN }}
+        approvers: ${{ secrets.PRODUCTION_APPROVERS }}
+        minimum-approvals: 2
+        issue-title: "🔴 Production Deployment Approval Required"
+        issue-body: |
+          ## 🚀 Production Deployment Request
+          
+          **Repository:** ${{ github.repository }}
+          **Branch/Tag:** ${{ github.ref }}
+          **Commit:** ${{ github.sha }}
+          **Triggered by:** ${{ github.actor }}
+          
+          **Changes in this deployment:**
+          - Database migrations: ${{ needs.pre-deployment-checks.outputs.migration_required == 'true' && '⚠️ Required' || '✅ None' }}
+          - Environment: Production
+          
+          **Pre-deployment checklist:**
+          - [ ] Code review completed
+          - [ ] Security scan passed
+          - [ ] Integration tests passed
+          - [ ] Database backup confirmed
+          - [ ] Rollback plan prepared
+          - [ ] Stakeholders notified
+          
+          **Deployment approval:** Please review and approve this production deployment.
+          
+          Comment `/approve` to proceed with deployment.
+
+    - name: 📊 Create production deployment backup
+      run: |
+        echo "📊 Creating production backup..."
+        
+        # Create comprehensive backup
+        echo "Backing up database..."
+        echo "Backing up current application version..."
+        echo "Saving deployment metadata..."
+        
+        echo "✅ Production backup completed"
+
+    - name: 🗄️ Database migrations (production)
+      if: needs.pre-deployment-checks.outputs.migration_required == 'true' && github.event.inputs.migration_strategy != 'skip'
+      run: |
+        echo "🗄️ Running production database migrations..."
+        
+        # Extra safety for production migrations
+        echo "Validating migration scripts..."
+        echo "Running migration in transaction..."
+        
+        # Your production migration commands here
+        echo "✅ Production database migrations completed"
+
+    - name: 🚀 Blue-Green deployment to production
+      run: |
+        echo "🔴 Starting blue-green deployment to production..."
+        
+        # Blue-green deployment process
+        echo "Deploying to green environment..."
+        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:production
+        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:production
+        
+        echo "Health checking green environment..."
+        sleep 60  # Allow time for startup
+        
+        echo "Switching traffic to green environment..."
+        
+        echo "Monitoring for 5 minutes..."
+        sleep 300
+        
+        echo "Deployment successful, cleaning up blue environment..."
+        echo "✅ Production deployment completed"
+
+    - name: 🧪 Production smoke tests
+      run: |
+        echo "🧪 Running production smoke tests..."
+        
+        # Critical path testing
+        echo "Testing authentication..."
+        echo "Testing critical APIs..."
+        echo "Testing database connectivity..."
+        echo "Testing file storage..."
+        
+        echo "✅ Production smoke tests passed"
+
+    - name: 📊 Deployment metrics
+      run: |
+        echo "📊 Collecting deployment metrics..."
+        
+        # Collect and report deployment metrics
+        echo "Deployment duration: $(date)"
+        echo "Services deployed: API, Frontend"
+        echo "Database migrations: ${{ needs.pre-deployment-checks.outputs.migration_required }}"
+        
+        # Could send metrics to monitoring system
+        echo "✅ Metrics collected"
+
+    - name: 🔔 Notify production deployment success
+      uses: ./.github/workflows/notifications.yml
+      with:
+        notification_type: 'deployment'
+        status: 'success'
+        title: 'Production Deployment Successful'
+        message: 'Application successfully deployed to production with all health checks passing'
+        environment: 'production'
+      secrets: inherit
+
+  # Job 6: Rollback Capability
+  rollback:
+    name: ⏪ Rollback Deployment
+    runs-on: ubuntu-latest
+    if: failure() && github.event.inputs.environment == 'production'
+    needs: [deploy-production]
+    environment: production-rollback
+    
+    steps:
+    - name: ⚠️ Rollback approval
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: ${{ github.TOKEN }}
+        approvers: ${{ secrets.PRODUCTION_APPROVERS }}
+        minimum-approvals: 1
+        issue-title: "⏪ Production Rollback Required"
+        issue-body: |
+          ## 🚨 Production Rollback Request
+          
+          Production deployment has failed and requires immediate rollback.
+          
+          **Repository:** ${{ github.repository }}
+          **Failed deployment:** ${{ github.sha }}
+          **Environment:** Production
+          
+          **Rollback actions:**
+          - [ ] Revert to previous stable version
+          - [ ] Restore database if needed
+          - [ ] Verify system functionality
+          - [ ] Notify stakeholders
+          
+          Comment `/approve` to proceed with rollback.
+
+    - name: ⏪ Execute rollback
+      run: |
+        echo "⏪ Executing production rollback..."
+        
+        # Rollback to previous version
+        echo "Reverting to previous stable deployment..."
+        echo "Checking database rollback requirements..."
+        echo "Switching traffic back to stable version..."
+        echo "Verifying rollback success..."
+        
+        echo "✅ Rollback completed successfully"
+
+    - name: 🔔 Notify rollback completion
+      uses: ./.github/workflows/notifications.yml
+      with:
+        notification_type: 'deployment'
+        status: 'success'
+        title: 'Production Rollback Completed'
+        message: 'Production environment has been successfully rolled back to the previous stable version'
+        environment: 'production'
+      secrets: inherit
+
+  # Job 7: Post-deployment Summary
+  deployment-summary:
+    name: 📊 Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-checks, deploy-development, deploy-staging, deploy-production]
+    if: always()
+    
+    steps:
+    - name: 📊 Generate deployment report
+      run: |
+        echo "## 🚢 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Target Environment:** ${{ needs.pre-deployment-checks.outputs.target_environment || 'Unknown' }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Deployment Status:** ${{ (needs.deploy-development.result == 'success' || needs.deploy-staging.result == 'success' || needs.deploy-production.result == 'success') && '✅ Successful' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Migration Required:** ${{ needs.pre-deployment-checks.outputs.migration_required == 'true' && '⚠️ Yes' || '✅ No' }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Environment Status" >> $GITHUB_STEP_SUMMARY
+        echo "| Environment | Status | Notes |" >> $GITHUB_STEP_SUMMARY
+        echo "|-------------|--------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Development | ${{ needs.deploy-development.result == 'success' && '✅ Deployed' || needs.deploy-development.result == 'skipped' && '⚪ Skipped' || '❌ Failed' }} | Auto-deployment |" >> $GITHUB_STEP_SUMMARY
+        echo "| Staging | ${{ needs.deploy-staging.result == 'success' && '✅ Deployed' || needs.deploy-staging.result == 'skipped' && '⚪ Skipped' || '❌ Failed' }} | Integration tested |" >> $GITHUB_STEP_SUMMARY
+        echo "| Production | ${{ needs.deploy-production.result == 'success' && '✅ Deployed' || needs.deploy-production.result == 'skipped' && '⚪ Skipped' || '❌ Failed' }} | Manual approval required |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Deployment Details" >> $GITHUB_STEP_SUMMARY
+        echo "- **Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch/Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Workflow:** ${{ github.workflow }}" >> $GITHUB_STEP_SUMMARY

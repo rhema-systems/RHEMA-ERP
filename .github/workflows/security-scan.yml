@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: '0 2 * * 1'  # Weekly on Monday at 2 AM UTC
   push:
-    branches: [ main, develop ]
+    branches: [ master ]
     paths:
       - 'src/**'
       - 'frontend/**'
@@ -12,7 +12,7 @@ on:
       - '**/*.csproj'
       - '**/package.json'
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
   workflow_dispatch: # Manual trigger
 
 env:
@@ -132,7 +132,7 @@ jobs:
       uses: trufflesecurity/trufflehog@main
       with:
         path: ./
-        base: main
+        base: master
         head: HEAD
         extra_args: --debug --only-verified
 
