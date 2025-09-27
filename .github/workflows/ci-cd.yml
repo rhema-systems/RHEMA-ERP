@@ -44,14 +44,20 @@ jobs:
 
     - name: 🔒 Run CodeQL Analysis
       uses: github/codeql-action/init@v3
+      continue-on-error: true
+      if: github.repository == 'owner/repo-with-advanced-security'
       with:
         languages: 'csharp,javascript'
 
     - name: 🏧️ Autobuild
       uses: github/codeql-action/autobuild@v3
+      continue-on-error: true
+      if: github.repository == 'owner/repo-with-advanced-security'
 
     - name: 🔒 Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
+      continue-on-error: true
+      if: github.repository == 'owner/repo-with-advanced-security'
 
   # Job 2: Backend Testing & Build
   backend-build-test:

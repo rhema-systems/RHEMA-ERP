@@ -56,19 +56,22 @@ jobs:
           cat security-audit.txt
         fi
 
-    - name: 🔍 Initialize CodeQL
-      uses: github/codeql-action/init@v3
-      with:
-        languages: 'csharp,javascript'
-        queries: security-extended,security-and-quality
+    - name: 🔍 Initialize CodeQL (Disabled - requires Advanced Security)
+      run: |
+        echo "CodeQL scanning requires GitHub Advanced Security to be enabled"
+        echo "Skipping CodeQL analysis for now"
+      # uses: github/codeql-action/init@v3
+      # with:
+      #   languages: 'csharp,javascript'
+      #   queries: security-extended,security-and-quality
 
-    - name: 🏧️ Autobuild for CodeQL
-      uses: github/codeql-action/autobuild@v3
+    # - name: 🏧️ Autobuild for CodeQL
+    #   uses: github/codeql-action/autobuild@v3
 
-    - name: 🔒 Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
-      with:
-        category: "/language:csharp,javascript"
+    # - name: 🔒 Perform CodeQL Analysis
+    #   uses: github/codeql-action/analyze@v3
+    #   with:
+    #     category: "/language:csharp,javascript"
 
     # Node.js Security Scanning
     - name: 🔧 Setup Node.js
