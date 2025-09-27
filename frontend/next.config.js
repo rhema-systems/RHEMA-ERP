@@ -3,10 +3,12 @@ const nextConfig = {
   // Enable standalone output for Docker containers
   output: 'standalone',
   
+  // Server external packages (moved from experimental)
+  serverExternalPackages: [],
+  
   // Experimental features
   experimental: {
-    // Enable server component logging
-    serverComponentsExternalPackages: [],
+    // Add any experimental features here if needed
   },
   
   // Environment variables

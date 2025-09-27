@@ -67,7 +67,7 @@ class FileUploadService {
     
     const formData = new FormData();
     
-    files.forEach((file, index) => {
+    files.forEach((file) => {
       formData.append('files', file);
     });
     

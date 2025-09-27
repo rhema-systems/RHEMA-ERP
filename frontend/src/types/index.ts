@@ -1,5 +1,5 @@
 // API Response Types
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   data?: T;
   message?: string;
   success: boolean;
@@ -91,5 +91,5 @@ export interface Tenant {
 export interface AppError {
   message: string;
   code?: string;
-  details?: any;
+  details?: Record<string, unknown>;
 }

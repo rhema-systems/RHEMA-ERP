@@ -1,4 +1,3 @@
-import { apiService } from './api.service';
 import type { User } from '../types';
 
 class UserService {
