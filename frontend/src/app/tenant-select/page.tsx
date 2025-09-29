@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { Building2, Loader2 } from 'lucide-react';
+import { Building2, Loader2, LogOut } from 'lucide-react';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { useTenant } from '../../contexts/TenantContext';
 import { tenantService } from '../../services/tenant';
+import { authService } from '../../services/auth';
 import { apiService, type UserTenantInfo } from '../../services/api.service';
 import type { Tenant } from '../../types';
 
@@ -38,8 +39,26 @@ export default function TenantSelectPage() {
     },
   });
 
+  const logoutMutation = useMutation({
+    mutationFn: () => authService.logout(),
+    onSuccess: () => {
+      router.push('/login');
+    },
+    onError: (error) => {
+      console.error('Logout error:', error);
+      // Even if logout fails, redirect to login
+      router.push('/login');
+    },
+  });
+
   const handleTenantSelect = (tenant: UserTenantInfo) => {
     selectTenantMutation.mutate(tenant);
+  };
+
+  const handleLogout = () => {
+    if (confirm('Are you sure you want to logout?')) {
+      logoutMutation.mutate();
+    }
   };
 
   // Auto-select if user has only one tenant (especially for public registration users)
@@ -217,6 +236,29 @@ export default function TenantSelectPage() {
                   </div>
                 </Button>
               ))}
+              
+              {/* Logout Section */}
+              <div className="pt-4 border-t border-gray-200 dark:border-gray-700 flex justify-center">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 dark:text-blue-400 dark:border-blue-800 dark:hover:bg-blue-900/20 dark:hover:text-blue-300 dark:hover:border-blue-700"
+                  onClick={handleLogout}
+                  disabled={logoutMutation.isPending}
+                >
+                  {logoutMutation.isPending ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      Logging out...
+                    </>
+                  ) : (
+                    <>
+                      <LogOut className="h-3 w-3 mr-1" />
+                      Logout
+                    </>
+                  )}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>
