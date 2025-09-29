@@ -51,7 +51,11 @@ namespace ErpSystem.Api.Controllers;
                         RecaptchaSiteKey = null,
                         RecaptchaSecretKey = null,
                         HCaptchaSiteKey = null,
-                        HCaptchaSecretKey = null
+                        HCaptchaSecretKey = null,
+
+                        // Legal URLs
+                        TermsOfServiceUrl = null,
+                        PrivacyPolicyUrl = null
                     });
                 }
 
@@ -84,7 +88,11 @@ namespace ErpSystem.Api.Controllers;
                     RecaptchaSiteKey = settings.RecaptchaSiteKey,
                     RecaptchaSecretKey = settings.RecaptchaSecretKey,
                     HCaptchaSiteKey = settings.HCaptchaSiteKey,
-                    HCaptchaSecretKey = settings.HCaptchaSecretKey
+                    HCaptchaSecretKey = settings.HCaptchaSecretKey,
+
+                    // Legal URLs
+                    TermsOfServiceUrl = settings.TermsOfServiceUrl,
+                    PrivacyPolicyUrl = settings.PrivacyPolicyUrl
                 });
             }
             catch (Exception ex)
@@ -133,7 +141,11 @@ namespace ErpSystem.Api.Controllers;
                     RecaptchaSiteKey = request.RecaptchaSiteKey,
                     RecaptchaSecretKey = request.RecaptchaSecretKey,
                     HCaptchaSiteKey = request.HCaptchaSiteKey,
-                    HCaptchaSecretKey = request.HCaptchaSecretKey
+                    HCaptchaSecretKey = request.HCaptchaSecretKey,
+
+                    // Legal URLs
+                    TermsOfServiceUrl = request.TermsOfServiceUrl,
+                    PrivacyPolicyUrl = request.PrivacyPolicyUrl
                 };
 
                 var updatedSettings = await _settingsService.UpdateSecuritySettingsAsync(securitySettings);
@@ -185,7 +197,9 @@ namespace ErpSystem.Api.Controllers;
                     RecaptchaSiteKey = updatedSettings.RecaptchaSiteKey,
                     RecaptchaSecretKey = updatedSettings.RecaptchaSecretKey,
                     HCaptchaSiteKey = updatedSettings.HCaptchaSiteKey,
-                    HCaptchaSecretKey = updatedSettings.HCaptchaSecretKey
+                    HCaptchaSecretKey = updatedSettings.HCaptchaSecretKey,
+                    TermsOfServiceUrl = updatedSettings.TermsOfServiceUrl,
+                    PrivacyPolicyUrl = updatedSettings.PrivacyPolicyUrl
                 };
                 
                 return Ok(responseDto);
@@ -617,6 +631,10 @@ public class TestEmailRequest
         public string? RecaptchaSecretKey { get; set; }
         public string? HCaptchaSiteKey { get; set; }
         public string? HCaptchaSecretKey { get; set; }
+
+        // Legal URLs
+        public string? TermsOfServiceUrl { get; set; }
+        public string? PrivacyPolicyUrl { get; set; }
     }
 
     public class PasswordPolicyDto

@@ -54,24 +54,57 @@ function LoginFormWithSearchParams() {
   });
 
   // Fetch tenants to check if any allow self-registration
-  const { data: tenants } = useQuery({
+  const { data: tenants, isLoading: tenantsLoading, error: tenantsError } = useQuery({
     queryKey: ['tenants'],
     queryFn: () => apiService.getTenants(),
   });
 
+  // Debug: Log tenant data
+  console.log('🏢 Tenants query state:', { 
+    tenants, 
+    tenantsLoading, 
+    tenantsError: tenantsError?.message,
+    hasData: !!tenants,
+    tenantCount: tenants?.length || 0
+  });
+  
+  if (tenants) {
+    console.log('🔍 Tenant self-registration status:', 
+      tenants.map(t => ({ 
+        name: t.name, 
+        code: t.code, 
+        allowSelfRegistration: t.allowSelfRegistration, 
+        isActive: t.isActive 
+      }))
+    );
+  }
+
   // Check if any tenant allows self-registration
   const allowSelfRegistration = tenants?.some(tenant => tenant.allowSelfRegistration && tenant.isActive) ?? false;
+  
+  console.log('✨ Create Account button will be shown:', allowSelfRegistration);
+  console.log('📋 Button visibility logic:', {
+    hasTenants: !!tenants,
+    tenantCount: tenants?.length || 0,
+    tenantsWithSelfReg: tenants?.filter(t => t.allowSelfRegistration).length || 0,
+    activeTenants: tenants?.filter(t => t.isActive).length || 0,
+    finalDecision: allowSelfRegistration
+  });
 
   // Determine if reCAPTCHA should be shown based on settings and failed attempts
   const shouldShowRecaptcha = () => {
     if (!securitySettings) return false;
     
-    // Always show if enabled in settings
-    if (securitySettings.captchaEnabled) return true;
+    // Always show if enabled in settings (and we have a valid site key)
+    if (securitySettings.captchaEnabled && 
+        (securitySettings.recaptchaSiteKey || securitySettings.hCaptchaSiteKey)) {
+      return true;
+    }
     
-    // Show after X failed attempts if configured
+    // Show after X failed attempts if configured (and we have a valid site key)
     if (securitySettings.maxFailedLoginAttempts && 
-        failedAttempts >= Math.max(1, Math.floor(securitySettings.maxFailedLoginAttempts / 2))) {
+        failedAttempts >= Math.max(1, Math.floor(securitySettings.maxFailedLoginAttempts / 2)) &&
+        (securitySettings.recaptchaSiteKey || securitySettings.hCaptchaSiteKey)) {
       return true;
     }
     
@@ -117,10 +150,12 @@ function LoginFormWithSearchParams() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 p-4">
-      {/* Background Pattern */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-100 via-transparent to-transparent dark:from-blue-900/20"></div>
-      <div className="absolute inset-0 bg-grid-slate-100 dark:bg-grid-slate-800/25 bg-[bottom_1px_center] dark:border-slate-800/25"></div>
+    <div className="min-h-screen flex items-start justify-center p-4 pt-16 relative overflow-hidden">
+      {/* Background Image */}
+      <div 
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat" 
+        style={{backgroundImage: 'url(/login.svg)'}}
+      ></div>
       
       <div className="relative w-full max-w-md space-y-8">
         {/* Logo and Header */}
@@ -133,16 +168,16 @@ function LoginFormWithSearchParams() {
               <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl blur opacity-25"></div>
             </div>
           </div>
-          <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
+          <h1 className="text-4xl font-bold tracking-tight text-white drop-shadow-lg">
             ERP System
           </h1>
-          <p className="mt-2 text-slate-600 dark:text-slate-400">
+          <p className="mt-2 text-white/90 drop-shadow">
             Enterprise Resource Planning Platform
           </p>
         </div>
 
         {/* Login Card */}
-        <Card className="backdrop-blur-xl bg-white/80 dark:bg-slate-900/80 shadow-2xl border-white/20 dark:border-slate-800">
+        <Card className="backdrop-blur-xl bg-white/95 dark:bg-slate-900/95 shadow-2xl border border-white/30 dark:border-slate-700/50 rounded-2xl">
           <CardHeader className="space-y-1 pb-6">
             <CardTitle className="text-2xl font-bold text-center">Sign In</CardTitle>
             <CardDescription className="text-center">
@@ -166,7 +201,6 @@ function LoginFormWithSearchParams() {
                     {...register('username')}
                   />
                 </div>
-                <p className="text-xs text-slate-500 italic">Default username: admin</p>
                 {errors.username && (
                   <p className="text-sm text-red-500 flex items-center gap-1">
                     <Shield className="h-3 w-3" />
@@ -202,7 +236,6 @@ function LoginFormWithSearchParams() {
                     )}
                   </Button>
                 </div>
-                <p className="text-xs text-slate-500 italic">Default password: Admin123!</p>
                 {errors.password && (
                   <p className="text-sm text-red-500 flex items-center gap-1">
                     <Shield className="h-3 w-3" />
@@ -323,22 +356,11 @@ function LoginFormWithSearchParams() {
               </div>
             )}
 
-            {/* Demo Credentials */}
-            <div className="mt-8 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-              <h4 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
-                Demo Credentials
-              </h4>
-              <div className="space-y-1 text-xs text-slate-600 dark:text-slate-400">
-                <p><strong>Admin:</strong> admin / Admin123!</p>
-                <p><strong>Manager:</strong> manager / Manager123!</p>
-                <p><strong>Employee:</strong> employee / Employee123!</p>
-              </div>
-            </div>
           </CardContent>
         </Card>
 
         {/* Footer */}
-        <div className="text-center text-sm text-slate-500 dark:text-slate-400">
+        <div className="text-center text-sm text-white/70 drop-shadow">
           <p>© 2025 ERP System. All rights reserved.</p>
           <p className="mt-1">Secure enterprise management platform</p>
         </div>
@@ -350,10 +372,16 @@ function LoginFormWithSearchParams() {
 // Loading component for Suspense fallback
 function LoginPageLoading() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 p-4">
-      <div className="flex items-center space-x-2">
+    <div className="min-h-screen flex items-start justify-center p-4 pt-16 relative overflow-hidden">
+      {/* Background Image */}
+      <div 
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat" 
+        style={{backgroundImage: 'url(/login.svg)'}}
+      ></div>
+      
+      <div className="relative flex items-center space-x-3 backdrop-blur-sm bg-white/95 dark:bg-slate-900/95 p-8 rounded-2xl shadow-2xl border border-white/30">
         <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-        <span className="text-slate-600 dark:text-slate-400">Loading login page...</span>
+        <span className="text-slate-900 dark:text-slate-100 font-medium text-lg">Loading login page...</span>
       </div>
     </div>
   );

@@ -17,6 +17,7 @@ public interface ISettingsService
     Task<PasswordPolicy> UpdatePasswordPolicyAsync(PasswordPolicy policy);
     
     Task<Security?> GetSecuritySettingsAsync();
+    Task<Security?> GetPublicSecuritySettingsAsync();
     Task<Security> UpdateSecuritySettingsAsync(Security settings);
     
     Task<SystemSettings?> GetSystemSettingAsync(string key);
@@ -247,6 +248,36 @@ public class SettingsService : ISettingsService
         }
     }
 
+    /// <summary>
+    /// Gets security settings for public access (login, registration) from default tenant
+    /// </summary>
+    public async Task<Security?> GetPublicSecuritySettingsAsync()
+    {
+        try
+        {
+            // Get settings from default tenant or first available tenant
+            var settings = await _unitOfWork.Repository<Security>().GetAllAsync();
+            var defaultSettings = settings.FirstOrDefault();
+            
+            if (defaultSettings != null)
+            {
+                _logger.LogInformation("Retrieved public security settings from tenant {TenantId}: CAPTCHA enabled = {CaptchaEnabled}", 
+                    defaultSettings.TenantId, defaultSettings.CaptchaEnabled);
+            }
+            else
+            {
+                _logger.LogWarning("No security settings found in database for public access");
+            }
+            
+            return defaultSettings;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving public security settings");
+            throw;
+        }
+    }
+
     public async Task<Security> UpdateSecuritySettingsAsync(Security settings)
     {
         try
@@ -286,6 +317,10 @@ public class SettingsService : ISettingsService
                 existingSettings.RateLimitLoginMaxAttempts = settings.RateLimitLoginMaxAttempts;
                 existingSettings.RateLimitLoginWindowMinutes = settings.RateLimitLoginWindowMinutes;
                 existingSettings.RateLimitLoginBlockDurationMinutes = settings.RateLimitLoginBlockDurationMinutes;
+                
+                // Legal URLs
+                existingSettings.TermsOfServiceUrl = settings.TermsOfServiceUrl;
+                existingSettings.PrivacyPolicyUrl = settings.PrivacyPolicyUrl;
                 
                 existingSettings.UpdatedAt = DateTime.UtcNow;
 

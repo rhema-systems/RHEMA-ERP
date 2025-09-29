@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Shield, Key, Clock, Bot, Save, Lock, Users, Loader2 } from 'lucide-react';
+import { Shield, Key, Clock, Bot, Save, Lock, Users, Loader2, FileText } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../../components/ui/select';
 
 import { Button } from '../../../../components/ui/button';
@@ -46,10 +46,15 @@ const lockoutSchema = z.object({
 const recaptchaSchema = z.object({
   captchaEnabled: z.boolean(),
   captchaProvider: z.enum(['recaptcha', 'hcaptcha']),
-  recaptchaSiteKey: z.string().nullable(),
-  recaptchaSecretKey: z.string().nullable(),
-  hCaptchaSiteKey: z.string().nullable(),
-  hCaptchaSecretKey: z.string().nullable(),
+  recaptchaSiteKey: z.string().optional().nullable().or(z.literal('')),
+  recaptchaSecretKey: z.string().optional().nullable().or(z.literal('')),
+  hCaptchaSiteKey: z.string().optional().nullable().or(z.literal('')),
+  hCaptchaSecretKey: z.string().optional().nullable().or(z.literal('')),
+});
+
+const legalSchema = z.object({
+  termsOfServiceUrl: z.string().url('Must be a valid URL').optional().nullable().or(z.literal('')),
+  privacyPolicyUrl: z.string().url('Must be a valid URL').optional().nullable().or(z.literal('')),
 });
 
 // Use the imported DTO type directly, ensuring schema matches its shape
@@ -57,11 +62,23 @@ const recaptchaSchema = z.object({
 export default function SecuritySettingsPage() {
   const [activeTab, setActiveTab] = useState('password');
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   // Fetch current settings
-  const { data: settings, isLoading } = useQuery({
+  const { data: settings, isLoading, error } = useQuery({
     queryKey: ['securitySettings'],
-    queryFn: () => settingsService.getSecuritySettings(),
+    queryFn: () => {
+      console.log('🔄 useQuery: Calling settingsService.getSecuritySettings()');
+      return settingsService.getSecuritySettings();
+    },
+  });
+  
+  console.log('🔍 Query state:', { 
+    hasSettings: !!settings, 
+    isLoading, 
+    hasError: !!error, 
+    errorMessage: error?.message,
+    settingsData: settings 
   });
 
   const {
@@ -78,6 +95,7 @@ export default function SecuritySettingsPage() {
         ...sessionSchema.shape,
         ...lockoutSchema.shape,
         ...recaptchaSchema.shape,
+        ...legalSchema.shape,
       })
     ),
     defaultValues: {
@@ -109,19 +127,136 @@ export default function SecuritySettingsPage() {
       recaptchaSecretKey: null,
       hCaptchaSiteKey: null,
       hCaptchaSecretKey: null,
+
+      // Legal URLs
+      termsOfServiceUrl: null,
+      privacyPolicyUrl: null,
     },
   });
 
   // Update form when settings are loaded
   useEffect(() => {
-    if (settings) {
-      reset(settings);
+    if (!settings) {
+      console.log('❌ No settings data available yet');
+      return;
     }
-  }, [settings, reset]);
+
+    console.log('\n🎯 Form reset triggered - processing settings data');
+    console.log('📊 Raw settings from API:', settings);
+    
+    // Prepare clean data for form reset
+    const cleanSettings = {
+      // Password Policy
+      passwordMinLength: settings.passwordMinLength || 8,
+      passwordRequireUppercase: Boolean(settings.passwordRequireUppercase),
+      passwordRequireLowercase: Boolean(settings.passwordRequireLowercase),
+      passwordRequireDigits: Boolean(settings.passwordRequireDigits),
+      passwordRequireSpecialChars: Boolean(settings.passwordRequireSpecialChars),
+      passwordMaxAge: settings.passwordMaxAge,
+      passwordPreventReuse: settings.passwordPreventReuse,
+      
+      // Session Settings
+      sessionTimeoutMinutes: settings.sessionTimeoutMinutes || 30,
+      jwtTokenLifetimeMinutes: settings.jwtTokenLifetimeMinutes || 60,
+      preventConcurrentLogin: settings.preventConcurrentLogin || 'Disabled',
+      
+      // Lockout Settings
+      maxFailedLoginAttempts: settings.maxFailedLoginAttempts || 5,
+      accountLockoutMinutes: settings.accountLockoutMinutes || 30,
+      rateLimitLoginMaxAttempts: settings.rateLimitLoginMaxAttempts || 5,
+      rateLimitLoginWindowMinutes: settings.rateLimitLoginWindowMinutes || 15,
+      rateLimitLoginBlockDurationMinutes: settings.rateLimitLoginBlockDurationMinutes || 30,
+      
+      // CAPTCHA Settings
+      captchaEnabled: Boolean(settings.captchaEnabled),
+      captchaProvider: settings.captchaProvider || 'recaptcha',
+      recaptchaSiteKey: settings.recaptchaSiteKey || '',
+      recaptchaSecretKey: settings.recaptchaSecretKey || '',
+      hCaptchaSiteKey: settings.hCaptchaSiteKey || '',
+      hCaptchaSecretKey: settings.hCaptchaSecretKey || '',
+      
+      // Legal URLs
+      termsOfServiceUrl: settings.termsOfServiceUrl || '',
+      privacyPolicyUrl: settings.privacyPolicyUrl || '',
+    } as SecuritySettingsDto;
+    
+    console.log('🧹 Clean settings for form:', cleanSettings);
+    console.log('🔄 Calling form reset...');
+    
+    // Reset form with clean data
+    reset(cleanSettings);
+    
+    // Verify form was updated
+    setTimeout(() => {
+      const currentFormValues = watch();
+      console.log('\n✅ Form reset complete - current values:');
+      console.log('🔐 Password fields:', {
+        passwordMinLength: currentFormValues.passwordMinLength,
+        passwordRequireUppercase: currentFormValues.passwordRequireUppercase,
+        passwordMaxAge: currentFormValues.passwordMaxAge,
+      });
+      console.log('⏱️ Session fields:', {
+        sessionTimeoutMinutes: currentFormValues.sessionTimeoutMinutes,
+        preventConcurrentLogin: currentFormValues.preventConcurrentLogin,
+      });
+      console.log('🚫 Lockout fields:', {
+        maxFailedLoginAttempts: currentFormValues.maxFailedLoginAttempts,
+        accountLockoutMinutes: currentFormValues.accountLockoutMinutes,
+      });
+      console.log('🤖 CAPTCHA fields:', {
+        captchaEnabled: currentFormValues.captchaEnabled,
+        captchaProvider: currentFormValues.captchaProvider,
+        recaptchaSiteKey: currentFormValues.recaptchaSiteKey,
+      });
+      console.log('📋 Legal fields:', {
+        termsOfServiceUrl: currentFormValues.termsOfServiceUrl,
+        privacyPolicyUrl: currentFormValues.privacyPolicyUrl,
+      });
+    }, 200);
+  }, [settings, reset, watch]);
+  
+  // Debug: Log current form values to see what's actually in the form
+  const currentValues = watch();
+  
+  // Log current form values every few seconds to see if they're updating
+  useEffect(() => {
+    const interval = setInterval(() => {
+      console.log('\n🔍 CURRENT FORM VALUES SNAPSHOT:');
+      console.log('📊 All form data:', currentValues);
+      console.log('🔐 Password tab values:', {
+        passwordMinLength: currentValues.passwordMinLength,
+        passwordRequireUppercase: currentValues.passwordRequireUppercase,
+        passwordMaxAge: currentValues.passwordMaxAge,
+      });
+      console.log('🚫 Lockout tab values:', {
+        maxFailedLoginAttempts: currentValues.maxFailedLoginAttempts,
+        accountLockoutMinutes: currentValues.accountLockoutMinutes,
+      });
+      console.log('🤖 reCAPTCHA tab values:', {
+        captchaEnabled: currentValues.captchaEnabled,
+        captchaProvider: currentValues.captchaProvider,
+        recaptchaSiteKey: currentValues.recaptchaSiteKey,
+      });
+      console.log('📋 Legal tab values:', {
+        termsOfServiceUrl: currentValues.termsOfServiceUrl,
+        privacyPolicyUrl: currentValues.privacyPolicyUrl,
+      });
+    }, 5000); // Log every 5 seconds
+    
+    return () => clearInterval(interval);
+  }, [currentValues]);
 
   const updateMutation = useMutation({
-    mutationFn: (data: SecuritySettingsDto) => settingsService.updateSecuritySettings(data),
-    onSuccess: () => {
+    mutationFn: (data: SecuritySettingsDto) => {
+      console.log('🚀 Submitting security settings:', data);
+      return settingsService.updateSecuritySettings(data);
+    },
+    onSuccess: (updatedData) => {
+      console.log('✅ Settings saved successfully:', updatedData);
+      
+      // Invalidate and refetch the security settings query
+      queryClient.invalidateQueries({ queryKey: ['securitySettings'] });
+      
       toast({
         title: 'Settings Updated',
         description: 'Security settings have been updated successfully.',
@@ -129,6 +264,7 @@ export default function SecuritySettingsPage() {
       });
     },
     onError: (error: any) => {
+      console.error('❌ Failed to save settings:', error);
       toast({
         title: 'Error',
         description: error.message || 'Failed to update security settings.',
@@ -138,7 +274,22 @@ export default function SecuritySettingsPage() {
   });
 
   const onSubmit = (data: SecuritySettingsDto) => {
-    updateMutation.mutate(data);
+    console.log('📤 Form submission - raw data:', data);
+    
+    // Clean up form data before sending to API
+    const cleanData: SecuritySettingsDto = {
+      ...data,
+      // Convert empty strings to null for optional fields
+      recaptchaSiteKey: data.recaptchaSiteKey?.trim() || null,
+      recaptchaSecretKey: data.recaptchaSecretKey?.trim() || null,
+      hCaptchaSiteKey: data.hCaptchaSiteKey?.trim() || null,
+      hCaptchaSecretKey: data.hCaptchaSecretKey?.trim() || null,
+      termsOfServiceUrl: data.termsOfServiceUrl?.trim() || null,
+      privacyPolicyUrl: data.privacyPolicyUrl?.trim() || null,
+    };
+    
+    console.log('🧹 Form submission - cleaned data:', cleanData);
+    updateMutation.mutate(cleanData);
   };
 
   if (isLoading) {
@@ -175,7 +326,7 @@ export default function SecuritySettingsPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-4 gap-4">
+        <TabsList className="grid grid-cols-5 gap-4">
           <TabsTrigger value="password" className="flex items-center gap-2">
             <Key className="h-4 w-4" />
             Password Policy
@@ -191,6 +342,10 @@ export default function SecuritySettingsPage() {
           <TabsTrigger value="recaptcha" className="flex items-center gap-2">
             <Bot className="h-4 w-4" />
             reCAPTCHA
+          </TabsTrigger>
+          <TabsTrigger value="legal" className="flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            Legal
           </TabsTrigger>
         </TabsList>
 
@@ -572,6 +727,64 @@ export default function SecuritySettingsPage() {
                   )}
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="legal">
+          <Card>
+            <CardHeader>
+              <CardTitle>Legal URLs</CardTitle>
+              <CardDescription>
+                Configure URLs for your Terms of Service and Privacy Policy pages
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="termsOfServiceUrl">Terms of Service URL</Label>
+                <Input
+                  id="termsOfServiceUrl"
+                  type="url"
+                  placeholder="https://yourcompany.com/terms"
+                  {...register('termsOfServiceUrl')}
+                />
+                <p className="text-sm text-slate-500">
+                  URL to your Terms of Service page that will be displayed on the registration form
+                </p>
+                {errors.termsOfServiceUrl && (
+                  <p className="text-sm text-red-500">{errors.termsOfServiceUrl.message}</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="privacyPolicyUrl">Privacy Policy URL</Label>
+                <Input
+                  id="privacyPolicyUrl"
+                  type="url"
+                  placeholder="https://yourcompany.com/privacy"
+                  {...register('privacyPolicyUrl')}
+                />
+                <p className="text-sm text-slate-500">
+                  URL to your Privacy Policy page that will be displayed on the registration form
+                </p>
+                {errors.privacyPolicyUrl && (
+                  <p className="text-sm text-red-500">{errors.privacyPolicyUrl.message}</p>
+                )}
+              </div>
+
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <FileText className="h-5 w-5 text-blue-600 mt-0.5" />
+                  <div>
+                    <h4 className="font-medium text-blue-900">Legal Compliance</h4>
+                    <p className="text-sm text-blue-800 mt-1">
+                      These URLs will be displayed to users during registration. Ensure your
+                      Terms of Service and Privacy Policy are up to date and accessible at
+                      these URLs to maintain compliance with data protection regulations.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

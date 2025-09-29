@@ -2,6 +2,8 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { EmailTemplateDesigner } from '../../../../components/email-template-designer';
+import { emailTemplateService, type EmailTemplate } from '../../../../services/email-template.service';
 import { DashboardLayout } from '../../../../components/layout/dashboard-layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../../components/ui/card';
 import { Button } from '../../../../components/ui/button';
@@ -9,6 +11,7 @@ import { Input } from '../../../../components/ui/input';
 import { Label } from '../../../../components/ui/label';
 import { Switch } from '../../../../components/ui/switch';
 import { Textarea } from '../../../../components/ui/textarea';
+import { Badge } from '../../../../components/ui/badge';
 import {
   Form,
   FormControl,
@@ -36,7 +39,9 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { adminApiService, EmailSettings } from '../../../../services/admin-api.service';
 import { useToast } from '../../../../hooks/use-toast';
-import { 
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../../components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../../components/ui/select';
+import {
   Mail, 
   Send, 
   Server, 
@@ -44,7 +49,13 @@ import {
   CheckCircle, 
   XCircle,
   AlertTriangle,
-  Settings
+  Settings,
+  FileText,
+  Plus,
+  Edit,
+  Trash2,
+  Database,
+  Eye
 } from 'lucide-react';
 
 const emailSettingsSchema = z.object({
@@ -66,9 +77,15 @@ const testEmailSchema = z.object({
 type EmailSettingsFormData = z.infer<typeof emailSettingsSchema>;
 type TestEmailFormData = z.infer<typeof testEmailSchema>;
 
+// EmailTemplate type is now imported from the service
+
 export default function EmailSettingsPage() {
   const [isTestDialogOpen, setIsTestDialogOpen] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isTemplateDesignerOpen, setIsTemplateDesignerOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | undefined>(undefined);
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -98,6 +115,12 @@ export default function EmailSettingsPage() {
   const { data: emailSettings, isLoading } = useQuery({
     queryKey: ['email-settings'],
     queryFn: () => adminApiService.getEmailSettings(),
+  });
+
+  // Fetch email templates
+  const { data: templates, isLoading: templatesLoading } = useQuery({
+    queryKey: ['email-templates'],
+    queryFn: () => emailTemplateService.getTemplates()
   });
 
   // Update form when data loads
@@ -166,6 +189,50 @@ export default function EmailSettingsPage() {
     },
   });
 
+  // Create/Update template mutation
+  const templateMutation = useMutation({
+    mutationFn: async (template: EmailTemplate) => {
+      if (template.id) {
+        return emailTemplateService.updateTemplate(template.id, template);
+      } else {
+        return emailTemplateService.createTemplate(template);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['email-templates'] });
+      toast({
+        title: 'Success',
+        description: 'Email template saved successfully'
+      });
+    },
+    onError: () => {
+      toast({
+        title: 'Error',
+        description: 'Failed to save email template',
+        variant: 'destructive'
+      });
+    }
+  });
+
+  // Delete template mutation
+  const deleteTemplateMutation = useMutation({
+    mutationFn: (templateId: string) => emailTemplateService.deleteTemplate(templateId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['email-templates'] });
+      toast({
+        title: 'Success',
+        description: 'Email template deleted successfully'
+      });
+    },
+    onError: () => {
+      toast({
+        title: 'Error',
+        description: 'Failed to delete email template',
+        variant: 'destructive'
+      });
+    }
+  });
+
   const onSubmit = (data: EmailSettingsFormData) => {
     updateSettingsMutation.mutate(data);
   };
@@ -184,6 +251,39 @@ export default function EmailSettingsPage() {
     setIsTestDialogOpen(true);
   };
 
+  const handleCreateTemplate = () => {
+    setEditingTemplate(undefined);
+    setIsTemplateDesignerOpen(true);
+  };
+
+  const handleEditTemplate = (template: EmailTemplate) => {
+    setEditingTemplate(template);
+    setIsTemplateDesignerOpen(true);
+  };
+
+  const handleDeleteTemplate = (templateId: string) => {
+    if (window.confirm('Are you sure you want to delete this template?')) {
+      deleteTemplateMutation.mutate(templateId);
+    }
+  };
+
+  const handleSaveTemplate = (template: EmailTemplate) => {
+    templateMutation.mutate(template);
+  };
+
+  // Filter templates based on search and category
+  const filteredTemplates = templates?.filter(template => {
+    const matchesSearch = !searchQuery || 
+      template.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      template.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      template.module.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesCategory = selectedCategory === 'all' || 
+      template.category?.toLowerCase() === selectedCategory;
+    
+    return matchesSearch && matchesCategory;
+  }) || [];
+
   if (isLoading) {
     return (
       <DashboardLayout>
@@ -200,9 +300,23 @@ export default function EmailSettingsPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Email Settings</h1>
           <p className="text-muted-foreground">
-            Configure SMTP settings for system email notifications
+            Configure SMTP settings and manage email templates
           </p>
         </div>
+
+        <Tabs defaultValue="settings" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="settings" className="flex items-center gap-2">
+              <Server className="h-4 w-4" />
+              Email Settings
+            </TabsTrigger>
+            <TabsTrigger value="templates" className="flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Email Templates
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="settings">
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* SMTP Configuration */}
@@ -456,6 +570,168 @@ export default function EmailSettingsPage() {
             </Card>
           </div>
         </div>
+          </TabsContent>
+
+          <TabsContent value="templates">
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-5 w-5 text-primary" />
+                        <CardTitle>Email Templates</CardTitle>
+                      </div>
+                      <CardDescription>
+                        Create and manage professional email templates with dynamic database field integration
+                      </CardDescription>
+                    </div>
+                    <Button 
+                      onClick={handleCreateTemplate}
+                      className="flex items-center gap-2"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Create Template
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {templatesLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                      <span className="ml-2 text-muted-foreground">Loading templates...</span>
+                    </div>
+                  ) : templates && templates.length > 0 ? (
+                    <>
+                      {/* Search and Filter Bar */}
+                      <div className="flex flex-col sm:flex-row gap-4 mb-6">
+                        <div className="flex-1">
+                          <Input
+                            placeholder="Search templates..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="max-w-sm"
+                          />
+                        </div>
+                        <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                          <SelectTrigger className="w-[180px]">
+                            <SelectValue placeholder="Filter by category" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Categories</SelectItem>
+                            <SelectItem value="notification">Notifications</SelectItem>
+                            <SelectItem value="marketing">Marketing</SelectItem>
+                            <SelectItem value="transactional">Transactional</SelectItem>
+                            <SelectItem value="system">System</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      {/* Results Counter */}
+                      <div className="flex items-center justify-between mb-4">
+                        <p className="text-sm text-muted-foreground">
+                          Showing {filteredTemplates.length} of {templates.length} templates
+                        </p>
+                      </div>
+                      
+                      {filteredTemplates.length === 0 ? (
+                        <div className="text-center py-12">
+                          <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                          <h3 className="text-lg font-medium mb-2">No templates found</h3>
+                          <p className="text-muted-foreground mb-4">
+                            {searchQuery || selectedCategory !== 'all' 
+                              ? 'No templates match your current filters. Try adjusting your search or category filter.'
+                              : 'No templates have been created yet.'}
+                          </p>
+                          {(!searchQuery && selectedCategory === 'all') && (
+                            <Button 
+                              onClick={handleCreateTemplate}
+                              className="flex items-center gap-2"
+                            >
+                              <Plus className="h-4 w-4" />
+                              Create Your First Template
+                            </Button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="grid gap-4">
+                          {filteredTemplates.map((template) => (
+                          <div key={template.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors">
+                            <div className="space-y-1 flex-1">
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-medium">{template.name}</h4>
+                                {template.module && (
+                                  <Badge variant="secondary">{template.module}</Badge>
+                                )}
+                                {template.category && (
+                                  <Badge variant="outline">{template.category}</Badge>
+                                )}
+                              </div>
+                              {template.description && (
+                                <p className="text-sm text-muted-foreground">
+                                  {template.description}
+                                </p>
+                              )}
+                              <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                                {template.tableName && (
+                                  <span className="flex items-center gap-1">
+                                    <Database className="h-3 w-3" />
+                                    {template.tableName}
+                                  </span>
+                                )}
+                                {template.createdAt && (
+                                  <span>Created: {new Date(template.createdAt).toLocaleDateString()}</span>
+                                )}
+                                {template.modifiedAt && (
+                                  <span>Modified: {new Date(template.modifiedAt).toLocaleDateString()}</span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 ml-4">
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                onClick={() => handleEditTemplate(template)}
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                onClick={() => template.id && handleDeleteTemplate(template.id)}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-center py-12">
+                      <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold mb-2">No templates yet</h3>
+                      <p className="text-muted-foreground mb-4">
+                        Create your first email template to get started with automated notifications and dynamic content.
+                      </p>
+                      <Button 
+                        onClick={handleCreateTemplate}
+                        className="flex items-center gap-2"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Create Your First Template
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+        </Tabs>
 
         {/* Test Email Dialog */}
         <Dialog open={isTestDialogOpen} onOpenChange={setIsTestDialogOpen}>
@@ -559,6 +835,16 @@ export default function EmailSettingsPage() {
             </Form>
           </DialogContent>
         </Dialog>
+
+        <EmailTemplateDesigner
+          isOpen={isTemplateDesignerOpen}
+          onClose={() => {
+            setIsTemplateDesignerOpen(false);
+            setEditingTemplate(undefined);
+          }}
+          template={editingTemplate}
+          onSave={handleSaveTemplate}
+        />
       </div>
     </DashboardLayout>
   );

@@ -149,6 +149,11 @@ namespace ErpSystem.Api.Extensions
             // Settings services
             services.AddScoped<ISettingsService, SettingsService>();
             
+            // Email template services
+            services.AddScoped<IEmailTemplateService, EmailTemplateService>();
+            services.AddScoped<IDatabaseMetadataService, DatabaseMetadataService>();
+            services.AddScoped<ISampleDataService, SampleDataService>();
+            
             // Logging services
             services.AddScoped<IAuditLogService, AuditLogService>();
             services.AddScoped<ISecurityLogService, SecurityLogService>();
@@ -158,6 +163,9 @@ namespace ErpSystem.Api.Extensions
             
             // Security services
             services.AddScoped<ICryptoService, CryptoService>();
+            services.AddScoped<IConcurrentLoginService, ConcurrentLoginService>();
+            services.AddScoped<IRefreshTokenService, RefreshTokenService>();
+            services.AddScoped<IJwtBlacklistService, JwtBlacklistService>();
             
             // User context services
             services.AddHttpContextAccessor();

@@ -292,9 +292,18 @@ export default function RegisterPage() {
                   />
                   <Label htmlFor="acceptPrivacy" className="text-sm text-slate-600 dark:text-slate-400">
                     I accept the{' '}
-                    <a href="#" className="text-blue-600 hover:underline">
-                      Privacy Policy
-                    </a>
+                    {securitySettings?.privacyPolicyUrl ? (
+                      <a 
+                        href={securitySettings.privacyPolicyUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="text-blue-600 hover:underline"
+                      >
+                        Privacy Policy
+                      </a>
+                    ) : (
+                      <span className="text-blue-600">Privacy Policy</span>
+                    )}
                   </Label>
                 </div>
                 {errors.acceptPrivacy && (
@@ -309,9 +318,18 @@ export default function RegisterPage() {
                   />
                   <Label htmlFor="acceptTerms" className="text-sm text-slate-600 dark:text-slate-400">
                     I accept the{' '}
-                    <a href="#" className="text-blue-600 hover:underline">
-                      Terms of Use
-                    </a>
+                    {securitySettings?.termsOfServiceUrl ? (
+                      <a 
+                        href={securitySettings.termsOfServiceUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="text-blue-600 hover:underline"
+                      >
+                        Terms of Service
+                      </a>
+                    ) : (
+                      <span className="text-blue-600">Terms of Service</span>
+                    )}
                   </Label>
                 </div>
                 {errors.acceptTerms && (

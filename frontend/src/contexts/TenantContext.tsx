@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiService } from '../services/api.service';
+import { authService } from '../services/auth';
 import type { Tenant } from '../types';
 
 interface TenantContextType {
@@ -22,7 +23,7 @@ interface TenantProviderProps {
 export function TenantProvider({ children }: TenantProviderProps) {
   const [currentTenantCode, setCurrentTenantCodeState] = useState<string | null>(null);
 
-  // Get all tenants
+  // Get all tenants - only if authenticated
   const { data: apiTenants = [], isLoading: isLoadingTenants, error: tenantsError } = useQuery({
     queryKey: ['tenants'],
     queryFn: async () => {
@@ -32,12 +33,17 @@ export function TenantProvider({ children }: TenantProviderProps) {
       return result;
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
-    retry: (failureCount, error) => {
+    retry: (failureCount, error: any) => {
       console.log('TenantContext: Query failed, retry attempt:', failureCount, error);
-      return failureCount < 3;
+      // Don't retry on 401 errors - user is not authenticated
+      if (error?.message?.includes('401') || error?.message?.includes('Unauthorized')) {
+        console.log('TenantContext: 401 error detected, stopping retries');
+        return false;
+      }
+      return failureCount < 2;
     },
     retryDelay: 1000,
-    enabled: typeof window !== 'undefined', // Only run on client-side
+    enabled: typeof window !== 'undefined' && authService.isAuthenticated(), // Only run if authenticated
   });
 
   // Convert API tenants to frontend format

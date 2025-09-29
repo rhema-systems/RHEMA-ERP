@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Api.Services;
 using ErpSystem.Api.Models;
 using ErpSystem.Shared;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -22,6 +23,9 @@ namespace ErpSystem.Api.Controllers
         private readonly ITenantService _tenantService;
         private readonly IUserTenantService _userTenantService;
         private readonly ILdapAuthenticationService _ldapAuthService;
+        private readonly IRefreshTokenService _refreshTokenService;
+        private readonly IJwtBlacklistService _jwtBlacklistService;
+        private readonly ISettingsService _settingsService;
         private readonly ILogger<AuthController> _logger;
 
         public AuthController(
@@ -33,6 +37,9 @@ namespace ErpSystem.Api.Controllers
             ITenantService tenantService,
             IUserTenantService userTenantService,
             ILdapAuthenticationService ldapAuthService,
+            IRefreshTokenService refreshTokenService,
+            IJwtBlacklistService jwtBlacklistService,
+            ISettingsService settingsService,
             ILogger<AuthController> logger)
         {
             _userManager = userManager;
@@ -43,6 +50,9 @@ namespace ErpSystem.Api.Controllers
             _tenantService = tenantService;
             _userTenantService = userTenantService;
             _ldapAuthService = ldapAuthService;
+            _refreshTokenService = refreshTokenService;
+            _jwtBlacklistService = jwtBlacklistService;
+            _settingsService = settingsService;
             _logger = logger;
         }
 
@@ -369,20 +379,74 @@ namespace ErpSystem.Api.Controllers
 
         [HttpPost("logout")]
         [Authorize]
-        public async Task<IActionResult> Logout()
+        public async Task<IActionResult> Logout([FromBody] LogoutRequest? request = null)
         {
             try
             {
-                await _signInManager.SignOutAsync();
-                
-                // TODO: Blacklist the current JWT token
-                // TODO: Remove refresh token from database
-                
-                // Log logout success using current user's tenant context
+                // Get current user context
                 var currentUserId = _currentUserService.GetUserId();
                 var currentTenantId = _currentUserService.GetTenantId();
                 var username = _currentUserService.GetUsername();
                 
+                if (!currentUserId.HasValue)
+                {
+                    _logger.LogWarning("Logout attempted but no current user found");
+                    return Unauthorized();
+                }
+
+                // Extract JWT token information for blacklisting
+                var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
+                if (authHeader?.StartsWith("Bearer ") == true)
+                {
+                    var jwt = authHeader["Bearer ".Length..];
+                    try
+                    {
+                        var tokenHandler = new JwtSecurityTokenHandler();
+                        var jsonToken = tokenHandler.ReadJwtToken(jwt);
+                        var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
+                        var exp = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Exp)?.Value;
+                        
+                        if (!string.IsNullOrEmpty(jti) && !string.IsNullOrEmpty(exp))
+                        {
+                            var expiresAt = DateTimeOffset.FromUnixTimeSeconds(long.Parse(exp)).DateTime;
+                            await _jwtBlacklistService.BlacklistTokenAsync(jti, currentUserId.Value, expiresAt, "User logout");
+                            _logger.LogInformation("Blacklisted JWT token with JTI {Jti} for user {UserId}", jti, currentUserId.Value);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to blacklist JWT token during logout");
+                        // Continue with logout even if blacklisting fails
+                    }
+                }
+
+                // Revoke refresh tokens
+                int revokedTokens = 0;
+                if (request?.RefreshToken != null)
+                {
+                    // Revoke specific refresh token if provided
+                    var success = await _refreshTokenService.RevokeRefreshTokenAsync(
+                        request.RefreshToken, 
+                        currentUserId.Value, 
+                        "User logout");
+                    if (success) revokedTokens = 1;
+                }
+                else
+                {
+                    // Revoke all refresh tokens for the user
+                    revokedTokens = await _refreshTokenService.RevokeAllUserRefreshTokensAsync(
+                        currentUserId.Value, 
+                        currentUserId.Value, 
+                        "User logout - all sessions");
+                }
+
+                _logger.LogInformation("Revoked {RevokedTokens} refresh tokens for user {UserId} during logout", 
+                    revokedTokens, currentUserId.Value);
+
+                // Traditional sign out (for any server-side sessions)
+                await _signInManager.SignOutAsync();
+                
+                // Log logout success
                 if (currentUserId.HasValue && currentTenantId.HasValue && !string.IsNullOrEmpty(username))
                 {
                     var logoutSecurityLog = new SecurityLog
@@ -392,7 +456,7 @@ namespace ErpSystem.Api.Controllers
                         IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
                         Username = username,
                         UserId = currentUserId.Value,
-                        Details = "User logged out",
+                        Details = $"User logged out, revoked {revokedTokens} refresh tokens",
                         FailureReason = null,
                         UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
                         TenantId = currentTenantId.Value
@@ -400,8 +464,8 @@ namespace ErpSystem.Api.Controllers
                     await _securityLogService.CreateSecurityLogAsync(logoutSecurityLog);
                 }
                 
-                _logger.LogInformation("User logged out successfully");
-                return Ok(new { message = "Logged out successfully" });
+                _logger.LogInformation("User {UserId} logged out successfully", currentUserId.Value);
+                return Ok(new { message = "Logged out successfully", revokedSessions = revokedTokens });
             }
             catch (Exception ex)
             {
@@ -872,35 +936,42 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                // This endpoint provides public security settings needed for registration
+                // This endpoint provides public security settings needed for registration and login
                 // (password policy, CAPTCHA settings, etc.) without requiring authentication
                 
-                // Get security settings from the first active tenant or use defaults
-                var tenants = await _tenantService.GetAllTenantsAsync();
-                var defaultTenant = tenants.FirstOrDefault(t => t.Status == TenantStatus.Active);
-                
-                if (defaultTenant != null)
+                // Try to get actual security settings from the database
+                Core.Entities.Security? settings = null;
+                try
                 {
-                    // Try to get security settings for the default tenant
-                    // Note: We'll need to modify the settings service to accept tenantId
-                    // For now, return reasonable defaults
+                    settings = await _settingsService.GetPublicSecuritySettingsAsync();
+                    _logger.LogInformation("Retrieved public security settings from database: CAPTCHA enabled = {CaptchaEnabled}, Site key = {SiteKeyPrefix}...", 
+                        settings?.CaptchaEnabled, settings?.RecaptchaSiteKey?.Length > 10 ? settings.RecaptchaSiteKey[..10] : settings?.RecaptchaSiteKey);
+                }
+                catch (Exception settingsEx)
+                {
+                    _logger.LogWarning(settingsEx, "Failed to retrieve public security settings from database, using defaults");
                 }
                 
-                // Return default security settings for public use (registration page)
+                // Return actual security settings or defaults
                 var publicSettings = new
                 {
-                    passwordMinLength = 8,
-                    passwordRequireUppercase = true,
-                    passwordRequireLowercase = true,
-                    passwordRequireDigits = true,
-                    passwordRequireSpecialChars = true,
-                    captchaEnabled = false,
-                    captchaProvider = "recaptcha",
-                    recaptchaSiteKey = (string?)null,
-                    hCaptchaSiteKey = (string?)null
+                    passwordMinLength = settings?.PasswordMinLength ?? 8,
+                    passwordRequireUppercase = settings?.PasswordRequireUppercase ?? true,
+                    passwordRequireLowercase = settings?.PasswordRequireLowercase ?? true,
+                    passwordRequireDigits = settings?.PasswordRequireDigits ?? true,
+                    passwordRequireSpecialChars = settings?.PasswordRequireSpecialChars ?? true,
+                    captchaEnabled = settings?.CaptchaEnabled ?? false,
+                    captchaProvider = settings?.CaptchaProvider ?? "recaptcha",
+                    recaptchaSiteKey = settings?.RecaptchaSiteKey,
+                    hCaptchaSiteKey = settings?.HCaptchaSiteKey,
+                    termsOfServiceUrl = settings?.TermsOfServiceUrl,
+                    privacyPolicyUrl = settings?.PrivacyPolicyUrl
                 };
                 
-                _logger.LogInformation("Public security settings retrieved for registration");
+                _logger.LogInformation("Public security settings retrieved: CAPTCHA enabled = {CaptchaEnabled}, Provider = {CaptchaProvider}, Site Key = {SiteKeyPrefix}...", 
+                    publicSettings.captchaEnabled, 
+                    publicSettings.captchaProvider, 
+                    publicSettings.recaptchaSiteKey?.Length > 10 ? publicSettings.recaptchaSiteKey[..10] : publicSettings.recaptchaSiteKey);
                 return Ok(publicSettings);
             }
             catch (Exception ex)
@@ -918,7 +989,9 @@ namespace ErpSystem.Api.Controllers
                     captchaEnabled = false,
                     captchaProvider = "recaptcha",
                     recaptchaSiteKey = (string?)null,
-                    hCaptchaSiteKey = (string?)null
+                    hCaptchaSiteKey = (string?)null,
+                    termsOfServiceUrl = (string?)null,
+                    privacyPolicyUrl = (string?)null
                 };
                 
                 return Ok(fallbackSettings);

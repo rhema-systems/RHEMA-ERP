@@ -88,6 +88,13 @@ public class Security : BaseEntity
     // Concurrent Login Prevention
     public PreventConcurrentLogin PreventConcurrentLogin { get; set; } = PreventConcurrentLogin.Disabled;
     
+    // Legal URLs
+    [StringLength(2048)]
+    public string? TermsOfServiceUrl { get; set; }
+    
+    [StringLength(2048)]
+    public string? PrivacyPolicyUrl { get; set; }
+    
     // Tenant association
     public Guid TenantId { get; set; }
     public virtual Tenant Tenant { get; set; } = null!;

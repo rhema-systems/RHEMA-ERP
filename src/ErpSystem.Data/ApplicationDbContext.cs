@@ -29,6 +29,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     
     // Settings entities
     public DbSet<EmailSettings> EmailSettings { get; set; }
+    public DbSet<EmailTemplate> EmailTemplates { get; set; }
     public DbSet<PasswordPolicy> PasswordPolicies { get; set; }
     public DbSet<SystemSettings> SystemSettings { get; set; }
     public DbSet<Security> Securities { get; set; }
@@ -36,6 +37,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // Logging entities
     public DbSet<AuditLog> AuditLogs { get; set; }
     public DbSet<SecurityLog> SecurityLogs { get; set; }
+    
+    // Token management entities
+    public DbSet<RefreshToken> RefreshTokens { get; set; }
+    public DbSet<BlacklistedToken> BlacklistedTokens { get; set; }
     
     // Permission entities
     public DbSet<Permission> Permissions { get; set; }
@@ -123,6 +128,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(e => e.TenantId); // One email setting per tenant
         });
         
+        // Configure EmailTemplate entity
+        builder.Entity<EmailTemplate>(entity =>
+        {
+            entity.HasOne(et => et.Tenant).WithMany().HasForeignKey(et => et.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(et => new { et.TenantId, et.Name }).IsUnique();
+            entity.HasIndex(et => et.Module);
+            entity.HasIndex(et => et.Category);
+        });
+        
         // Configure PasswordPolicy entity
         builder.Entity<PasswordPolicy>(entity =>
         {
@@ -187,6 +201,39 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(p => p.RolePermissions)
                 .HasForeignKey(rp => rp.PermissionId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+        
+        // Configure RefreshToken entity
+        builder.Entity<RefreshToken>(entity =>
+        {
+            entity.ToTable("RefreshTokens");
+            entity.HasOne(rt => rt.User)
+                .WithMany()
+                .HasForeignKey(rt => rt.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasOne(rt => rt.Tenant)
+                .WithMany()
+                .HasForeignKey(rt => rt.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasIndex(rt => rt.TokenHash).IsUnique();
+            entity.HasIndex(rt => rt.UserId);
+            entity.HasIndex(rt => rt.ExpiresAt);
+        });
+        
+        // Configure BlacklistedToken entity
+        builder.Entity<BlacklistedToken>(entity =>
+        {
+            entity.ToTable("BlacklistedTokens");
+            entity.HasOne(bt => bt.User)
+                .WithMany()
+                .HasForeignKey(bt => bt.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasIndex(bt => bt.Jti).IsUnique();
+            entity.HasIndex(bt => bt.UserId);
+            entity.HasIndex(bt => bt.ExpiresAt);
         });
 
         // Apply global query filters for soft delete and multitenancy

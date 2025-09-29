@@ -9,7 +9,8 @@ import {
   LogOut, 
   Moon, 
   Sun,
-  ChevronDown 
+  ChevronDown,
+  Clock 
 } from 'lucide-react';
 
 import { Button } from '../ui/button';
@@ -17,6 +18,7 @@ import { Input } from '../ui/input';
 import { cn, getInitials } from '../../lib/utils';
 import { useAuth } from '../../hooks/use-auth';
 import { useTenant } from '../../contexts/TenantContext';
+import { useOptionalSessionTimeoutContext } from '../../contexts/session-timeout-context';
 import { ClientOnly } from '../ClientOnly';
 
 interface HeaderProps {
@@ -29,6 +31,7 @@ export function Header({ className }: HeaderProps) {
   const [mounted, setMounted] = useState(false);
   const { user, logout, isLoggingOut } = useAuth();
   const { currentTenant, currentTenantCode, setCurrentTenantCode } = useTenant();
+  const sessionTimeout = useOptionalSessionTimeoutContext();
 
   // Sync tenant code when user logs in
   useEffect(() => {
@@ -120,6 +123,19 @@ export function Header({ className }: HeaderProps) {
             <Bell className="h-4 w-4 text-slate-600 dark:text-slate-400" />
             <span className="absolute -top-1 -right-1 h-3 w-3 bg-red-500 rounded-full border-2 border-white dark:border-slate-900" />
           </Button>
+
+          {/* Session Status */}
+          <ClientOnly>
+            {sessionTimeout && (
+              <div className="hidden sm:flex items-center px-3 py-1.5 bg-slate-50/80 dark:bg-slate-800/80 rounded-xl border border-slate-200/50 dark:border-slate-700/50">
+                <Clock className="h-3 w-3 text-slate-500 mr-2" />
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                  Session: {Math.ceil((sessionTimeout.sessionState.sessionTimeoutMinutes || 30) - 
+                  ((Date.now() - sessionTimeout.sessionState.lastActivity) / (1000 * 60)))}m
+                </span>
+              </div>
+            )}
+          </ClientOnly>
 
           {/* User Menu */}
           <div className="relative">

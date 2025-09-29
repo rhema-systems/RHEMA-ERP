@@ -17,7 +17,11 @@ export class AuthService {
 
   logout = async (): Promise<void> => {
     try {
-      await apiService.logout();
+      // Get refresh token before clearing
+      const refreshToken = localStorage.getItem('refreshToken');
+      
+      // Call logout endpoint with refresh token if available
+      await apiService.logout(refreshToken || undefined);
     } catch (error) {
       // Continue with logout even if API call fails
       console.warn('Logout API call failed:', error);

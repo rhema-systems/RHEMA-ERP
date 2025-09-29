@@ -51,6 +51,14 @@ namespace ErpSystem.Api.Models
         public required string RefreshToken { get; set; }
     }
 
+    public class LogoutRequest
+    {
+        /// <summary>
+        /// Optional refresh token to revoke. If not provided, all refresh tokens for the user will be revoked.
+        /// </summary>
+        public string? RefreshToken { get; set; }
+    }
+
     public class LoginResponse
     {
         public required string Token { get; set; }

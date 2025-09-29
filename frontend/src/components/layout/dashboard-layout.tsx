@@ -3,31 +3,37 @@
 import { ReactNode } from 'react';
 import { Sidebar } from './sidebar';
 import { Header } from './header';
+import { SessionTimeoutProvider } from '../../contexts/session-timeout-context';
+import { authService } from '../../services/auth';
 
 interface DashboardLayoutProps {
   children: ReactNode;
 }
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
+  const isAuthenticated = typeof window !== 'undefined' ? authService.isAuthenticated() : false;
+  
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
-      <div className="flex h-screen">
-        {/* Sidebar */}
-        <Sidebar />
+    <SessionTimeoutProvider enabled={isAuthenticated}>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
+        <div className="flex h-screen">
+          {/* Sidebar */}
+          <Sidebar />
 
-        {/* Main Content */}
-        <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Header */}
-          <Header />
+          {/* Main Content */}
+          <div className="flex flex-1 flex-col overflow-hidden">
+            {/* Header */}
+            <Header />
 
-          {/* Page Content */}
-          <main className="flex-1 overflow-y-auto">
-            <div className="container mx-auto p-6 space-y-6">
-              {children}
-            </div>
-          </main>
+            {/* Page Content */}
+            <main className="flex-1 overflow-y-auto">
+              <div className="container mx-auto p-6 space-y-6">
+                {children}
+              </div>
+            </main>
+          </div>
         </div>
       </div>
-    </div>
+    </SessionTimeoutProvider>
   );
 }

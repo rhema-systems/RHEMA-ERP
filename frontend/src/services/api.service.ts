@@ -234,10 +234,12 @@ class ApiService {
     return response;
   }
 
-  public async logout(): Promise<void> {
+  public async logout(refreshToken?: string): Promise<void> {
     try {
+      const body = refreshToken ? { refreshToken } : undefined;
       await this.privateRequest('/auth/logout', {
         method: 'POST',
+        body: body ? JSON.stringify(body) : undefined,
       });
     } finally {
       this.clearToken();
