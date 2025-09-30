@@ -5,7 +5,6 @@ import { Sidebar } from './sidebar';
 import { Header } from './header';
 import { SessionTimeoutProvider } from '../../contexts/session-timeout-context';
 import { authService } from '../../services/auth';
-import { ThemeDebug } from '../ui/ThemeDebug';
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -34,8 +33,6 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             </main>
           </div>
         </div>
-        {/* Debug component - remove this later */}
-        <ThemeDebug />
       </div>
     </SessionTimeoutProvider>
   );
