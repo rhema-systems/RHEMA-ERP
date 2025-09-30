@@ -22,6 +22,8 @@ import {
   FileText,
   Mail,
   Building,
+  BarChart3,
+  Bell,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -101,11 +103,38 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
+    title: 'Reports & Analytics',
+    href: '/reports',
+    icon: BarChart3,
+    children: [
+      { title: 'Report Builder', href: '/reports#builder', icon: FileText },
+      { title: 'Analytics Dashboard', href: '/reports#analytics', icon: BarChart3 },
+      { title: 'Report Templates', href: '/reports#templates', icon: FileText },
+      { title: 'Data Export', href: '/reports#export', icon: FileText },
+    ],
+  },
+  {
+    title: 'Notifications',
+    href: '/notifications',
+    icon: Bell,
+    children: [
+      { title: 'Notification Center', href: '/notifications#center', icon: Bell },
+      { title: 'Email Campaigns', href: '/notifications#email', icon: Mail },
+      { title: 'Templates', href: '/notifications#templates', icon: FileText },
+      { title: 'Settings', href: '/notifications#settings', icon: Settings },
+    ],
+  },
+  {
     title: 'Administration',
     href: '/administration',
     icon: Settings,
     roles: ['admin', 'SuperAdmin', 'TenantAdmin'],
     children: [
+      {
+        title: 'Security',
+        href: '/administration/security/dashboard',
+        icon: Shield,
+      },
       {
         title: 'Identity Management',
         href: '/administration/identity-management',
@@ -124,7 +153,6 @@ const navigationItems: NavItem[] = [
         href: '/administration/settings',
         icon: Settings,
         children: [
-          { title: 'Security', href: '/administration/settings/security', icon: Shield },
           { title: 'Email Settings', href: '/administration/settings/email', icon: Mail },
         ],
       },
@@ -139,7 +167,7 @@ interface SidebarProps {
 
 export function Sidebar({ className }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['Administration', 'Administration-Identity Management']));
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['Administration', 'Administration-Identity Management', 'Administration-Security']));
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
   const { hasAnyRole } = useAuth();
