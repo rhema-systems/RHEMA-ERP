@@ -443,5 +443,18 @@ export const adminService = {
         ? `Test email sent successfully to ${testEmail}` 
         : 'Failed to send test email. Please check your SMTP settings.'
     };
+  },
+
+  // Online Users Management
+  async getOnlineUsers(): Promise<any[]> {
+    await delay(300);
+    // Mock implementation - replace with actual API call
+    return [];
+  },
+
+  async terminateUserSession(sessionId: string): Promise<void> {
+    await delay(500);
+    // Mock implementation - replace with actual API call
+    console.log('Terminating session:', sessionId);
   }
 };

@@ -10,6 +10,7 @@ namespace ErpSystem.Api.Services
     public interface IJwtTokenService
     {
         Task<string> GenerateTokenAsync(ApplicationUser user);
+        Task<string> GenerateTokenAsync(ApplicationUser user, string sessionId);
         string GenerateRefreshToken();
         ClaimsPrincipal GetPrincipalFromExpiredToken(string token);
     }
@@ -27,6 +28,11 @@ namespace ErpSystem.Api.Services
 
         public async Task<string> GenerateTokenAsync(ApplicationUser user)
         {
+            return await GenerateTokenAsync(user, null);
+        }
+        
+        public async Task<string> GenerateTokenAsync(ApplicationUser user, string sessionId)
+        {
             var jwtSettings = _configuration.GetSection("JwtSettings");
             var key = Encoding.ASCII.GetBytes(jwtSettings["SecretKey"] ?? throw new InvalidOperationException("JWT SecretKey not found"));
 
@@ -38,6 +44,12 @@ namespace ErpSystem.Api.Services
                 new System.Security.Claims.Claim("tenant_id", user.TenantId.ToString()),
                 new System.Security.Claims.Claim("jti", Guid.NewGuid().ToString())
             };
+            
+            // Add session ID claim if provided
+            if (!string.IsNullOrEmpty(sessionId))
+            {
+                claims.Add(new System.Security.Claims.Claim("sid", sessionId));
+            }
 
             // Add roles
             var roles = await _userManager.GetRolesAsync(user);

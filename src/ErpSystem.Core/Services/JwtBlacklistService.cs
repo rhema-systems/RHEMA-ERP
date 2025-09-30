@@ -64,12 +64,27 @@ public class JwtBlacklistService : IJwtBlacklistService
         try
         {
             if (string.IsNullOrEmpty(jti))
+            {
+                _logger.LogDebug("Empty JTI provided for blacklist check");
                 return false;
+            }
 
+            _logger.LogInformation("🔍 Blacklist Service: Checking JTI: {Jti}", jti);
+            
             var blacklistedToken = await _unitOfWork.Repository<BlacklistedToken>()
                 .FirstOrDefaultAsync(bt => bt.Jti == jti && !bt.IsDeleted);
 
-            return blacklistedToken != null;
+            var isBlacklisted = blacklistedToken != null;
+            _logger.LogInformation("🔍 Blacklist Service: JTI {Jti} result: {IsBlacklisted} (Token found: {TokenFound})", 
+                jti, isBlacklisted, blacklistedToken != null ? "YES" : "NO");
+            
+            if (blacklistedToken != null)
+            {
+                _logger.LogDebug("Blacklisted token details - Reason: {Reason}, BlacklistedAt: {BlacklistedAt}, ExpiresAt: {ExpiresAt}", 
+                    blacklistedToken.Reason, blacklistedToken.BlacklistedAt, blacklistedToken.ExpiresAt);
+            }
+
+            return isBlacklisted;
         }
         catch (Exception ex)
         {

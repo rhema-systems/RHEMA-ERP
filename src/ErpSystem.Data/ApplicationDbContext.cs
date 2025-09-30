@@ -41,7 +41,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // Token management entities
     public DbSet<RefreshToken> RefreshTokens { get; set; }
     public DbSet<BlacklistedToken> BlacklistedTokens { get; set; }
-    
+    public DbSet<UserSession> UserSessions { get; set; }
     // Permission entities
     public DbSet<Permission> Permissions { get; set; }
     public DbSet<RolePermission> RolePermissions { get; set; }

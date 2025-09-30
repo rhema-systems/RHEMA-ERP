@@ -6,6 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using ErpSystem.Api.Extensions;
 using ErpSystem.Web.Middleware;
+using ErpSystem.Api.Middleware;
 using ErpSystem.Data;
 
 // Check for seed command
@@ -55,6 +56,7 @@ builder.Services.AddErpSystemSearch(builder.Configuration);
 builder.Services.AddErpSystemLifecycle();
 builder.Services.AddErpSystemCors(builder.Configuration);
 builder.Services.AddErpSystemFileUpload(builder.Configuration);
+builder.Services.AddErpSystemSignalR();
 builder.Services.AddDevelopmentServices(builder.Environment);
 
 var app = builder.Build();
@@ -111,6 +113,7 @@ app.UseRouting();
 app.UseCors("ErpSystemCorsPolicy");
 
 app.UseAuthentication();
+app.UseMiddleware<JwtBlacklistMiddleware>();
 app.UseAuthorization();
 
 // Health check endpoints
@@ -124,6 +127,9 @@ app.MapHealthChecks("/health/shutdown", new HealthCheckOptions
 
 // API Controllers
 app.MapControllers();
+
+// SignalR Hubs
+app.MapHub<ErpSystem.Api.Hubs.DashboardHub>("/api/hubs/dashboard");
 
 // Initialize database and seed data
 await InitializeDatabaseAsync(app);

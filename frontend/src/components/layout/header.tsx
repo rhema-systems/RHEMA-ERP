@@ -7,8 +7,6 @@ import {
   Settings, 
   User, 
   LogOut, 
-  Moon, 
-  Sun,
   ChevronDown,
   Clock 
 } from 'lucide-react';
@@ -20,6 +18,8 @@ import { useAuth } from '../../hooks/use-auth';
 import { useTenant } from '../../contexts/TenantContext';
 import { useOptionalSessionTimeoutContext } from '../../contexts/session-timeout-context';
 import { ClientOnly } from '../ClientOnly';
+import { AnimatedThemeToggle } from '../ui/ThemeToggle';
+import { useTheme } from '../../contexts/ThemeContext';
 
 interface HeaderProps {
   className?: string;
@@ -27,11 +27,11 @@ interface HeaderProps {
 
 export function Header({ className }: HeaderProps) {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
   const [mounted, setMounted] = useState(false);
   const { user, logout, isLoggingOut } = useAuth();
   const { currentTenant, currentTenantCode, setCurrentTenantCode } = useTenant();
   const sessionTimeout = useOptionalSessionTimeoutContext();
+  const { actualTheme, toggleTheme } = useTheme();
 
   // Sync tenant code when user logs in
   useEffect(() => {
@@ -53,13 +53,6 @@ export function Header({ className }: HeaderProps) {
   useEffect(() => {
     setMounted(true);
   }, []);
-
-  const toggleDarkMode = () => {
-    if (!mounted) return;
-    setIsDarkMode(!isDarkMode);
-    // In a real app, this would update the theme context
-    document.documentElement.classList.toggle('dark');
-  };
 
   const handleLogout = () => {
     logout();
@@ -100,19 +93,8 @@ export function Header({ className }: HeaderProps) {
 
         {/* Actions */}
         <div className="flex items-center space-x-3">
-          {/* Theme Toggle */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={toggleDarkMode}
-            className="h-9 w-9 p-0 rounded-xl"
-          >
-            {isDarkMode ? (
-              <Sun className="h-4 w-4 text-slate-600 dark:text-slate-400" />
-            ) : (
-              <Moon className="h-4 w-4 text-slate-600 dark:text-slate-400" />
-            )}
-          </Button>
+          {/* Theme Toggle (uses ThemeContext) */}
+          <AnimatedThemeToggle size="sm" showLabel={false} />
 
           {/* Notifications */}
           <Button

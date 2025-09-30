@@ -74,6 +74,65 @@ public class UserController : ControllerBase
     }
 
     /// <summary>
+    /// Search users by query
+    /// </summary>
+    [HttpGet("search")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<IEnumerable<UserDto>>> SearchUsers([FromQuery] string? query = null)
+    {
+        try
+        {
+            var users = await _userService.GetAllUsersAsync();
+            
+            // Filter users based on query
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                var lowercaseQuery = query.ToLowerInvariant();
+                users = users.Where(u => 
+                    (u.UserName?.ToLowerInvariant().Contains(lowercaseQuery) == true) ||
+                    (u.Email?.ToLowerInvariant().Contains(lowercaseQuery) == true) ||
+                    (u.FirstName?.ToLowerInvariant().Contains(lowercaseQuery) == true) ||
+                    (u.LastName?.ToLowerInvariant().Contains(lowercaseQuery) == true) ||
+                    ($"{u.FirstName} {u.LastName}".ToLowerInvariant().Contains(lowercaseQuery))
+                );
+            }
+            
+            var userDtos = users.Select(u => new UserDto
+            {
+                Id = u.Id.ToString(),
+                Username = u.UserName ?? "",
+                Email = u.Email ?? "",
+                FirstName = u.FirstName,
+                LastName = u.LastName,
+                PhoneNumber = u.PhoneNumber,
+                IsActive = u.IsActive,
+                Roles = u.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>(),
+                CreatedAt = u.CreatedAt,
+                LastLoginAt = u.LastLoginDate,
+                TenantId = u.TenantId.ToString(),
+                LinkedTenants = u.UserTenants?.Where(ut => !ut.IsDeleted).Select(ut => new UserTenantDto
+                {
+                    TenantId = ut.TenantId.ToString(),
+                    TenantCode = ut.Tenant?.Code ?? "",
+                    TenantName = ut.Tenant?.Name ?? "",
+                    AccessLevel = ut.AccessLevel.ToString(),
+                    Status = ut.Status.ToString(),
+                    IsDefault = ut.IsDefault,
+                    GrantedAt = ut.GrantedAt,
+                    ExpiresAt = ut.ExpiresAt
+                }).ToArray() ?? Array.Empty<UserTenantDto>()
+            }).ToList();
+
+            return Ok(userDtos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error searching users with query: {Query}", query);
+            return StatusCode(500, "An error occurred while searching users");
+        }
+    }
+
+    /// <summary>
     /// Get user by ID
     /// </summary>
     [HttpGet("{id}")]

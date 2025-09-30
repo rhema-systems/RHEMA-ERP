@@ -23,21 +23,6 @@ namespace ErpSystem.Web.HealthChecks
         {
             try
             {
-                // Check if shutdown is in progress
-                if (ApplicationLifecycleMiddleware.IsShutdownInProgress)
-                {
-                    var data = new Dictionary<string, object>
-                    {
-                        ["status"] = "shutting_down",
-                        ["message"] = "Application is in graceful shutdown mode",
-                        ["timestamp"] = DateTime.UtcNow
-                    };
-
-                    return HealthCheckResult.Degraded(
-                        "Application is shutting down gracefully",
-                        data: data);
-                }
-
                 // Check if shutdown is complete
                 try
                 {

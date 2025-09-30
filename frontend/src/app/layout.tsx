@@ -3,6 +3,8 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ReactQueryProvider } from "../lib/react-query";
 import { TenantProvider } from "../contexts/TenantContext";
+import { SessionBlacklistProvider } from "../contexts/SessionBlacklistContext";
+import { ThemeProvider } from "../contexts/ThemeContext";
 import { Toaster } from "../components/ui/toaster";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -20,12 +22,21 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className} suppressHydrationWarning>
-        <ReactQueryProvider>
-          <TenantProvider>
-            {children}
-            <Toaster />
-          </TenantProvider>
-        </ReactQueryProvider>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <ReactQueryProvider>
+            <SessionBlacklistProvider>
+              <TenantProvider>
+                {children}
+                <Toaster />
+              </TenantProvider>
+            </SessionBlacklistProvider>
+          </ReactQueryProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

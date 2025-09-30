@@ -17,6 +17,7 @@ public interface ISettingsService
     Task<PasswordPolicy> UpdatePasswordPolicyAsync(PasswordPolicy policy);
     
     Task<Security?> GetSecuritySettingsAsync();
+    Task<Security?> GetSecuritySettingsAsync(Guid tenantId);
     Task<Security?> GetPublicSecuritySettingsAsync();
     Task<Security> UpdateSecuritySettingsAsync(Security settings);
     
@@ -244,6 +245,20 @@ public class SettingsService : ISettingsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving security settings");
+            throw;
+        }
+    }
+
+    public async Task<Security?> GetSecuritySettingsAsync(Guid tenantId)
+    {
+        try
+        {
+            var settings = await _unitOfWork.Repository<Security>().FindAsync(s => s.TenantId == tenantId);
+            return settings.FirstOrDefault();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving security settings for tenant {TenantId}", tenantId);
             throw;
         }
     }

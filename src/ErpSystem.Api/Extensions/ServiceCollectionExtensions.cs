@@ -166,10 +166,14 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<IConcurrentLoginService, ConcurrentLoginService>();
             services.AddScoped<IRefreshTokenService, RefreshTokenService>();
             services.AddScoped<IJwtBlacklistService, JwtBlacklistService>();
-            
+            services.AddScoped<IRefreshTokenService, RefreshTokenService>();
+            services.AddScoped<IUserSessionService, ErpSystem.Data.Services.UserSessionService>();
             // User context services
             services.AddHttpContextAccessor();
             services.AddScoped<ICurrentUserService, ErpSystem.Api.Services.CurrentUserService>();
+
+            // Dashboard service
+            services.AddScoped<ErpSystem.Core.Services.IDashboardService, ErpSystem.Data.Services.DashboardService>();
 
             return services;
         }
@@ -312,7 +316,16 @@ namespace ErpSystem.Api.Extensions
                         .WithOrigins(allowedOrigins)
                         .AllowAnyMethod()
                         .AllowAnyHeader()
-                        .AllowCredentials(); // Important for Next.js auth
+                        .AllowCredentials() // Important for Next.js auth and SignalR
+                        .SetIsOriginAllowedToAllowWildcardSubdomains()
+                        .SetIsOriginAllowed(origin => 
+                        {
+                            // Allow configured origins
+                            if (allowedOrigins.Contains(origin)) return true;
+                            // Allow null origin for file:// protocol (testing only)
+                            if (origin == null || origin == "null") return true;
+                            return false;
+                        });
                 });
             });
 
@@ -525,6 +538,30 @@ namespace ErpSystem.Api.Extensions
             app.UseMiddleware<DevSecurityHeadersMiddleware>();
 
             return app;
+        }
+
+        public static IServiceCollection AddErpSystemSignalR(this IServiceCollection services)
+        {
+            services.AddSignalR(options =>
+            {
+                options.EnableDetailedErrors = true;
+                options.MaximumReceiveMessageSize = 32 * 1024; // 32KB
+                options.StreamBufferCapacity = 10;
+                options.MaximumParallelInvocationsPerClient = 2;
+                
+                // Configure timeouts - more lenient for reconnections
+                options.ClientTimeoutInterval = TimeSpan.FromMinutes(5); // Increase from 60s to 5 minutes
+                options.HandshakeTimeout = TimeSpan.FromSeconds(60); // Increase from 30s to 60s
+                options.KeepAliveInterval = TimeSpan.FromSeconds(30); // Increase from 15s to 30s
+                
+                // Add connection state management
+                options.StatefulReconnectBufferSize = 1000;
+            });
+
+            // Register Hub notification service
+            services.AddScoped<ErpSystem.Core.Interfaces.IHubNotificationService, ErpSystem.Api.Services.HubNotificationService>();
+
+            return services;
         }
     }
 }

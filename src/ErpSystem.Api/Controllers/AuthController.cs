@@ -7,7 +7,9 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Api.Services;
 using ErpSystem.Api.Models;
 using ErpSystem.Shared;
+using ErpSystem.Data;
 using System.IdentityModel.Tokens.Jwt;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -26,6 +28,8 @@ namespace ErpSystem.Api.Controllers
         private readonly IRefreshTokenService _refreshTokenService;
         private readonly IJwtBlacklistService _jwtBlacklistService;
         private readonly ISettingsService _settingsService;
+        private readonly IUserSessionService _userSessionService;
+        private readonly ApplicationDbContext _context;
         private readonly ILogger<AuthController> _logger;
 
         public AuthController(
@@ -40,6 +44,8 @@ namespace ErpSystem.Api.Controllers
             IRefreshTokenService refreshTokenService,
             IJwtBlacklistService jwtBlacklistService,
             ISettingsService settingsService,
+            IUserSessionService userSessionService,
+            ApplicationDbContext context,
             ILogger<AuthController> logger)
         {
             _userManager = userManager;
@@ -53,6 +59,8 @@ namespace ErpSystem.Api.Controllers
             _refreshTokenService = refreshTokenService;
             _jwtBlacklistService = jwtBlacklistService;
             _settingsService = settingsService;
+            _userSessionService = userSessionService;
+            _context = context;
             _logger = logger;
         }
 
@@ -270,11 +278,79 @@ namespace ErpSystem.Api.Controllers
                     return Unauthorized(new { message = "Invalid credentials" });
                 }
 
+                // Get security settings for concurrent login prevention from user's tenant
+                var effectiveTenantId = tenant?.Id ?? user.TenantId;
+                var securitySettings = await _settingsService.GetSecuritySettingsAsync(effectiveTenantId);
+                var preventConcurrentLogin = securitySettings?.PreventConcurrentLogin.ToString() ?? "Disabled";
+                
+                // Check if user can login based on concurrent login prevention settings
+                var canLogin = await _userSessionService.CanUserLoginAsync(user.Id, preventConcurrentLogin);
+                if (!canLogin)
+                {
+                    _logger.LogWarning("Login prevented for user {Username}: Active session exists and prevention mode is {Mode}", 
+                        request.Username, preventConcurrentLogin);
+                    
+                    var preventedLoginSecurityLog = new SecurityLog
+                    {
+                        Action = SecurityAction.LoginFailure.ToString(),
+                        Success = false,
+                        IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                        Username = request.Username,
+                        UserId = user.Id,
+                        Details = $"Login prevented due to concurrent session policy: {preventConcurrentLogin}",
+                        FailureReason = "Active session exists - concurrent login prevented",
+                        UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                        TenantId = user.TenantId
+                    };
+                    await _securityLogService.CreateSecurityLogAsync(preventedLoginSecurityLog);
+                    
+                    return Unauthorized(new { 
+                        message = "You already have an active session. Please logout from other devices first.",
+                        code = "CONCURRENT_SESSION_PREVENTED"
+                    });
+                }
+                
+                // Get device information for session tracking
+                var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
+                var userAgent = Request.Headers["User-Agent"].FirstOrDefault() ?? "Unknown";
+                var deviceFingerprint = GenerateDeviceFingerprint(ipAddress, userAgent);
+                
+                // Create user session (this handles concurrent login prevention logic)
+                var userSession = await _userSessionService.CreateSessionAsync(
+                    user.Id, 
+                    tenant?.Id ?? user.TenantId,
+                    ipAddress, 
+                    userAgent, 
+                    deviceFingerprint, 
+                    preventConcurrentLogin
+                );
+
+                // Generate token with session ID included
+                var token = await _tokenService.GenerateTokenAsync(user, userSession.SessionId);
+                
+                // Extract JTI from the generated token and update the session
+                try
+                {
+                    var tokenHandler = new JwtSecurityTokenHandler();
+                    var jsonToken = tokenHandler.ReadJwtToken(token);
+                    var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
+                    
+                    if (!string.IsNullOrEmpty(jti))
+                    {
+                        userSession.JwtTokenId = jti;
+                        await _context.SaveChangesAsync(); // Save the JTI to the session
+                        _logger.LogDebug("Linked JWT token {Jti} to session {SessionId}", jti, userSession.SessionId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to link JWT token to session {SessionId}", userSession.SessionId);
+                    // Continue with login even if linking fails
+                }
+
                 // Update last login timestamp
                 user.LastLoginDate = DateTime.UtcNow;
                 await _userManager.UpdateAsync(user);
-
-                var token = await _tokenService.GenerateTokenAsync(user);
                 var refreshToken = _tokenService.GenerateRefreshToken();
 
                 // TODO: Store refresh token in database for security
@@ -394,7 +470,8 @@ namespace ErpSystem.Api.Controllers
                     return Unauthorized();
                 }
 
-                // Extract JWT token information for blacklisting
+                // Extract JWT token information for blacklisting and session termination
+                string sessionId = null;
                 var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
                 if (authHeader?.StartsWith("Bearer ") == true)
                 {
@@ -405,6 +482,7 @@ namespace ErpSystem.Api.Controllers
                         var jsonToken = tokenHandler.ReadJwtToken(jwt);
                         var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
                         var exp = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Exp)?.Value;
+                        sessionId = jsonToken.Claims.FirstOrDefault(x => x.Type == "sid")?.Value; // Session ID claim
                         
                         if (!string.IsNullOrEmpty(jti) && !string.IsNullOrEmpty(exp))
                         {
@@ -417,6 +495,36 @@ namespace ErpSystem.Api.Controllers
                     {
                         _logger.LogWarning(ex, "Failed to blacklist JWT token during logout");
                         // Continue with logout even if blacklisting fails
+                    }
+                }
+                
+                // Terminate user session if session ID found
+                if (!string.IsNullOrEmpty(sessionId))
+                {
+                    try
+                    {
+                        _logger.LogInformation("Attempting to terminate session {SessionId} for user {UserId}", sessionId, currentUserId.Value);
+                        await _userSessionService.TerminateSessionAsync(sessionId, "User logout");
+                        _logger.LogInformation("Successfully terminated session {SessionId} for user {UserId}", sessionId, currentUserId.Value);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to terminate user session {SessionId} during logout", sessionId);
+                        // Continue with logout even if session termination fails
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("No session ID found in JWT token for user {UserId} logout. Attempting to terminate all active sessions.", currentUserId.Value);
+                    // Fallback: terminate all active sessions for this user
+                    try
+                    {
+                        await _userSessionService.TerminateAllUserSessionsAsync(currentUserId.Value, null, "User logout (session ID not found)");
+                        _logger.LogInformation("Terminated all active sessions for user {UserId} as fallback during logout", currentUserId.Value);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to terminate sessions for user {UserId} during logout fallback", currentUserId.Value);
                     }
                 }
 
@@ -518,6 +626,29 @@ namespace ErpSystem.Api.Controllers
                         }
                     }
                 }
+                
+                // If no explicit UserTenant relationships exist, include the user's primary tenant
+                if (!tenantInfoList.Any() && user.TenantId != Guid.Empty)
+                {
+                    var primaryTenant = await _tenantService.GetTenantByIdAsync(user.TenantId);
+                    if (primaryTenant?.Status == TenantStatus.Active)
+                    {
+                        var tenantInfo = new UserTenantInfo
+                        {
+                            TenantId = primaryTenant.Id,
+                            TenantCode = primaryTenant.Code,
+                            TenantName = primaryTenant.Name,
+                            IsDefault = true, // User's primary tenant is always default
+                            AccessLevel = "Standard" // Default access level for primary tenant
+                        };
+                        
+                        tenantInfoList.Add(tenantInfo);
+                        defaultTenant = tenantInfo;
+                        
+                        _logger.LogInformation("Added user's primary tenant {TenantCode} as accessible tenant for user {Username} (no explicit UserTenant relationships found)", 
+                            primaryTenant.Code, request.Username);
+                    }
+                }
 
                 var response = new GetUserTenantsResponse
                 {
@@ -570,6 +701,26 @@ namespace ErpSystem.Api.Controllers
                             IsDefault = ut.IsDefault,
                             AccessLevel = ut.AccessLevel.ToString()
                         });
+                    }
+                }
+                
+                // If no explicit UserTenant relationships exist, include the user's primary tenant
+                if (!accessibleTenants.Any() && user.TenantId != Guid.Empty)
+                {
+                    var primaryTenant = await _tenantService.GetTenantByIdAsync(user.TenantId);
+                    if (primaryTenant?.Status == TenantStatus.Active)
+                    {
+                        accessibleTenants.Add(new UserTenantInfo
+                        {
+                            TenantId = primaryTenant.Id,
+                            TenantCode = primaryTenant.Code,
+                            TenantName = primaryTenant.Name,
+                            IsDefault = true, // User's primary tenant is always default
+                            AccessLevel = "Standard" // Default access level for primary tenant
+                        });
+                        
+                        _logger.LogInformation("Added user's primary tenant {TenantCode} as accessible tenant for user {UserId} (no explicit UserTenant relationships found)", 
+                            primaryTenant.Code, user.Id);
                     }
                 }
 
@@ -626,9 +777,14 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 // Validate user has access to this tenant
-                if (!await _userTenantService.HasActiveAccessAsync(Guid.Parse(userId), tenant.Id))
+                // Check both explicit UserTenant relationships and user's primary tenant
+                var hasExplicitAccess = await _userTenantService.HasActiveAccessAsync(Guid.Parse(userId), tenant.Id);
+                var isPrimaryTenant = user.TenantId == tenant.Id;
+                
+                if (!hasExplicitAccess && !isPrimaryTenant)
                 {
-                    return Forbid("User does not have access to this tenant");
+                    _logger.LogWarning("User {UserId} attempted to access tenant {TenantCode} without permission", userId, request.TenantCode);
+                    return BadRequest(new { message = "User does not have access to this tenant" });
                 }
 
                 // Update user's current tenant
@@ -647,6 +803,37 @@ namespace ErpSystem.Api.Controllers
 
                 // Generate new JWT token with updated tenant context
                 var newToken = await _tokenService.GenerateTokenAsync(user);
+                
+                // Extract JTI from the new token and update the current session
+                try
+                {
+                    var sessionId = User.FindFirst("sid")?.Value;
+                    if (!string.IsNullOrEmpty(sessionId) && Guid.TryParse(sessionId, out var sessionGuid))
+                    {
+                        var currentSession = await _context.UserSessions
+                            .FirstOrDefaultAsync(s => s.SessionId == sessionGuid.ToString() && s.IsActive);
+                        
+                        if (currentSession != null)
+                        {
+                            var tokenHandler = new JwtSecurityTokenHandler();
+                            var jsonToken = tokenHandler.ReadJwtToken(newToken);
+                            var newJti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
+                            
+                            if (!string.IsNullOrEmpty(newJti))
+                            {
+                                currentSession.JwtTokenId = newJti;
+                                await _context.SaveChangesAsync();
+                                _logger.LogDebug("Updated session {SessionId} with new JTI {Jti} after tenant selection", 
+                                    sessionGuid, newJti);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to update session with new JWT token after tenant selection");
+                    // Continue with the response even if linking fails
+                }
 
                 // Get updated user info with new tenant context
                 var userTenants = await _userTenantService.GetActiveUserTenantsAsync(user.Id);
@@ -665,6 +852,26 @@ namespace ErpSystem.Api.Controllers
                             IsDefault = ut.IsDefault,
                             AccessLevel = ut.AccessLevel.ToString()
                         });
+                    }
+                }
+                
+                // If no explicit UserTenant relationships exist, include the user's primary tenant
+                if (!accessibleTenants.Any() && user.TenantId != Guid.Empty)
+                {
+                    var primaryTenant = await _tenantService.GetTenantByIdAsync(user.TenantId);
+                    if (primaryTenant?.Status == TenantStatus.Active)
+                    {
+                        accessibleTenants.Add(new UserTenantInfo
+                        {
+                            TenantId = primaryTenant.Id,
+                            TenantCode = primaryTenant.Code,
+                            TenantName = primaryTenant.Name,
+                            IsDefault = true, // User's primary tenant is always default
+                            AccessLevel = "Standard" // Default access level for primary tenant
+                        });
+                        
+                        _logger.LogInformation("Added user's primary tenant {TenantCode} as accessible tenant for user {UserId} during tenant selection (no explicit UserTenant relationships found)", 
+                            primaryTenant.Code, user.Id);
                     }
                 }
 
@@ -996,6 +1203,15 @@ namespace ErpSystem.Api.Controllers
                 
                 return Ok(fallbackSettings);
             }
+        }
+        
+        private string GenerateDeviceFingerprint(string ipAddress, string userAgent)
+        {
+            // Create a simple device fingerprint using IP and User Agent
+            var combined = $"{ipAddress}|{userAgent}";
+            using var sha256 = System.Security.Cryptography.SHA256.Create();
+            var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(combined));
+            return Convert.ToBase64String(hashBytes)[..16]; // Take first 16 characters
         }
     }
 }

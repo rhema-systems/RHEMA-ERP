@@ -112,6 +112,7 @@ const navigationItems: NavItem[] = [
         icon: Shield,
         children: [
           { title: 'User Management', href: '/administration/identity-management/users', icon: Users },
+          { title: 'Online Users', href: '/administration/identity-management/online-users', icon: UserCheck },
           { title: 'Role Management', href: '/administration/identity-management/roles', icon: Shield },
           { title: 'Security Logs', href: '/administration/identity-management/security-logs', icon: FileText },
         ],

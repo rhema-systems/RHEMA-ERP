@@ -170,6 +170,30 @@ class ApiService {
   private async handleResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      
+      // Check if this is a 401 (Unauthorized) response - likely a blacklisted token
+      if (response.status === 401) {
+        // Don't trigger session blacklist event if we're on login/public endpoints
+        const url = new URL(response.url);
+        const isPublicEndpoint = url.pathname.includes('/auth/login') || 
+                                url.pathname.includes('/auth/security-settings') || 
+                                url.pathname.includes('/auth/refresh') ||
+                                (url.pathname.includes('/tenant') && !this.token);
+        
+        if (!isPublicEndpoint && typeof window !== 'undefined') {
+          // Clear the token immediately to prevent further API calls with blacklisted token
+          this.clearToken();
+          
+          // Emit a custom event to notify about session termination
+          window.dispatchEvent(new CustomEvent('session-blacklisted', {
+            detail: {
+              status: response.status,
+              message: errorData.message || 'Session terminated'
+            }
+          }));
+        }
+      }
+      
       throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
     }
 
@@ -375,3 +399,29 @@ class ApiService {
 }
 
 export const apiService = new ApiService();
+
+// Helper function to get stored token for SignalR
+export function getStoredToken(): string | null {
+  if (typeof window !== 'undefined') {
+    return localStorage.getItem('authToken');
+  }
+  return null;
+}
+
+// Backward compatibility wrapper for old apiRequest calls
+export async function apiRequest<T>(options: {
+  url: string;
+  method?: string;
+  data?: any;
+}): Promise<T> {
+  const { url, method = 'GET', data } = options;
+  const requestOptions: RequestInit = {
+    method,
+  };
+  
+  if (data) {
+    requestOptions.body = JSON.stringify(data);
+  }
+  
+  return apiService.request<T>(url, requestOptions);
+}

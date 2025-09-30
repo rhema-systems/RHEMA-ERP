@@ -54,32 +54,7 @@ export default function Dashboard() {
   return (
     <DashboardLayout>
       <div className="space-y-8">
-        {/* Enhanced Header */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-blue-900/20 dark:to-purple-900/20 p-8 border border-blue-100 dark:border-gray-800">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-blue-200/20 to-purple-200/20 rounded-full blur-3xl -translate-y-8 translate-x-8" />
-          <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-indigo-200/20 to-pink-200/20 rounded-full blur-2xl translate-y-4 -translate-x-4" />
-          <div className="relative z-10">
-            <ClientOnly fallback={
-              <div className="space-y-2">
-                <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-gray-900 via-blue-800 to-purple-800 dark:from-white dark:via-blue-200 dark:to-purple-200 bg-clip-text text-transparent">
-                  Dashboard Overview 📊
-                </h1>
-                <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl">
-                  Welcome to your business command center
-                </p>
-              </div>
-            }>
-              <div className="space-y-2">
-                <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-gray-900 via-blue-800 to-purple-800 dark:from-white dark:via-blue-200 dark:to-purple-200 bg-clip-text text-transparent">
-                  Welcome back, {user?.firstName || user?.username}! 👋
-                </h1>
-                <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl">
-                  Here&rsquo;s your business overview and key metrics for today. Let&rsquo;s make it productive!
-                </p>
-              </div>
-            </ClientOnly>
-          </div>
-        </div>
+        {/* Welcome back header is temporarily hidden */}
         
         {/* Enhanced KPI Cards */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 animate-in slide-in-from-bottom-4 duration-700">

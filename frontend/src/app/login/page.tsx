@@ -95,13 +95,15 @@ function LoginFormWithSearchParams() {
   const shouldShowRecaptcha = () => {
     if (!securitySettings) return false;
     
-    // Always show if enabled in settings (and we have a valid site key)
-    if (securitySettings.captchaEnabled && 
+    // Only show CAPTCHA after failed attempts or suspicious activity, not always
+    // Show after 2 or more failed attempts if configured (and we have a valid site key)
+    if (securitySettings.captchaEnabled &&
+        failedAttempts >= 2 &&
         (securitySettings.recaptchaSiteKey || securitySettings.hCaptchaSiteKey)) {
       return true;
     }
     
-    // Show after X failed attempts if configured (and we have a valid site key)
+    // Show after X failed attempts based on maxFailedLoginAttempts setting
     if (securitySettings.maxFailedLoginAttempts && 
         failedAttempts >= Math.max(1, Math.floor(securitySettings.maxFailedLoginAttempts / 2)) &&
         (securitySettings.recaptchaSiteKey || securitySettings.hCaptchaSiteKey)) {
