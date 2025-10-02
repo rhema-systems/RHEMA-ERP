@@ -6,12 +6,25 @@ import { TenantProvider } from "../contexts/TenantContext";
 import { SessionBlacklistProvider } from "../contexts/SessionBlacklistContext";
 import { ThemeProvider } from "../contexts/ThemeContext";
 import { Toaster } from "../components/ui/toaster";
+import { PWAInit } from "../components/PWAInit";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "ERP System - Enterprise Resource Planning",
   description: "Modern enterprise resource planning system",
+  manifest: "/manifest.json",
+  themeColor: "#000000",
+  viewport: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "ERP System"
+  },
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/icon-192.png"
+  }
 };
 
 export default function RootLayout({
@@ -33,6 +46,7 @@ export default function RootLayout({
               <TenantProvider>
                 {children}
                 <Toaster />
+                <PWAInit />
               </TenantProvider>
             </SessionBlacklistProvider>
           </ReactQueryProvider>

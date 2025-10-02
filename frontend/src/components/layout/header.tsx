@@ -184,7 +184,10 @@ export function Header({ className }: HeaderProps) {
                   <Button
                     variant="ghost"
                     className="w-full justify-start h-10 px-3 text-sm font-medium rounded-xl"
-                    onClick={() => setIsUserMenuOpen(false)}
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      window.location.href = '/profile';
+                    }}
                   >
                     <User className="h-4 w-4 mr-3 text-slate-500" />
                     Profile Settings
@@ -193,7 +196,10 @@ export function Header({ className }: HeaderProps) {
                   <Button
                     variant="ghost"
                     className="w-full justify-start h-10 px-3 text-sm font-medium rounded-xl"
-                    onClick={() => setIsUserMenuOpen(false)}
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      window.location.href = '/account';
+                    }}
                   >
                     <Settings className="h-4 w-4 mr-3 text-slate-500" />
                     Account Settings

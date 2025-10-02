@@ -32,29 +32,6 @@ public class EmailSettings : BaseEntity
     public virtual Tenant Tenant { get; set; } = null!;
 }
 
-public class PasswordPolicy : BaseEntity
-{
-    [Range(1, 128)]
-    public int MinLength { get; set; } = 8;
-
-    public bool RequireUppercase { get; set; } = true;
-
-    public bool RequireLowercase { get; set; } = true;
-
-    public bool RequireDigits { get; set; } = true;
-
-    public bool RequireSpecialChars { get; set; } = true;
-
-    [Range(0, 365)]
-    public int? MaxAge { get; set; } = 90; // Days
-
-    [Range(0, 50)]
-    public int? PreventReuse { get; set; } = 5; // Number of previous passwords to prevent reuse
-
-    public Guid TenantId { get; set; }
-    public virtual Tenant Tenant { get; set; } = null!;
-}
-
 public class SystemSettings : BaseEntity
 {
     [Required]

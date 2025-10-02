@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '../ui/card'
 import { Button } from '../ui/button'
 import { Badge } from '../ui/badge'
@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog'
 import { Alert, AlertDescription } from '../ui/alert'
+import { useToast } from '../../hooks/use-toast'
 import { 
   Smartphone, 
   Monitor, 
@@ -29,191 +30,67 @@ import {
   Unlock,
   ShieldCheck,
   ShieldX,
-  RefreshCw
+  RefreshCw,
+  Loader2
 } from 'lucide-react'
-
-interface Device {
-  id: string
-  type: 'mobile' | 'tablet' | 'desktop' | 'laptop' | 'other'
-  name: string
-  lastActive: Date
-  browser: string
-  os: string
-  isTrusted: boolean
-  location?: {
-    ip: string
-    city: string
-    country: string
-    coordinates?: string
-  }
-  riskLevel: 'low' | 'medium' | 'high'
-}
-
-interface Session {
-  id: string
-  deviceId: string
-  startTime: Date
-  expiresAt: Date
-  isActive: boolean
-  ipAddress: string
-  userAgent: string
-  lastActivity: Date
-  location?: {
-    city: string
-    country: string
-  }
-}
+import { deviceService, DeviceSession, SuspiciousActivity, MyDevicesResponse } from '../../lib/api/deviceService'
 
 export function DeviceManagement() {
-  // Mock data for devices and sessions
-  const [devices, setDevices] = useState<Device[]>([
-    {
-      id: '1',
-      type: 'laptop',
-      name: 'MacBook Pro',
-      lastActive: new Date(Date.now() - 5 * 60 * 1000), // 5 minutes ago
-      browser: 'Chrome 121.0',
-      os: 'macOS 13.1',
-      isTrusted: true,
-      location: {
-        ip: '192.168.1.5',
-        city: 'New York',
-        country: 'United States',
-        coordinates: '40.7128° N, 74.0060° W'
-      },
-      riskLevel: 'low'
-    },
-    {
-      id: '2',
-      type: 'mobile',
-      name: 'iPhone 15',
-      lastActive: new Date(Date.now() - 3 * 60 * 60 * 1000), // 3 hours ago
-      browser: 'Safari 17.0',
-      os: 'iOS 17.2',
-      isTrusted: true,
-      location: {
-        ip: '10.0.0.15',
-        city: 'New York',
-        country: 'United States',
-        coordinates: '40.7128° N, 74.0060° W'
-      },
-      riskLevel: 'low'
-    },
-    {
-      id: '3',
-      type: 'desktop',
-      name: 'Work Computer',
-      lastActive: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
-      browser: 'Edge 121.0',
-      os: 'Windows 11',
-      isTrusted: false,
-      location: {
-        ip: '203.0.113.45',
-        city: 'Toronto',
-        country: 'Canada',
-        coordinates: '43.6532° N, 79.3832° W'
-      },
-      riskLevel: 'medium'
-    },
-    {
-      id: '4',
-      type: 'tablet',
-      name: 'Samsung Tablet',
-      lastActive: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000), // 15 days ago
-      browser: 'Chrome 120.0',
-      os: 'Android 14',
-      isTrusted: false,
-      location: {
-        ip: '203.0.113.198',
-        city: 'Tokyo',
-        country: 'Japan',
-        coordinates: '35.6762° N, 139.6503° E'
-      },
-      riskLevel: 'high'
-    }
-  ])
-
-  const [sessions, setSessions] = useState<Session[]>([
-    {
-      id: 's1',
-      deviceId: '1',
-      startTime: new Date(Date.now() - 45 * 60 * 1000), // 45 minutes ago
-      expiresAt: new Date(Date.now() + 45 * 60 * 1000), // 45 minutes from now
-      isActive: true,
-      ipAddress: '192.168.1.5',
-      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
-      lastActivity: new Date(Date.now() - 5 * 60 * 1000), // 5 minutes ago
-      location: {
-        city: 'New York',
-        country: 'United States'
-      }
-    },
-    {
-      id: 's2',
-      deviceId: '2',
-      startTime: new Date(Date.now() - 4 * 60 * 60 * 1000), // 4 hours ago
-      expiresAt: new Date(Date.now() - 60 * 60 * 1000), // expired 1 hour ago
-      isActive: false,
-      ipAddress: '10.0.0.15',
-      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X)',
-      lastActivity: new Date(Date.now() - 3 * 60 * 60 * 1000), // 3 hours ago
-      location: {
-        city: 'New York',
-        country: 'United States'
-      }
-    },
-    {
-      id: 's3',
-      deviceId: '3',
-      startTime: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
-      expiresAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000 - 30 * 60 * 1000), // expired 2 days and 30 minutes ago
-      isActive: false,
-      ipAddress: '203.0.113.45',
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      lastActivity: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
-      location: {
-        city: 'Toronto',
-        country: 'Canada'
-      }
-    }
-  ])
-
-  const [suspiciousActivity, setSuspiciousActivity] = useState([
-    {
-      id: 'a1',
-      deviceId: '4',
-      timestamp: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000), // 15 days ago + 30 minutes
-      type: 'location_change',
-      description: 'Login from unusual location (Tokyo, Japan)',
-      severity: 'high'
-    },
-    {
-      id: 'a2',
-      deviceId: '3',
-      timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000 + 15 * 60 * 1000), // 2 days ago + 15 minutes
-      type: 'multiple_attempts',
-      description: 'Multiple failed login attempts (5) before success',
-      severity: 'medium'
-    },
-    {
-      id: 'a3',
-      deviceId: '1',
-      timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // 7 days ago
-      type: 'unusual_timing',
-      description: 'Login at unusual time (3:27 AM)',
-      severity: 'low'
-    }
-  ])
-
+  const { toast } = useToast()
+  
+  // State for API data
+  const [deviceData, setDeviceData] = useState<MyDevicesResponse | null>(null)
+  const [suspiciousActivity, setSuspiciousActivity] = useState<SuspiciousActivity[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  
+  // UI state
   const [activeTab, setActiveTab] = useState('devices')
   const [searchTerm, setSearchTerm] = useState('')
   const [deviceFilter, setDeviceFilter] = useState('all')
   const [sessionFilter, setSessionFilter] = useState('active')
-  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
+  const [selectedDevice, setSelectedDevice] = useState<DeviceSession | null>(null)
   const [showDeviceDetails, setShowDeviceDetails] = useState(false)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  
+  // Load initial data
+  useEffect(() => {
+    loadDeviceData()
+    loadSuspiciousActivity()
+  }, [])
 
-  const getDeviceIcon = (type: Device['type']) => {
-    switch (type) {
+  const loadDeviceData = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const data = await deviceService.getMyDevices()
+      setDeviceData(data)
+    } catch (error) {
+      console.error('Failed to load device data:', error)
+      setError('Failed to load device information')
+      toast({
+        title: "Error",
+        description: "Failed to load device information. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadSuspiciousActivity = async () => {
+    try {
+      const activity = await deviceService.getSuspiciousActivity()
+      setSuspiciousActivity(activity)
+    } catch (error) {
+      console.error('Failed to load suspicious activity:', error)
+      // Don't show error for suspicious activity as it's not critical
+    }
+  }
+
+  const getDeviceIcon = (type: string) => {
+    const deviceType = type.toLowerCase()
+    switch (deviceType) {
       case 'mobile': return <Smartphone className="h-5 w-5" />
       case 'tablet': return <Tablet className="h-5 w-5" />
       case 'laptop': return <Laptop className="h-5 w-5" />
@@ -222,7 +99,8 @@ export function DeviceManagement() {
     }
   }
 
-  const formatTimeAgo = (date: Date) => {
+  const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString)
     const now = new Date()
     const diff = now.getTime() - date.getTime()
     const minutes = Math.floor(diff / (1000 * 60))
@@ -238,88 +116,159 @@ export function DeviceManagement() {
     }
   }
 
-  const formatRiskLevel = (level: 'low' | 'medium' | 'high') => {
-    switch (level) {
-      case 'low': return (
+  const formatRiskLevel = (riskScore: number) => {
+    if (riskScore < 30) {
+      return (
         <Badge variant="outline" className="text-green-600 border-green-200 flex items-center gap-1">
-          <ShieldCheck className="h-3 w-3" /> Low
+          <ShieldCheck className="h-3 w-3" /> Low Risk
         </Badge>
       )
-      case 'medium': return (
+    } else if (riskScore < 60) {
+      return (
         <Badge variant="outline" className="text-yellow-600 border-yellow-200 flex items-center gap-1">
-          <AlertTriangle className="h-3 w-3" /> Medium
+          <AlertTriangle className="h-3 w-3" /> Medium Risk
         </Badge>
       )
-      case 'high': return (
+    } else {
+      return (
         <Badge variant="outline" className="text-red-600 border-red-200 flex items-center gap-1">
-          <ShieldX className="h-3 w-3" /> High
+          <ShieldX className="h-3 w-3" /> High Risk
         </Badge>
       )
-      default: return null
     }
   }
 
-  const handleTerminateSession = (sessionId: string) => {
-    // In a real app, this would call an API to terminate the session
-    setSessions(prevSessions => prevSessions.map(session => 
-      session.id === sessionId ? { ...session, isActive: false } : session
-    ))
+  const handleTerminateSession = async (sessionId: string) => {
+    try {
+      setActionLoading(sessionId)
+      await deviceService.terminateSession(sessionId, 'Terminated by user')
+      await loadDeviceData() // Refresh data
+      toast({
+        title: "Success",
+        description: "Session terminated successfully",
+      })
+    } catch (error) {
+      console.error('Failed to terminate session:', error)
+      toast({
+        title: "Error",
+        description: "Failed to terminate session. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setActionLoading(null)
+    }
   }
 
-  const handleTerminateAllSessions = (exceptCurrentSession = true) => {
-    // In a real app, this would call an API to terminate all sessions except current
-    setSessions(prevSessions => prevSessions.map(session => {
-      if (exceptCurrentSession && session.id === 's1') {
-        return session // Keep current session
-      }
-      return { ...session, isActive: false }
-    }))
+  const handleTerminateAllSessions = async () => {
+    try {
+      setActionLoading('terminate-all')
+      const result = await deviceService.terminateAllOtherSessions('All other sessions terminated by user')
+      await loadDeviceData() // Refresh data
+      toast({
+        title: "Success",
+        description: `Successfully terminated ${result.terminatedCount} other sessions`,
+      })
+    } catch (error) {
+      console.error('Failed to terminate all sessions:', error)
+      toast({
+        title: "Error",
+        description: "Failed to terminate other sessions. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setActionLoading(null)
+    }
   }
 
-  const handleRevokeDevice = (deviceId: string) => {
-    // In a real app, this would call an API to revoke device access
-    setDevices(prevDevices => prevDevices.map(device => 
-      device.id === deviceId ? { ...device, isTrusted: false } : device
-    ))
+  const handleTrustDevice = async (deviceId: string, isTrusted: boolean) => {
+    try {
+      setActionLoading(deviceId)
+      await deviceService.updateDeviceTrust(deviceId, isTrusted)
+      // In a real implementation, you'd refresh the data to show updated trust status
+      toast({
+        title: "Success",
+        description: `Device ${isTrusted ? 'trusted' : 'untrusted'} successfully`,
+      })
+    } catch (error) {
+      console.error('Failed to update device trust:', error)
+      toast({
+        title: "Error",
+        description: "Failed to update device trust. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  // Create devices list from sessions (group by device fingerprint or similar identifier)
+  const getDevicesFromSessions = () => {
+    if (!deviceData) return []
     
-    // Also terminate any active sessions for this device
-    setSessions(prevSessions => prevSessions.map(session => 
-      session.deviceId === deviceId ? { ...session, isActive: false } : session
-    ))
+    const allSessions = [...deviceData.activeSessions, ...deviceData.recentSessions]
+    const deviceMap = new Map<string, DeviceSession>()
+    
+    // Group sessions by device info to create unique devices
+    allSessions.forEach(session => {
+      const deviceKey = `${session.deviceInfo.type}-${session.deviceInfo.browser}-${session.deviceInfo.os}-${session.location.ip}`
+      if (!deviceMap.has(deviceKey) || session.session.isActive) {
+        deviceMap.set(deviceKey, session)
+      }
+    })
+    
+    return Array.from(deviceMap.values())
   }
 
-  const handleTrustDevice = (deviceId: string) => {
-    // In a real app, this would call an API to trust a device
-    setDevices(prevDevices => prevDevices.map(device => 
-      device.id === deviceId ? { ...device, isTrusted: true } : device
-    ))
-  }
-
-  // Filtering functions
-  const filteredDevices = devices.filter(device => {
+  const filteredDevices = getDevicesFromSessions().filter(device => {
     const matchesSearch = 
-      device.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      device.browser.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      device.os.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      device.location?.city.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      device.location?.country.toLowerCase().includes(searchTerm.toLowerCase())
+      device.deviceInfo.browser.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      device.deviceInfo.os.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      device.location.city.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      device.location.country.toLowerCase().includes(searchTerm.toLowerCase())
     
     if (deviceFilter === 'all') return matchesSearch
-    if (deviceFilter === 'trusted') return matchesSearch && device.isTrusted
-    if (deviceFilter === 'untrusted') return matchesSearch && !device.isTrusted
-    if (deviceFilter === 'active') {
-      const hasActiveSession = sessions.some(s => s.deviceId === device.id && s.isActive)
-      return matchesSearch && hasActiveSession
-    }
+    if (deviceFilter === 'trusted') return matchesSearch && device.security.isTrusted
+    if (deviceFilter === 'untrusted') return matchesSearch && !device.security.isTrusted
+    if (deviceFilter === 'active') return matchesSearch && device.session.isActive
     return matchesSearch
   })
-  
-  const filteredSessions = sessions.filter(session => {
+
+  const filteredSessions = deviceData ? deviceData.activeSessions.concat(deviceData.recentSessions).filter(session => {
     if (sessionFilter === 'all') return true
-    if (sessionFilter === 'active') return session.isActive
-    if (sessionFilter === 'expired') return !session.isActive
+    if (sessionFilter === 'active') return session.session.isActive
+    if (sessionFilter === 'expired') return !session.session.isActive
     return true
-  })
+  }) : []
+
+  if (loading && !deviceData) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <Loader2 className="h-8 w-8 animate-spin" />
+        <span className="ml-2">Loading device information...</span>
+      </div>
+    )
+  }
+
+  if (error && !deviceData) {
+    return (
+      <div className="space-y-6">
+        <Alert className="bg-red-50 border-red-200">
+          <AlertTriangle className="h-5 w-5 text-red-600" />
+          <AlertDescription>
+            <span className="font-medium">Error loading device information.</span> {error}
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="ml-2"
+              onClick={loadDeviceData}
+            >
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -339,9 +288,14 @@ export function DeviceManagement() {
           <Button 
             variant="outline" 
             size="sm"
-            onClick={() => handleTerminateAllSessions()}
+            onClick={handleTerminateAllSessions}
+            disabled={actionLoading === 'terminate-all'}
           >
-            <LogOut className="h-4 w-4 mr-2" />
+            {actionLoading === 'terminate-all' ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+            ) : (
+              <LogOut className="h-4 w-4 mr-2" />
+            )}
             Terminate All Other Sessions
           </Button>
         </div>
@@ -413,84 +367,78 @@ export function DeviceManagement() {
                     <p>No devices match your filters</p>
                   </div>
                 ) : (
-                  filteredDevices.map((device) => {
-                    const hasActiveSession = sessions.some(s => s.deviceId === device.id && s.isActive)
-                    return (
-                      <div 
-                        key={device.id}
-                        className="border rounded-lg p-4 hover:border-primary/50 transition-colors cursor-pointer"
-                        onClick={() => {
-                          setSelectedDevice(device)
-                          setShowDeviceDetails(true)
-                        }}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-start gap-3">
-                            <div className={`p-2 rounded-full ${hasActiveSession ? 'bg-green-50' : 'bg-gray-50'}`}>
-                              {getDeviceIcon(device.type)}
+                  filteredDevices.map((device) => (
+                    <div 
+                      key={device.id}
+                      className="border rounded-lg p-4 hover:border-primary/50 transition-colors cursor-pointer"
+                      onClick={() => {
+                        setSelectedDevice(device)
+                        setShowDeviceDetails(true)
+                      }}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-start gap-3">
+                          <div className={`p-2 rounded-full ${device.session.isActive ? 'bg-green-50' : 'bg-gray-50'}`}>
+                            {getDeviceIcon(device.deviceInfo.type)}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-medium">{device.deviceInfo.browser} on {device.deviceInfo.os}</h3>
+                              {device.security.isTrusted && (
+                                <Badge variant="secondary" className="text-xs">Trusted</Badge>
+                              )}
+                              {device.session.isActive && (
+                                <Badge variant="outline" className="text-green-600 border-green-200 text-xs">Active Now</Badge>
+                              )}
                             </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h3 className="font-medium">{device.name}</h3>
-                                {device.isTrusted && (
-                                  <Badge variant="secondary" className="text-xs">Trusted</Badge>
-                                )}
-                                {hasActiveSession && (
-                                  <Badge variant="outline" className="text-green-600 border-green-200 text-xs">Active Now</Badge>
-                                )}
-                              </div>
-                              
-                              <div className="text-sm text-muted-foreground mt-1">
-                                <p>{device.browser} • {device.os}</p>
-                                <div className="flex items-center gap-4 mt-1">
-                                  <div className="flex items-center gap-1">
-                                    <Clock className="h-3.5 w-3.5" />
-                                    <span>{formatTimeAgo(device.lastActive)}</span>
-                                  </div>
-                                  
-                                  {device.location && (
-                                    <div className="flex items-center gap-1">
-                                      <MapPin className="h-3.5 w-3.5" />
-                                      <span>{device.location.city}, {device.location.country}</span>
-                                    </div>
-                                  )}
+                            
+                            <div className="text-sm text-muted-foreground mt-1">
+                              <p>{device.deviceInfo.type} • {device.deviceInfo.browser}</p>
+                              <div className="flex items-center gap-4 mt-1">
+                                <div className="flex items-center gap-1">
+                                  <Clock className="h-3.5 w-3.5" />
+                                  <span>{formatTimeAgo(device.session.lastActivity)}</span>
+                                </div>
+                                
+                                <div className="flex items-center gap-1">
+                                  <MapPin className="h-3.5 w-3.5" />
+                                  <span>{device.location.city}, {device.location.country}</span>
                                 </div>
                               </div>
                             </div>
                           </div>
-                          
-                          <div className="flex flex-col items-end gap-2">
-                            {formatRiskLevel(device.riskLevel)}
-                            <Button 
-                              variant="ghost" 
-                              size="sm"
-                              className="h-7"
-                              onClick={(e) => {
-                                e.stopPropagation() 
-                                if (device.isTrusted) {
-                                  handleRevokeDevice(device.id)
-                                } else {
-                                  handleTrustDevice(device.id)
-                                }
-                              }}
-                            >
-                              {device.isTrusted ? (
-                                <>
-                                  <XCircle className="h-3.5 w-3.5 mr-1" />
-                                  Revoke
-                                </>
-                              ) : (
-                                <>
-                                  <CheckCircle className="h-3.5 w-3.5 mr-1" />
-                                  Trust
-                                </>
-                              )}
-                            </Button>
-                          </div>
+                        </div>
+                        
+                        <div className="flex flex-col items-end gap-2">
+                          {formatRiskLevel(device.security.riskScore)}
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            className="h-7"
+                            disabled={actionLoading === device.id}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleTrustDevice(device.id, !device.security.isTrusted)
+                            }}
+                          >
+                            {actionLoading === device.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                            ) : device.security.isTrusted ? (
+                              <>
+                                <XCircle className="h-3.5 w-3.5 mr-1" />
+                                Revoke
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                                Trust
+                              </>
+                            )}
+                          </Button>
                         </div>
                       </div>
-                    )
-                  })
+                    </div>
+                  ))
                 )}
               </div>
             </CardContent>
@@ -532,21 +480,20 @@ export function DeviceManagement() {
                   </div>
                 ) : (
                   filteredSessions.map((session) => {
-                    const device = devices.find(d => d.id === session.deviceId)
-                    const isCurrentSession = session.id === 's1'
+                    const isCurrentSession = session.session.sessionId === 'current' // Simplified check
                     return (
                       <div key={session.id} className="border rounded-lg p-4">
                         <div className="flex items-start justify-between">
                           <div className="flex items-start gap-3">
-                            <div className={`p-2 rounded-full ${session.isActive ? 'bg-green-50' : 'bg-gray-50'}`}>
-                              {device ? getDeviceIcon(device.type) : <Globe className="h-5 w-5" />}
+                            <div className={`p-2 rounded-full ${session.session.isActive ? 'bg-green-50' : 'bg-gray-50'}`}>
+                              {getDeviceIcon(session.deviceInfo.type)}
                             </div>
                             <div>
                               <div className="flex items-center gap-2">
                                 <h3 className="font-medium">
-                                  {device ? device.name : 'Unknown Device'}
+                                  {session.deviceInfo.browser} on {session.deviceInfo.os}
                                 </h3>
-                                {session.isActive && (
+                                {session.session.isActive && (
                                   <Badge variant="outline" className="text-green-600 border-green-200 text-xs">
                                     Active
                                   </Badge>
@@ -561,38 +508,41 @@ export function DeviceManagement() {
                                   <div className="flex items-center gap-1">
                                     <Clock className="h-3.5 w-3.5" />
                                     <span>
-                                      {session.isActive 
-                                        ? `Active ${formatTimeAgo(session.startTime)}` 
-                                        : `Ended ${formatTimeAgo(session.lastActivity)}`
+                                      {session.session.isActive 
+                                        ? `Active ${formatTimeAgo(session.session.startTime)}` 
+                                        : `Ended ${formatTimeAgo(session.session.lastActivity)}`
                                       }
                                     </span>
                                   </div>
                                   
-                                  {session.location && (
-                                    <div className="flex items-center gap-1">
-                                      <MapPin className="h-3.5 w-3.5" />
-                                      <span>{session.location.city}, {session.location.country}</span>
-                                    </div>
-                                  )}
+                                  <div className="flex items-center gap-1">
+                                    <MapPin className="h-3.5 w-3.5" />
+                                    <span>{session.location.city}, {session.location.country}</span>
+                                  </div>
                                 </div>
                                 
                                 <div className="flex items-center gap-1 mt-1">
                                   <Globe className="h-3.5 w-3.5" />
-                                  <span>{session.ipAddress}</span>
+                                  <span>{session.location.ip}</span>
                                 </div>
                               </div>
                             </div>
                           </div>
                           
                           <div>
-                            {session.isActive && !isCurrentSession && (
+                            {session.session.isActive && !isCurrentSession && (
                               <Button 
                                 variant="outline" 
                                 size="sm"
                                 className="text-red-600 hover:text-red-700 h-7"
-                                onClick={() => handleTerminateSession(session.id)}
+                                disabled={actionLoading === session.id}
+                                onClick={() => handleTerminateSession(session.session.sessionId)}
                               >
-                                <LogOut className="h-3.5 w-3.5 mr-1" />
+                                {actionLoading === session.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                                ) : (
+                                  <LogOut className="h-3.5 w-3.5 mr-1" />
+                                )}
                                 Terminate
                               </Button>
                             )}
@@ -631,8 +581,8 @@ export function DeviceManagement() {
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  {getDeviceIcon(selectedDevice.type)}
-                  {selectedDevice.name}
+                  {getDeviceIcon(selectedDevice.deviceInfo.type)}
+                  {selectedDevice.deviceInfo.browser} on {selectedDevice.deviceInfo.os}
                 </DialogTitle>
                 <DialogDescription>
                   Device details and security information
@@ -643,28 +593,28 @@ export function DeviceManagement() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label className="text-xs text-muted-foreground">DEVICE TYPE</Label>
-                    <p className="capitalize">{selectedDevice.type}</p>
+                    <p className="capitalize">{selectedDevice.deviceInfo.type}</p>
                   </div>
                   <div>
                     <Label className="text-xs text-muted-foreground">LAST ACTIVE</Label>
-                    <p>{formatTimeAgo(selectedDevice.lastActive)}</p>
+                    <p>{formatTimeAgo(selectedDevice.session.lastActivity)}</p>
                   </div>
                   <div>
                     <Label className="text-xs text-muted-foreground">BROWSER</Label>
-                    <p>{selectedDevice.browser}</p>
+                    <p>{selectedDevice.deviceInfo.browser}</p>
                   </div>
                   <div>
                     <Label className="text-xs text-muted-foreground">OPERATING SYSTEM</Label>
-                    <p>{selectedDevice.os}</p>
+                    <p>{selectedDevice.deviceInfo.os}</p>
                   </div>
                   <div>
                     <Label className="text-xs text-muted-foreground">IP ADDRESS</Label>
-                    <p>{selectedDevice.location?.ip || 'Unknown'}</p>
+                    <p>{selectedDevice.location.ip}</p>
                   </div>
                   <div>
                     <Label className="text-xs text-muted-foreground">TRUST STATUS</Label>
                     <p>
-                      {selectedDevice.isTrusted ? (
+                      {selectedDevice.security.isTrusted ? (
                         <span className="flex items-center text-green-600 gap-1">
                           <CheckCircle className="h-3.5 w-3.5" /> Trusted
                         </span>
@@ -677,110 +627,79 @@ export function DeviceManagement() {
                   </div>
                 </div>
 
-                {selectedDevice.location && (
-                  <div>
-                    <Label className="text-xs text-muted-foreground">LOCATION</Label>
-                    <p className="font-medium">{selectedDevice.location.city}, {selectedDevice.location.country}</p>
-                    {selectedDevice.location.coordinates && (
-                      <p className="text-sm text-muted-foreground">{selectedDevice.location.coordinates}</p>
-                    )}
-                  </div>
-                )}
+                <div>
+                  <Label className="text-xs text-muted-foreground">LOCATION</Label>
+                  <p className="font-medium">{selectedDevice.location.city}, {selectedDevice.location.country}</p>
+                  {selectedDevice.location.coordinates && (
+                    <p className="text-sm text-muted-foreground">
+                      {selectedDevice.location.coordinates.latitude}°, {selectedDevice.location.coordinates.longitude}°
+                    </p>
+                  )}
+                </div>
 
                 <div>
                   <Label className="text-xs text-muted-foreground">RISK ASSESSMENT</Label>
                   <div className="flex items-center gap-2 mt-1">
-                    {formatRiskLevel(selectedDevice.riskLevel)}
+                    {formatRiskLevel(selectedDevice.security.riskScore)}
                     <span className="text-sm">
-                      {selectedDevice.riskLevel === 'low' && 'Normal usage patterns detected'}
-                      {selectedDevice.riskLevel === 'medium' && 'Some unusual activities detected'}
-                      {selectedDevice.riskLevel === 'high' && 'Suspicious login location or behavior'}
+                      {selectedDevice.security.riskScore < 30 && 'Normal usage patterns detected'}
+                      {selectedDevice.security.riskScore >= 30 && selectedDevice.security.riskScore < 60 && 'Some unusual activities detected'}
+                      {selectedDevice.security.riskScore >= 60 && 'Suspicious login location or behavior'}
                     </span>
                   </div>
                 </div>
-
-                {/* Recent Sessions on this device */}
-                <div>
-                  <Label className="text-xs text-muted-foreground">RECENT SESSIONS</Label>
-                  <div className="space-y-2 mt-1">
-                    {sessions
-                      .filter(s => s.deviceId === selectedDevice.id)
-                      .slice(0, 3)
-                      .map((session) => (
-                        <div key={session.id} className="flex items-center justify-between border rounded-md p-2 text-sm">
-                          <div className="flex items-center gap-2">
-                            <Clock className="h-4 w-4" />
-                            <span>
-                              {new Date(session.startTime).toLocaleString()} 
-                              {session.isActive ? ' (Active)' : ''}
-                            </span>
-                          </div>
-                          <Badge variant={session.isActive ? "outline" : "secondary"} className="text-xs">
-                            {session.isActive ? 'Active' : 'Ended'}
-                          </Badge>
-                        </div>
-                      ))
-                    }
-                  </div>
-                </div>
-
-                {/* Suspicious activity on this device */}
-                {suspiciousActivity.filter(a => a.deviceId === selectedDevice.id).length > 0 && (
-                  <div>
-                    <Label className="text-xs text-muted-foreground">SUSPICIOUS ACTIVITY</Label>
-                    <div className="space-y-2 mt-1">
-                      {suspiciousActivity
-                        .filter(a => a.deviceId === selectedDevice.id)
-                        .map((activity) => (
-                          <div key={activity.id} className="flex items-center justify-between border border-amber-200 bg-amber-50 rounded-md p-2 text-sm">
-                            <div className="flex items-center gap-2">
-                              <AlertTriangle className="h-4 w-4 text-amber-600" />
-                              <span>{activity.description}</span>
-                            </div>
-                            <Badge variant="outline" className="text-xs capitalize">{activity.severity}</Badge>
-                          </div>
-                        ))
-                      }
-                    </div>
-                  </div>
-                )}
               </div>
 
               <DialogFooter>
-                {selectedDevice.isTrusted ? (
+                {selectedDevice.security.isTrusted ? (
                   <Button 
                     variant="outline" 
                     className="border-red-200 text-red-600 hover:bg-red-50"
+                    disabled={actionLoading === selectedDevice.id}
                     onClick={() => {
-                      handleRevokeDevice(selectedDevice.id)
+                      handleTrustDevice(selectedDevice.id, false)
                       setShowDeviceDetails(false)
                     }}
                   >
-                    <Lock className="h-4 w-4 mr-2" />
+                    {actionLoading === selectedDevice.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Lock className="h-4 w-4 mr-2" />
+                    )}
                     Revoke Device
                   </Button>
                 ) : (
                   <Button 
                     variant="outline"
                     className="border-green-200 text-green-600 hover:bg-green-50"
+                    disabled={actionLoading === selectedDevice.id}
                     onClick={() => {
-                      handleTrustDevice(selectedDevice.id)
+                      handleTrustDevice(selectedDevice.id, true)
                       setShowDeviceDetails(false)
                     }}
                   >
-                    <Unlock className="h-4 w-4 mr-2" />
+                    {actionLoading === selectedDevice.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Unlock className="h-4 w-4 mr-2" />
+                    )}
                     Trust Device
                   </Button>
                 )}
 
                 <Button 
                   variant="destructive"
+                  disabled={actionLoading === 'terminate-all'}
                   onClick={() => {
                     handleTerminateAllSessions()
                     setShowDeviceDetails(false)
                   }}
                 >
-                  <LogOut className="h-4 w-4 mr-2" />
+                  {actionLoading === 'terminate-all' ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <LogOut className="h-4 w-4 mr-2" />
+                  )}
                   Terminate All Sessions
                 </Button>
               </DialogFooter>

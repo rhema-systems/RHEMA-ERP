@@ -41,6 +41,9 @@ import { adminApiService, Tenant } from '../../../services/admin-api.service';
 import { fileUploadService } from '../../../services/file-upload.service';
 import { useToast } from '../../../hooks/use-toast';
 import { DataTable, Column } from '../../../components/admin/data-table';
+import { TenantOverview } from '../../../components/admin/TenantOverview';
+import { BulkTenantActions } from '../../../components/admin/BulkTenantActions';
+import { ClientOnly } from '../../../components/ui/client-only';
 import { 
   Building, 
   Settings, 
@@ -145,6 +148,9 @@ export default function TenantManagementPage() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [faviconFile, setFaviconFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [selectedTenants, setSelectedTenants] = useState<Tenant[]>([]);
+  const [viewingTenant, setViewingTenant] = useState<Tenant | null>(null);
+  const [isOverviewDialogOpen, setIsOverviewDialogOpen] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -480,6 +486,21 @@ export default function TenantManagementPage() {
     setDeleteTenant(tenant);
   };
 
+  const handleView = (tenant: Tenant) => {
+    setViewingTenant(tenant);
+    setIsOverviewDialogOpen(true);
+  };
+
+  const handleSelectionChange = (selectedTenants: Tenant[]) => {
+    console.log('Selected tenants:', selectedTenants.map(t => t.name));
+    setSelectedTenants(selectedTenants);
+  };
+
+  const handleBulkActionComplete = () => {
+    setSelectedTenants([]);
+    queryClient.invalidateQueries({ queryKey: ['admin-tenants'] });
+  };
+
   // Test LDAP connection
   const testLdapConnection = async () => {
     const formData = form.getValues();
@@ -674,8 +695,7 @@ export default function TenantManagementPage() {
   ];
 
   return (
-    <DashboardLayout>
-      <div className="space-y-6">
+    <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Tenant Management</h1>
@@ -684,6 +704,14 @@ export default function TenantManagementPage() {
             </p>
           </div>
         </div>
+
+        {selectedTenants.length > 0 && (
+          <BulkTenantActions
+            selectedTenantIds={selectedTenants.map(t => t.id)}
+            tenants={tenants}
+            onActionComplete={handleBulkActionComplete}
+          />
+        )}
 
         <DataTable
           title="Tenants"
@@ -695,6 +723,11 @@ export default function TenantManagementPage() {
           onAdd={handleAdd}
           onEdit={handleEdit}
           onDelete={handleDelete}
+          onView={handleView}
+          selectable={true}
+          onSelectionChange={handleSelectionChange}
+          exportable={true}
+          exportFileName="tenants_export.csv"
         />
 
         {/* Add/Edit Tenant Dialog */}
@@ -800,21 +833,25 @@ export default function TenantManagementPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Status</FormLabel>
-                        <Select
-                          onValueChange={field.onChange}
-                          defaultValue={field.value}
-                        >
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select tenant status" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="Active">Active</SelectItem>
-                            <SelectItem value="Inactive">Inactive</SelectItem>
-                            <SelectItem value="Suspended">Suspended</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <ClientOnly fallback={
+                          <div className="h-10 bg-muted/50 rounded-md border" />
+                        }>
+                          <Select
+                            onValueChange={field.onChange}
+                            defaultValue={field.value}
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select tenant status" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="Active">Active</SelectItem>
+                              <SelectItem value="Inactive">Inactive</SelectItem>
+                              <SelectItem value="Suspended">Suspended</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </ClientOnly>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -891,21 +928,25 @@ export default function TenantManagementPage() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>User Audience</FormLabel>
-                          <Select
-                            onValueChange={(value) => field.onChange(parseInt(value))}
-                            defaultValue={field.value?.toString() || '2'}
-                          >
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select user audience" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              <SelectItem value="1">Internal</SelectItem>
-                              <SelectItem value="2">External</SelectItem>
-                              <SelectItem value="3">Both</SelectItem>
-                            </SelectContent>
-                          </Select>
+                          <ClientOnly fallback={
+                            <div className="h-10 bg-muted/50 rounded-md border" />
+                          }>
+                            <Select
+                              onValueChange={(value) => field.onChange(parseInt(value))}
+                              defaultValue={field.value?.toString() || '2'}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select user audience" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="1">Internal</SelectItem>
+                                <SelectItem value="2">External</SelectItem>
+                                <SelectItem value="3">Both</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </ClientOnly>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -1605,7 +1646,20 @@ export default function TenantManagementPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Tenant Overview Dialog */}
+        {viewingTenant && (
+          <TenantOverview
+            tenant={viewingTenant}
+            isOpen={isOverviewDialogOpen}
+            onClose={() => setIsOverviewDialogOpen(false)}
+            onEdit={(tenant) => {
+              setEditingTenant(tenant);
+              setIsDialogOpen(true);
+              setIsOverviewDialogOpen(false);
+            }}
+          />
+        )}
       </div>
-    </DashboardLayout>
   );
 }

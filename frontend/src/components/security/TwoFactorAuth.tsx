@@ -9,6 +9,7 @@ import { Badge } from '../ui/badge'
 import { Alert, AlertDescription } from '../ui/alert'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog'
 import { QRCodeSVG } from 'qrcode.react'
+import { securityService, type TwoFactorSettings, type TwoFactorSetup } from '../../services/security'
 import { 
   Shield, 
   ShieldCheck, 
@@ -40,58 +41,66 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
   isEnabled = false,
   onStatusChange
 }) => {
-  const [is2FAEnabled, setIs2FAEnabled] = useState(isEnabled)
+  const [twoFactorSettings, setTwoFactorSettings] = useState<TwoFactorSettings | null>(null)
   const [setupStep, setSetupStep] = useState<'initial' | 'qr' | 'verify' | 'backup'>('initial')
-  const [secretKey, setSecretKey] = useState('')
-  const [qrCodeUrl, setQrCodeUrl] = useState('')
+  const [setupData, setSetupData] = useState<TwoFactorSetup | null>(null)
   const [verificationCode, setVerificationCode] = useState('')
-  const [backupCodes, setBackupCodes] = useState<BackupCode[]>([])
+  const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [showBackupCodes, setShowBackupCodes] = useState(false)
   const [copiedText, setCopiedText] = useState<string | null>(null)
 
-  // Mock data for demonstration
+  // Load 2FA settings on component mount
   useEffect(() => {
-    if (is2FAEnabled) {
-      setBackupCodes([
-        { code: '12345-67890', used: false },
-        { code: '98765-43210', used: false },
-        { code: '11111-22222', used: true, usedAt: new Date('2024-01-15') },
-        { code: '33333-44444', used: false },
-        { code: '55555-66666', used: false },
-        { code: '77777-88888', used: false },
-        { code: '99999-00000', used: false },
-        { code: '12121-34343', used: false }
-      ])
-    }
-  }, [is2FAEnabled])
+    loadTwoFactorSettings()
+  }, [])
 
-  const generateSecretKey = () => {
-    // In real app, this would be generated server-side
-    const secret = 'JBSWY3DPEHPK3PXP'
-    setSecretKey(secret)
-    
-    // Generate QR code URL for authenticator apps
-    const appName = encodeURIComponent('ERP System')
-    const accountName = encodeURIComponent(userEmail)
-    const qrUrl = `otpauth://totp/${appName}:${accountName}?secret=${secret}&issuer=${appName}&algorithm=SHA1&digits=6&period=30`
-    setQrCodeUrl(qrUrl)
-    
-    setSetupStep('qr')
+  const loadTwoFactorSettings = async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const settings = await securityService.getTwoFactorSettings()
+      setTwoFactorSettings(settings)
+      onStatusChange?.(settings.isEnabled)
+    } catch (err) {
+      setError('Failed to load 2FA settings')
+      console.error('Error loading 2FA settings:', err)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleSetup2FA = async () => {
+    if (!password) {
+      setError('Password is required to enable 2FA')
+      return
+    }
+
     setIsLoading(true)
     setError(null)
     
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      generateSecretKey()
-    } catch (err) {
-      setError('Failed to generate 2FA setup. Please try again.')
+      // Call API to initiate 2FA setup (this generates the QR code)
+      const setup = await securityService.enableTwoFactor({
+        verificationCode: '', // Empty for initial setup
+        password
+      })
+      
+      setSetupData(setup)
+      setSetupStep('qr')
+    } catch (err: any) {
+      // Make error messages more user-friendly
+      const errorMessage = err?.message || 'Failed to generate 2FA setup. Please try again.'
+      
+      if (errorMessage.toLowerCase().includes('incorrect password')) {
+        setError('The password you entered is incorrect. Please double-check and try again.')
+      } else if (errorMessage.toLowerCase().includes('password')) {
+        setError('Password verification failed. Please make sure you entered your current password correctly.')
+      } else {
+        setError('Unable to start 2FA setup. Please try again or contact support if the problem persists.')
+      }
     } finally {
       setIsLoading(false)
     }
@@ -103,45 +112,48 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
       return
     }
     
+    if (!password) {
+      setError('Password is required')
+      return
+    }
+    
     setIsLoading(true)
     setError(null)
     
     try {
-      // Simulate API verification
-      await new Promise(resolve => setTimeout(resolve, 1500))
+      // Call API to verify the code and complete 2FA setup
+      const setup = await securityService.enableTwoFactor({
+        verificationCode,
+        password
+      })
       
-      // Mock verification - accept 123456 as valid code
-      if (verificationCode === '123456') {
-        setSetupStep('backup')
-        generateBackupCodes()
-        setSuccess('2FA has been successfully enabled!')
+      setSetupData(setup)
+      setSetupStep('backup')
+      setSuccess('2FA has been successfully enabled!')
+    } catch (err: any) {
+      // Make error messages more user-friendly
+      const errorMessage = err?.message || 'Invalid verification code. Please try again.'
+      
+      if (errorMessage.toLowerCase().includes('incorrect password')) {
+        setError('The password you entered is incorrect. Please double-check and try again.')
+      } else if (errorMessage.toLowerCase().includes('verification code')) {
+        setError('The verification code is incorrect or has expired. Please enter the current 6-digit code from your authenticator app.')
+      } else if (errorMessage.toLowerCase().includes('code')) {
+        setError('The code you entered is not valid. Please make sure you\'re using the current 6-digit code from your authenticator app.')
       } else {
-        setError('Invalid verification code. Please try again.')
+        setError('Unable to verify the code. Please try again with a fresh code from your authenticator app.')
       }
-    } catch (err) {
-      setError('Verification failed. Please try again.')
     } finally {
       setIsLoading(false)
     }
   }
 
-  const generateBackupCodes = () => {
-    const codes: BackupCode[] = []
-    for (let i = 0; i < 8; i++) {
-      const code = `${Math.floor(Math.random() * 90000) + 10000}-${Math.floor(Math.random() * 90000) + 10000}`
-      codes.push({ code, used: false })
-    }
-    setBackupCodes(codes)
-  }
-
   const handleEnable2FA = async () => {
     setIsLoading(true)
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      setIs2FAEnabled(true)
+      // Refresh settings to get updated state
+      await loadTwoFactorSettings()
       setSetupStep('initial')
-      onStatusChange?.(true)
       setSuccess('2FA has been enabled successfully!')
     } catch (err) {
       setError('Failed to enable 2FA')
@@ -151,16 +163,31 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
   }
 
   const handleDisable2FA = async () => {
+    if (!password) {
+      setError('Password is required to disable 2FA')
+      return
+    }
+
     setIsLoading(true)
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      setIs2FAEnabled(false)
-      setBackupCodes([])
-      onStatusChange?.(false)
+      await securityService.disableTwoFactor({
+        password,
+        reason: 'User requested'
+      })
+      
+      await loadTwoFactorSettings()
       setSuccess('2FA has been disabled')
-    } catch (err) {
-      setError('Failed to disable 2FA')
+    } catch (err: any) {
+      // Make error messages more user-friendly
+      const errorMessage = err?.message || 'Failed to disable 2FA'
+      
+      if (errorMessage.toLowerCase().includes('incorrect password')) {
+        setError('The password you entered is incorrect. Please double-check and try again.')
+      } else if (errorMessage.toLowerCase().includes('password')) {
+        setError('Password verification failed. Please make sure you entered your current password correctly.')
+      } else {
+        setError('Unable to disable 2FA. Please try again or contact support if the problem persists.')
+      }
     } finally {
       setIsLoading(false)
     }
@@ -177,9 +204,9 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
   }
 
   const downloadBackupCodes = () => {
-    const codesText = backupCodes
-      .map(bc => `${bc.code} ${bc.used ? '(USED)' : ''}`)
-      .join('\n')
+    if (!setupData?.recoveryCodes) return
+    
+    const codesText = setupData.recoveryCodes.join('\n')
     
     const blob = new Blob([`ERP System - 2FA Backup Codes\nGenerated: ${new Date().toISOString()}\n\n${codesText}`], 
       { type: 'text/plain' })
@@ -192,16 +219,7 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
   }
 
   const regenerateBackupCodes = async () => {
-    setIsLoading(true)
-    try {
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      generateBackupCodes()
-      setSuccess('New backup codes generated successfully!')
-    } catch (err) {
-      setError('Failed to regenerate backup codes')
-    } finally {
-      setIsLoading(false)
-    }
+    setError('Backup code regeneration not yet implemented')
   }
 
   return (
@@ -211,27 +229,20 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            {is2FAEnabled ? (
+            {twoFactorSettings?.isEnabled ? (
               <ShieldCheck className="h-5 w-5 text-green-600" />
             ) : (
               <ShieldX className="h-5 w-5 text-red-600" />
             )}
             Two-Factor Authentication
-            <Badge variant={is2FAEnabled ? "default" : "destructive"}>
-              {is2FAEnabled ? 'Enabled' : 'Disabled'}
+            <Badge variant={twoFactorSettings?.isEnabled ? "default" : "destructive"}>
+              {twoFactorSettings?.isEnabled ? 'Enabled' : 'Disabled'}
             </Badge>
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {/* Status Messages */}
-            {error && (
-              <Alert variant="destructive">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-            
+            {/* Success Messages (only show success on main page) */}
             {success && (
               <Alert>
                 <Check className="h-4 w-4" />
@@ -240,7 +251,7 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
             )}
 
             <p className="text-sm text-muted-foreground">
-              {is2FAEnabled 
+              {twoFactorSettings?.isEnabled 
                 ? 'Your account is protected with two-factor authentication. You\'ll need your authenticator app to sign in.'
                 : 'Add an extra layer of security to your account by enabling two-factor authentication.'
               }
@@ -248,10 +259,15 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
 
             {/* Action Buttons */}
             <div className="flex gap-2">
-              {!is2FAEnabled ? (
+              {!twoFactorSettings?.isEnabled ? (
                 <Dialog>
                   <DialogTrigger asChild>
-                    <Button onClick={() => setSetupStep('initial')}>
+                    <Button onClick={() => {
+                      setSetupStep('initial')
+                      setError(null)
+                      setPassword('')
+                      setVerificationCode('')
+                    }}>
                       <Shield className="h-4 w-4 mr-2" />
                       Enable 2FA
                     </Button>
@@ -279,9 +295,31 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
                           </div>
                         </div>
                         
+                        {/* Error display within dialog */}
+                        {error && (
+                          <Alert variant="destructive">
+                            <AlertTriangle className="h-4 w-4" />
+                            <AlertDescription>{error}</AlertDescription>
+                          </Alert>
+                        )}
+                        
+                        <div className="space-y-2">
+                          <Label htmlFor="setup-password">Current Password</Label>
+                          <Input
+                            id="setup-password"
+                            type="password"
+                            placeholder="Enter your password"
+                            value={password}
+                            onChange={(e) => {
+                              setPassword(e.target.value)
+                              setError(null)
+                            }}
+                          />
+                        </div>
+                        
                         <Button 
                           onClick={handleSetup2FA} 
-                          disabled={isLoading}
+                          disabled={isLoading || !password}
                           className="w-full"
                         >
                           {isLoading ? (
@@ -304,18 +342,25 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
                           
                           <div className="flex justify-center mb-4">
                             <div className="p-4 bg-white rounded-lg border">
-                              <QRCodeSVG value={qrCodeUrl} size={200} />
+                              {setupData?.qrCodeUrl ? (
+                                <img src={setupData.qrCodeUrl} alt="2FA QR Code" width={200} height={200} />
+                              ) : (
+                                <div className="w-[200px] h-[200px] bg-muted rounded flex items-center justify-center">
+                                  <p className="text-sm text-muted-foreground">Loading QR Code...</p>
+                                </div>
+                              )}
                             </div>
                           </div>
                           
                           <div className="text-xs text-muted-foreground">
                             <p className="mb-2">Can't scan? Enter this key manually:</p>
                             <div className="flex items-center gap-2 p-2 bg-muted rounded font-mono text-xs">
-                              <span className="flex-1">{secretKey}</span>
+                              <span className="flex-1">{setupData?.authenticatorKey || 'Loading...'}</span>
                               <Button 
                                 size="sm" 
                                 variant="ghost" 
-                                onClick={() => copyToClipboard(secretKey, 'secret')}
+                                onClick={() => copyToClipboard(setupData?.authenticatorKey || '', 'secret')}
+                                disabled={!setupData?.authenticatorKey}
                               >
                                 {copiedText === 'secret' ? (
                                   <Check className="h-3 w-3" />
@@ -343,6 +388,14 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
                           <p className="text-sm text-muted-foreground mb-4">
                             Enter the 6-digit code from your authenticator app
                           </p>
+                          
+                          {/* Error display within verify dialog */}
+                          {error && (
+                            <Alert variant="destructive">
+                              <AlertTriangle className="h-4 w-4" />
+                              <AlertDescription>{error}</AlertDescription>
+                            </Alert>
+                          )}
                           
                           <div className="space-y-2">
                             <Label htmlFor="verification-code">Verification Code</Label>
@@ -373,9 +426,6 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
                           Verify & Enable
                         </Button>
                         
-                        <div className="text-xs text-center text-muted-foreground">
-                          <p>Demo: Use code <span className="font-mono bg-muted px-1 rounded">123456</span> to verify</p>
-                        </div>
                       </div>
                     )}
 
@@ -389,11 +439,15 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
                           
                           <div className="bg-muted p-3 rounded-lg">
                             <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                              {backupCodes.slice(0, 8).map((backup, index) => (
+                              {setupData?.recoveryCodes?.map((code, index) => (
                                 <div key={index} className="p-1">
-                                  {backup.code}
+                                  {code}
                                 </div>
-                              ))}
+                              )) || (
+                                <div className="col-span-2 text-center text-muted-foreground">
+                                  Loading backup codes...
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -427,14 +481,74 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
                     <Key className="h-4 w-4 mr-2" />
                     View Backup Codes
                   </Button>
-                  <Button
-                    variant="destructive"
-                    onClick={handleDisable2FA}
-                    disabled={isLoading}
-                  >
-                    {isLoading && <RefreshCw className="h-4 w-4 mr-2 animate-spin" />}
-                    Disable 2FA
-                  </Button>
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button 
+                        variant="destructive" 
+                        disabled={isLoading}
+                        onClick={() => {
+                          setError(null)
+                          setPassword('')
+                        }}
+                      >
+                        {isLoading && <RefreshCw className="h-4 w-4 mr-2 animate-spin" />}
+                        Disable 2FA
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-md">
+                      <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                          <ShieldX className="h-5 w-5" />
+                          Disable Two-Factor Authentication
+                        </DialogTitle>
+                      </DialogHeader>
+                      
+                      <div className="space-y-4">
+                        <Alert variant="destructive">
+                          <AlertTriangle className="h-4 w-4" />
+                          <AlertDescription>
+                            Disabling 2FA will make your account less secure. Are you sure you want to continue?
+                          </AlertDescription>
+                        </Alert>
+                        
+                        {/* Error display within disable dialog */}
+                        {error && (
+                          <Alert variant="destructive">
+                            <AlertTriangle className="h-4 w-4" />
+                            <AlertDescription>{error}</AlertDescription>
+                          </Alert>
+                        )}
+                        
+                        <div className="space-y-2">
+                          <Label htmlFor="disable-password">Current Password</Label>
+                          <Input
+                            id="disable-password"
+                            type="password"
+                            placeholder="Enter your password to confirm"
+                            value={password}
+                            onChange={(e) => {
+                              setPassword(e.target.value)
+                              setError(null)
+                            }}
+                          />
+                        </div>
+                        
+                        <Button 
+                          onClick={handleDisable2FA}
+                          disabled={isLoading || !password}
+                          variant="destructive"
+                          className="w-full"
+                        >
+                          {isLoading ? (
+                            <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <ShieldX className="h-4 w-4 mr-2" />
+                          )}
+                          Disable 2FA
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </>
               )}
             </div>
@@ -443,7 +557,7 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
       </Card>
 
       {/* Backup Codes Management */}
-      {is2FAEnabled && (
+      {twoFactorSettings?.isEnabled && (
         <Dialog open={showBackupCodes} onOpenChange={setShowBackupCodes}>
           <DialogContent>
             <DialogHeader>
@@ -463,25 +577,23 @@ export const TwoFactorAuth: React.FC<TwoFactorAuthProps> = ({
               </Alert>
               
               <div className="bg-muted p-4 rounded-lg">
-                <div className="grid grid-cols-1 gap-2">
-                  {backupCodes.map((backup, index) => (
-                    <div 
-                      key={index} 
-                      className={`flex items-center justify-between p-2 rounded font-mono text-sm ${
-                        backup.used 
-                          ? 'bg-red-50 text-red-600 line-through' 
-                          : 'bg-white'
-                      }`}
-                    >
-                      <span>{backup.code}</span>
-                      {backup.used && (
-                        <Badge variant="destructive" className="text-xs">
-                          Used {backup.usedAt?.toLocaleDateString()}
-                        </Badge>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                {twoFactorSettings?.recoveryCodes && twoFactorSettings.recoveryCodes.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-2">
+                    {twoFactorSettings.recoveryCodes.map((code, index) => (
+                      <div 
+                        key={index} 
+                        className="flex items-center justify-between p-2 rounded font-mono text-sm bg-white"
+                      >
+                        <span>{code}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center text-muted-foreground py-4">
+                    <p>No backup codes available.</p>
+                    <p className="text-xs mt-1">Backup codes are generated when you first enable 2FA.</p>
+                  </div>
+                )}
               </div>
               
               <div className="flex gap-2">

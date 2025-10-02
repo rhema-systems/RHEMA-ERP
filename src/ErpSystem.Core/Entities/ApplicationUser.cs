@@ -32,6 +32,10 @@ public class ApplicationUser : IdentityUser<Guid>
 
     public DateTime? LastLoginDate { get; set; }
     public string? ProfilePictureUrl { get; set; }
+    
+    // Two-Factor Authentication
+    [StringLength(32)]
+    public string? AuthenticatorKey { get; set; }
 
     // Navigation properties
     public virtual ICollection<ApplicationUserRole> UserRoles { get; set; } = new List<ApplicationUserRole>();

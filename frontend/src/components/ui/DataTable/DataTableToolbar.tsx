@@ -25,7 +25,6 @@ import {
 } from 'lucide-react';
 import { DataTableExport } from './DataTableExport';
 import { useDeviceType } from '@/hooks/useResponsive';
-import { useThemeStyles } from '@/hooks/useUserTheme';
 
 export interface DataTableToolbarProps<TData> {
   table: Table<TData>;
@@ -73,7 +72,6 @@ export function DataTableToolbar<TData>({
   loading = false,
 }: DataTableToolbarProps<TData>) {
   const { isMobile, isTablet } = useDeviceType();
-  const { isCompact } = useThemeStyles();
   const isFiltered = table.getState().columnFilters.length > 0 || globalFilter.length > 0;
   const hasSelection = selectedRows.length > 0;
 
@@ -85,7 +83,7 @@ export function DataTableToolbar<TData>({
   };
 
   return (
-    <div className={`flex flex-col space-y-4 ${isCompact ? 'p-3' : 'p-4'}`}>
+    <div className="flex flex-col space-y-4 p-4">
       {/* Top row - Main actions */}
       <div className={`${isMobile ? 'flex-col space-y-3' : 'flex items-center justify-between'}`}>
         <div className={`${isMobile ? 'flex flex-col space-y-2' : 'flex items-center space-x-2'}`}>
@@ -143,7 +141,7 @@ export function DataTableToolbar<TData>({
           {enableColumnVisibility && !isMobile && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size={isCompact ? "sm" : "default"} disabled={loading}>
+                <Button variant="outline" size="default" disabled={loading}>
                   <EyeIcon className="mr-1 h-3 w-3" />
                   {isMobile ? '' : 'View'}
                 </Button>

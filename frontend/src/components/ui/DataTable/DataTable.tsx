@@ -21,7 +21,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useDeviceType } from '@/hooks/useResponsive';
-import { useThemeStyles } from '@/hooks/useUserTheme';
 import {
   Table,
   TableBody,
@@ -231,7 +230,6 @@ export function DataTable<TData>({
   enableHorizontalScroll = true,
 }: DataTableProps<TData>) {
   const { isMobile, isTablet, needsMoreSpacing } = useDeviceType();
-  const { isCompact } = useThemeStyles();
   
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);

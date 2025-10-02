@@ -24,6 +24,7 @@ import {
   Building,
   BarChart3,
   Bell,
+  Database,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -110,6 +111,7 @@ const navigationItems: NavItem[] = [
       { title: 'Report Builder', href: '/reports#builder', icon: FileText },
       { title: 'Analytics Dashboard', href: '/reports#analytics', icon: BarChart3 },
       { title: 'Report Templates', href: '/reports#templates', icon: FileText },
+      { title: 'Data Sources', href: '/data-sources', icon: Database },
       { title: 'Data Export', href: '/reports#export', icon: FileText },
     ],
   },

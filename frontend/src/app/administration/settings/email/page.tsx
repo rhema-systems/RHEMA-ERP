@@ -34,6 +34,7 @@ import {
   AlertDescription,
   AlertTitle,
 } from '../../../../components/ui/alert';
+import { ConfirmationDialog } from '../../../../components/ui/confirmation-dialog';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -86,6 +87,8 @@ export default function EmailSettingsPage() {
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | undefined>(undefined);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [templateToDelete, setTemplateToDelete] = useState<string | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -262,8 +265,14 @@ export default function EmailSettingsPage() {
   };
 
   const handleDeleteTemplate = (templateId: string) => {
-    if (window.confirm('Are you sure you want to delete this template?')) {
-      deleteTemplateMutation.mutate(templateId);
+    setTemplateToDelete(templateId);
+    setShowDeleteDialog(true);
+  };
+
+  const confirmDeleteTemplate = () => {
+    if (templateToDelete) {
+      deleteTemplateMutation.mutate(templateToDelete);
+      setTemplateToDelete(null);
     }
   };
 
@@ -286,17 +295,14 @@ export default function EmailSettingsPage() {
 
   if (isLoading) {
     return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        </div>
-      </DashboardLayout>
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
     );
   }
 
   return (
-    <DashboardLayout>
-      <div className="space-y-6">
+    <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Email Settings</h1>
           <p className="text-muted-foreground">
@@ -845,7 +851,19 @@ export default function EmailSettingsPage() {
           template={editingTemplate}
           onSave={handleSaveTemplate}
         />
+
+        {/* Delete Confirmation Dialog */}
+        <ConfirmationDialog
+          open={showDeleteDialog}
+          onOpenChange={setShowDeleteDialog}
+          title="Delete Email Template"
+          description="Are you sure you want to delete this email template? This action cannot be undone and may affect automated notifications that use this template."
+          confirmText="Delete"
+          cancelText="Cancel"
+          variant="destructive"
+          onConfirm={confirmDeleteTemplate}
+          isLoading={deleteTemplateMutation.isPending}
+        />
       </div>
-    </DashboardLayout>
   );
 }

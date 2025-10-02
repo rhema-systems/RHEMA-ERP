@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { themeService, UserThemePreferences } from '@/services/theme.service';
 
@@ -16,9 +16,12 @@ export function useUserTheme({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const hasInitialized = useRef(false);
 
-  // Load user preferences on mount
+  // Load user preferences on mount (only once)
   useEffect(() => {
+    if (hasInitialized.current) return;
+    
     const loadPreferences = async () => {
       setIsLoading(true);
       setError(null);
@@ -51,22 +54,26 @@ export function useUserTheme({
 
         setPreferences(userPreferences);
         
-        // Apply theme if it differs from current
+        // Apply theme if it differs from current but don't create loops
+        // This will only happen on the initial load
         if (userPreferences.theme !== theme) {
           setTheme(userPreferences.theme);
         }
+        
+        hasInitialized.current = true;
 
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to load theme preferences';
         setError(errorMessage);
         console.error('Error loading theme preferences:', err);
+        hasInitialized.current = true; // Mark as initialized even on error
       } finally {
         setIsLoading(false);
       }
     };
 
     loadPreferences();
-  }, [autoSync, fallbackToLocal, theme, setTheme]);
+  }, [autoSync, fallbackToLocal, theme, setTheme]); // Keep dependencies but use ref to prevent multiple loads
 
   // Update user preferences
   const updatePreferences = useCallback(async (newPreferences: Partial<UserThemePreferences>) => {

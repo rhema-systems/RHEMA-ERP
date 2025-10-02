@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { ShoppingCart, User, Package, CreditCard, Clock } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import type { ActivityItem } from '../../types/dashboard';
+import { useIsClient } from '../../lib/ssr-utils';
 
 interface RecentActivityProps {
   data: ActivityItem[];
@@ -25,7 +26,14 @@ const activityColors = {
 } as const;
 
 export function RecentActivity({ data, loading = false }: RecentActivityProps) {
+  const isClient = useIsClient();
+  
   const formatRelativeTime = (timestamp: string) => {
+    if (!isClient) {
+      // Return a safe fallback during SSR
+      const date = new Date(timestamp);
+      return date.toLocaleDateString();
+    }
     return formatDistanceToNow(new Date(timestamp), { addSuffix: true });
   };
 

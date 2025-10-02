@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Identity;
 using ErpSystem.Core.Services;
 using ErpSystem.Core.Entities;
 using ErpSystem.Shared;
@@ -15,17 +16,20 @@ public class UserController : ControllerBase
     private readonly ILogger<UserController> _logger;
     private readonly IAuditLogService _auditLogService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ISettingsService _settingsService;
 
     public UserController(
         IUserService userService, 
         ILogger<UserController> logger,
         IAuditLogService auditLogService,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        ISettingsService settingsService)
     {
         _userService = userService;
         _logger = logger;
         _auditLogService = auditLogService;
         _currentUserService = currentUserService;
+        _settingsService = settingsService;
     }
 
     /// <summary>
@@ -456,6 +460,8 @@ public class UserController : ControllerBase
                 user.LastName = request.LastName;
             if (!string.IsNullOrEmpty(request.Email))
                 user.Email = request.Email;
+            if (!string.IsNullOrEmpty(request.PhoneNumber))
+                user.PhoneNumber = request.PhoneNumber;
             
             // Handle tenant change if provided and user has permission
             if (request.TenantId.HasValue && request.TenantId != user.TenantId)
@@ -510,6 +516,7 @@ public class UserController : ControllerBase
                 Email = updatedUser.Email ?? "",
                 FirstName = updatedUser.FirstName,
                 LastName = updatedUser.LastName,
+                PhoneNumber = updatedUser.PhoneNumber,
                 IsActive = updatedUser.IsActive,
                 Roles = updatedUser.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>(),
                 CreatedAt = updatedUser.CreatedAt,
@@ -523,6 +530,110 @@ public class UserController : ControllerBase
         {
             _logger.LogError(ex, "Error updating user profile");
             return StatusCode(500, "An error occurred while updating the profile");
+        }
+    }
+
+    /// <summary>
+    /// Change current user's password
+    /// </summary>
+    [HttpPost("change-password")]
+    [Authorize]
+    public async Task<ActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
+    {
+        try
+        {
+            var currentUserId = _currentUserService.GetUserId();
+            if (!currentUserId.HasValue)
+            {
+                return Unauthorized();
+            }
+
+            var user = await _userService.GetUserByIdAsync(currentUserId.Value);
+            if (user == null)
+            {
+                return NotFound("User not found");
+            }
+
+            // Verify current password
+            var passwordHasher = new PasswordHasher<ApplicationUser>();
+            var verificationResult = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.CurrentPassword);
+            
+            if (verificationResult == PasswordVerificationResult.Failed)
+            {
+                return BadRequest("Current password is incorrect");
+            }
+
+            // Validate new password against security policy
+            var security = await _settingsService.GetSecuritySettingsAsync(user.TenantId);
+            if (security != null)
+            {
+                var errors = new List<string>();
+                
+                // Validate minimum length
+                if (request.NewPassword.Length < security.PasswordMinLength)
+                {
+                    errors.Add($"Password must be at least {security.PasswordMinLength} characters long");
+                }
+                
+                // Validate uppercase requirement
+                if (security.PasswordRequireUppercase && !System.Text.RegularExpressions.Regex.IsMatch(request.NewPassword, @"[A-Z]"))
+                {
+                    errors.Add("Password must contain at least one uppercase letter");
+                }
+                
+                // Validate lowercase requirement
+                if (security.PasswordRequireLowercase && !System.Text.RegularExpressions.Regex.IsMatch(request.NewPassword, @"[a-z]"))
+                {
+                    errors.Add("Password must contain at least one lowercase letter");
+                }
+                
+                // Validate digits requirement
+                if (security.PasswordRequireDigits && !System.Text.RegularExpressions.Regex.IsMatch(request.NewPassword, @"[0-9]"))
+                {
+                    errors.Add("Password must contain at least one digit");
+                }
+                
+                // Validate special characters requirement
+                if (security.PasswordRequireSpecialChars && !System.Text.RegularExpressions.Regex.IsMatch(request.NewPassword, @"[!@#$%^&*()_+\-=\[\]{};':""\\|,.<>\/?]"))
+                {
+                    errors.Add("Password must contain at least one special character");
+                }
+                
+                if (errors.Any())
+                {
+                    return BadRequest(new { message = "Password does not meet policy requirements", errors = errors });
+                }
+            }
+
+            // Hash new password
+            user.PasswordHash = passwordHasher.HashPassword(user, request.NewPassword);
+            await _userService.UpdateUserAsync(user);
+
+            // Log audit trail for password change
+            try
+            {
+                await _auditLogService.LogUserActionAsync(
+                    currentUserId.Value,
+                    _currentUserService.GetUsername() ?? "Unknown",
+                    "ChangePassword",
+                    "User",
+                    currentUserId.Value.ToString(),
+                    null,
+                    new { Message = "Password changed" },
+                    GetClientIpAddress(),
+                    GetUserAgent());
+            }
+            catch (Exception logEx)
+            {
+                _logger.LogWarning(logEx, "Failed to log audit trail for password change");
+            }
+
+            return Ok(new { message = "Password changed successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error changing password");
+            return StatusCode(500, "An error occurred while changing the password");
         }
     }
 
@@ -601,5 +712,12 @@ public class UpdateProfileRequest
     public string? FirstName { get; set; }
     public string? LastName { get; set; }
     public string? Email { get; set; }
+    public string? PhoneNumber { get; set; }
     public Guid? TenantId { get; set; }
+}
+
+public class ChangePasswordRequest
+{
+    public string CurrentPassword { get; set; } = string.Empty;
+    public string NewPassword { get; set; } = string.Empty;
 }

@@ -168,12 +168,28 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<IJwtBlacklistService, JwtBlacklistService>();
             services.AddScoped<IRefreshTokenService, RefreshTokenService>();
             services.AddScoped<IUserSessionService, ErpSystem.Data.Services.UserSessionService>();
+            services.AddScoped<ITwoFactorAuthService, TwoFactorAuthService>();
+            services.AddScoped<IDeviceSessionService, DeviceSessionService>();
+            
+            // Configure HttpClient for geolocation services
+            services.AddHttpClient("geolocation", client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(5);
+                client.DefaultRequestHeaders.Add("User-Agent", "ERP-System/1.0");
+            });
+            services.AddScoped<ISecurityService, SecurityService>();
             // User context services
             services.AddHttpContextAccessor();
             services.AddScoped<ICurrentUserService, ErpSystem.Api.Services.CurrentUserService>();
 
             // Dashboard service
             services.AddScoped<ErpSystem.Core.Services.IDashboardService, ErpSystem.Data.Services.DashboardService>();
+            
+            // Reports service
+            services.AddScoped<IReportsService, MockReportsService>();
+            
+            // Data source service
+            services.AddScoped<IDataSourceService, MockDataSourceService>();
 
             return services;
         }

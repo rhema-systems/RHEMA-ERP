@@ -25,6 +25,11 @@ const nextConfig = {
     // Add any experimental features here if needed
   },
   
+  // Turbopack configuration
+  turbopack: {
+    root: __dirname,
+  },
+  
   // Environment variables
   env: {
     CUSTOM_KEY: process.env.CUSTOM_KEY,

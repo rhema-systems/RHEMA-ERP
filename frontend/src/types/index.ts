@@ -14,8 +14,17 @@ export interface User {
   firstName?: string;
   lastName?: string;
   tenantId?: string;
+  currentTenantId?: string;
+  currentTenantCode?: string;
+  currentTenantName?: string;
   isActive: boolean;
   roles: string[];
+  phoneNumber?: string;
+  createdAt?: string;
+  lastLoginAt?: string;
+  profilePictureUrl?: string;
+  twoFactorEnabled?: boolean;
+  authenticationProvider?: 'Local' | 'LDAP';
 }
 
 // Authentication Types
@@ -24,13 +33,16 @@ export interface LoginRequest {
   password: string;
   tenantCode?: string;
   rememberMe?: boolean;
+  twoFactorCode?: string;
 }
 
 export interface LoginResponse {
-  token: string;
-  refreshToken: string;
-  expiresAt: string;
-  user: User;
+  token?: string;
+  refreshToken?: string;
+  expiresAt?: string;
+  user?: User;
+  requiresTwoFactor?: boolean;
+  twoFactorToken?: string;
 }
 
 export interface RefreshTokenRequest {

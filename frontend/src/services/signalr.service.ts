@@ -125,7 +125,9 @@ class SignalRService {
     // Clean up existing connection if any
     if (this.connection) {
       try {
-        await this.connection.stop();
+        if (this.connection.state !== HubConnectionState.Disconnected) {
+          await this.connection.stop();
+        }
       } catch (error) {
         console.warn('Error stopping previous SignalR connection:', error);
       }
@@ -191,7 +193,9 @@ class SignalRService {
       // Clean up failed connection
       if (this.connection) {
         try {
-          await this.connection.stop();
+          if (this.connection.state !== HubConnectionState.Disconnected) {
+            await this.connection.stop();
+          }
         } catch (stopError) {
           console.warn('Error stopping failed connection:', stopError);
         }

@@ -6,6 +6,9 @@ import { DashboardLayout } from '../../../../components/layout/dashboard-layout'
 import { DataTable, Column } from '../../../../components/admin/data-table';
 import { Button } from '../../../../components/ui/button';
 import { Badge } from '../../../../components/ui/badge';
+import { BulkUserActions } from '../../../../components/admin/BulkUserActions';
+import { UserProfile } from '../../../../components/admin/UserProfile';
+import { ClientOnly } from '../../../../components/ui/client-only';
 import {
   Dialog,
   DialogContent,
@@ -65,6 +68,9 @@ export default function UsersPage() {
   const [lastLoginFromDate, setLastLoginFromDate] = useState<string>('');
   const [lastLoginToDate, setLastLoginToDate] = useState<string>('');
   const [phoneNumber, setPhoneNumber] = useState('+233'); // Default to Ghana country code
+  const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
+  const [viewingUser, setViewingUser] = useState<User | null>(null);
+  const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -216,7 +222,17 @@ export default function UsersPage() {
 
   const handleSelectionChange = (selectedUsers: User[]) => {
     console.log('Selected users:', selectedUsers.map(u => u.username));
-    // You can add batch operations here like bulk delete, bulk edit, etc.
+    setSelectedUsers(selectedUsers);
+  };
+
+  const handleBulkActionComplete = () => {
+    setSelectedUsers([]);
+    queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+  };
+
+  const handleViewProfile = (user: User) => {
+    setViewingUser(user);
+    setIsProfileDialogOpen(true);
   };
 
   const onSubmit = (data: UserFormData) => {
@@ -359,8 +375,7 @@ export default function UsersPage() {
   ];
 
   return (
-    <DashboardLayout>
-      <div className="space-y-6">
+    <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">User Management</h1>
@@ -368,6 +383,18 @@ export default function UsersPage() {
               Manage system users, roles, and permissions
             </p>
           </div>
+          {selectedUsers.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-sm">
+                {selectedUsers.length} selected
+              </Badge>
+              <BulkUserActions
+                selectedUserIds={selectedUsers.map(u => u.id)}
+                users={users}
+                onActionComplete={handleBulkActionComplete}
+              />
+            </div>
+          )}
         </div>
 
         {/* Filters */}
@@ -376,32 +403,40 @@ export default function UsersPage() {
             {/* Role Filter */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">Role</Label>
-              <Select value={roleFilter} onValueChange={setRoleFilter}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="All Roles" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Roles</SelectItem>
-                  {availableRoles.map(role => (
-                    <SelectItem key={role} value={role}>{role}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <ClientOnly fallback={
+                <div className="w-40 h-10 bg-muted/50 rounded-md border" />
+              }>
+                <Select value={roleFilter} onValueChange={setRoleFilter}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue placeholder="All Roles" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Roles</SelectItem>
+                    {availableRoles.map(role => (
+                      <SelectItem key={role} value={role}>{role}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </ClientOnly>
             </div>
 
             {/* Status Filter */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">Status</Label>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="All Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="inactive">Inactive</SelectItem>
-                </SelectContent>
-              </Select>
+              <ClientOnly fallback={
+                <div className="w-40 h-10 bg-muted/50 rounded-md border" />
+              }>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue placeholder="All Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </ClientOnly>
             </div>
 
             {/* Last Login Date Range */}
@@ -453,6 +488,7 @@ export default function UsersPage() {
           onAdd={handleAdd}
           onEdit={handleEdit}
           onDelete={handleDelete}
+          onView={handleViewProfile}
           exportable={true}
           exportFileName="users_export.csv"
           selectable={true}
@@ -567,21 +603,25 @@ export default function UsersPage() {
                     <FormItem>
                       <FormLabel>Roles *</FormLabel>
                       <FormControl>
-                        <Select
-                          value={field.value[0] || ''}
-                          onValueChange={(value) => field.onChange([value])}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a role" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {roles.map((role) => (
-                              <SelectItem key={role.id} value={role.name}>
-                                {role.name} - {role.description}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <ClientOnly fallback={
+                          <div className="h-10 bg-muted/50 rounded-md border" />
+                        }>
+                          <Select
+                            value={field.value[0] || ''}
+                            onValueChange={(value) => field.onChange([value])}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select a role" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {roles.map((role) => (
+                                <SelectItem key={role.id} value={role.name}>
+                                  {role.name} - {role.description}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </ClientOnly>
                       </FormControl>
                       <FormDescription>
                         Select the primary role for this user
@@ -667,7 +707,29 @@ export default function UsersPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* User Profile Dialog */}
+        <Dialog open={isProfileDialogOpen} onOpenChange={setIsProfileDialogOpen}>
+          <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>User Profile</DialogTitle>
+              <DialogDescription>
+                Detailed view and management of user information
+              </DialogDescription>
+            </DialogHeader>
+            {viewingUser && (
+              <UserProfile
+                user={viewingUser}
+                onClose={() => setIsProfileDialogOpen(false)}
+                onEdit={(user) => {
+                  setEditingUser(user);
+                  setIsDialogOpen(true);
+                  setIsProfileDialogOpen(false);
+                }}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
-    </DashboardLayout>
   );
 }

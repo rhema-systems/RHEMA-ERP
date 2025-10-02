@@ -13,8 +13,6 @@ public interface ISettingsService
     Task<EmailSettings> UpdateEmailSettingsAsync(EmailSettings settings);
     Task<bool> TestEmailSettingsAsync(EmailSettings settings, string testEmail);
     
-    Task<PasswordPolicy?> GetPasswordPolicyAsync();
-    Task<PasswordPolicy> UpdatePasswordPolicyAsync(PasswordPolicy policy);
     
     Task<Security?> GetSecuritySettingsAsync();
     Task<Security?> GetSecuritySettingsAsync(Guid tenantId);
@@ -166,66 +164,6 @@ public class SettingsService : ISettingsService
 
     #endregion
 
-    #region Password Policy
-
-    public async Task<PasswordPolicy?> GetPasswordPolicyAsync()
-    {
-        try
-        {
-            var policies = await _unitOfWork.Repository<PasswordPolicy>().GetAllAsync();
-            return policies.FirstOrDefault();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving password policy");
-            throw;
-        }
-    }
-
-    public async Task<PasswordPolicy> UpdatePasswordPolicyAsync(PasswordPolicy policy)
-    {
-        try
-        {
-            var existingPolicy = await GetPasswordPolicyAsync();
-            
-            if (existingPolicy != null)
-            {
-                // Update existing policy
-                existingPolicy.MinLength = policy.MinLength;
-                existingPolicy.RequireUppercase = policy.RequireUppercase;
-                existingPolicy.RequireLowercase = policy.RequireLowercase;
-                existingPolicy.RequireDigits = policy.RequireDigits;
-                existingPolicy.RequireSpecialChars = policy.RequireSpecialChars;
-                existingPolicy.MaxAge = policy.MaxAge;
-                existingPolicy.PreventReuse = policy.PreventReuse;
-                existingPolicy.UpdatedAt = DateTime.UtcNow;
-
-                await _unitOfWork.Repository<PasswordPolicy>().UpdateAsync(existingPolicy);
-                await _unitOfWork.SaveChangesAsync();
-                _logger.LogInformation("Updated password policy");
-                return existingPolicy;
-            }
-            else
-            {
-                // Create new policy
-                policy.Id = Guid.NewGuid();
-                policy.TenantId = _currentUserService.GetTenantId() ?? throw new InvalidOperationException("Tenant ID is required");
-                policy.CreatedAt = DateTime.UtcNow;
-                policy.CreatedBy = _currentUserService.GetUsername();
-                var createdPolicy = await _unitOfWork.Repository<PasswordPolicy>().AddAsync(policy);
-                await _unitOfWork.SaveChangesAsync();
-                _logger.LogInformation("Created new password policy");
-                return createdPolicy;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating password policy");
-            throw;
-        }
-    }
-
-    #endregion
 
     #region Security Settings
 

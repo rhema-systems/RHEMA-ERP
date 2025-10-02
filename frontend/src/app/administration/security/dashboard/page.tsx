@@ -18,8 +18,10 @@ import { TwoFactorAuth } from '../../../../components/security/TwoFactorAuth'
 import { AuditLog } from '../../../../components/security/AuditLog'
 import { DeviceManagement } from '../../../../components/security/DeviceManagement'
 import { SecurityPolicies } from '../../../../components/security/SecurityPolicies'
+import { SessionManagementTab } from '@/components/admin/SessionManagementTab';
 import { useToast } from '../../../../hooks/use-toast'
 import { settingsService } from '../../../../services/settings'
+import { securityService, type SecurityMetrics, type SecurityAlert, type SecurityHealthScore } from '../../../../services/security'
 import type { SecuritySettings as SecuritySettingsDto } from '../../../../services/settings'
 import { 
   Shield, 
@@ -41,23 +43,15 @@ import {
   Loader2,
   Monitor
 } from 'lucide-react'
+import { ClientOnly } from '../../../../components/ui/client-only'
 
-interface SecurityMetric {
+interface SecurityMetricUI {
   label: string
   value: string | number
   change?: string
   trend?: 'up' | 'down' | 'stable'
   status?: 'good' | 'warning' | 'critical'
   icon: React.ComponentType<any>
-}
-
-interface SecurityAlert {
-  id: string
-  type: 'critical' | 'warning' | 'info'
-  title: string
-  message: string
-  timestamp: Date
-  dismissed: boolean
 }
 
 // Schema definitions for form validation
@@ -100,7 +94,11 @@ const legalSchema = z.object({
 });
 
 export default function SecurityDashboardPage() {
+  console.log('🔥 SecurityDashboardPage rendering');
   const [activeTab, setActiveTab] = useState('overview')
+  const [realTimeAlerts, setRealTimeAlerts] = useState<SecurityAlert[]>([])
+  const [realTimeMetrics, setRealTimeMetrics] = useState<SecurityMetrics | null>(null)
+  const [healthScore, setHealthScore] = useState<SecurityHealthScore | null>(null)
   const { toast } = useToast()
   const queryClient = useQueryClient()
 
@@ -108,6 +106,27 @@ export default function SecurityDashboardPage() {
   const { data: settings, isLoading: settingsLoading, error: settingsError } = useQuery({
     queryKey: ['securitySettings'],
     queryFn: () => settingsService.getSecuritySettings(),
+  })
+
+  // Fetch security metrics
+  const { data: securityMetrics, isLoading: metricsLoading } = useQuery({
+    queryKey: ['securityMetrics'],
+    queryFn: () => securityService.getSecurityMetrics(),
+    refetchInterval: 30000, // Refresh every 30 seconds
+  })
+
+  // Fetch security alerts
+  const { data: securityAlerts, isLoading: alertsLoading, refetch: refetchAlerts } = useQuery({
+    queryKey: ['securityAlerts'],
+    queryFn: () => securityService.getSecurityAlerts(false),
+    refetchInterval: 15000, // Refresh every 15 seconds
+  })
+
+  // Fetch security health score
+  const { data: securityHealth, isLoading: healthLoading } = useQuery({
+    queryKey: ['securityHealthScore'],
+    queryFn: () => securityService.getSecurityHealthScore(),
+    refetchInterval: 60000, // Refresh every minute
   })
 
   // Form for security settings
@@ -198,6 +217,33 @@ export default function SecurityDashboardPage() {
     reset(cleanSettings)
   }, [settings, reset])
 
+  // Setup real-time security data subscriptions
+  useEffect(() => {
+    // Subscribe to real-time security alerts
+    const unsubscribeAlerts = securityService.onSecurityAlert((alert) => {
+      setRealTimeAlerts(prev => [alert, ...prev.slice(0, 9)]) // Keep only latest 10
+      toast({
+        title: `Security Alert: ${alert.title}`,
+        description: alert.message,
+        variant: alert.type === 'critical' ? 'destructive' : 'default',
+      })
+      // Refetch alerts to update the UI
+      refetchAlerts()
+    })
+
+    // Subscribe to real-time security metrics
+    const unsubscribeMetrics = securityService.onSecurityMetrics((metrics) => {
+      setRealTimeMetrics(metrics)
+      // Invalidate and refetch metrics query
+      queryClient.invalidateQueries({ queryKey: ['securityMetrics'] })
+    })
+
+    return () => {
+      unsubscribeAlerts()
+      unsubscribeMetrics()
+    }
+  }, [toast, refetchAlerts, queryClient])
+
   // Settings update mutation
   const updateMutation = useMutation({
     mutationFn: (data: SecuritySettingsDto) => settingsService.updateSecuritySettings(data),
@@ -231,93 +277,94 @@ export default function SecurityDashboardPage() {
     updateMutation.mutate(cleanData)
   }
 
-  // Mock security metrics
-  const securityMetrics: SecurityMetric[] = [
+  // Alert dismiss functionality
+  const dismissAlert = async (alertId: string) => {
+    try {
+      await securityService.dismissAlert(alertId)
+      // Refetch alerts to update UI
+      refetchAlerts()
+      toast({
+        title: 'Alert Dismissed',
+        description: 'Security alert has been dismissed successfully.',
+        variant: 'default',
+      })
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to dismiss alert. Please try again.',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  // Convert real security metrics to UI format
+  const metricsData = realTimeMetrics || securityMetrics
+  const securityMetricsUI: SecurityMetricUI[] = metricsData ? [
     {
       label: '2FA Adoption Rate',
-      value: '85%',
-      change: '+12%',
-      trend: 'up',
-      status: 'good',
+      value: `${metricsData.twoFactorAdoptionRate}%`,
+      change: metricsData.trends.twoFactorAdoptionRate > 0 ? `+${metricsData.trends.twoFactorAdoptionRate}%` : 
+              metricsData.trends.twoFactorAdoptionRate < 0 ? `${metricsData.trends.twoFactorAdoptionRate}%` : '0%',
+      trend: metricsData.trends.twoFactorAdoptionRate > 0 ? 'up' : 
+             metricsData.trends.twoFactorAdoptionRate < 0 ? 'down' : 'stable',
+      status: metricsData.twoFactorAdoptionRate >= 90 ? 'good' : metricsData.twoFactorAdoptionRate >= 75 ? 'warning' : 'critical',
       icon: Shield
     },
     {
       label: 'Failed Login Attempts',
-      value: 23,
-      change: '-15%',
-      trend: 'down',
-      status: 'good',
+      value: metricsData.failedLoginAttempts,
+      change: metricsData.trends.failedLoginAttempts > 0 ? `+${metricsData.trends.failedLoginAttempts}%` : 
+              metricsData.trends.failedLoginAttempts < 0 ? `${metricsData.trends.failedLoginAttempts}%` : '0%',
+      trend: metricsData.trends.failedLoginAttempts > 0 ? 'up' : 
+             metricsData.trends.failedLoginAttempts < 0 ? 'down' : 'stable',
+      status: metricsData.failedLoginAttempts <= 10 ? 'good' : metricsData.failedLoginAttempts <= 50 ? 'warning' : 'critical',
       icon: Lock
     },
     {
       label: 'Active Sessions',
-      value: 142,
-      change: '+8%',
-      trend: 'up',
-      status: 'warning',
+      value: metricsData.activeSessions,
+      change: metricsData.trends.activeSessions > 0 ? `+${metricsData.trends.activeSessions}%` : 
+              metricsData.trends.activeSessions < 0 ? `${metricsData.trends.activeSessions}%` : '0%',
+      trend: metricsData.trends.activeSessions > 0 ? 'up' : 
+             metricsData.trends.activeSessions < 0 ? 'down' : 'stable',
+      status: metricsData.activeSessions <= 200 ? 'good' : metricsData.activeSessions <= 500 ? 'warning' : 'critical',
       icon: Users
     },
     {
       label: 'Security Incidents',
-      value: 3,
+      value: metricsData.securityIncidents,
       change: 'Last 24h',
-      trend: 'stable',
-      status: 'warning',
+      trend: metricsData.trends.securityIncidents > 0 ? 'up' : 
+             metricsData.trends.securityIncidents < 0 ? 'down' : 'stable',
+      status: metricsData.securityIncidents === 0 ? 'good' : metricsData.securityIncidents <= 3 ? 'warning' : 'critical',
       icon: AlertTriangle
     },
     {
       label: 'Password Compliance',
-      value: '92%',
-      change: '+5%',
-      trend: 'up',
-      status: 'good',
+      value: `${metricsData.passwordCompliance}%`,
+      change: metricsData.trends.passwordCompliance > 0 ? `+${metricsData.trends.passwordCompliance}%` : 
+              metricsData.trends.passwordCompliance < 0 ? `${metricsData.trends.passwordCompliance}%` : '0%',
+      trend: metricsData.trends.passwordCompliance > 0 ? 'up' : 
+             metricsData.trends.passwordCompliance < 0 ? 'down' : 'stable',
+      status: metricsData.passwordCompliance >= 95 ? 'good' : metricsData.passwordCompliance >= 80 ? 'warning' : 'critical',
       icon: Key
     },
     {
       label: 'Audit Events Today',
-      value: 1247,
-      change: '+22%',
-      trend: 'up',
+      value: metricsData.auditEventsToday,
+      change: metricsData.trends.auditEventsToday > 0 ? `+${metricsData.trends.auditEventsToday}%` : 
+              metricsData.trends.auditEventsToday < 0 ? `${metricsData.trends.auditEventsToday}%` : '0%',
+      trend: metricsData.trends.auditEventsToday > 0 ? 'up' : 
+             metricsData.trends.auditEventsToday < 0 ? 'down' : 'stable',
       status: 'good',
       icon: FileText
     }
-  ]
+  ] : []
 
-  // Mock security alerts
-  const [securityAlerts, setSecurityAlerts] = useState<SecurityAlert[]>([
-    {
-      id: '1',
-      type: 'critical',
-      title: 'Multiple Failed Login Attempts',
-      message: 'User john.doe@company.com has 8 failed login attempts from IP 192.168.1.100',
-      timestamp: new Date(Date.now() - 15 * 60 * 1000),
-      dismissed: false
-    },
-    {
-      id: '2',
-      type: 'warning',
-      title: 'Unusual Login Location',
-      message: 'Login detected from new location: Tokyo, Japan for user alice@company.com',
-      timestamp: new Date(Date.now() - 45 * 60 * 1000),
-      dismissed: false
-    },
-    {
-      id: '3',
-      type: 'info',
-      title: 'Password Policy Updated',
-      message: 'Security team updated password complexity requirements',
-      timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
-      dismissed: false
-    }
-  ])
-
-  const dismissAlert = (alertId: string) => {
-    setSecurityAlerts(alerts => 
-      alerts.map(alert => 
-        alert.id === alertId ? { ...alert, dismissed: true } : alert
-      )
-    )
-  }
+  // Use real security alerts data
+  const alertsData = [...(realTimeAlerts || []), ...(securityAlerts || [])]
+    .filter((alert, index, self) => index === self.findIndex(a => a.id === alert.id))
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -355,10 +402,13 @@ export default function SecurityDashboardPage() {
     }
   }
 
-  if (settingsLoading) {
+  if (settingsLoading || metricsLoading || alertsLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin" />
+        <div className="text-center space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto" />
+          <p className="text-muted-foreground">Loading security dashboard...</p>
+        </div>
       </div>
     )
   }
@@ -401,10 +451,12 @@ export default function SecurityDashboardPage() {
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-6 h-12 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+      <ClientOnly fallback={<div className="p-8 text-center text-muted-foreground">Loading security dashboard...</div>}>
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid w-full grid-cols-7 h-12 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
           <TabsTrigger value="overview" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-slate-100 font-medium">Overview</TabsTrigger>
           <TabsTrigger value="settings" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-slate-100 font-medium">Settings</TabsTrigger>
+          <TabsTrigger value="sessions" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-slate-100 font-medium">Online Users</TabsTrigger>
           <TabsTrigger value="2fa" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-slate-100 font-medium">Two-Factor Auth</TabsTrigger>
           <TabsTrigger value="audit" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-slate-100 font-medium">Audit & Monitoring</TabsTrigger>
           <TabsTrigger value="devices" className="data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-slate-100 font-medium">Device Management</TabsTrigger>
@@ -416,7 +468,7 @@ export default function SecurityDashboardPage() {
 
           {/* Security Metrics */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {securityMetrics.map((metric, index) => (
+            {securityMetricsUI.length > 0 ? securityMetricsUI.map((metric, index) => (
               <Card key={index}>
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
@@ -438,7 +490,12 @@ export default function SecurityDashboardPage() {
                   </div>
                 </CardContent>
               </Card>
-            ))}
+            )) : (
+              <div className="col-span-full text-center py-8 text-muted-foreground">
+                <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
+                <p>Loading security metrics...</p>
+              </div>
+            )}
           </div>
 
           {/* Security Alerts */}
@@ -448,24 +505,37 @@ export default function SecurityDashboardPage() {
                 <AlertTriangle className="h-5 w-5" />
                 Security Alerts
                 <Badge variant="destructive">
-                  {securityAlerts.filter(alert => !alert.dismissed).length}
+                  {alertsData.filter(alert => !alert.dismissed).length}
                 </Badge>
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {securityAlerts
+                {alertsData
                   .filter(alert => !alert.dismissed)
                   .slice(0, 5)
                   .map((alert) => (
                   <Alert key={alert.id} variant={getAlertVariant(alert.type)}>
                     <div className="flex items-start justify-between w-full">
                       <div className="flex-1">
-                        <h4 className="font-medium">{alert.title}</h4>
+                        <div className="flex items-center gap-2 mb-1">
+                          <h4 className="font-medium">{alert.title}</h4>
+                          <Badge variant="outline" className="text-xs">
+                            {alert.category}
+                          </Badge>
+                          {alert.severity && (
+                            <Badge variant={alert.severity >= 4 ? 'destructive' : alert.severity >= 2 ? 'secondary' : 'outline'} className="text-xs">
+                              {alert.severity >= 4 ? 'Critical' : alert.severity >= 2 ? 'Medium' : 'Low'}
+                            </Badge>
+                          )}
+                        </div>
                         <p className="text-sm mt-1">{alert.message}</p>
-                        <p className="text-xs text-muted-foreground mt-2">
-                          {formatTimeAgo(alert.timestamp)}
-                        </p>
+                        <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                          <span>{formatTimeAgo(alert.timestamp)}</span>
+                          {alert.affectedUser && <span>User: {alert.affectedUser}</span>}
+                          {alert.ipAddress && <span>IP: {alert.ipAddress}</span>}
+                          {alert.location && <span>Location: {alert.location}</span>}
+                        </div>
                       </div>
                       <Button
                         variant="ghost"
@@ -478,7 +548,7 @@ export default function SecurityDashboardPage() {
                   </Alert>
                 ))}
                 
-                {securityAlerts.filter(alert => !alert.dismissed).length === 0 && (
+                {alertsData.filter(alert => !alert.dismissed).length === 0 && (
                   <div className="text-center py-8 text-muted-foreground">
                     <CheckCircle className="h-12 w-12 mx-auto mb-2 text-green-600" />
                     <p>No active security alerts</p>
@@ -497,7 +567,7 @@ export default function SecurityDashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                 <Button 
                   variant="outline" 
                   className="h-20 flex-col gap-2"
@@ -523,6 +593,15 @@ export default function SecurityDashboardPage() {
                 >
                   <FileText className="h-6 w-6" />
                   <span className="text-sm">Audit Logs</span>
+                </Button>
+                
+                <Button 
+                  variant="outline" 
+                  className="h-20 flex-col gap-2"
+                  onClick={() => setActiveTab('sessions')}
+                >
+                  <Users className="h-6 w-6" />
+                  <span className="text-sm">Online Users</span>
                 </Button>
                 
                 <Button 
@@ -582,60 +661,85 @@ export default function SecurityDashboardPage() {
                   </svg>
                   <div className="absolute inset-0 flex items-center justify-center">
                     <div className="text-center">
-                      <div className="text-3xl font-bold text-green-600">87</div>
+                      <div className={`text-3xl font-bold ${
+                        (securityHealth?.overall || 87) >= 90 ? 'text-green-600' : 
+                        (securityHealth?.overall || 87) >= 75 ? 'text-yellow-600' : 'text-red-600'
+                      }`}>
+                        {securityHealth?.overall || 87}
+                      </div>
                       <div className="text-sm text-muted-foreground">Score</div>
                     </div>
                   </div>
                 </div>
                 
                 <div className="flex-1 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm">Password Policies</span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-20 h-2 bg-gray-200 rounded-full">
-                        <div className="w-4/5 h-2 bg-green-500 rounded-full"></div>
+                  {Object.entries(securityHealth?.categories || {
+                    passwordPolicies: 92,
+                    twoFactorAdoption: 85,
+                    sessionSecurity: 78,
+                    accessControls: 95
+                  }).map(([key, value]) => {
+                    const label = key === 'passwordPolicies' ? 'Password Policies' :
+                                  key === 'twoFactorAdoption' ? '2FA Adoption' :
+                                  key === 'sessionSecurity' ? 'Session Security' :
+                                  key === 'accessControls' ? 'Access Controls' :
+                                  key === 'auditCompliance' ? 'Audit Compliance' : key
+                    const color = value >= 90 ? 'bg-green-500 text-green-600' :
+                                  value >= 75 ? 'bg-yellow-500 text-yellow-600' : 'bg-red-500 text-red-600'
+                    return (
+                      <div key={key} className="flex items-center justify-between">
+                        <span className="text-sm">{label}</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-20 h-2 bg-gray-200 rounded-full">
+                            <div 
+                              className={`h-2 ${color.split(' ')[0]} rounded-full`}
+                              style={{ width: `${Math.min(value, 100)}%` }}
+                            ></div>
+                          </div>
+                          <span className={`text-sm ${color.split(' ')[1]}`}>{value}%</span>
+                        </div>
                       </div>
-                      <span className="text-sm text-green-600">92%</span>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm">2FA Adoption</span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-20 h-2 bg-gray-200 rounded-full">
-                        <div className="w-4/5 h-2 bg-green-500 rounded-full"></div>
-                      </div>
-                      <span className="text-sm text-green-600">85%</span>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm">Session Security</span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-20 h-2 bg-gray-200 rounded-full">
-                        <div className="w-3/4 h-2 bg-yellow-500 rounded-full"></div>
-                      </div>
-                      <span className="text-sm text-yellow-600">78%</span>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm">Access Controls</span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-20 h-2 bg-gray-200 rounded-full">
-                        <div className="w-full h-2 bg-green-500 rounded-full"></div>
-                      </div>
-                      <span className="text-sm text-green-600">95%</span>
-                    </div>
-                  </div>
+                    )
+                  })}
                 </div>
               </div>
               
-              <div className="mt-6 p-4 bg-green-50 rounded-lg">
-                <p className="text-sm text-green-800">
-                  <strong>Excellent security posture!</strong> Your organization maintains strong security practices. 
-                  Consider increasing 2FA adoption and reviewing session policies to reach 95+ score.
-                </p>
+              <div className={`mt-6 p-4 rounded-lg ${
+                (securityHealth?.overall || 87) >= 90 ? 'bg-green-50' :
+                (securityHealth?.overall || 87) >= 75 ? 'bg-yellow-50' : 'bg-red-50'
+              }`}>
+                {securityHealth?.recommendations && securityHealth.recommendations.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className={`text-sm font-medium ${
+                      (securityHealth?.overall || 87) >= 90 ? 'text-green-800' :
+                      (securityHealth?.overall || 87) >= 75 ? 'text-yellow-800' : 'text-red-800'
+                    }`}>
+                      Security Recommendations:
+                    </p>
+                    {securityHealth.recommendations.slice(0, 2).map((rec, index) => (
+                      <div key={index} className="flex items-start gap-2">
+                        <Badge 
+                          variant={rec.priority === 'critical' ? 'destructive' : 
+                                 rec.priority === 'high' ? 'secondary' : 'outline'}
+                          className="text-xs mt-0.5"
+                        >
+                          {rec.priority}
+                        </Badge>
+                        <p className={`text-sm flex-1 ${
+                          (securityHealth?.overall || 87) >= 90 ? 'text-green-700' :
+                          (securityHealth?.overall || 87) >= 75 ? 'text-yellow-700' : 'text-red-700'
+                        }`}>
+                          <strong>{rec.category}:</strong> {rec.message}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-green-800">
+                    <strong>Excellent security posture!</strong> Your organization maintains strong security practices. 
+                    Consider increasing 2FA adoption and reviewing session policies to reach 95+ score.
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -1103,6 +1207,13 @@ export default function SecurityDashboardPage() {
           </form>
         </TabsContent>
 
+        {/* Session Management Tab */}
+        <TabsContent value="sessions">
+          <div className="space-y-4">
+            <SessionManagementTab />
+          </div>
+        </TabsContent>
+
         {/* Two-Factor Authentication Tab */}
         <TabsContent value="2fa">
           <TwoFactorAuth 
@@ -1126,7 +1237,8 @@ export default function SecurityDashboardPage() {
         <TabsContent value="policies">
           <SecurityPolicies />
         </TabsContent>
-      </Tabs>
+        </Tabs>
+      </ClientOnly>
     </div>
   )
 }

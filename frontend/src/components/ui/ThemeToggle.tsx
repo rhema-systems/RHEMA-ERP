@@ -16,6 +16,7 @@ import {
   PaletteIcon,
 } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
+import { ClientOnly } from './client-only';
 
 interface ThemeToggleProps {
   variant?: 'button' | 'dropdown' | 'compact';
@@ -75,89 +76,122 @@ export function ThemeToggle({
   // Simple toggle button (light/dark only)
   if (variant === 'button') {
     return (
+    <ClientOnly fallback={
       <Button
         variant="ghost"
         size={size}
-        onClick={toggleTheme}
         className="px-2"
-        title={`Switch to ${actualTheme === 'dark' ? 'light' : 'dark'} mode`}
+        disabled={true}
       >
-        {getCurrentIcon()}
-        {showLabel && <span className="ml-2">{getCurrentLabel()}</span>}
+        <SunIcon className="h-4 w-4" />
       </Button>
+    }>
+        <Button
+          variant="ghost"
+          size={size}
+          onClick={toggleTheme}
+          className="px-2"
+          title={`Switch to ${actualTheme === 'dark' ? 'light' : 'dark'} mode`}
+        >
+          {getCurrentIcon()}
+          {showLabel && <span className="ml-2">{getCurrentLabel()}</span>}
+        </Button>
+      </ClientOnly>
     );
   }
 
   // Compact icon-only toggle
   if (variant === 'compact') {
     return (
+      <ClientOnly fallback={
       <Button
         variant="ghost"
         size="sm"
-        onClick={toggleTheme}
         className="h-8 w-8 p-0"
-        title={`Switch to ${actualTheme === 'dark' ? 'light' : 'dark'} mode`}
+        disabled={true}
       >
-        {getCurrentIcon()}
-      </Button>
+          <SunIcon className="h-4 w-4" />
+        </Button>
+      }>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={toggleTheme}
+          className="h-8 w-8 p-0"
+          title={`Switch to ${actualTheme === 'dark' ? 'light' : 'dark'} mode`}
+        >
+          {getCurrentIcon()}
+        </Button>
+      </ClientOnly>
     );
   }
 
   // Full dropdown with all options
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size={size}
-          className="px-2"
-          title="Change theme"
-        >
-          {getCurrentIcon()}
-          {showLabel && <span className="ml-2">{getCurrentLabel()}</span>}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align={align} className="min-w-[130px]">
-        <DropdownMenuItem
-          onClick={() => setTheme('light')}
-          className="cursor-pointer"
-        >
-          <div className="flex items-center justify-between w-full">
-            <div className="flex items-center">
-              <SunIcon className="mr-2 h-4 w-4" />
-              <span>Light</span>
+    <ClientOnly fallback={
+      <Button
+        variant="ghost"
+        size={size}
+        className="px-2"
+        disabled={true}
+      >
+        <SunIcon className="h-4 w-4" />
+      </Button>
+    }>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size={size}
+            className="px-2"
+            title="Change theme"
+          >
+            {getCurrentIcon()}
+            {showLabel && <span className="ml-2">{getCurrentLabel()}</span>}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align={align} className="min-w-[130px]">
+          <DropdownMenuItem
+            onClick={() => setTheme('light')}
+            className="cursor-pointer"
+          >
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center">
+                <SunIcon className="mr-2 h-4 w-4" />
+                <span>Light</span>
+              </div>
+              {theme === 'light' && <CheckIcon className="h-3 w-3" />}
             </div>
-            {theme === 'light' && <CheckIcon className="h-3 w-3" />}
-          </div>
-        </DropdownMenuItem>
-        
-        <DropdownMenuItem
-          onClick={() => setTheme('dark')}
-          className="cursor-pointer"
-        >
-          <div className="flex items-center justify-between w-full">
-            <div className="flex items-center">
-              <MoonIcon className="mr-2 h-4 w-4" />
-              <span>Dark</span>
+          </DropdownMenuItem>
+          
+          <DropdownMenuItem
+            onClick={() => setTheme('dark')}
+            className="cursor-pointer"
+          >
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center">
+                <MoonIcon className="mr-2 h-4 w-4" />
+                <span>Dark</span>
+              </div>
+              {theme === 'dark' && <CheckIcon className="h-3 w-3" />}
             </div>
-            {theme === 'dark' && <CheckIcon className="h-3 w-3" />}
-          </div>
-        </DropdownMenuItem>
-        
-        <DropdownMenuItem
-          onClick={() => setTheme('system')}
-          className="cursor-pointer"
-        >
-          <div className="flex items-center justify-between w-full">
-            <div className="flex items-center">
-              <MonitorIcon className="mr-2 h-4 w-4" />
-              <span>System</span>
+          </DropdownMenuItem>
+          
+          <DropdownMenuItem
+            onClick={() => setTheme('system')}
+            className="cursor-pointer"
+          >
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center">
+                <MonitorIcon className="mr-2 h-4 w-4" />
+                <span>System</span>
+              </div>
+              {theme === 'system' && <CheckIcon className="h-3 w-3" />}
             </div>
-            {theme === 'system' && <CheckIcon className="h-3 w-3" />}
-          </div>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </ClientOnly>
   );
 }
 
@@ -172,35 +206,48 @@ export function AnimatedThemeToggle({
   const { actualTheme, toggleTheme } = useTheme();
 
   return (
-    <Button
-      variant="ghost"
-      size={size}
-      onClick={toggleTheme}
-      className="px-2 relative overflow-hidden"
-      title={`Switch to ${actualTheme === 'dark' ? 'light' : 'dark'} mode`}
-    >
-      <div className="relative">
-        <SunIcon 
-          className={`h-4 w-4 transition-all duration-300 ${
-            actualTheme === 'dark' 
-              ? 'rotate-90 scale-0 opacity-0' 
-              : 'rotate-0 scale-100 opacity-100'
-          }`} 
-        />
-        <MoonIcon 
-          className={`h-4 w-4 absolute inset-0 transition-all duration-300 ${
-            actualTheme === 'dark' 
-              ? 'rotate-0 scale-100 opacity-100' 
-              : '-rotate-90 scale-0 opacity-0'
-          }`} 
-        />
-      </div>
-      {showLabel && (
-        <span className="ml-2 transition-opacity duration-300">
-          {actualTheme === 'dark' ? 'Dark' : 'Light'}
-        </span>
-      )}
-    </Button>
+    <ClientOnly fallback={
+      <Button
+        variant="ghost"
+        size={size}
+        className="px-2 relative overflow-hidden"
+        disabled={true}
+      >
+        <div className="relative">
+          <SunIcon className="h-4 w-4" />
+        </div>
+      </Button>
+    }>
+      <Button
+        variant="ghost"
+        size={size}
+        onClick={toggleTheme}
+        className="px-2 relative overflow-hidden"
+        title={`Switch to ${actualTheme === 'dark' ? 'light' : 'dark'} mode`}
+      >
+        <div className="relative">
+          <SunIcon 
+            className={`h-4 w-4 transition-all duration-300 ${
+              actualTheme === 'dark' 
+                ? 'rotate-90 scale-0 opacity-0' 
+                : 'rotate-0 scale-100 opacity-100'
+            }`} 
+          />
+          <MoonIcon 
+            className={`h-4 w-4 absolute inset-0 transition-all duration-300 ${
+              actualTheme === 'dark' 
+                ? 'rotate-0 scale-100 opacity-100' 
+                : '-rotate-90 scale-0 opacity-0'
+            }`} 
+          />
+        </div>
+        {showLabel && (
+          <span className="ml-2 transition-opacity duration-300">
+            {actualTheme === 'dark' ? 'Dark' : 'Light'}
+          </span>
+        )}
+      </Button>
+    </ClientOnly>
   );
 }
 
@@ -214,12 +261,18 @@ export function ThemeIndicator({
 
   return (
     <div className={`flex items-center space-x-2 text-sm text-muted-foreground ${className}`}>
-      {getThemeIcon(isSystemTheme ? 'system' : actualTheme)}
+      {actualTheme === 'dark' ? (
+        <MoonIcon className="h-4 w-4" />
+      ) : actualTheme === 'light' ? (
+        <SunIcon className="h-4 w-4" />
+      ) : (
+        <MonitorIcon className="h-4 w-4" />
+      )}
       <span>
         {isSystemTheme ? (
           <>System <span className="text-xs">({systemTheme})</span></>
         ) : (
-          getThemeLabel(actualTheme)
+          actualTheme === 'dark' ? 'Dark' : 'Light'
         )}
       </span>
     </div>

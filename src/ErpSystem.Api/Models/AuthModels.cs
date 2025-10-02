@@ -36,10 +36,16 @@ namespace ErpSystem.Api.Models
         [StringLength(100, MinimumLength = 8)]
         public required string Password { get; set; }
 
-        [StringLength(50, MinimumLength = 1)]
+        [StringLength(50)]
         public string? TenantCode { get; set; }
 
         public bool RememberMe { get; set; } = false;
+        
+        /// <summary>
+        /// Two-factor authentication code (6 digits)
+        /// </summary>
+        [StringLength(6)]
+        public string? TwoFactorCode { get; set; }
     }
 
     public class RefreshTokenRequest
@@ -61,10 +67,20 @@ namespace ErpSystem.Api.Models
 
     public class LoginResponse
     {
-        public required string Token { get; set; }
-        public required string RefreshToken { get; set; }
-        public DateTime ExpiresAt { get; set; }
-        public required UserInfo User { get; set; }
+        public string? Token { get; set; }
+        public string? RefreshToken { get; set; }
+        public DateTime? ExpiresAt { get; set; }
+        public UserInfo? User { get; set; }
+        
+        /// <summary>
+        /// Indicates if two-factor authentication is required to complete login
+        /// </summary>
+        public bool RequiresTwoFactor { get; set; }
+        
+        /// <summary>
+        /// Temporary token used for 2FA verification (when RequiresTwoFactor is true)
+        /// </summary>
+        public string? TwoFactorToken { get; set; }
     }
 
     public class UserInfo
@@ -74,6 +90,7 @@ namespace ErpSystem.Api.Models
         public required string Email { get; set; }
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
+        public string? PhoneNumber { get; set; }
         
         // Current session tenant info
         public Guid? CurrentTenantId { get; set; }

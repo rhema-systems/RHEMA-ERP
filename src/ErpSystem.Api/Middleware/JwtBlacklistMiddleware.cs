@@ -27,45 +27,69 @@ public class JwtBlacklistMiddleware
             
             if (authHeader?.StartsWith("Bearer ") == true)
             {
-                var jwt = authHeader["Bearer ".Length..];
+                var jwt = authHeader["Bearer ".Length..].Trim();
                 _logger.LogDebug("Extracted JWT token, length: {Length}", jwt.Length);
                 
-                try
+                // Validate JWT format before processing
+                if (string.IsNullOrWhiteSpace(jwt))
                 {
-                    var tokenHandler = new JwtSecurityTokenHandler();
-                    var jsonToken = tokenHandler.ReadJwtToken(jwt);
-                    var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
-                    
-                _logger.LogInformation("🔍 Extracted JTI from token: {Jti}", jti);
-                    
-                    if (!string.IsNullOrEmpty(jti))
+                    _logger.LogWarning("JWT token is empty or whitespace");
+                }
+                else if (!IsValidJwtFormat(jwt))
+                {
+                    _logger.LogWarning("JWT token is not in valid format (should have 3 parts separated by dots). Token: {TokenPreview}", 
+                        jwt.Length > 50 ? jwt.Substring(0, 50) + "..." : jwt);
+                }
+                else
+                {
+                    try
                     {
-                        _logger.LogInformation("🔍 Checking if JTI {Jti} is blacklisted...", jti);
-                        var isBlacklisted = await jwtBlacklistService.IsTokenBlacklistedAsync(jti);
-                        _logger.LogInformation("🔍 JTI {Jti} blacklist status: {IsBlacklisted}", jti, isBlacklisted);
+                        var tokenHandler = new JwtSecurityTokenHandler();
                         
-                        if (isBlacklisted)
+                        // First check if the token can be read without validation
+                        if (!tokenHandler.CanReadToken(jwt))
                         {
-                            _logger.LogWarning("🚫 BLOCKED REQUEST: Blacklisted JWT token (JTI: {Jti}) for path: {Path}", jti, requestPath);
-                            context.Response.StatusCode = 401;
-                            context.Response.ContentType = "application/json";
-                            await context.Response.WriteAsync("{\"error\": \"Token has been revoked\", \"code\": \"TOKEN_BLACKLISTED\"}");
-                            return;
+                            _logger.LogWarning("JWT token cannot be read by token handler. Token preview: {TokenPreview}", 
+                                jwt.Length > 50 ? jwt.Substring(0, 50) + "..." : jwt);
                         }
                         else
                         {
-                            _logger.LogInformation("✅ Token {Jti} is valid, continuing request to {Path}", jti, requestPath);
+                            var jsonToken = tokenHandler.ReadJwtToken(jwt);
+                            var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
+                    
+                            _logger.LogInformation("🔍 Extracted JTI from token: {Jti}", jti);
+                            
+                            if (!string.IsNullOrEmpty(jti))
+                            {
+                                _logger.LogInformation("🔍 Checking if JTI {Jti} is blacklisted...", jti);
+                                var isBlacklisted = await jwtBlacklistService.IsTokenBlacklistedAsync(jti);
+                                _logger.LogInformation("🔍 JTI {Jti} blacklist status: {IsBlacklisted}", jti, isBlacklisted);
+                                
+                                if (isBlacklisted)
+                                {
+                                    _logger.LogWarning("🚫 BLOCKED REQUEST: Blacklisted JWT token (JTI: {Jti}) for path: {Path}", jti, requestPath);
+                                    context.Response.StatusCode = 401;
+                                    context.Response.ContentType = "application/json";
+                                    await context.Response.WriteAsync("{\"error\": \"Token has been revoked\", \"code\": \"TOKEN_BLACKLISTED\"}");
+                                    return;
+                                }
+                                else
+                                {
+                                    _logger.LogInformation("✅ Token {Jti} is valid, continuing request to {Path}", jti, requestPath);
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogWarning("JWT token does not contain JTI claim");
+                            }
                         }
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        _logger.LogWarning("JWT token does not contain JTI claim");
+                        _logger.LogWarning(ex, "Error reading JWT token for blacklist validation. Path: {Path}, Token preview: {TokenPreview}", 
+                            requestPath, jwt.Length > 50 ? jwt.Substring(0, 50) + "..." : jwt);
+                        // Continue processing - don't block requests due to malformed tokens that might be handled elsewhere
                     }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Error validating JWT token blacklist status for path: {Path}", requestPath);
-                    // Continue processing - don't block valid tokens due to validation errors
                 }
             }
             else
@@ -79,5 +103,31 @@ public class JwtBlacklistMiddleware
         }
 
         await _next(context);
+    }
+
+    /// <summary>
+    /// Validates that a JWT token has the correct format (3 parts separated by dots)
+    /// </summary>
+    /// <param name="token">The JWT token to validate</param>
+    /// <returns>True if the token has valid format, false otherwise</returns>
+    private static bool IsValidJwtFormat(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return false;
+
+        var parts = token.Split('.');
+        
+        // JWT should have exactly 3 parts: header.payload.signature
+        if (parts.Length != 3)
+            return false;
+
+        // Each part should not be empty
+        foreach (var part in parts)
+        {
+            if (string.IsNullOrWhiteSpace(part))
+                return false;
+        }
+
+        return true;
     }
 }

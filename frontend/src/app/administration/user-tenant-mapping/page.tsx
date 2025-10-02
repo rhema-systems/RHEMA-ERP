@@ -104,17 +104,14 @@ export default function UserTenantMappingPage() {
 
   if (isLoadingTenants || isLoadingUsers) {
     return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center min-h-screen">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-        </div>
-      </DashboardLayout>
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+      </div>
     );
   }
 
   return (
-    <DashboardLayout>
-      <div className="container mx-auto py-6 space-y-8">
+    <div className="container mx-auto py-6 space-y-8">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">User-Tenant Mapping</h1>
@@ -356,6 +353,5 @@ export default function UserTenantMappingPage() {
         </CardContent>
       </Card>
       </div>
-    </DashboardLayout>
   );
 }

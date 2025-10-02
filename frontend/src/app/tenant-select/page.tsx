@@ -7,6 +7,7 @@ import { Building2, Loader2, LogOut } from 'lucide-react';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
+import { ConfirmationDialog } from '../../components/ui/confirmation-dialog';
 import { useTenant } from '../../contexts/TenantContext';
 import { tenantService } from '../../services/tenant';
 import { authService } from '../../services/auth';
@@ -17,6 +18,9 @@ export default function TenantSelectPage() {
   const router = useRouter();
   const { setCurrentTenantCode } = useTenant();
   const [isAutoSelecting, setIsAutoSelecting] = useState(false);
+  const [isManuallySelecting, setIsManuallySelecting] = useState(false);
+  const [selectedTenantName, setSelectedTenantName] = useState<string>('');
+  const [showLogoutDialog, setShowLogoutDialog] = useState(false);
 
   // Fetch current user info including accessible tenants
   const { data: userInfo, isLoading, error } = useQuery({
@@ -52,13 +56,22 @@ export default function TenantSelectPage() {
   });
 
   const handleTenantSelect = (tenant: UserTenantInfo) => {
-    selectTenantMutation.mutate(tenant);
+    // Show loading workspace screen for manual selection
+    setIsManuallySelecting(true);
+    setSelectedTenantName(tenant.tenantName);
+    
+    // Add delay to show loading workspace (3 seconds for better UX)
+    setTimeout(() => {
+      selectTenantMutation.mutate(tenant);
+    }, 3000);
   };
 
   const handleLogout = () => {
-    if (confirm('Are you sure you want to logout?')) {
-      logoutMutation.mutate();
-    }
+    setShowLogoutDialog(true);
+  };
+
+  const confirmLogout = () => {
+    logoutMutation.mutate();
   };
 
   // Auto-select if user has only one tenant (especially for public registration users)
@@ -83,8 +96,8 @@ export default function TenantSelectPage() {
     );
   }
 
-  // Show preparing workspace loader when auto-selecting single tenant
-  if (isAutoSelecting) {
+  // Show preparing workspace loader when auto-selecting single tenant or manually selecting
+  if (isAutoSelecting || isManuallySelecting) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 p-4">
         {/* Background Pattern */}
@@ -107,10 +120,10 @@ export default function TenantSelectPage() {
             <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto" />
             <div>
               <h2 className="text-2xl font-semibold text-slate-900 dark:text-white mb-2">
-                Preparing your workspace
+                {isManuallySelecting ? `Accessing ${selectedTenantName}` : 'Preparing your workspace'}
               </h2>
               <p className="text-slate-600 dark:text-slate-400">
-                Setting up your account access...
+                {isManuallySelecting ? 'Initializing workspace environment...' : 'Setting up your account access...'}
               </p>
             </div>
           </div>
@@ -263,6 +276,19 @@ export default function TenantSelectPage() {
           </Card>
         </div>
       </div>
+
+      {/* Logout Confirmation Dialog */}
+      <ConfirmationDialog
+        open={showLogoutDialog}
+        onOpenChange={setShowLogoutDialog}
+        title="Confirm Logout"
+        description="Are you sure you want to logout? You will need to sign in again to access the system."
+        confirmText="Logout"
+        cancelText="Cancel"
+        variant="destructive"
+        onConfirm={confirmLogout}
+        isLoading={logoutMutation.isPending}
+      />
     </div>
   );
 }

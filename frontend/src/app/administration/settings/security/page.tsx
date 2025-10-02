@@ -301,8 +301,7 @@ export default function SecuritySettingsPage() {
   }
 
   return (
-    <DashboardLayout>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Security Settings</h1>
@@ -790,6 +789,5 @@ export default function SecuritySettingsPage() {
         </TabsContent>
       </Tabs>
       </form>
-    </DashboardLayout>
   );
 }

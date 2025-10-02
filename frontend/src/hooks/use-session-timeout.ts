@@ -31,7 +31,7 @@ export function useSessionTimeout() {
   const activityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch session timeout settings from security settings - only if authenticated
-  const { data: securitySettings } = useQuery({
+  const { data: securitySettings, isLoading: isLoadingSettings } = useQuery({
     queryKey: ['securitySettings'],
     queryFn: () => settingsService.getSecuritySettings(),
     refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes to get updated settings
@@ -45,7 +45,9 @@ export function useSessionTimeout() {
     },
   });
 
+  // Use the actual session timeout from settings, or default if still loading
   const sessionTimeoutMinutes = securitySettings?.sessionTimeoutMinutes || DEFAULT_SESSION_TIMEOUT;
+  const shouldInitializeTimers = !isLoadingSettings || securitySettings?.sessionTimeoutMinutes;
   const sessionTimeoutMs = sessionTimeoutMinutes * 60 * 1000;
   const warningTimeMs = WARNING_TIME * 1000;
 
@@ -55,12 +57,19 @@ export function useSessionTimeout() {
       ...prev,
       lastActivity: now,
       showWarning: false,
+      sessionTimeoutMinutes: sessionTimeoutMinutes, // Update state with current timeout
     }));
 
     // Clear existing timers
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
     if (activityTimeoutRef.current) clearTimeout(activityTimeoutRef.current);
+
+    // Don't initialize timers until we have the actual settings loaded
+    if (!shouldInitializeTimers) {
+      console.log('⏳ Waiting for security settings before initializing session timeout...');
+      return;
+    }
 
     console.log(`🔄 Activity reset - session timeout in ${sessionTimeoutMinutes} minutes`);
 
@@ -81,7 +90,7 @@ export function useSessionTimeout() {
 
     }, sessionTimeoutMs - warningTimeMs);
 
-  }, [sessionTimeoutMinutes, sessionTimeoutMs, warningTimeMs]);
+  }, [sessionTimeoutMinutes, sessionTimeoutMs, warningTimeMs, shouldInitializeTimers]);
 
   const handleSessionTimeout = useCallback(async () => {
     console.log('🚪 Session expired - calling backend logout and clearing tokens');
@@ -183,9 +192,25 @@ export function useSessionTimeout() {
     };
   }, [handleActivity, resetActivity]);
 
-  // Update session timeout when security settings change
+  // Initialize session timeout when security settings are first loaded
   useEffect(() => {
-    if (securitySettings?.sessionTimeoutMinutes) {
+    // Only initialize if we have settings and haven't initialized yet
+    if (securitySettings?.sessionTimeoutMinutes && shouldInitializeTimers) {
+      console.log(`\u2699\ufe0f Security settings loaded - session timeout: ${securitySettings.sessionTimeoutMinutes} minutes`);
+      setSessionState(prev => ({
+        ...prev,
+        sessionTimeoutMinutes: securitySettings.sessionTimeoutMinutes,
+      }));
+      
+      // Initialize timers with the correct timeout
+      resetActivity();
+    }
+  }, [securitySettings?.sessionTimeoutMinutes, shouldInitializeTimers, resetActivity]);
+
+  // Update session timeout when security settings change (after initial load)
+  useEffect(() => {
+    if (securitySettings?.sessionTimeoutMinutes && !isLoadingSettings) {
+      console.log(`\ud83d\udd04 Security settings updated - new session timeout: ${securitySettings.sessionTimeoutMinutes} minutes`);
       setSessionState(prev => ({
         ...prev,
         sessionTimeoutMinutes: securitySettings.sessionTimeoutMinutes,
@@ -194,7 +219,7 @@ export function useSessionTimeout() {
       // Reset activity to apply new timeout
       resetActivity();
     }
-  }, [securitySettings?.sessionTimeoutMinutes, resetActivity]);
+  }, [securitySettings?.sessionTimeoutMinutes, isLoadingSettings, resetActivity]);
 
   // Update remaining seconds countdown when warning is shown
   useEffect(() => {

@@ -29,6 +29,7 @@ namespace ErpSystem.Api.Controllers
         private readonly IJwtBlacklistService _jwtBlacklistService;
         private readonly ISettingsService _settingsService;
         private readonly IUserSessionService _userSessionService;
+        private readonly ITwoFactorAuthService _twoFactorService;
         private readonly ApplicationDbContext _context;
         private readonly ILogger<AuthController> _logger;
 
@@ -45,6 +46,7 @@ namespace ErpSystem.Api.Controllers
             IJwtBlacklistService jwtBlacklistService,
             ISettingsService settingsService,
             IUserSessionService userSessionService,
+            ITwoFactorAuthService twoFactorService,
             ApplicationDbContext context,
             ILogger<AuthController> logger)
         {
@@ -60,6 +62,7 @@ namespace ErpSystem.Api.Controllers
             _jwtBlacklistService = jwtBlacklistService;
             _settingsService = settingsService;
             _userSessionService = userSessionService;
+            _twoFactorService = twoFactorService;
             _context = context;
             _logger = logger;
         }
@@ -278,6 +281,74 @@ namespace ErpSystem.Api.Controllers
                     return Unauthorized(new { message = "Invalid credentials" });
                 }
 
+                // Check if user has Two-Factor Authentication enabled
+                var hasTwoFactorEnabled = await _userManager.GetTwoFactorEnabledAsync(user) && !string.IsNullOrEmpty(user.AuthenticatorKey);
+                
+                if (hasTwoFactorEnabled)
+                {
+                    // If 2FA code is not provided, return response indicating 2FA is required
+                    if (string.IsNullOrWhiteSpace(request.TwoFactorCode))
+                    {
+                        _logger.LogInformation("User {Username} requires 2FA verification", request.Username);
+                        
+                        // Generate a temporary token for 2FA verification
+                        var tempToken = Guid.NewGuid().ToString("N");
+                        
+                        // Store the temporary login state (you might want to use a cache like Redis in production)
+                        // For now, we'll use a simple approach with a temporary JWT
+                        var tempLoginInfo = new
+                        {
+                            UserId = user.Id,
+                            Username = request.Username,
+                            TenantId = tenant?.Id ?? user.TenantId,
+                            RememberMe = request.RememberMe,
+                            Timestamp = DateTime.UtcNow
+                        };
+                        
+                        return Ok(new LoginResponse
+                        {
+                            RequiresTwoFactor = true,
+                            TwoFactorToken = tempToken,
+                            Token = null,
+                            RefreshToken = null,
+                            ExpiresAt = null,
+                            User = null
+                        });
+                    }
+                    
+                    // Validate the provided 2FA code format first
+                    if (request.TwoFactorCode.Length != 6 || !request.TwoFactorCode.All(char.IsDigit))
+                    {
+                        _logger.LogWarning("Invalid 2FA code format for user {Username}: length={Length}, code='{Code}'", request.Username, request.TwoFactorCode.Length, request.TwoFactorCode);
+                        return BadRequest(new { message = "Two-factor authentication code must be exactly 6 digits" });
+                    }
+                    
+                    // Validate the provided 2FA code
+                    var isValid2FA = await _twoFactorService.ValidateTotpAsync(user, request.TwoFactorCode);
+                    if (!isValid2FA)
+                    {
+                        _logger.LogWarning("Invalid 2FA code provided for user {Username}", request.Username);
+                        
+                        var invalid2FASecurityLog = new SecurityLog
+                        {
+                            Action = SecurityAction.LoginFailure.ToString(),
+                            Success = false,
+                            IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                            Username = request.Username,
+                            UserId = user.Id,
+                            Details = "Invalid 2FA code",
+                            FailureReason = "Two-factor authentication failed",
+                            UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                            TenantId = user.TenantId
+                        };
+                        await _securityLogService.CreateSecurityLogAsync(invalid2FASecurityLog);
+                        
+                        return Unauthorized(new { message = "Invalid two-factor authentication code" });
+                    }
+                    
+                    _logger.LogInformation("2FA verification successful for user {Username}", request.Username);
+                }
+
                 // Get security settings for concurrent login prevention from user's tenant
                 var effectiveTenantId = tenant?.Id ?? user.TenantId;
                 var securitySettings = await _settingsService.GetSecuritySettingsAsync(effectiveTenantId);
@@ -332,14 +403,22 @@ namespace ErpSystem.Api.Controllers
                 try
                 {
                     var tokenHandler = new JwtSecurityTokenHandler();
-                    var jsonToken = tokenHandler.ReadJwtToken(token);
-                    var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
-                    
-                    if (!string.IsNullOrEmpty(jti))
+                    if (tokenHandler.CanReadToken(token))
                     {
-                        userSession.JwtTokenId = jti;
-                        await _context.SaveChangesAsync(); // Save the JTI to the session
-                        _logger.LogDebug("Linked JWT token {Jti} to session {SessionId}", jti, userSession.SessionId);
+                        var jsonToken = tokenHandler.ReadJwtToken(token);
+                        var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
+                    
+                        if (!string.IsNullOrEmpty(jti))
+                        {
+                            userSession.JwtTokenId = jti;
+                            await _context.SaveChangesAsync(); // Save the JTI to the session
+                            _logger.LogDebug("Linked JWT token {Jti} to session {SessionId}", jti, userSession.SessionId);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Generated JWT token cannot be read: {TokenPreview}", 
+                            token.Length > 50 ? token.Substring(0, 50) + "..." : token);
                     }
                 }
                 catch (Exception ex)
@@ -475,25 +554,34 @@ namespace ErpSystem.Api.Controllers
                 var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
                 if (authHeader?.StartsWith("Bearer ") == true)
                 {
-                    var jwt = authHeader["Bearer ".Length..];
+                    var jwt = authHeader["Bearer ".Length..].Trim();
                     try
                     {
                         var tokenHandler = new JwtSecurityTokenHandler();
-                        var jsonToken = tokenHandler.ReadJwtToken(jwt);
-                        var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
-                        var exp = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Exp)?.Value;
-                        sessionId = jsonToken.Claims.FirstOrDefault(x => x.Type == "sid")?.Value; // Session ID claim
-                        
-                        if (!string.IsNullOrEmpty(jti) && !string.IsNullOrEmpty(exp))
+                        if (!tokenHandler.CanReadToken(jwt))
                         {
-                            var expiresAt = DateTimeOffset.FromUnixTimeSeconds(long.Parse(exp)).DateTime;
-                            await _jwtBlacklistService.BlacklistTokenAsync(jti, currentUserId.Value, expiresAt, "User logout");
-                            _logger.LogInformation("Blacklisted JWT token with JTI {Jti} for user {UserId}", jti, currentUserId.Value);
+                            _logger.LogWarning("Cannot read JWT token during logout. Token preview: {TokenPreview}", 
+                                jwt.Length > 50 ? jwt.Substring(0, 50) + "..." : jwt);
+                        }
+                        else
+                        {
+                            var jsonToken = tokenHandler.ReadJwtToken(jwt);
+                            var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
+                            var exp = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Exp)?.Value;
+                            sessionId = jsonToken.Claims.FirstOrDefault(x => x.Type == "sid")?.Value; // Session ID claim
+                            
+                            if (!string.IsNullOrEmpty(jti) && !string.IsNullOrEmpty(exp))
+                            {
+                                var expiresAt = DateTimeOffset.FromUnixTimeSeconds(long.Parse(exp)).DateTime;
+                                await _jwtBlacklistService.BlacklistTokenAsync(jti, currentUserId.Value, expiresAt, "User logout");
+                                _logger.LogInformation("Blacklisted JWT token with JTI {Jti} for user {UserId}", jti, currentUserId.Value);
+                            }
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to blacklist JWT token during logout");
+                        _logger.LogWarning(ex, "Failed to blacklist JWT token during logout. Token preview: {TokenPreview}", 
+                            jwt.Length > 50 ? jwt.Substring(0, 50) + "..." : jwt);
                         // Continue with logout even if blacklisting fails
                     }
                 }
@@ -734,6 +822,7 @@ namespace ErpSystem.Api.Controllers
                     Email = user.Email!,
                     FirstName = user.FirstName,
                     LastName = user.LastName,
+                    PhoneNumber = user.PhoneNumber,
                     CurrentTenantId = user.TenantId,
                     CurrentTenantCode = currentTenant?.Code,
                     CurrentTenantName = currentTenant?.Name,
@@ -816,15 +905,23 @@ namespace ErpSystem.Api.Controllers
                         if (currentSession != null)
                         {
                             var tokenHandler = new JwtSecurityTokenHandler();
-                            var jsonToken = tokenHandler.ReadJwtToken(newToken);
-                            var newJti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
-                            
-                            if (!string.IsNullOrEmpty(newJti))
+                            if (!tokenHandler.CanReadToken(newToken))
                             {
-                                currentSession.JwtTokenId = newJti;
-                                await _context.SaveChangesAsync();
-                                _logger.LogDebug("Updated session {SessionId} with new JTI {Jti} after tenant selection", 
-                                    sessionGuid, newJti);
+                                _logger.LogWarning("Cannot read new JWT token after tenant selection. Token preview: {TokenPreview}", 
+                                    newToken.Length > 50 ? newToken.Substring(0, 50) + "..." : newToken);
+                            }
+                            else
+                            {
+                                var jsonToken = tokenHandler.ReadJwtToken(newToken);
+                                var newJti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
+                            
+                                if (!string.IsNullOrEmpty(newJti))
+                                {
+                                    currentSession.JwtTokenId = newJti;
+                                    await _context.SaveChangesAsync();
+                                    _logger.LogDebug("Updated session {SessionId} with new JTI {Jti} after tenant selection", 
+                                        sessionGuid, newJti);
+                                }
                             }
                         }
                     }
@@ -1202,6 +1299,51 @@ namespace ErpSystem.Api.Controllers
                 };
                 
                 return Ok(fallbackSettings);
+            }
+        }
+
+        /// <summary>
+        /// Get password policy for authenticated users
+        /// </summary>
+        [HttpGet("password-policy")]
+        [Authorize]
+        public async Task<IActionResult> GetPasswordPolicy()
+        {
+            try
+            {
+                var tenantId = _currentUserService.GetTenantId();
+                var security = await _settingsService.GetSecuritySettingsAsync();
+                
+                if (security == null)
+                {
+                    // Return default policy if none exists
+                    return Ok(new
+                    {
+                        minLength = 8,
+                        requireUppercase = true,
+                        requireLowercase = true,
+                        requireDigits = true,
+                        requireSpecialChars = true,
+                        maxAge = 90,
+                        preventReuse = 5
+                    });
+                }
+
+                return Ok(new
+                {
+                    minLength = security.PasswordMinLength,
+                    requireUppercase = security.PasswordRequireUppercase,
+                    requireLowercase = security.PasswordRequireLowercase,
+                    requireDigits = security.PasswordRequireDigits,
+                    requireSpecialChars = security.PasswordRequireSpecialChars,
+                    maxAge = security.PasswordMaxAge,
+                    preventReuse = security.PasswordPreventReuse
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving password policy for user");
+                return StatusCode(500, new { message = "An error occurred while retrieving password policy" });
             }
         }
         

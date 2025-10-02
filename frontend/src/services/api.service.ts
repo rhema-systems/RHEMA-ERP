@@ -11,13 +11,16 @@ export interface LoginRequest {
   password: string;
   tenantCode?: string;
   rememberMe?: boolean;
+  twoFactorCode?: string;
 }
 
 export interface LoginResponse {
-  token: string;
-  refreshToken: string;
-  expiresAt: string;
-  user: UserInfo;
+  token?: string;
+  refreshToken?: string;
+  expiresAt?: string;
+  user?: UserInfo;
+  requiresTwoFactor?: boolean;
+  twoFactorToken?: string;
 }
 
 export interface UserInfo {
@@ -26,12 +29,16 @@ export interface UserInfo {
   email: string;
   firstName?: string;
   lastName?: string;
+  phoneNumber?: string;
   currentTenantId?: string;
   currentTenantCode?: string;
   currentTenantName?: string;
   accessibleTenants: UserTenantInfo[];
   isActive: boolean;
   roles: string[];
+  createdAt?: string;
+  lastLoginAt?: string;
+  tenantId?: string;
 }
 
 export interface UserTenantInfo {
@@ -161,7 +168,15 @@ class ApiService {
     }
 
     if (this.token && includeAuth) {
-      headers['Authorization'] = `Bearer ${this.token}`;
+      // Validate token format before sending
+      if (this.isValidJwtFormat(this.token)) {
+        headers['Authorization'] = `Bearer ${this.token}`;
+      } else {
+        console.warn('Invalid JWT token format detected, clearing token:', 
+          this.token.length > 50 ? this.token.substring(0, 50) + '...' : this.token);
+        this.clearToken();
+        // Don't include Authorization header with invalid token
+      }
     }
 
     return headers;
@@ -169,7 +184,23 @@ class ApiService {
 
   private async handleResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
+      let errorData: any = {};
+      
+      try {
+        // Try to parse JSON error response
+        const text = await response.text();
+        if (text) {
+          try {
+            errorData = JSON.parse(text);
+          } catch {
+            // If JSON parsing fails, but we have text, use it as the message
+            errorData = { message: text };
+          }
+        }
+      } catch {
+        // If we can't get any text at all, use status info
+        errorData = {};
+      }
       
       // Check if this is a 401 (Unauthorized) response - likely a blacklisted token
       if (response.status === 401) {
@@ -194,7 +225,20 @@ class ApiService {
         }
       }
       
-      throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      // Create a proper error with the message from the API response
+      // Only fall back to generic HTTP status message if no other message is available
+      const errorMessage = errorData.message || 
+                          errorData.title || 
+                          errorData.error || 
+                          `HTTP ${response.status}: ${response.statusText}`;
+      const error = new Error(errorMessage);
+      
+      // Attach additional error details
+      (error as any).status = response.status;
+      (error as any).statusText = response.statusText;
+      (error as any).response = errorData;
+      
+      throw error;
     }
 
     const contentType = response.headers.get('content-type');
@@ -206,7 +250,20 @@ class ApiService {
   }
 
 
-  public setToken(token: string): void {
+  public setToken(token: string | null | undefined): void {
+    // Handle null/undefined tokens
+    if (!token) {
+      this.clearToken();
+      return;
+    }
+    
+    // Validate token format before storing
+    if (!this.isValidJwtFormat(token)) {
+      console.error('Attempting to store invalid JWT token format:', 
+        token.length > 50 ? token.substring(0, 50) + '...' : token);
+      return; // Don't store invalid tokens
+    }
+    
     this.token = token;
     if (typeof window !== 'undefined') {
       localStorage.setItem('authToken', token);
@@ -228,9 +285,12 @@ class ApiService {
       body: JSON.stringify(request),
     });
 
-    // Store tokens
-    this.setToken(response.token);
-    if (typeof window !== 'undefined') {
+    // Store tokens only if they exist
+    if (response.token) {
+      this.setToken(response.token);
+    }
+    
+    if (response.refreshToken && typeof window !== 'undefined') {
       localStorage.setItem('refreshToken', response.refreshToken);
     }
 
@@ -250,8 +310,11 @@ class ApiService {
       body: JSON.stringify({ token, refreshToken }),
     });
 
-    this.setToken(response.token);
-    if (typeof window !== 'undefined') {
+    if (response.token) {
+      this.setToken(response.token);
+    }
+    
+    if (response.refreshToken && typeof window !== 'undefined') {
       localStorage.setItem('refreshToken', response.refreshToken);
     }
 
@@ -276,16 +339,21 @@ class ApiService {
 
   // Public request method for admin service
   public async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    return this.privateRequest<T>(endpoint, options, true);
+    return this.privateRequest<T>(endpoint, options, true, false);
   }
 
   // Public request method without authentication
   public async publicRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    return this.privateRequest<T>(endpoint, options, false);
+    return this.privateRequest<T>(endpoint, options, false, false);
+  }
+
+  // Silent request method that doesn't log errors to console
+  public async silentRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    return this.privateRequest<T>(endpoint, options, true, true);
   }
 
   // Rename private request method
-  private async privateRequest<T>(endpoint: string, options: RequestInit = {}, includeAuth: boolean = true): Promise<T> {
+  private async privateRequest<T>(endpoint: string, options: RequestInit = {}, includeAuth: boolean = true, silent: boolean = false): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
     
     // Check if the body is FormData
@@ -299,15 +367,17 @@ class ApiService {
     const method = options.method || 'GET';
     const timestamp = new Date().toISOString();
     
-    console.log(`🚀 API ${method} ${endpoint} - ${timestamp}`);
-    if (method !== 'GET' && config.headers) {
-      console.log('📤 Request headers:', config.headers);
-      if (options.body) {
-        try {
-          const bodyData = JSON.parse(options.body as string);
-          console.log('📦 Request body:', bodyData);
-        } catch {
-          console.log('📦 Request body (non-JSON):', options.body);
+    if (!silent) {
+      console.log(`🚀 API ${method} ${endpoint} - ${timestamp}`);
+      if (method !== 'GET' && config.headers) {
+        console.log('📤 Request headers:', config.headers);
+        if (options.body) {
+          try {
+            const bodyData = JSON.parse(options.body as string);
+            console.log('📦 Request body:', bodyData);
+          } catch {
+            console.log('📦 Request body (non-JSON):', options.body);
+          }
         }
       }
     }
@@ -321,22 +391,26 @@ class ApiService {
       const status = response.status;
       const statusText = response.statusText;
       
-      if (status >= 200 && status < 300) {
-        console.log(`✅ API ${method} ${endpoint} - ${status} ${statusText} (${duration}ms)`);
-      } else {
-        console.log(`❌ API ${method} ${endpoint} - ${status} ${statusText} (${duration}ms)`);
+      if (!silent) {
+        if (status >= 200 && status < 300) {
+          console.log(`✅ API ${method} ${endpoint} - ${status} ${statusText} (${duration}ms)`);
+        } else {
+          console.log(`❌ API ${method} ${endpoint} - ${status} ${statusText} (${duration}ms)`);
+        }
       }
       
       const result = await this.handleResponse<T>(response);
       
-      // Log response data for non-GET operations and errors
-      if (method !== 'GET' || status >= 400) {
+      // Log response data for non-GET operations and errors (only if not silent)
+      if (!silent && (method !== 'GET' || status >= 400)) {
         console.log('📥 Response data:', result);
       }
       
       return result;
     } catch (error) {
-      console.error(`💥 API ${method} ${endpoint} failed:`, error);
+      if (!silent) {
+        console.error(`💥 API ${method} ${endpoint} failed:`, error);
+      }
       throw error;
     }
   }
@@ -385,7 +459,9 @@ class ApiService {
     });
 
     // Update stored token with new tenant context
-    this.setToken(response.token);
+    if (response.token) {
+      this.setToken(response.token);
+    }
     
     return response;
   }
@@ -395,6 +471,40 @@ class ApiService {
       throw new Error('getTenantUsers cannot be called during server-side rendering');
     }
     return this.privateRequest<TenantUserMapping[]>(`/auth/tenant/${encodeURIComponent(tenantId)}/users`);
+  }
+
+  /**
+   * Validates that a JWT token has the correct format (3 parts separated by dots)
+   * @param token The JWT token to validate
+   * @returns True if the token has valid format, false otherwise
+   */
+  private isValidJwtFormat(token: string): boolean {
+    if (!token || typeof token !== 'string') {
+      return false;
+    }
+
+    // Remove any whitespace
+    const trimmedToken = token.trim();
+    
+    if (!trimmedToken) {
+      return false;
+    }
+
+    const parts = trimmedToken.split('.');
+    
+    // JWT should have exactly 3 parts: header.payload.signature
+    if (parts.length !== 3) {
+      return false;
+    }
+
+    // Each part should not be empty
+    for (const part of parts) {
+      if (!part || part.trim() === '') {
+        return false;
+      }
+    }
+
+    return true;
   }
 }
 

@@ -30,13 +30,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // Settings entities
     public DbSet<EmailSettings> EmailSettings { get; set; }
     public DbSet<EmailTemplate> EmailTemplates { get; set; }
-    public DbSet<PasswordPolicy> PasswordPolicies { get; set; }
     public DbSet<SystemSettings> SystemSettings { get; set; }
     public DbSet<Security> Securities { get; set; }
     
     // Logging entities
     public DbSet<AuditLog> AuditLogs { get; set; }
     public DbSet<SecurityLog> SecurityLogs { get; set; }
+    
+    // Security entities
+    public DbSet<SecurityAlert> SecurityAlerts { get; set; }
+    public DbSet<SecurityMetrics> SecurityMetricsSet { get; set; }
+    public DbSet<ThreatDetection> ThreatDetections { get; set; }
+    public DbSet<ThreatIndicator> ThreatIndicators { get; set; }
+    public DbSet<SecurityPolicy> SecurityPolicies { get; set; }
+    public DbSet<SecurityPolicyViolation> SecurityPolicyViolations { get; set; }
     
     // Token management entities
     public DbSet<RefreshToken> RefreshTokens { get; set; }
@@ -137,12 +144,6 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(et => et.Category);
         });
         
-        // Configure PasswordPolicy entity
-        builder.Entity<PasswordPolicy>(entity =>
-        {
-            entity.HasOne(p => p.Tenant).WithMany().HasForeignKey(p => p.TenantId);
-            entity.HasIndex(p => p.TenantId); // One password policy per tenant
-        });
         
         // Configure SystemSettings entity
         builder.Entity<SystemSettings>(entity =>
@@ -176,6 +177,75 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.HasOne(s => s.Tenant).WithMany().HasForeignKey(s => s.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(s => s.TenantId);
+        });
+        
+        // Configure SecurityAlert entity
+        builder.Entity<SecurityAlert>(entity =>
+        {
+            entity.HasOne(sa => sa.Tenant).WithMany().HasForeignKey(sa => sa.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(sa => sa.AffectedUserEntity).WithMany().HasForeignKey(sa => sa.AffectedUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(sa => sa.TenantId);
+            entity.HasIndex(sa => sa.Timestamp);
+            entity.HasIndex(sa => sa.Type);
+            entity.HasIndex(sa => sa.Category);
+            entity.HasIndex(sa => sa.Dismissed);
+        });
+        
+        // Configure SecurityMetrics entity
+        builder.Entity<SecurityMetrics>(entity =>
+        {
+            entity.HasOne(sm => sm.Tenant).WithMany().HasForeignKey(sm => sm.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(sm => new { sm.TenantId, sm.MetricDate }).IsUnique();
+            entity.HasIndex(sm => sm.MetricDate);
+        });
+        
+        // Configure ThreatDetection entity
+        builder.Entity<ThreatDetection>(entity =>
+        {
+            entity.HasOne(td => td.Tenant).WithMany().HasForeignKey(td => td.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(td => td.AffectedUser).WithMany().HasForeignKey(td => td.AffectedUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(td => td.TenantId);
+            entity.HasIndex(td => td.DetectedAt);
+            entity.HasIndex(td => td.ThreatType);
+            entity.HasIndex(td => td.Status);
+            entity.HasIndex(td => td.Severity);
+            entity.HasIndex(td => td.IpAddress);
+        });
+        
+        // Configure ThreatIndicator entity
+        builder.Entity<ThreatIndicator>(entity =>
+        {
+            entity.HasOne(ti => ti.ThreatDetection).WithMany(td => td.Indicators).HasForeignKey(ti => ti.ThreatDetectionId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(ti => ti.Tenant).WithMany().HasForeignKey(ti => ti.TenantId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasIndex(ti => ti.ThreatDetectionId);
+            entity.HasIndex(ti => ti.IndicatorType);
+            entity.HasIndex(ti => ti.Value);
+            entity.HasIndex(ti => ti.IsActive);
+        });
+        
+        // Configure SecurityPolicy entity
+        builder.Entity<SecurityPolicy>(entity =>
+        {
+            entity.HasOne(sp => sp.Tenant).WithMany().HasForeignKey(sp => sp.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(sp => sp.TenantId);
+            entity.HasIndex(sp => sp.Name);
+            entity.HasIndex(sp => sp.Type);
+            entity.HasIndex(sp => sp.IsActive);
+            entity.HasIndex(sp => sp.Priority);
+        });
+        
+        // Configure SecurityPolicyViolation entity
+        builder.Entity<SecurityPolicyViolation>(entity =>
+        {
+            entity.HasOne(spv => spv.SecurityPolicy).WithMany(sp => sp.Violations).HasForeignKey(spv => spv.SecurityPolicyId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(spv => spv.User).WithMany().HasForeignKey(spv => spv.UserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(spv => spv.Tenant).WithMany().HasForeignKey(spv => spv.TenantId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasIndex(spv => spv.SecurityPolicyId);
+            entity.HasIndex(spv => spv.UserId);
+            entity.HasIndex(spv => spv.DetectedAt);
+            entity.HasIndex(spv => spv.ViolationType);
+            entity.HasIndex(spv => spv.Severity);
+            entity.HasIndex(spv => spv.IsResolved);
         });
         
         // Configure Permission entity

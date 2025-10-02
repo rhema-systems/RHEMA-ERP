@@ -7,12 +7,25 @@ using System.Security.Claims;
 
 namespace ErpSystem.Api.Controllers;
 
-    [ApiController]
-    [Route("api/[controller]")]
-    [Authorize]
-    public class SettingsController : ControllerBase
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class SettingsController : ControllerBase
+{
+    private readonly ISettingsService _settingsService;
+    private readonly IAuditLogService _auditLogService;
+    private readonly ICurrentUserService _currentUserService;
+    private readonly ILogger<SettingsController> _logger;
+
+    public SettingsController(ISettingsService settingsService, IAuditLogService auditLogService, ICurrentUserService currentUserService, ILogger<SettingsController> logger)
     {
-        [HttpGet("security")]
+        _settingsService = settingsService;
+        _auditLogService = auditLogService;
+        _currentUserService = currentUserService;
+        _logger = logger;
+    }
+
+    [HttpGet("security")]
         [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
         public async Task<ActionResult<SecuritySettingsDto>> GetSecuritySettings()
         {
@@ -210,18 +223,6 @@ namespace ErpSystem.Api.Controllers;
                 return StatusCode(500, "An error occurred while updating security settings");
             }
         }
-    private readonly ISettingsService _settingsService;
-    private readonly IAuditLogService _auditLogService;
-    private readonly ICurrentUserService _currentUserService;
-    private readonly ILogger<SettingsController> _logger;
-
-    public SettingsController(ISettingsService settingsService, IAuditLogService auditLogService, ICurrentUserService currentUserService, ILogger<SettingsController> logger)
-    {
-        _settingsService = settingsService;
-        _auditLogService = auditLogService;
-        _currentUserService = currentUserService;
-        _logger = logger;
-    }
 
     /// <summary>
     /// Get email settings
@@ -443,138 +444,6 @@ namespace ErpSystem.Api.Controllers;
         }
     }
 
-    /// <summary>
-    /// Get password policy
-    /// </summary>
-    [HttpGet("password-policy")]
-    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
-    public async Task<ActionResult<PasswordPolicyDto>> GetPasswordPolicy()
-    {
-        try
-        {
-            var policy = await _settingsService.GetPasswordPolicyAsync();
-            if (policy == null)
-            {
-                // Return default policy if none exists
-                return Ok(new PasswordPolicyDto
-                {
-                    MinLength = 8,
-                    RequireUppercase = true,
-                    RequireLowercase = true,
-                    RequireDigits = true,
-                    RequireSpecialChars = true,
-                    MaxAge = 90,
-                    PreventReuse = 5
-                });
-            }
-
-            return Ok(new PasswordPolicyDto
-            {
-                MinLength = policy.MinLength,
-                RequireUppercase = policy.RequireUppercase,
-                RequireLowercase = policy.RequireLowercase,
-                RequireDigits = policy.RequireDigits,
-                RequireSpecialChars = policy.RequireSpecialChars,
-                MaxAge = policy.MaxAge,
-                PreventReuse = policy.PreventReuse
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving password policy");
-            return StatusCode(500, "An error occurred while retrieving password policy");
-        }
-    }
-
-    /// <summary>
-    /// Create password policy
-    /// </summary>
-    [HttpPost("password-policy")]
-    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
-    public async Task<ActionResult<PasswordPolicyDto>> CreatePasswordPolicy([FromBody] PasswordPolicyDto request)
-    {
-        try
-        {
-            // Check if policy already exists
-            var existingPolicy = await _settingsService.GetPasswordPolicyAsync();
-            if (existingPolicy != null)
-            {
-                return Conflict("Password policy already exists. Use PUT to update it.");
-            }
-
-            var createdPolicy = await _settingsService.UpdatePasswordPolicyAsync(new Core.Entities.PasswordPolicy
-            {
-                MinLength = request.MinLength,
-                RequireUppercase = request.RequireUppercase,
-                RequireLowercase = request.RequireLowercase,
-                RequireDigits = request.RequireDigits,
-                RequireSpecialChars = request.RequireSpecialChars,
-                MaxAge = request.MaxAge,
-                PreventReuse = request.PreventReuse
-            });
-
-            return CreatedAtAction(nameof(GetPasswordPolicy), null, new PasswordPolicyDto
-            {
-                MinLength = createdPolicy.MinLength,
-                RequireUppercase = createdPolicy.RequireUppercase,
-                RequireLowercase = createdPolicy.RequireLowercase,
-                RequireDigits = createdPolicy.RequireDigits,
-                RequireSpecialChars = createdPolicy.RequireSpecialChars,
-                MaxAge = createdPolicy.MaxAge,
-                PreventReuse = createdPolicy.PreventReuse
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating password policy");
-            return StatusCode(500, "An error occurred while creating password policy");
-        }
-    }
-
-    /// <summary>
-    /// Update password policy
-    /// </summary>
-    [HttpPut("password-policy")]
-    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
-    public async Task<ActionResult<PasswordPolicyDto>> UpdatePasswordPolicy([FromBody] PasswordPolicyDto request)
-    {
-        try
-        {
-            // Check if policy exists
-            var existingPolicy = await _settingsService.GetPasswordPolicyAsync();
-            if (existingPolicy == null)
-            {
-                return NotFound("Password policy not found. Use POST to create it first.");
-            }
-
-            var updatedPolicy = await _settingsService.UpdatePasswordPolicyAsync(new Core.Entities.PasswordPolicy
-            {
-                MinLength = request.MinLength,
-                RequireUppercase = request.RequireUppercase,
-                RequireLowercase = request.RequireLowercase,
-                RequireDigits = request.RequireDigits,
-                RequireSpecialChars = request.RequireSpecialChars,
-                MaxAge = request.MaxAge,
-                PreventReuse = request.PreventReuse
-            });
-
-            return Ok(new PasswordPolicyDto
-            {
-                MinLength = updatedPolicy.MinLength,
-                RequireUppercase = updatedPolicy.RequireUppercase,
-                RequireLowercase = updatedPolicy.RequireLowercase,
-                RequireDigits = updatedPolicy.RequireDigits,
-                RequireSpecialChars = updatedPolicy.RequireSpecialChars,
-                MaxAge = updatedPolicy.MaxAge,
-                PreventReuse = updatedPolicy.PreventReuse
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating password policy");
-            return StatusCode(500, "An error occurred while updating password policy");
-        }
-    }
 }
 
 // DTOs
@@ -637,13 +506,3 @@ public class TestEmailRequest
         public string? PrivacyPolicyUrl { get; set; }
     }
 
-    public class PasswordPolicyDto
-{
-    public int MinLength { get; set; }
-    public bool RequireUppercase { get; set; }
-    public bool RequireLowercase { get; set; }
-    public bool RequireDigits { get; set; }
-    public bool RequireSpecialChars { get; set; }
-    public int? MaxAge { get; set; }
-    public int? PreventReuse { get; set; }
-}

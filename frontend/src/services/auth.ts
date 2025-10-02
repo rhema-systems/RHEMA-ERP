@@ -41,6 +41,10 @@ export class AuthService {
       lastName: userInfo.lastName,
       roles: userInfo.roles,
       isActive: userInfo.isActive,
+      lastLoginAt: userInfo.lastLoginAt,
+      createdAt: userInfo.createdAt,
+      phoneNumber: userInfo.phoneNumber,
+      tenantId: userInfo.tenantId,
     } as User;
   }
 
