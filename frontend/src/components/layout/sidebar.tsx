@@ -136,27 +136,19 @@ const navigationItems: NavItem[] = [
         icon: Shield,
       },
       {
-        title: 'Identity Management',
-        href: '/administration/identity-management',
-        icon: Shield,
-        children: [
-          { title: 'User Management', href: '/administration/identity-management/users', icon: Users },
-          { title: 'Online Users', href: '/administration/identity-management/online-users', icon: UserCheck },
-          { title: 'Role Management', href: '/administration/identity-management/roles', icon: Shield },
-          { title: 'Security Logs', href: '/administration/identity-management/security-logs', icon: FileText },
-        ],
-      },
-      { title: 'Tenant Management', href: '/administration/tenant-management', icon: Building },
-      { title: 'User-Tenant Mapping', href: '/administration/user-tenant-mapping', icon: Users },
-      {
-        title: 'Settings',
-        href: '/administration/settings',
+        title: 'System',
+        href: '/administration/system',
         icon: Settings,
         children: [
+          { title: 'User Management', href: '/administration/identity-management/users', icon: Users },
+          { title: 'Role Management', href: '/administration/identity-management/roles', icon: Shield },
+          { title: 'Tenant Management', href: '/administration/tenant-management', icon: Building },
           { title: 'Email Settings', href: '/administration/settings/email', icon: Mail },
+          { title: 'User-Tenant Mapping', href: '/administration/user-tenant-mapping', icon: Users },
+          { title: 'Security Logs', href: '/administration/identity-management/security-logs', icon: FileText },
+          { title: 'Audit Logs', href: '/administration/audit-logs', icon: FileText },
         ],
       },
-      { title: 'Audit Logs', href: '/administration/audit-logs', icon: FileText },
     ],
   },
 ];
@@ -167,7 +159,7 @@ interface SidebarProps {
 
 export function Sidebar({ className }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['Administration', 'Administration-Identity Management', 'Administration-Security']));
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['Administration', 'Administration-System', 'Administration-Security']));
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
   const { hasAnyRole } = useAuth();
