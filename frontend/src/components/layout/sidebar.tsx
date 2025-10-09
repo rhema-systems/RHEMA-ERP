@@ -30,6 +30,11 @@ import {
   HelpCircle,
   Workflow,
   Wrench,
+  Calendar,
+  ClipboardCheck,
+  AlertTriangle,
+  Clock,
+  CheckSquare,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -141,6 +146,21 @@ const navigationItems: NavItem[] = [
       { title: 'Resources', href: '/development/resources', icon: Users },
       { title: 'Timeline', href: '/development/timeline', icon: BarChart3 },
       { title: 'Documentation', href: '/development/documentation', icon: FileText },
+      {
+        title: 'Maintenance Management',
+        href: '/development/maintenance',
+        icon: Wrench,
+        children: [
+          { title: 'Dashboard', href: '/development/maintenance/dashboard', icon: LayoutDashboard },
+          { title: 'Work Orders', href: '/development/maintenance/work-orders', icon: FileText },
+          { title: 'Assets', href: '/development/maintenance/assets', icon: Package },
+          { title: 'Scheduled Maintenance', href: '/development/maintenance/scheduled', icon: Calendar },
+          { title: 'Emergency Maintenance', href: '/development/maintenance/emergency', icon: AlertTriangle },
+          { title: 'Inspections', href: '/development/maintenance/inspections', icon: ClipboardCheck },
+          { title: 'Maintenance History', href: '/development/maintenance/history', icon: Clock },
+          { title: 'Reports', href: '/development/maintenance/reports', icon: BarChart3 },
+        ],
+      },
     ],
   },
   {
@@ -285,6 +305,21 @@ const navigationItems: NavItem[] = [
           { title: 'Task Categories', href: '/administration/development/task-categories', icon: FileText },
           { title: 'Development Stages', href: '/administration/development/stages', icon: BarChart3 },
           { title: 'Resource Types', href: '/administration/development/resource-types', icon: Users },
+        ],
+      },
+      {
+        title: 'Maintenance Setup',
+        href: '/administration/maintenance',
+        icon: Wrench,
+        children: [
+          { title: 'Asset Categories', href: '/administration/maintenance/asset-categories', icon: Package },
+          { title: 'Work Order Types', href: '/administration/maintenance/work-order-types', icon: FileText },
+          { title: 'Maintenance Types', href: '/administration/maintenance/maintenance-types', icon: Wrench },
+          { title: 'Priority Levels', href: '/administration/maintenance/priorities', icon: AlertTriangle },
+          { title: 'Inspection Templates', href: '/administration/maintenance/inspection-templates', icon: ClipboardCheck },
+          { title: 'Maintenance Schedules', href: '/administration/maintenance/schedules', icon: Calendar },
+          { title: 'Technician Skills', href: '/administration/maintenance/skills', icon: Users },
+          { title: 'Safety Protocols', href: '/administration/maintenance/safety', icon: Shield },
         ],
       },
       {
