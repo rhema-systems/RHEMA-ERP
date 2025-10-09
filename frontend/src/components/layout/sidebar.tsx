@@ -25,6 +25,11 @@ import {
   BarChart3,
   Bell,
   Database,
+  Home,
+  Code,
+  HelpCircle,
+  Workflow,
+  Wrench,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -46,33 +51,15 @@ const navigationItems: NavItem[] = [
     icon: LayoutDashboard,
   },
   {
-    title: 'Sales',
-    href: '/sales',
-    icon: ShoppingCart,
-    children: [
-      { title: 'Customers', href: '/sales/customers', icon: Users },
-      { title: 'Orders', href: '/sales/orders', icon: ShoppingCart },
-      { title: 'Quotes', href: '/sales/quotes', icon: CreditCard },
-    ],
-  },
-  {
-    title: 'Inventory',
-    href: '/inventory',
-    icon: Package,
-    children: [
-      { title: 'Products', href: '/inventory/products', icon: Package },
-      { title: 'Stock Management', href: '/inventory/stock', icon: Package },
-      { title: 'Warehouses', href: '/inventory/warehouses', icon: Building2 },
-    ],
-  },
-  {
     title: 'Finance',
     href: '/finance',
     icon: CreditCard,
     children: [
       { title: 'Accounts', href: '/finance/accounts', icon: CreditCard },
       { title: 'Invoices', href: '/finance/invoices', icon: CreditCard },
-      { title: 'Financial Reports', href: '/finance/reports', icon: CreditCard },
+      { title: 'Financial Reports', href: '/finance/reports', icon: BarChart3 },
+      { title: 'Budgets', href: '/finance/budgets', icon: CreditCard },
+      { title: 'Transactions', href: '/finance/transactions', icon: CreditCard },
     ],
   },
   {
@@ -83,6 +70,8 @@ const navigationItems: NavItem[] = [
       { title: 'Employees', href: '/hr/employees', icon: Users },
       { title: 'Payroll', href: '/hr/payroll', icon: CreditCard },
       { title: 'Attendance', href: '/hr/attendance', icon: UserCheck },
+      { title: 'Leave Management', href: '/hr/leave', icon: UserCheck },
+      { title: 'Performance', href: '/hr/performance', icon: BarChart3 },
     ],
   },
   {
@@ -92,6 +81,31 @@ const navigationItems: NavItem[] = [
     children: [
       { title: 'Suppliers', href: '/procurement/suppliers', icon: Briefcase },
       { title: 'Purchase Orders', href: '/procurement/purchase-orders', icon: ShoppingCart },
+      { title: 'Purchase Requests', href: '/procurement/requests', icon: FileText },
+      { title: 'Vendor Management', href: '/procurement/vendors', icon: Users },
+    ],
+  },
+  {
+    title: 'Inventory',
+    href: '/inventory',
+    icon: Package,
+    children: [
+      { title: 'Products', href: '/inventory/products', icon: Package },
+      { title: 'Stock Management', href: '/inventory/stock', icon: Package },
+      { title: 'Warehouses', href: '/inventory/warehouses', icon: Building2 },
+      { title: 'Stock Movements', href: '/inventory/movements', icon: Package },
+    ],
+  },
+  {
+    title: 'Sales',
+    href: '/sales',
+    icon: ShoppingCart,
+    children: [
+      { title: 'Customers', href: '/sales/customers', icon: Users },
+      { title: 'Orders', href: '/sales/orders', icon: ShoppingCart },
+      { title: 'Quotes', href: '/sales/quotes', icon: FileText },
+      { title: 'Invoicing', href: '/sales/invoicing', icon: CreditCard },
+      { title: 'Sales Pipeline', href: '/sales/pipeline', icon: BarChart3 },
     ],
   },
   {
@@ -101,6 +115,54 @@ const navigationItems: NavItem[] = [
     children: [
       { title: 'Campaigns', href: '/marketing/campaigns', icon: Megaphone },
       { title: 'Leads', href: '/marketing/leads', icon: Users },
+      { title: 'Contacts', href: '/marketing/contacts', icon: Users },
+      { title: 'Analytics', href: '/marketing/analytics', icon: BarChart3 },
+    ],
+  },
+  {
+    title: 'Estate',
+    href: '/estate',
+    icon: Home,
+    children: [
+      { title: 'Properties', href: '/estate/properties', icon: Home },
+      { title: 'Tenants', href: '/estate/tenants', icon: Users },
+      { title: 'Leases', href: '/estate/leases', icon: FileText },
+      { title: 'Maintenance', href: '/estate/maintenance', icon: Wrench },
+      { title: 'Rent Collection', href: '/estate/rent-collection', icon: CreditCard },
+    ],
+  },
+  {
+    title: 'Development',
+    href: '/development',
+    icon: Code,
+    children: [
+      { title: 'Projects', href: '/development/projects', icon: Briefcase },
+      { title: 'Tasks', href: '/development/tasks', icon: FileText },
+      { title: 'Resources', href: '/development/resources', icon: Users },
+      { title: 'Timeline', href: '/development/timeline', icon: BarChart3 },
+      { title: 'Documentation', href: '/development/documentation', icon: FileText },
+    ],
+  },
+  {
+    title: 'Enquiry & Helpdesk',
+    href: '/helpdesk',
+    icon: HelpCircle,
+    children: [
+      { title: 'Tickets', href: '/helpdesk/tickets', icon: FileText },
+      { title: 'Knowledge Base', href: '/helpdesk/knowledge-base', icon: FileText },
+      { title: 'Customer Support', href: '/helpdesk/support', icon: Users },
+      { title: 'FAQ Management', href: '/helpdesk/faq', icon: HelpCircle },
+    ],
+  },
+  {
+    title: 'Workflow',
+    href: '/workflow',
+    icon: Workflow,
+    children: [
+      { title: 'Process Designer', href: '/workflow/designer', icon: Code },
+      { title: 'Running Processes', href: '/workflow/running', icon: Workflow },
+      { title: 'Process History', href: '/workflow/history', icon: FileText },
+      { title: 'Task Management', href: '/workflow/tasks', icon: FileText },
     ],
   },
   {
@@ -112,6 +174,8 @@ const navigationItems: NavItem[] = [
       { title: 'Sales Reports', href: '/reports?module=sales', icon: ShoppingCart },
       { title: 'HR Reports', href: '/reports?module=hr', icon: UserCheck },
       { title: 'Inventory Reports', href: '/reports?module=inventory', icon: Package },
+      { title: 'Estate Reports', href: '/reports?module=estate', icon: Home },
+      { title: 'Development Reports', href: '/reports?module=development', icon: Code },
       { title: 'Operations Reports', href: '/reports?module=operations', icon: BarChart3 },
     ],
   },
@@ -132,6 +196,108 @@ const navigationItems: NavItem[] = [
     icon: Settings,
     roles: ['admin', 'SuperAdmin', 'TenantAdmin'],
     children: [
+      {
+        title: 'Finance Setup',
+        href: '/administration/finance',
+        icon: CreditCard,
+        children: [
+          { title: 'Chart of Accounts', href: '/administration/finance/accounts', icon: CreditCard },
+          { title: 'Tax Configuration', href: '/administration/finance/tax', icon: CreditCard },
+          { title: 'Currency Settings', href: '/administration/finance/currency', icon: CreditCard },
+          { title: 'Payment Methods', href: '/administration/finance/payment-methods', icon: CreditCard },
+          { title: 'Financial Periods', href: '/administration/finance/periods', icon: CreditCard },
+        ],
+      },
+      {
+        title: 'HR Setup',
+        href: '/administration/hr',
+        icon: UserCheck,
+        children: [
+          { title: 'Job Positions', href: '/administration/hr/positions', icon: Users },
+          { title: 'Departments', href: '/administration/hr/departments', icon: Building },
+          { title: 'Employee Categories', href: '/administration/hr/categories', icon: Users },
+          { title: 'Leave Types', href: '/administration/hr/leave-types', icon: UserCheck },
+          { title: 'Payroll Components', href: '/administration/hr/payroll-components', icon: CreditCard },
+        ],
+      },
+      {
+        title: 'Procurement Setup',
+        href: '/administration/procurement',
+        icon: Briefcase,
+        children: [
+          { title: 'Supplier Categories', href: '/administration/procurement/supplier-categories', icon: Briefcase },
+          { title: 'Purchase Categories', href: '/administration/procurement/purchase-categories', icon: Package },
+          { title: 'Approval Workflows', href: '/administration/procurement/workflows', icon: Workflow },
+          { title: 'Terms & Conditions', href: '/administration/procurement/terms', icon: FileText },
+        ],
+      },
+      {
+        title: 'Inventory Setup',
+        href: '/administration/inventory',
+        icon: Package,
+        children: [
+          { title: 'Product Categories', href: '/administration/inventory/categories', icon: Package },
+          { title: 'Units of Measure', href: '/administration/inventory/units', icon: Package },
+          { title: 'Storage Locations', href: '/administration/inventory/locations', icon: Building2 },
+          { title: 'Stock Levels', href: '/administration/inventory/stock-levels', icon: Package },
+        ],
+      },
+      {
+        title: 'Sales Setup',
+        href: '/administration/sales',
+        icon: ShoppingCart,
+        children: [
+          { title: 'Customer Categories', href: '/administration/sales/customer-categories', icon: Users },
+          { title: 'Sales Territories', href: '/administration/sales/territories', icon: Building },
+          { title: 'Price Lists', href: '/administration/sales/price-lists', icon: CreditCard },
+          { title: 'Sales Channels', href: '/administration/sales/channels', icon: ShoppingCart },
+          { title: 'Commission Rules', href: '/administration/sales/commission', icon: CreditCard },
+        ],
+      },
+      {
+        title: 'Marketing Setup',
+        href: '/administration/marketing',
+        icon: Megaphone,
+        children: [
+          { title: 'Campaign Templates', href: '/administration/marketing/templates', icon: Megaphone },
+          { title: 'Lead Sources', href: '/administration/marketing/lead-sources', icon: Users },
+          { title: 'Market Segments', href: '/administration/marketing/segments', icon: Users },
+          { title: 'Marketing Channels', href: '/administration/marketing/channels', icon: Megaphone },
+        ],
+      },
+      {
+        title: 'Estate Setup',
+        href: '/administration/estate',
+        icon: Home,
+        children: [
+          { title: 'Property Types', href: '/administration/estate/property-types', icon: Home },
+          { title: 'Lease Templates', href: '/administration/estate/lease-templates', icon: FileText },
+          { title: 'Maintenance Categories', href: '/administration/estate/maintenance-categories', icon: Wrench },
+          { title: 'Tenant Categories', href: '/administration/estate/tenant-categories', icon: Users },
+        ],
+      },
+      {
+        title: 'Development Setup',
+        href: '/administration/development',
+        icon: Code,
+        children: [
+          { title: 'Project Templates', href: '/administration/development/templates', icon: Briefcase },
+          { title: 'Task Categories', href: '/administration/development/task-categories', icon: FileText },
+          { title: 'Development Stages', href: '/administration/development/stages', icon: BarChart3 },
+          { title: 'Resource Types', href: '/administration/development/resource-types', icon: Users },
+        ],
+      },
+      {
+        title: 'Helpdesk Setup',
+        href: '/administration/helpdesk',
+        icon: HelpCircle,
+        children: [
+          { title: 'Ticket Categories', href: '/administration/helpdesk/categories', icon: FileText },
+          { title: 'Priority Levels', href: '/administration/helpdesk/priorities', icon: BarChart3 },
+          { title: 'SLA Templates', href: '/administration/helpdesk/sla', icon: FileText },
+          { title: 'Support Channels', href: '/administration/helpdesk/channels', icon: HelpCircle },
+        ],
+      },
       {
         title: 'System',
         href: '/administration/system',
@@ -167,7 +333,7 @@ interface SidebarProps {
 
 export function Sidebar({ className }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['Administration', 'Administration-System']));
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['Administration']));
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
   const { hasAnyRole } = useAuth();
