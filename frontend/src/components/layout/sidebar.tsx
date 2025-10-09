@@ -104,15 +104,15 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
-    title: 'Reports & Analytics',
+    title: 'Reports',
     href: '/reports',
     icon: BarChart3,
     children: [
-      { title: 'Report Builder', href: '/reports#builder', icon: FileText },
-      { title: 'Analytics Dashboard', href: '/reports#analytics', icon: BarChart3 },
-      { title: 'Report Templates', href: '/reports#templates', icon: FileText },
-      { title: 'Data Sources', href: '/data-sources', icon: Database },
-      { title: 'Data Export', href: '/reports#export', icon: FileText },
+      { title: 'Financial Reports', href: '/reports?module=financial', icon: CreditCard },
+      { title: 'Sales Reports', href: '/reports?module=sales', icon: ShoppingCart },
+      { title: 'HR Reports', href: '/reports?module=hr', icon: UserCheck },
+      { title: 'Inventory Reports', href: '/reports?module=inventory', icon: Package },
+      { title: 'Operations Reports', href: '/reports?module=operations', icon: BarChart3 },
     ],
   },
   {
@@ -133,15 +133,20 @@ const navigationItems: NavItem[] = [
     roles: ['admin', 'SuperAdmin', 'TenantAdmin'],
     children: [
       {
-        title: 'Security',
-        href: '/administration/security/dashboard',
-        icon: Shield,
-      },
-      {
         title: 'System',
         href: '/administration/system',
         icon: Settings,
         children: [
+          {
+            title: 'Security',
+            href: '/administration/security/dashboard',
+            icon: Shield,
+          },
+          {
+            title: 'Reports Administration',
+            href: '/administration/reports',
+            icon: BarChart3,
+          },
           { title: 'User Management', href: '/administration/identity-management/users', icon: Users },
           { title: 'Role Management', href: '/administration/identity-management/roles', icon: Shield },
           { title: 'Tenant Management', href: '/administration/tenant-management', icon: Building },
@@ -149,6 +154,7 @@ const navigationItems: NavItem[] = [
           { title: 'User-Tenant Mapping', href: '/administration/user-tenant-mapping', icon: Users },
           { title: 'Security Logs', href: '/administration/identity-management/security-logs', icon: FileText },
           { title: 'Audit Logs', href: '/administration/audit-logs', icon: FileText },
+          { title: 'Data Sources', href: '/data-sources', icon: Database },
         ],
       },
     ],
@@ -161,7 +167,7 @@ interface SidebarProps {
 
 export function Sidebar({ className }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['Administration', 'Administration-System', 'Administration-Security']));
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['Administration', 'Administration-System']));
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
   const { hasAnyRole } = useAuth();
