@@ -104,9 +104,9 @@ public class SettingsService : ISettingsService
             {
                 // Create new settings
                 settings.Id = Guid.NewGuid();
-                settings.TenantId = _currentUserService.GetTenantId() ?? throw new InvalidOperationException("Tenant ID is required");
+                settings.TenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
                 settings.CreatedAt = DateTime.UtcNow;
-                settings.CreatedBy = _currentUserService.GetUsername();
+                settings.CreatedBy = _currentUserService.UserName;
                 
                 // Encrypt the password before storing
                 if (!string.IsNullOrEmpty(settings.SmtpPassword))
@@ -171,7 +171,7 @@ public class SettingsService : ISettingsService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (tenantId == null)
             {
                 throw new InvalidOperationException("Tenant ID is required");
@@ -235,7 +235,7 @@ public class SettingsService : ISettingsService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId() ?? throw new InvalidOperationException("Tenant ID is required");
+            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
             var existingSettings = await GetSecuritySettingsAsync();
             
             if (existingSettings != null)
@@ -288,7 +288,7 @@ public class SettingsService : ISettingsService
                 settings.Id = Guid.NewGuid();
                 settings.TenantId = tenantId;
                 settings.CreatedAt = DateTime.UtcNow;
-                settings.CreatedBy = _currentUserService.GetUsername();
+                settings.CreatedBy = _currentUserService.UserName;
                 
                 var createdSettings = await _unitOfWork.Repository<Security>().AddAsync(settings);
                 await _unitOfWork.SaveChangesAsync();
@@ -346,9 +346,9 @@ public class SettingsService : ISettingsService
                     Key = key,
                     Value = value,
                     Description = description,
-                    TenantId = _currentUserService.GetTenantId() ?? throw new InvalidOperationException("Tenant ID is required"),
+                    TenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required"),
                     CreatedAt = DateTime.UtcNow,
-                    CreatedBy = _currentUserService.GetUsername()
+                    CreatedBy = _currentUserService.UserName
                 };
                 
                 var createdSetting = await _unitOfWork.Repository<SystemSettings>().AddAsync(newSetting);

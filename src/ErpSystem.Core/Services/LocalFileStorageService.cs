@@ -58,6 +58,58 @@ public class LocalFileStorageService : IFileStorageService
         }
     }
 
+    public async Task<string> UploadFileAsync(Stream fileStream, string fileName, string folderPath)
+    {
+        try
+        {
+            // Generate unique filename
+            var uniqueFileName = GenerateUniqueFileName(fileName);
+            
+            // Create directory path
+            var fullDirectoryPath = Path.Combine(_basePath, folderPath);
+            Directory.CreateDirectory(fullDirectoryPath);
+            
+            // Full file path
+            var filePath = Path.Combine(fullDirectoryPath, uniqueFileName);
+            var relativeFilePath = Path.Combine(folderPath, uniqueFileName).Replace('\\', '/');
+            
+            // Save file
+            using (var fileStreamWriter = new FileStream(filePath, FileMode.Create, FileAccess.Write))
+            {
+                await fileStream.CopyToAsync(fileStreamWriter);
+                await fileStreamWriter.FlushAsync();
+            }
+            
+            _logger.LogInformation("File uploaded: {FileName} -> {FilePath}", fileName, relativeFilePath);
+            return relativeFilePath;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error uploading file: {FileName}", fileName);
+            throw;
+        }
+    }
+
+    public async Task<Stream> DownloadFileAsync(string filePath, Guid fileId)
+    {
+        try
+        {
+            var fullPath = Path.Combine(_basePath, filePath);
+            if (!File.Exists(fullPath))
+            {
+                throw new FileNotFoundException($"File not found: {filePath}");
+            }
+            
+            var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read);
+            return await Task.FromResult(stream);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error downloading file: {FilePath}", filePath);
+            throw;
+        }
+    }
+
     public async Task<FileStorageResult> UploadFileAsync(FileUploadRequest request)
     {
         try

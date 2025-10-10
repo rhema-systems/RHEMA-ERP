@@ -8,7 +8,12 @@ import {
   User, 
   LogOut, 
   ChevronDown,
-  Clock 
+  Clock,
+  BarChart3,
+  Shield,
+  Plus,
+  Zap,
+  FileText
 } from 'lucide-react';
 
 import { Button } from '../ui/button';
@@ -27,6 +32,8 @@ interface HeaderProps {
 
 export function Header({ className }: HeaderProps) {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [mounted, setMounted] = useState(false);
   const { user, logout, isLoggingOut } = useAuth();
   const { currentTenant, currentTenantCode, setCurrentTenantCode } = useTenant();
@@ -65,14 +72,82 @@ export function Header({ className }: HeaderProps) {
       className
     )}>
       <div className="container flex h-16 items-center justify-between px-6">
-        {/* Search */}
+        {/* Enhanced Search */}
         <div className="flex flex-1 items-center space-x-4">
           <div className="relative w-full max-w-sm">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
             <Input
-              placeholder="Search anything..."
+              placeholder="Search modules and functions..."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setIsSearchOpen(e.target.value.length > 0);
+              }}
+              onFocus={() => setIsSearchOpen(searchQuery.length > 0)}
               className="pl-10 bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/50 dark:border-slate-700/50 focus:bg-white dark:focus:bg-slate-800"
             />
+            
+            {/* Search Suggestions - HIDDEN */}
+            {/* {isSearchOpen && searchQuery && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-lg z-50 max-h-80 overflow-y-auto">
+                {/* Quick Actions */}
+                {/* <div className="p-2 border-b border-slate-100 dark:border-slate-800">
+                  <div className="text-xs font-medium text-slate-500 dark:text-slate-400 px-3 py-1">Quick Actions</div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start h-9 px-3 text-sm rounded-lg"
+                    onClick={() => {
+                      setIsSearchOpen(false);
+                      setSearchQuery('');
+                      window.location.href = '/reports';
+                    }}
+                  >
+                    <BarChart3 className="h-4 w-4 mr-3 text-slate-500" />
+                    Browse All Reports
+                  </Button>
+                  
+                  {user?.roles?.some(role => ['admin', 'SuperAdmin', 'TenantAdmin'].includes(role)) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start h-9 px-3 text-sm rounded-lg"
+                      onClick={() => {
+                        setIsSearchOpen(false);
+                        setSearchQuery('');
+                        window.location.href = '/administration/reports';
+                      }}
+                    >
+                      <Plus className="h-4 w-4 mr-3 text-slate-500" />
+                      Create New Report
+                    </Button>
+                  )}
+                </div>
+                
+                {/* Report Modules */}
+                {/* <div className="p-2">
+                  <div className="text-xs font-medium text-slate-500 dark:text-slate-400 px-3 py-1">Report Modules</div>
+                  {['Financial', 'Sales', 'HR', 'Inventory', 'Operations'].filter(module => 
+                    module.toLowerCase().includes(searchQuery.toLowerCase())
+                  ).map((module) => (
+                    <Button
+                      key={module}
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start h-9 px-3 text-sm rounded-lg"
+                      onClick={() => {
+                        setIsSearchOpen(false);
+                        setSearchQuery('');
+                        window.location.href = `/reports?module=${module.toLowerCase()}`;
+                      }}
+                    >
+                      <FileText className="h-4 w-4 mr-3 text-slate-500" />
+                      {module} Reports
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )} */}
           </div>
         </div>
 
@@ -93,6 +168,34 @@ export function Header({ className }: HeaderProps) {
 
         {/* Actions */}
         <div className="flex items-center space-x-3">
+          {/* Quick Reports Access - HIDDEN */}
+          {/* <div className="hidden lg:flex items-center space-x-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 px-3 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
+              onClick={() => window.location.href = '/reports'}
+            >
+              <BarChart3 className="h-4 w-4 mr-2 text-slate-600 dark:text-slate-400" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">Reports</span>
+            </Button>
+            
+            {/* Admin Quick Access - only show for admin users */}
+            {/* <ClientOnly>
+              {user?.roles?.some(role => ['admin', 'SuperAdmin', 'TenantAdmin'].includes(role)) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 px-3 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
+                  onClick={() => window.location.href = '/administration/reports'}
+                >
+                  <Shield className="h-4 w-4 mr-2 text-slate-600 dark:text-slate-400" />
+                  <span className="text-sm text-slate-700 dark:text-slate-300">Admin</span>
+                </Button>
+              )}
+            </ClientOnly>
+          </div> */}
+
           {/* Theme Toggle (uses ThemeContext) */}
           <AnimatedThemeToggle size="sm" showLabel={false} />
 
@@ -179,8 +282,53 @@ export function Header({ className }: HeaderProps) {
                   </div>
                 </div>
 
-                {/* Menu Items */}
+                {/* Menu Items - Reports and Admin HIDDEN */}
                 <div className="p-2">
+                  {/* <Button
+                    variant="ghost"
+                    className="w-full justify-start h-10 px-3 text-sm font-medium rounded-xl"
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      window.location.href = '/reports';
+                    }}
+                  >
+                    <BarChart3 className="h-4 w-4 mr-3 text-slate-500" />
+                    My Reports
+                  </Button> */}
+                  
+                  {/* Admin Functions - only show for admin users */}
+                  {/* <ClientOnly>
+                    {user?.roles?.some(role => ['admin', 'SuperAdmin', 'TenantAdmin'].includes(role)) && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          className="w-full justify-start h-10 px-3 text-sm font-medium rounded-xl"
+                          onClick={() => {
+                            setIsUserMenuOpen(false);
+                            window.location.href = '/administration/reports';
+                          }}
+                        >
+                          <Shield className="h-4 w-4 mr-3 text-slate-500" />
+                          Reports Administration
+                        </Button>
+                        
+                        <Button
+                          variant="ghost"
+                          className="w-full justify-start h-10 px-3 text-sm font-medium rounded-xl"
+                          onClick={() => {
+                            setIsUserMenuOpen(false);
+                            window.location.href = '/administration';
+                          }}
+                        >
+                          <Settings className="h-4 w-4 mr-3 text-slate-500" />
+                          Administration
+                        </Button>
+                      </>
+                    )}
+                  </ClientOnly> */}
+                  
+                  <div className="border-t border-slate-100 dark:border-slate-800 my-2" />
+                  
                   <Button
                     variant="ghost"
                     className="w-full justify-start h-10 px-3 text-sm font-medium rounded-xl"
@@ -223,11 +371,14 @@ export function Header({ className }: HeaderProps) {
         </div>
       </div>
 
-      {/* Click outside to close menu */}
-      {isUserMenuOpen && (
+      {/* Click outside to close menus */}
+      {(isUserMenuOpen || isSearchOpen) && (
         <div
           className="fixed inset-0 z-40"
-          onClick={() => setIsUserMenuOpen(false)}
+          onClick={() => {
+            setIsUserMenuOpen(false);
+            setIsSearchOpen(false);
+          }}
         />
       )}
     </header>

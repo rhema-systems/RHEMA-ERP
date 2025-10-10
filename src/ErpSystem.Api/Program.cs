@@ -55,6 +55,7 @@ builder.Services.AddErpSystemWebFarm(builder.Configuration);
 builder.Services.AddErpSystemSearch(builder.Configuration);
 builder.Services.AddErpSystemLifecycle();
 builder.Services.AddErpSystemCors(builder.Configuration);
+builder.Services.AddErpSystemRateLimiting();
 builder.Services.AddErpSystemFileUpload(builder.Configuration);
 builder.Services.AddErpSystemSignalR();
 builder.Services.AddDevelopmentServices(builder.Environment);
@@ -62,13 +63,19 @@ builder.Services.AddDevelopmentServices(builder.Environment);
 var app = builder.Build();
 
 // Configure the HTTP request pipeline
+
+// Add global exception handling first
+app.UseMiddleware<GlobalExceptionHandlingMiddleware>();
+
+// Add security headers
+app.UseMiddleware<SecurityHeadersMiddleware>();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
 }
 else
 {
-    app.UseExceptionHandler("/Error");
     app.UseHsts();
 }
 
@@ -111,6 +118,9 @@ app.UseRouting();
 
 // CORS must be after UseRouting and before UseAuthentication
 app.UseCors("ErpSystemCorsPolicy");
+
+// Rate limiting should be after CORS but before authentication
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseMiddleware<JwtBlacklistMiddleware>();

@@ -1,9 +1,10 @@
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Shared;
+using ErpSystem.Shared.Interfaces;
 
 namespace ErpSystem.Core.Entities;
 
-public class Tenant : BaseEntity
+public class Tenant : BaseEntity, IAuditable
 {
     [Required]
     [StringLength(100)]

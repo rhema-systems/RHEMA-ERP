@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Identity;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using ErpSystem.Core.Entities;
 using ErpSystem.Shared;
@@ -217,9 +218,9 @@ public class UserController : ControllerBase
             // Log audit trail for user creation
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
-                var currentUsername = _currentUserService.GetUsername();
-                var currentTenantId = _currentUserService.GetTenantId();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
+                var currentUsername = _currentUserService.UserName;
+                var currentTenantId = _currentUserService.TenantId;
                 
                 _logger.LogInformation("DEBUG: Attempting to log user creation. UserId: {UserId}, Username: {Username}, TenantId: {TenantId}", 
                     currentUserId, currentUsername, currentTenantId);
@@ -330,8 +331,8 @@ public class UserController : ControllerBase
                 };
 
                 await _auditLogService.LogUserActionAsync(
-                    _currentUserService.GetUserId() ?? Guid.Empty,
-                    _currentUserService.GetUsername() ?? "Unknown",
+                    Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null ?? Guid.Empty,
+                    _currentUserService.UserName ?? "Unknown",
                     "Update",
                     "User",
                     id.ToString(),
@@ -394,8 +395,8 @@ public class UserController : ControllerBase
             try
             {
                 await _auditLogService.LogUserActionAsync(
-                    _currentUserService.GetUserId() ?? Guid.Empty,
-                    _currentUserService.GetUsername() ?? "Unknown",
+                    Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null ?? Guid.Empty,
+                    _currentUserService.UserName ?? "Unknown",
                     "Delete",
                     "User",
                     id.ToString(),
@@ -432,7 +433,7 @@ public class UserController : ControllerBase
     {
         try
         {
-            var currentUserId = _currentUserService.GetUserId();
+            var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
             if (!currentUserId.HasValue)
             {
                 return Unauthorized();
@@ -493,7 +494,7 @@ public class UserController : ControllerBase
 
                 await _auditLogService.LogUserActionAsync(
                     currentUserId.Value,
-                    _currentUserService.GetUsername() ?? "Unknown",
+                    _currentUserService.UserName ?? "Unknown",
                     "UpdateProfile",
                     "User",
                     currentUserId.Value.ToString(),
@@ -542,7 +543,7 @@ public class UserController : ControllerBase
     {
         try
         {
-            var currentUserId = _currentUserService.GetUserId();
+            var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
             if (!currentUserId.HasValue)
             {
                 return Unauthorized();
@@ -614,7 +615,7 @@ public class UserController : ControllerBase
             {
                 await _auditLogService.LogUserActionAsync(
                     currentUserId.Value,
-                    _currentUserService.GetUsername() ?? "Unknown",
+                    _currentUserService.UserName ?? "Unknown",
                     "ChangePassword",
                     "User",
                     currentUserId.Value.ToString(),

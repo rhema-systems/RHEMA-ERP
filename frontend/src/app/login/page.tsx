@@ -52,10 +52,10 @@ function LoginFormWithSearchParams() {
   }, [searchParams]);
   
 
-  // Fetch security settings to determine if reCAPTCHA should be shown
+  // Fetch public security settings to determine if reCAPTCHA should be shown
   const { data: securitySettings } = useQuery({
-    queryKey: ['securitySettings'],
-    queryFn: () => settingsService.getSecuritySettings(),
+    queryKey: ['publicSecuritySettings'],
+    queryFn: () => settingsService.getPublicSecuritySettings(),
   });
 
   // Fetch tenants to check if any allow self-registration

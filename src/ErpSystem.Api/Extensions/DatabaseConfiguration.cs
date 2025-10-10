@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using ErpSystem.Data;
+using ErpSystem.Data.Extensions;
 
 namespace ErpSystem.Api.Extensions
 {
@@ -21,9 +22,26 @@ namespace ErpSystem.Api.Extensions
             var connectionString = configuration.GetConnectionString("DefaultConnection") ??
                 throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
 
-            services.AddDbContext<ApplicationDbContext>(options =>
+            // Add audit logging if enabled
+            var auditEnabled = configuration.GetValue<bool>("Audit:Enabled", true);
+            if (auditEnabled)
+            {
+                services.AddAuditLogging(configuration);
+            }
+
+            services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
             {
                 ConfigureDatabase(options, provider, connectionString);
+                
+                // Enable lazy loading proxies for better navigation property handling
+                // Temporarily commented out due to build errors
+                // options.UseLazyLoadingProxies();
+                
+                // Add audit interceptor if enabled
+                if (auditEnabled)
+                {
+                    options.AddAuditInterceptor(serviceProvider);
+                }
             });
 
             return services;

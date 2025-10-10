@@ -86,6 +86,15 @@ export interface Role {
   updatedAt: Date;
 }
 
+export interface TenantModule {
+  id: string;
+  moduleName: string;
+  description?: string;
+  status: string;
+  enabledDate?: Date;
+  disabledDate?: Date;
+}
+
 export interface Tenant {
   id: string;
   name: string;
@@ -842,6 +851,26 @@ class AdminApiService {
 
   async getAuditLogs(): Promise<AuditLog[]> {
     return apiService.request<AuditLog[]>('/auditlog');
+  }
+
+  // Tenant Modules
+  async getTenantModules(): Promise<TenantModule[]> {
+    console.log('Fetching tenant modules');
+    try {
+      const modules = await apiService.request<TenantModule[]>('/tenant/modules');
+      console.log('Fetched', modules.length, 'tenant modules');
+      return modules.map(module => ({
+        id: module.id,
+        moduleName: module.moduleName,
+        description: module.description,
+        status: module.status,
+        enabledDate: module.enabledDate ? new Date(module.enabledDate) : undefined,
+        disabledDate: module.disabledDate ? new Date(module.disabledDate) : undefined,
+      }));
+    } catch (error) {
+      console.error('Failed to fetch tenant modules:', error);
+      throw error;
+    }
   }
 
   // LDAP Testing

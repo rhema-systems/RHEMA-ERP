@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Data.Services;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using ErpSystem.Core.Entities;
 using ErpSystem.Shared;
@@ -166,8 +167,8 @@ public class PermissionController : ControllerBase
             try
             {
                 await _auditLogService.LogUserActionAsync(
-                    _currentUserService.GetUserId() ?? Guid.Empty,
-                    _currentUserService.GetUsername() ?? "Unknown",
+                    Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null ?? Guid.Empty,
+                    _currentUserService.UserName ?? "Unknown",
                     "Create",
                     "Permission",
                     createdPermission.Id.ToString(),

@@ -29,6 +29,13 @@ import {
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/select';
+import {
   BarChart3,
   PieChart,
   TrendingUp,
@@ -54,95 +61,170 @@ import {
   Target,
   Zap,
   Database,
-  Loader2
+  Loader2,
+  Package,
+  Shield,
+  CheckCircle,
+  Star,
+  History,
+  Play,
+  ChevronRight,
+  BookOpen,
+  Bookmark
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
-import { ConfirmationDialog } from '../../components/ui/confirmation-dialog';
 import { useToast } from '../../hooks/use-toast';
 import { reportsService, ReportDefinition, ReportAnalytics } from '../../services/reports';
 import { useIsClient } from '../../lib/ssr-utils';
-import ReportBuilder from '../../components/reports/ReportBuilder';
-import AnalyticsDashboard from '../../components/reports/AnalyticsDashboard';
-import ReportTemplates from '../../components/reports/ReportTemplates';
-import DataExportTools from '../../components/reports/DataExportTools';
 import ReportResultsDialog from '../../components/reports/ReportResultsDialog';
 
-export default function ReportsPage() {
+// User-facing interfaces with tenant awareness
+interface Module {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  reportCount: number;
+  color: string;
+}
+
+interface UserReportDefinition extends ReportDefinition {
+  moduleId: string;
+  moduleName: string;
+  isPublished: boolean;
+  canExecute: boolean;
+  lastExecuted?: string;
+  executionCount?: number;
+  avgExecutionTime?: string;
+  parameters?: ReportParameter[];
+}
+
+interface ReportParameter {
+  name: string;
+  type: string;
+  value: any;
+  required?: boolean;
+  options?: string[];
+  label: string;
+}
+
+export default function UserReportsPage() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedType, setSelectedType] = useState<string>('all');
-  const [isBuilderOpen, setIsBuilderOpen] = useState(false);
+  const [selectedModule, setSelectedModule] = useState<string>('all');
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [reportToDelete, setReportToDelete] = useState<string | null>(null);
   const [executingReportId, setExecutingReportId] = useState<string | null>(null);
   const [showResultsDialog, setShowResultsDialog] = useState(false);
   const [selectedReportForResults, setSelectedReportForResults] = useState<{ id: string; name: string } | null>(null);
+  const [showFiltersDialog, setShowFiltersDialog] = useState(false);
+  const [reportFilters, setReportFilters] = useState<Record<string, any>>({});
+  const [showFavorites, setShowFavorites] = useState(false);
   const isClient = useIsClient();
   
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Fetch reports
+  // Mock modules data (in real app, this would be filtered by user's tenant and role permissions)
+  const modules: Module[] = [
+    { 
+      id: 'financial', 
+      name: 'Financial Reports', 
+      description: 'Financial statements, budgets, and analysis', 
+      icon: 'DollarSign', 
+      reportCount: 12,
+      color: 'bg-green-100 text-green-700 border-green-200'
+    },
+    { 
+      id: 'sales', 
+      name: 'Sales Reports', 
+      description: 'Sales performance, pipelines, and forecasts', 
+      icon: 'TrendingUp', 
+      reportCount: 8,
+      color: 'bg-blue-100 text-blue-700 border-blue-200'
+    },
+    { 
+      id: 'hr', 
+      name: 'HR Reports', 
+      description: 'Employee data, payroll, and performance', 
+      icon: 'Users', 
+      reportCount: 15,
+      color: 'bg-purple-100 text-purple-700 border-purple-200'
+    },
+    { 
+      id: 'inventory', 
+      name: 'Inventory Reports', 
+      description: 'Stock levels, movements, and valuations', 
+      icon: 'Package', 
+      reportCount: 6,
+      color: 'bg-orange-100 text-orange-700 border-orange-200'
+    },
+    { 
+      id: 'operations', 
+      name: 'Operations Reports', 
+      description: 'Operational KPIs, efficiency, and metrics', 
+      icon: 'Activity', 
+      reportCount: 10,
+      color: 'bg-indigo-100 text-indigo-700 border-indigo-200'
+    },
+  ];
+
+  // Fetch published reports available to current user's role and tenant
   const {
     data: reports = [],
     isLoading: reportsLoading,
     error: reportsError,
     refetch: refetchReports
   } = useQuery({
-    queryKey: ['reports', selectedType !== 'all' ? selectedType : undefined],
+    queryKey: ['user-reports', selectedModule !== 'all' ? selectedModule : undefined],
     queryFn: () => reportsService.getReports(
-      selectedType !== 'all' ? selectedType : undefined
+      selectedModule !== 'all' ? selectedModule : undefined,
+      'published' // Only fetch published reports for users
     ),
     refetchOnWindowFocus: false,
   });
 
-  // Fetch analytics
+  // Fetch user's recent report executions
   const {
-    data: analytics,
-    isLoading: analyticsLoading
+    data: recentReports = [],
+    isLoading: recentLoading
   } = useQuery({
-    queryKey: ['reportAnalytics'],
-    queryFn: () => reportsService.getReportAnalytics(),
+    queryKey: ['user-recent-reports'],
+    queryFn: () => {
+      // TODO: Implement getUserRecentReports API call
+      return Promise.resolve([]);
+    },
     refetchOnWindowFocus: false,
   });
 
-  // Mutations
+  // Execute report mutation with parameter support
   const executeReportMutation = useMutation({
     mutationFn: ({ reportId, params }: { reportId: string; params?: any }) => {
       setExecutingReportId(reportId);
-      return reportsService.executeReport(reportId, { parameters: params, includeMetadata: true });
+      return reportsService.executeReport(reportId, { 
+        parameters: { ...reportFilters, ...params }, 
+        maxRows: 1000, 
+        includeMetadata: true 
+      });
     },
     onSuccess: (data) => {
       setExecutingReportId(null);
+      setShowFiltersDialog(false);
+      setReportFilters({});
+      // Automatically open results dialog
+      const report = reports.find(r => r.id === selectedReportId);
+      if (report) {
+        setSelectedReportForResults({ id: report.id, name: report.name });
+        setShowResultsDialog(true);
+      }
       toast({
-        title: 'Report Executed Successfully',
+        title: 'Report Generated Successfully',
         description: `Generated ${data.totalRows} rows in ${data.executionTime}`,
       });
-      // Could open a results dialog here
     },
     onError: (error: any) => {
       setExecutingReportId(null);
       toast({
-        title: 'Execution Failed',
-        description: error.response?.data?.message || 'Failed to execute report',
-        variant: 'destructive',
-      });
-    },
-  });
-
-  const deleteReportMutation = useMutation({
-    mutationFn: reportsService.deleteReport,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
-      toast({
-        title: 'Report Deleted',
-        description: 'Report has been deleted successfully',
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: 'Delete Failed',
-        description: error.response?.data?.message || 'Failed to delete report',
+        title: 'Report Generation Failed',
+        description: error.response?.data?.message || 'Failed to generate report',
         variant: 'destructive',
       });
     },
@@ -151,7 +233,7 @@ export default function ReportsPage() {
   const toggleFavoriteMutation = useMutation({
     mutationFn: reportsService.toggleFavorite,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      queryClient.invalidateQueries({ queryKey: ['user-reports'] });
     },
     onError: (error: any) => {
       toast({
@@ -162,17 +244,35 @@ export default function ReportsPage() {
     },
   });
 
-  const getTypeIcon = (type: string) => {
+  // Helper functions
+  const getModuleIcon = (iconName: string) => {
+    switch (iconName) {
+      case 'DollarSign':
+        return <DollarSign className="h-5 w-5" />;
+      case 'TrendingUp':
+        return <TrendingUp className="h-5 w-5" />;
+      case 'Users':
+        return <Users className="h-5 w-5" />;
+      case 'Package':
+        return <Package className="h-5 w-5" />;
+      case 'Activity':
+        return <Activity className="h-5 w-5" />;
+      default:
+        return <FileText className="h-5 w-5" />;
+    }
+  };
+
+  const getReportIcon = (type: string) => {
     switch (type.toLowerCase()) {
       case 'financial':
         return <DollarSign className="h-4 w-4" />;
-      case 'user':
+      case 'sales':
+        return <TrendingUp className="h-4 w-4" />;
+      case 'hr':
       case 'users':
         return <Users className="h-4 w-4" />;
-      case 'tenant':
-      case 'tenants':
-        return <Building className="h-4 w-4" />;
-      case 'operational':
+      case 'inventory':
+        return <Package className="h-4 w-4" />;
       case 'operations':
         return <Activity className="h-4 w-4" />;
       default:
@@ -180,96 +280,37 @@ export default function ReportsPage() {
     }
   };
 
-  const getTypeColor = (type: string) => {
+  const getReportTypeColor = (type: string) => {
     switch (type.toLowerCase()) {
       case 'financial':
         return 'bg-green-100 text-green-700';
-      case 'user':
-      case 'users':
+      case 'sales':
         return 'bg-blue-100 text-blue-700';
-      case 'tenant':
-      case 'tenants':
+      case 'hr':
+      case 'users':
         return 'bg-purple-100 text-purple-700';
-      case 'operational':
-      case 'operations':
+      case 'inventory':
         return 'bg-orange-100 text-orange-700';
+      case 'operations':
+        return 'bg-indigo-100 text-indigo-700';
       default:
         return 'bg-gray-100 text-gray-700';
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'published':
-        return <Badge variant="default">Published</Badge>;
-      case 'draft':
-        return <Badge variant="secondary">Draft</Badge>;
-      case 'scheduled':
-        return <Badge variant="outline">Scheduled</Badge>;
-      default:
-        return <Badge variant="secondary">{status}</Badge>;
+  // Event handlers
+  const handleRunReport = (reportId: string, reportName?: string) => {
+    const report = reports.find(r => r.id === reportId) as UserReportDefinition;
+    
+    // If report has parameters, show filters dialog
+    if (report?.parameters && report.parameters.length > 0) {
+      setSelectedReportId(reportId);
+      setShowFiltersDialog(true);
+    } else {
+      // Execute directly if no parameters needed
+      executeReportMutation.mutate({ reportId });
+      setSelectedReportId(reportId);
     }
-  };
-
-  const filteredReports = reports.filter(report => {
-    const matchesSearch = report.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         report.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesType = selectedType === 'all' || report.type.toLowerCase() === selectedType.toLowerCase();
-    return matchesSearch && matchesType;
-  });
-
-  const handleRunReport = (reportId: string) => {
-    executeReportMutation.mutate({ reportId });
-  };
-
-  const handleScheduleReport = (reportId: string) => {
-    // TODO: Open schedule dialog
-    toast({
-      title: 'Schedule Report',
-      description: 'Report scheduling dialog will be implemented soon.',
-    });
-  };
-
-  const handleExportReport = async (reportId: string, format: 'pdf' | 'csv' | 'xlsx' | 'json') => {
-    try {
-      const blob = await reportsService.exportReport(reportId, { format });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = `report-${reportId}.${format}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      
-      toast({
-        title: 'Export Successful',
-        description: `Report exported as ${format.toUpperCase()}`,
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Export Failed',
-        description: error.response?.data?.message || 'Failed to export report',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleDeleteReport = (reportId: string) => {
-    setReportToDelete(reportId);
-    setShowDeleteDialog(true);
-  };
-
-  const confirmDeleteReport = () => {
-    if (reportToDelete) {
-      deleteReportMutation.mutate(reportToDelete);
-      setReportToDelete(null);
-    }
-  };
-
-  const handleToggleFavorite = (reportId: string) => {
-    toggleFavoriteMutation.mutate(reportId);
   };
 
   const handleViewResults = (reportId: string, reportName: string) => {
@@ -277,29 +318,52 @@ export default function ReportsPage() {
     setShowResultsDialog(true);
   };
 
-  const handleDuplicateReport = (reportId: string) => {
-    // TODO: Implement report duplication
-    toast({
-      title: 'Duplicate Report',
-      description: 'Report duplication feature will be implemented soon.',
-    });
+  const handleToggleFavorite = (reportId: string) => {
+    toggleFavoriteMutation.mutate(reportId);
   };
 
-  const handleShareReport = (reportId: string) => {
-    // TODO: Implement report sharing
-    toast({
-      title: 'Share Report',
-      description: 'Report sharing feature will be implemented soon.',
-    });
+  const handleExportReport = async (reportId: string, format: 'pdf' | 'csv' | 'xlsx' | 'json') => {
+    try {
+      const { fileName, blob } = await reportsService.exportReport(reportId, { format });
+      
+      // Create a download link and trigger the download
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      
+      // Clean up
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      toast({
+        title: 'Export Successful',
+        description: `Report exported as ${format.toUpperCase()}: ${fileName}`,
+      });
+    } catch (error: any) {
+      console.error('Export error:', error);
+      toast({
+        title: 'Export Failed',
+        description: error.message || 'Failed to export report',
+        variant: 'destructive',
+      });
+    }
   };
 
-  const handleEditReport = (reportId: string) => {
-    // TODO: Implement report editing
-    toast({
-      title: 'Edit Report',
-      description: 'Report editing feature will be implemented soon.',
-    });
-  };
+  // Filter reports
+  const filteredReports = reports.filter(report => {
+    const matchesSearch = report.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         report.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesModule = selectedModule === 'all' || (report as UserReportDefinition).moduleId === selectedModule;
+    const matchesFavorites = !showFavorites || report.isFavorite;
+    return matchesSearch && matchesModule && matchesFavorites;
+  });
+
+  // Get current module info
+  const currentModule = selectedModule !== 'all' ? modules.find(m => m.id === selectedModule) : null;
 
   if (reportsError) {
     return (
@@ -329,13 +393,20 @@ export default function ReportsPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Reports & Analytics</h1>
+            <h1 className="text-3xl font-bold tracking-tight">Reports</h1>
             <p className="text-muted-foreground">
-              Create, manage, and analyze comprehensive business reports
+              Access published reports organized by business modules
             </p>
           </div>
           
           <div className="flex items-center space-x-2">
+            <Button 
+              variant={showFavorites ? "default" : "outline"}
+              onClick={() => setShowFavorites(!showFavorites)}
+            >
+              <Star className={`h-4 w-4 mr-2 ${showFavorites ? 'fill-current' : ''}`} />
+              Favorites
+            </Button>
             <Button 
               variant="outline" 
               onClick={() => refetchReports()}
@@ -344,27 +415,17 @@ export default function ReportsPage() {
               <RefreshCw className={`h-4 w-4 mr-2 ${reportsLoading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
-            <Button onClick={() => setIsBuilderOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              New Report
-            </Button>
           </div>
         </div>
 
-        {/* Analytics Overview Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        {/* Quick Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-muted-foreground">Total Reports</p>
-                  <p className="text-2xl font-bold">
-                    {analyticsLoading ? (
-                      <Loader2 className="h-6 w-6 animate-spin" />
-                    ) : (
-                      analytics?.totalReports || 0
-                    )}
-                  </p>
+                  <p className="text-sm font-medium text-muted-foreground">Available Reports</p>
+                  <p className="text-2xl font-bold">{filteredReports.length}</p>
                 </div>
                 <FileText className="h-8 w-8 text-blue-600" />
               </div>
@@ -375,16 +436,10 @@ export default function ReportsPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-muted-foreground">Scheduled</p>
-                  <p className="text-2xl font-bold">
-                    {analyticsLoading ? (
-                      <Loader2 className="h-6 w-6 animate-spin" />
-                    ) : (
-                      analytics?.scheduledReports || 0
-                    )}
-                  </p>
+                  <p className="text-sm font-medium text-muted-foreground">Favorites</p>
+                  <p className="text-2xl font-bold">{reports.filter(r => r.isFavorite).length}</p>
                 </div>
-                <Clock className="h-8 w-8 text-green-600" />
+                <Star className="h-8 w-8 text-yellow-600" />
               </div>
             </CardContent>
           </Card>
@@ -393,16 +448,10 @@ export default function ReportsPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-muted-foreground">Run Today</p>
-                  <p className="text-2xl font-bold">
-                    {analyticsLoading ? (
-                      <Loader2 className="h-6 w-6 animate-spin" />
-                    ) : (
-                      analytics?.reportsRunToday || 0
-                    )}
-                  </p>
+                  <p className="text-sm font-medium text-muted-foreground">Modules</p>
+                  <p className="text-2xl font-bold">{modules.length}</p>
                 </div>
-                <Zap className="h-8 w-8 text-yellow-600" />
+                <Package className="h-8 w-8 text-purple-600" />
               </div>
             </CardContent>
           </Card>
@@ -411,67 +460,86 @@ export default function ReportsPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-muted-foreground">Data Sources</p>
-                  <p className="text-2xl font-bold">
-                    {analyticsLoading ? (
-                      <Loader2 className="h-6 w-6 animate-spin" />
-                    ) : (
-                      analytics?.dataSourcesConnected || 0
-                    )}
-                  </p>
+                  <p className="text-sm font-medium text-muted-foreground">Recent Runs</p>
+                  <p className="text-2xl font-bold">{recentReports.length}</p>
                 </div>
-                <Database className="h-8 w-8 text-purple-600" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Exports</p>
-                  <p className="text-2xl font-bold">
-                    {analyticsLoading ? (
-                      <Loader2 className="h-6 w-6 animate-spin" />
-                    ) : (
-                      analytics?.totalExports || 0
-                    )}
-                  </p>
-                </div>
-                <Download className="h-8 w-8 text-orange-600" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Avg Time</p>
-                  <p className="text-2xl font-bold">
-                    {analyticsLoading ? (
-                      <Loader2 className="h-6 w-6 animate-spin" />
-                    ) : (
-                      `${analytics?.avgGenerationTime || 0}s`
-                    )}
-                  </p>
-                </div>
-                <Target className="h-8 w-8 text-red-600" />
+                <History className="h-8 w-8 text-green-600" />
               </div>
             </CardContent>
           </Card>
         </div>
 
-        <Tabs defaultValue="reports" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="reports">My Reports</TabsTrigger>
-            <TabsTrigger value="analytics">Analytics Dashboard</TabsTrigger>
-            <TabsTrigger value="templates">Templates</TabsTrigger>
-            <TabsTrigger value="exports">Data Export</TabsTrigger>
-          </TabsList>
+        {/* Module Navigation */}
+        {selectedModule === 'all' && (
+          <div>
+            <h2 className="text-xl font-semibold mb-4">Browse by Module</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {modules.map((module) => (
+                <Card key={module.id} className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setSelectedModule(module.id)}>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className={`p-3 rounded-lg ${module.color}`}>
+                          {getModuleIcon(module.icon)}
+                        </div>
+                        <div>
+                          <CardTitle className="text-lg">{module.name}</CardTitle>
+                          <CardDescription className="text-sm">
+                            {module.reportCount} reports available
+                          </CardDescription>
+                        </div>
+                      </div>
+                      <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      {module.description}
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
 
-          <TabsContent value="reports" className="space-y-4">
-            {/* Search and Filter Bar */}
+        {/* Reports List */}
+        {selectedModule !== 'all' && (
+          <div className="space-y-4">
+            {/* Breadcrumb */}
+            <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+              <Button variant="ghost" size="sm" onClick={() => setSelectedModule('all')}>
+                Reports
+              </Button>
+              <ChevronRight className="h-4 w-4" />
+              <span className="font-medium text-foreground">
+                {currentModule?.name}
+              </span>
+            </div>
+
+            {/* Module Header */}
+            {currentModule && (
+              <Card className={`border-l-4 ${currentModule.color}`}>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-4">
+                      <div className={`p-3 rounded-lg ${currentModule.color}`}>
+                        {getModuleIcon(currentModule.icon)}
+                      </div>
+                      <div>
+                        <CardTitle className="text-xl">{currentModule.name}</CardTitle>
+                        <CardDescription>{currentModule.description}</CardDescription>
+                      </div>
+                    </div>
+                    <Badge variant="secondary">
+                      {filteredReports.length} reports
+                    </Badge>
+                  </div>
+                </CardHeader>
+              </Card>
+            )}
+
+            {/* Search and Filter */}
             <div className="flex flex-col sm:flex-row gap-4">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
@@ -482,34 +550,6 @@ export default function ReportsPage() {
                   className="pl-10"
                 />
               </div>
-              
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline">
-                    <Filter className="h-4 w-4 mr-2" />
-                    Type: {selectedType === 'all' ? 'All' : selectedType}
-                    <ChevronDown className="h-4 w-4 ml-2" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => setSelectedType('all')}>
-                    All Types
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => setSelectedType('financial')}>
-                    Financial
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedType('user')}>
-                    User Reports
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedType('tenant')}>
-                    Tenant Analytics
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedType('operational')}>
-                    Operational
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
             </div>
 
             {/* Reports Grid */}
@@ -541,208 +581,209 @@ export default function ReportsPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredReports.map((report) => (
-                  <Card key={report.id} className="hover:shadow-lg transition-shadow">
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center space-x-2">
-                          <div className={`p-2 rounded-lg ${getTypeColor(report.type)}`}>
-                            {getTypeIcon(report.type)}
-                          </div>
-                          <div>
-                            <CardTitle className="text-lg">{report.name}</CardTitle>
-                            <div className="flex items-center space-x-2 mt-1">
-                              {getStatusBadge(report.status)}
-                              {report.isFavorite && (
-                                <Badge variant="outline" className="text-yellow-600">
-                                  ★ Favorite
+                {filteredReports.map((report) => {
+                  const userReport = report as UserReportDefinition;
+                  return (
+                    <Card key={report.id} className="hover:shadow-lg transition-shadow">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center space-x-2">
+                            <div className={`p-2 rounded-lg ${getReportTypeColor(report.type)}`}>
+                              {getReportIcon(report.type)}
+                            </div>
+                            <div className="flex-1">
+                              <CardTitle className="text-lg">{report.name}</CardTitle>
+                              <div className="flex items-center space-x-2 mt-1">
+                                <Badge variant="outline" className="text-xs">
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Published
                                 </Badge>
-                              )}
+                                {report.isFavorite && (
+                                  <Badge variant="outline" className="text-yellow-600 text-xs">
+                                    <Star className="h-3 w-3 mr-1 fill-current" />
+                                    Favorite
+                                  </Badge>
+                                )}
+                              </div>
                             </div>
                           </div>
+                        
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm">
+                                <Settings className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => handleViewResults(report.id, report.name)}>
+                                <Eye className="h-4 w-4 mr-2" />
+                                View Results
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => handleExportReport(report.id, 'pdf')}>
+                                <Download className="h-4 w-4 mr-2" />
+                                Export PDF
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleExportReport(report.id, 'xlsx')}>
+                                <Download className="h-4 w-4 mr-2" />
+                                Export Excel
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleExportReport(report.id, 'csv')}>
+                                <Download className="h-4 w-4 mr-2" />
+                                Export CSV
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => handleToggleFavorite(report.id)}>
+                                <Star className={`h-4 w-4 mr-2 ${report.isFavorite ? 'fill-current' : ''}`} />
+                                {report.isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
+                      </CardHeader>
                       
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm">
-                            <Settings className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem 
-                            onClick={() => handleRunReport(report.id)}
+                      <CardContent>
+                        <CardDescription className="mb-4">
+                          {report.description}
+                        </CardDescription>
+                        
+                        <div className="space-y-2 text-sm text-muted-foreground">
+                          <div className="flex justify-between">
+                            <span>Created by:</span>
+                            <span>{report.createdBy}</span>
+                          </div>
+                          {userReport.lastExecuted && (
+                            <div className="flex justify-between">
+                              <span>Last run:</span>
+                              <span>{isClient ? new Date(userReport.lastExecuted).toLocaleDateString() : new Date(userReport.lastExecuted).toISOString().split('T')[0]}</span>
+                            </div>
+                          )}
+                          {userReport.avgExecutionTime && (
+                            <div className="flex justify-between">
+                              <span>Avg time:</span>
+                              <span>{userReport.avgExecutionTime}</span>
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="flex space-x-2 mt-4">
+                          <Button 
+                            size="sm" 
+                            className="flex-1" 
+                            onClick={() => handleRunReport(report.id, report.name)}
                             disabled={executingReportId === report.id}
                           >
                             {executingReportId === report.id ? (
                               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                             ) : (
-                              <Zap className="h-4 w-4 mr-2" />
+                              <Play className="h-4 w-4 mr-2" />
                             )}
-                            {executingReportId === report.id ? 'Running...' : 'Run Now'}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleViewResults(report.id, report.name)}>
-                            <Eye className="h-4 w-4 mr-2" />
-                            View Results
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => handleScheduleReport(report.id)}>
-                            <Calendar className="h-4 w-4 mr-2" />
-                            Schedule
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleExportReport(report.id, 'pdf')}>
-                            <Download className="h-4 w-4 mr-2" />
-                            Export PDF
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleDuplicateReport(report.id)}>
-                            <Copy className="h-4 w-4 mr-2" />
-                            Duplicate
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleShareReport(report.id)}>
-                            <Share2 className="h-4 w-4 mr-2" />
-                            Share
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => handleEditReport(report.id)}>
-                            <Edit className="h-4 w-4 mr-2" />
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            onClick={() => handleDeleteReport(report.id)}
-                            className="text-red-600"
+                            Run Report
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => handleToggleFavorite(report.id)}
+                            disabled={toggleFavoriteMutation.isPending}
                           >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </CardHeader>
-                  
-                  <CardContent>
-                    <CardDescription className="mb-4">
-                      {report.description}
-                    </CardDescription>
-                    
-                    <div className="space-y-2 text-sm text-muted-foreground">
-                      <div className="flex justify-between">
-                        <span>Created by:</span>
-                        <span>{report.createdBy}</span>
-                      </div>
-                      {report.lastRun && (
-                        <div className="flex justify-between">
-                          <span>Last run:</span>
-                          <span>{isClient ? new Date(report.lastRun).toLocaleDateString() : new Date(report.lastRun).toISOString().split('T')[0]}</span>
+                            <Star className={`h-4 w-4 ${report.isFavorite ? 'fill-current text-yellow-600' : ''}`} />
+                          </Button>
                         </div>
-                      )}
-                      {report.isScheduled && report.nextRun && (
-                        <div className="flex justify-between">
-                          <span>Next run:</span>
-                          <span>{isClient ? new Date(report.nextRun).toLocaleDateString() : new Date(report.nextRun).toISOString().split('T')[0]}</span>
-                        </div>
-                      )}
-                    </div>
-                    
-                    <div className="flex space-x-2 mt-4">
-                      <Button 
-                        size="sm" 
-                        className="flex-1" 
-                        onClick={() => handleRunReport(report.id)}
-                        disabled={executingReportId === report.id}
-                      >
-                        {executingReportId === report.id ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <Zap className="h-4 w-4 mr-2" />
-                        )}
-                        Run
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={() => handleViewResults(report.id, report.name)}
-                      >
-                        <Eye className="h-4 w-4 mr-2" />
-                        View
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={() => handleToggleFavorite(report.id)}
-                        disabled={toggleFavoriteMutation.isPending}
-                      >
-                        {report.isFavorite ? (
-                          <span className="text-yellow-600">★</span>
-                        ) : (
-                          <span>☆</span>
-                        )}
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-                ))}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             )}
 
-            {filteredReports.length === 0 && (
+            {filteredReports.length === 0 && !reportsLoading && (
               <Card>
                 <CardContent className="p-8 text-center">
                   <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                   <h3 className="text-lg font-medium mb-2">No reports found</h3>
                   <p className="text-muted-foreground mb-4">
-                    {searchQuery || selectedType !== 'all' 
-                      ? 'Try adjusting your search or filter criteria'
-                      : 'Get started by creating your first report'
+                    {searchQuery || showFavorites
+                      ? 'Try adjusting your search criteria or filters'
+                      : currentModule 
+                        ? `No published reports available in ${currentModule.name} module`
+                        : 'No reports available'
                     }
                   </p>
-                  <Button onClick={() => setIsBuilderOpen(true)}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create New Report
-                  </Button>
+                  {searchQuery && (
+                    <Button variant="outline" onClick={() => setSearchQuery('')}>
+                      Clear Search
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             )}
-          </TabsContent>
+          </div>
+        )}
 
-          <TabsContent value="analytics">
-            <AnalyticsDashboard />
-          </TabsContent>
-
-          <TabsContent value="templates">
-            <ReportTemplates onCreateFromTemplate={(template) => setIsBuilderOpen(true)} />
-          </TabsContent>
-
-          <TabsContent value="exports">
-            <DataExportTools />
-          </TabsContent>
-        </Tabs>
-
-        {/* Report Builder Dialog */}
-        <Dialog open={isBuilderOpen} onOpenChange={setIsBuilderOpen}>
-          <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0">
-            <DialogHeader className="px-6 py-4 border-b flex-shrink-0">
-              <DialogTitle>Report Builder</DialogTitle>
+        {/* Report Filters Dialog */}
+        <Dialog open={showFiltersDialog} onOpenChange={setShowFiltersDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Report Parameters</DialogTitle>
               <DialogDescription>
-                Create custom reports with drag-and-drop interface
+                Configure parameters for this report
               </DialogDescription>
             </DialogHeader>
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              <ReportBuilder onClose={() => setIsBuilderOpen(false)} />
+            <div className="space-y-4">
+              {/* TODO: Render dynamic report parameters based on report definition */}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Date Range</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      type="date"
+                      placeholder="Start Date"
+                      onChange={(e) => setReportFilters(prev => ({ ...prev, startDate: e.target.value }))}
+                    />
+                    <Input
+                      type="date"
+                      placeholder="End Date"
+                      onChange={(e) => setReportFilters(prev => ({ ...prev, endDate: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium mb-2">Department</label>
+                  <Select onValueChange={(value) => setReportFilters(prev => ({ ...prev, department: value }))}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Department" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Departments</SelectItem>
+                      <SelectItem value="sales">Sales</SelectItem>
+                      <SelectItem value="marketing">Marketing</SelectItem>
+                      <SelectItem value="operations">Operations</SelectItem>
+                      <SelectItem value="finance">Finance</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              <div className="flex justify-end space-x-2 pt-4">
+                <Button variant="outline" onClick={() => setShowFiltersDialog(false)}>
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={() => selectedReportId && executeReportMutation.mutate({ reportId: selectedReportId })}
+                  disabled={executeReportMutation.isPending}
+                >
+                  {executeReportMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Play className="h-4 w-4 mr-2" />
+                  )}
+                  Generate Report
+                </Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>
-
-        {/* Delete Confirmation Dialog */}
-        <ConfirmationDialog
-          open={showDeleteDialog}
-          onOpenChange={setShowDeleteDialog}
-          title="Delete Report"
-          description="Are you sure you want to delete this report? This action cannot be undone and all associated schedules will also be removed."
-          confirmText="Delete"
-          cancelText="Cancel"
-          variant="destructive"
-          onConfirm={confirmDeleteReport}
-          isLoading={deleteReportMutation.isPending}
-        />
 
         {/* Report Results Dialog */}
         <ReportResultsDialog

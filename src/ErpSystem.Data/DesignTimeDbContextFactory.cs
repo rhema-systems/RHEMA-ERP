@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.Extensions.Configuration;
@@ -20,8 +21,12 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Applicatio
         string? connectionString = null;
         if (File.Exists(apiAppSettings))
         {
+            var apiDevSettings = Path.ChangeExtension(apiAppSettings.Replace(".json", ".Development.json"), null) + ".json";
             var config = new ConfigurationBuilder()
-                .AddJsonFile(apiAppSettings, optional: false)
+                .SetBasePath(Path.GetDirectoryName(apiAppSettings)!)
+                .AddJsonFile("appsettings.json", optional: false)
+                .AddJsonFile("appsettings.Development.json", optional: true)
+                .AddUserSecrets("10483e62-e5b2-4652-8963-50f9500d3d5d") // Use the API project's user secrets ID
                 .AddEnvironmentVariables()
                 .Build();
             connectionString = config.GetConnectionString("DefaultConnection");

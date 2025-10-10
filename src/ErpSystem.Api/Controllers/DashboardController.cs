@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.Dashboard;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using System.Security.Claims;
 
@@ -33,7 +34,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -61,7 +62,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -86,7 +87,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -111,7 +112,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -136,7 +137,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -162,7 +163,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");

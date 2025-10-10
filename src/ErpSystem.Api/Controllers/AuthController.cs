@@ -539,9 +539,9 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 // Get current user context
-                var currentUserId = _currentUserService.GetUserId();
-                var currentTenantId = _currentUserService.GetTenantId();
-                var username = _currentUserService.GetUsername();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
+                var currentTenantId = _currentUserService.TenantId;
+                var username = _currentUserService.UserName;
                 
                 if (!currentUserId.HasValue)
                 {
@@ -1311,7 +1311,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 var security = await _settingsService.GetSecuritySettingsAsync();
                 
                 if (security == null)

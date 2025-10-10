@@ -24,4 +24,5 @@ public class TenantModule : BaseEntity
 
     // Navigation properties
     public virtual Tenant Tenant { get; set; } = null!;
+    public virtual ICollection<Report> Reports { get; set; } = new List<Report>();
 }

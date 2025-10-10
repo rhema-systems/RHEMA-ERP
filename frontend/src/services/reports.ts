@@ -137,6 +137,18 @@ export interface ReportSchedule {
   createdAt: string;
 }
 
+export interface CreateReportTemplateDto {
+  name: string;
+  description: string;
+  category: string;
+  type: string;
+  chartType?: string;
+  isCustom?: boolean;
+  tags?: string[];
+  previewImage?: string;
+  configuration?: Record<string, any>;
+}
+
 export interface ReportTemplate {
   id: string;
   name: string;
@@ -193,6 +205,57 @@ export interface TopReport {
   avgRating: number;
 }
 
+// Role Assignment interfaces
+export interface ReportRoleAssignment {
+  id: string;
+  reportId: string;
+  reportName: string;
+  roleId: string;
+  roleName: string;
+  canRead: boolean;
+  canExecute: boolean;
+  canExport: boolean;
+  canEdit: boolean;
+  canSchedule: boolean;
+  assignedAt: string;
+  assignedBy: string;
+}
+
+export interface CreateReportRoleAssignmentDto {
+  reportId: string;
+  roleId: string;
+  canRead: boolean;
+  canExecute: boolean;
+  canExport: boolean;
+  canEdit: boolean;
+  canSchedule: boolean;
+}
+
+export interface UpdateReportRoleAssignmentDto {
+  canRead: boolean;
+  canExecute: boolean;
+  canExport: boolean;
+  canEdit: boolean;
+  canSchedule: boolean;
+}
+
+export interface BulkAssignRolesToReportDto {
+  reportId: string;
+  roleAssignments: CreateReportRoleAssignmentDto[];
+}
+
+export interface ReportAccessDto {
+  reportId: string;
+  reportName: string;
+  hasAccess: boolean;
+  canRead: boolean;
+  canExecute: boolean;
+  canExport: boolean;
+  canEdit: boolean;
+  canSchedule: boolean;
+  accessibleRoles: string[];
+}
+
 class ReportsService {
 
   // Report CRUD operations
@@ -206,6 +269,20 @@ class ReportsService {
       return await apiService.request<ReportDefinition[]>(`/reports?${params.toString()}`);
     } catch (error) {
       console.error('Error fetching reports:', error);
+      throw error;
+    }
+  }
+
+  // Admin-specific method to get ALL reports for the tenant (bypasses role filtering)
+  async getReportsForAdmin(type?: string, status?: string): Promise<ReportDefinition[]> {
+    try {
+      const params = new URLSearchParams();
+      if (type) params.append('type', type);
+      if (status) params.append('status', status);
+
+      return await apiService.request<ReportDefinition[]>(`/reports/admin?${params.toString()}`);
+    } catch (error) {
+      console.error('Error fetching admin reports:', error);
       throw error;
     }
   }
@@ -267,14 +344,44 @@ class ReportsService {
     }
   }
 
-  async exportReport(reportId: string, exportReportDto: ExportReportDto): Promise<Blob> {
+  async exportReport(reportId: string, exportReportDto: ExportReportDto): Promise<{ fileName: string; blob: Blob }> {
     try {
-      // Note: For blob responses, we might need to handle this differently with the apiService
-      // For now, this is a simplified version - may need adjustment based on apiService implementation
-      return await apiService.request<Blob>(`/reports/${reportId}/export`, {
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const url = `${baseUrl}/reports/${reportId}/export`;
+      
+      // Get auth token for headers
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+      
+      const response = await fetch(url, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` })
+        },
         body: JSON.stringify(exportReportDto),
       });
+
+      if (!response.ok) {
+        throw new Error(`Export failed with status ${response.status}`);
+      }
+
+      // Get filename from Content-Disposition header or create a default one
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let fileName = 'report-export';
+      
+      if (contentDisposition) {
+        const fileNameMatch = contentDisposition.match(/filename[^;=\n]*=(['"]*)([^'"\n]*(['"]*))/i);
+        if (fileNameMatch && fileNameMatch[2]) {
+          fileName = fileNameMatch[2];
+        }
+      } else {
+        // Create filename based on format
+        const timestamp = new Date().toISOString().split('T')[0];
+        fileName = `report-${timestamp}.${exportReportDto.format}`;
+      }
+
+      const blob = await response.blob();
+      return { fileName, blob };
     } catch (error) {
       console.error('Error exporting report:', error);
       throw error;
@@ -316,6 +423,18 @@ class ReportsService {
     }
   }
 
+  async createReportTemplate(createTemplateDto: CreateReportTemplateDto): Promise<ReportTemplate> {
+    try {
+      return await apiService.request<ReportTemplate>('/reports/templates', {
+        method: 'POST',
+        body: JSON.stringify(createTemplateDto),
+      });
+    } catch (error) {
+      console.error('Error creating report template:', error);
+      throw error;
+    }
+  }
+
   // Analytics
   async getReportAnalytics(period = 'last-30-days', tenantFilter?: string): Promise<ReportAnalytics> {
     try {
@@ -339,6 +458,146 @@ class ReportsService {
       });
     } catch (error) {
       console.error('Error toggling favorite:', error);
+      throw error;
+    }
+  }
+
+  // Role Assignment methods
+  async getReportRoleAssignments(reportId: string): Promise<ReportRoleAssignment[]> {
+      try {
+        console.log('🚀 ReportsService: Starting to fetch role assignments for reportId:', reportId);
+        const endpoint = `/reportroleassignment/report/${reportId}/assignments`;
+        console.log('🔗 ReportsService: Calling endpoint:', endpoint);
+        
+        // Use the new accessible endpoint that doesn't require admin permissions
+        const result = await apiService.request<ReportRoleAssignment[]>(endpoint);
+        
+        console.log('📦 ReportsService: Raw API response:', result);
+        console.log('📁 ReportsService: Response length:', Array.isArray(result) ? result.length : 'Not an array');
+        
+        if (Array.isArray(result) && result.length > 0) {
+          console.log('📋 ReportsService: First assignment sample:', {
+            id: result[0].id,
+            reportId: result[0].reportId,
+            roleId: result[0].roleId,
+            roleName: result[0].roleName,
+            canRead: result[0].canRead
+          });
+        }
+        
+        return result;
+      } catch (error) {
+        console.error('❌ ReportsService: Error fetching report role assignments:', error);
+        console.error('❌ ReportsService: Error details:', {
+          message: error instanceof Error ? error.message : 'Unknown error',
+          status: (error as any)?.response?.status,
+          statusText: (error as any)?.response?.statusText,
+          data: (error as any)?.response?.data
+        });
+        throw error;
+      }
+    }
+
+  async getAllTenantRoleAssignments(): Promise<ReportRoleAssignment[]> {
+    try {
+      // Get all role assignments for the current tenant
+      return await apiService.request<ReportRoleAssignment[]>('/reportroleassignment/tenant/assignments');
+    } catch (error) {
+      console.error('Error fetching tenant role assignments:', error);
+      throw error;
+    }
+  }
+
+  async getRoleReportAssignments(roleId: string): Promise<ReportRoleAssignment[]> {
+    try {
+      return await apiService.request<ReportRoleAssignment[]>(`/reportroleassignment/role/${roleId}`);
+    } catch (error) {
+      console.error('Error fetching role report assignments:', error);
+      throw error;
+    }
+  }
+
+  async createRoleAssignment(assignmentDto: CreateReportRoleAssignmentDto): Promise<ReportRoleAssignment> {
+    try {
+      return await apiService.request<ReportRoleAssignment>('/reportroleassignment', {
+        method: 'POST',
+        body: JSON.stringify(assignmentDto),
+      });
+    } catch (error) {
+      console.error('Error creating role assignment:', error);
+      throw error;
+    }
+  }
+
+  async updateRoleAssignment(assignmentId: string, updateDto: UpdateReportRoleAssignmentDto): Promise<ReportRoleAssignment> {
+    try {
+      return await apiService.request<ReportRoleAssignment>(`/reportroleassignment/${assignmentId}`, {
+        method: 'PUT',
+        body: JSON.stringify(updateDto),
+      });
+    } catch (error) {
+      console.error('Error updating role assignment:', error);
+      throw error;
+    }
+  }
+
+  async deleteRoleAssignment(assignmentId: string): Promise<void> {
+    try {
+      await apiService.request<void>(`/reportroleassignment/${assignmentId}`, {
+        method: 'DELETE',
+      });
+    } catch (error) {
+      console.error('Error deleting role assignment:', error);
+      throw error;
+    }
+  }
+
+  // Report publishing
+  async publishReport(reportId: string): Promise<{ reportId: string; publishedAt: string }> {
+    try {
+      return await apiService.request<{ reportId: string; publishedAt: string }>(`/reports/${reportId}/publish`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+    } catch (error) {
+      console.error('Error publishing report:', error);
+      throw error;
+    }
+  }
+
+  async unpublishReport(reportId: string): Promise<{ reportId: string; unpublishedAt: string }> {
+    try {
+      return await apiService.request<{ reportId: string; unpublishedAt: string }>(`/reports/${reportId}/unpublish`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+    } catch (error) {
+      console.error('Error unpublishing report:', error);
+      throw error;
+    }
+  }
+
+  // Module assignment
+  async assignReportToModule(reportId: string, moduleId: string): Promise<{ reportId: string; moduleId: string; assignedAt: string }> {
+    try {
+      return await apiService.request<{ reportId: string; moduleId: string; assignedAt: string }>(`/reports/${reportId}/assign-module`, {
+        method: 'POST',
+        body: JSON.stringify({ moduleId }),
+      });
+    } catch (error) {
+      console.error('Error assigning report to module:', error);
+      throw error;
+    }
+  }
+
+  async unassignReportFromModule(reportId: string): Promise<{ reportId: string; unassignedAt: string }> {
+    try {
+      return await apiService.request<{ reportId: string; unassignedAt: string }>(`/reports/${reportId}/unassign-module`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+    } catch (error) {
+      console.error('Error unassigning report from module:', error);
       throw error;
     }
   }

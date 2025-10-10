@@ -76,7 +76,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
                 throw new InvalidOperationException("Tenant ID is required");
 
@@ -104,7 +104,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
                 throw new InvalidOperationException("Tenant ID is required");
 
@@ -172,7 +172,7 @@ public class SecurityService : ISecurityService
                 TotalUsers = totalUsers,
                 UsersWithTwoFactorEnabled = usersWithTwoFactor,
                 LastUpdated = DateTime.UtcNow,
-                CreatedBy = _currentUserService.GetUsername()
+                CreatedBy = _currentUserService.UserName
             };
 
             // Check if today's metrics already exist
@@ -251,7 +251,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
                 throw new InvalidOperationException("Tenant ID is required");
 
@@ -271,7 +271,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
                 throw new InvalidOperationException("Tenant ID is required");
 
@@ -288,7 +288,7 @@ public class SecurityService : ISecurityService
                 IpAddress = request.IpAddress,
                 Location = request.Location,
                 Metadata = request.Metadata != null ? JsonSerializer.Serialize(request.Metadata) : null,
-                CreatedBy = _currentUserService.GetUsername()
+                CreatedBy = _currentUserService.UserName
             };
 
             var createdAlert = await _unitOfWork.Repository<SecurityAlert>().AddAsync(alert);
@@ -309,7 +309,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
                 throw new InvalidOperationException("Tenant ID is required");
 
@@ -321,7 +321,7 @@ public class SecurityService : ISecurityService
 
             alert.Dismissed = true;
             alert.DismissedAt = DateTime.UtcNow;
-            alert.DismissedBy = _currentUserService.GetUsername();
+            alert.DismissedBy = _currentUserService.UserName;
 
             await _unitOfWork.Repository<SecurityAlert>().UpdateAsync(alert);
             await _unitOfWork.SaveChangesAsync();
@@ -365,7 +365,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
                 throw new InvalidOperationException("Tenant ID is required");
 
@@ -501,7 +501,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
                 throw new InvalidOperationException("Tenant ID is required");
 
@@ -556,7 +556,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var userId = _currentUserService.GetUserId();
+            var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
             if (!userId.HasValue)
                 throw new InvalidOperationException("User ID is required");
 
@@ -573,7 +573,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var userId = _currentUserService.GetUserId();
+            var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
             if (!userId.HasValue)
                 throw new InvalidOperationException("User ID is required");
 
@@ -590,7 +590,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var userId = _currentUserService.GetUserId();
+            var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
             if (!userId.HasValue)
                 throw new InvalidOperationException("User ID is required");
 
@@ -612,7 +612,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
                 throw new InvalidOperationException("Tenant ID is required");
 
@@ -829,7 +829,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
                 throw new InvalidOperationException("Tenant ID is required");
 
@@ -849,7 +849,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
                 throw new InvalidOperationException("Tenant ID is required");
 
@@ -861,7 +861,7 @@ public class SecurityService : ISecurityService
 
             threat.Status = Enum.Parse<Core.Enums.ThreatStatus>(request.Status);
             threat.Resolution = request.Resolution;
-            threat.ResolvedBy = _currentUserService.GetUsername();
+            threat.ResolvedBy = _currentUserService.UserName;
 
             if (threat.Status == Core.Enums.ThreatStatus.Resolved)
             {
@@ -924,7 +924,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var userId = _currentUserService.GetUserId();
+            var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
             if (!userId.HasValue)
                 throw new InvalidOperationException("User ID is required");
 
@@ -953,7 +953,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var userId = _currentUserService.GetUserId();
+            var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
             if (!userId.HasValue)
                 throw new InvalidOperationException("User ID is required");
 
@@ -1031,7 +1031,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var userId = _currentUserService.GetUserId();
+            var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
             if (!userId.HasValue)
                 throw new InvalidOperationException("User ID is required");
 
@@ -1073,7 +1073,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
                 throw new InvalidOperationException("Tenant ID is required");
 
@@ -1093,7 +1093,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
                 throw new InvalidOperationException("Tenant ID is required");
 
@@ -1106,7 +1106,7 @@ public class SecurityService : ISecurityService
                 PolicyRules = JsonSerializer.Serialize(request.Configuration ?? new Dictionary<string, object>()),
                 IsActive = request.IsEnabled,
                 Priority = 0, // Default priority since it's not in the request
-                CreatedBy = _currentUserService.GetUsername()
+                CreatedBy = _currentUserService.UserName
             };
 
             var createdPolicy = await _unitOfWork.Repository<SecurityPolicy>().AddAsync(policy);
@@ -1127,7 +1127,7 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
                 throw new InvalidOperationException("Tenant ID is required");
 
@@ -1141,7 +1141,7 @@ public class SecurityService : ISecurityService
             policy.Description = request.Description;
             policy.PolicyRules = JsonSerializer.Serialize(request.Configuration ?? new Dictionary<string, object>());
             policy.IsActive = request.IsEnabled;
-            policy.UpdatedBy = _currentUserService.GetUsername();
+            policy.UpdatedBy = _currentUserService.UserName;
 
             await _unitOfWork.Repository<SecurityPolicy>().UpdateAsync(policy);
             await _unitOfWork.SaveChangesAsync();

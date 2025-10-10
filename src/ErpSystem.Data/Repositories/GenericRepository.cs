@@ -239,5 +239,11 @@ namespace ErpSystem.Data.Repositories
         {
             return await _dbSet.Where(predicate).Where(e => !e.IsDeleted).Select(projection).ToListAsync();
         }
+        
+        // Unit of work
+        public virtual async Task<int> SaveChangesAsync()
+        {
+            return await _context.SaveChangesAsync();
+        }
     }
 }

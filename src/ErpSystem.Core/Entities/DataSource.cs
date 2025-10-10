@@ -1,45 +1,47 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ErpSystem.Core.Entities
 {
     public class DataSource : BaseEntity
     {
         [Required]
-        [StringLength(100)]
+        [MaxLength(200)]
         public string Name { get; set; } = string.Empty;
 
-        [StringLength(500)]
+        [MaxLength(1000)]
         public string? Description { get; set; }
 
         [Required]
-        public DataSourceType Type { get; set; }
+        public int Type { get; set; } // DataSourceType enum as int
 
-        [Required]
-        public string ConnectionString { get; set; } = string.Empty;
-
-        [StringLength(50)]
+        [MaxLength(100)]
         public string? Host { get; set; }
 
         public int? Port { get; set; }
 
-        [StringLength(100)]
+        [MaxLength(200)]
         public string? DatabaseName { get; set; }
 
-        [StringLength(100)]
+        [MaxLength(200)]
         public string? Username { get; set; }
 
-        [StringLength(500)]
-        public string? EncryptedPassword { get; set; }
+        [MaxLength(1000)]
+        public string? EncryptedPassword { get; set; } // Store encrypted password
 
-        public Dictionary<string, object>? AdditionalSettings { get; set; }
+        [Column(TypeName = "nvarchar(max)")]
+        public string? AdditionalSettings { get; set; } // JSON for extra settings
 
         public bool IsActive { get; set; } = true;
 
         public DateTime? LastConnectionTest { get; set; }
-
         public bool? LastConnectionSuccess { get; set; }
 
+        [MaxLength(1000)]
         public string? LastConnectionError { get; set; }
+
+        public DateTime? LastUsed { get; set; }
+        public int UsageCount { get; set; } = 0;
 
         [Required]
         public Guid TenantId { get; set; }
@@ -47,12 +49,17 @@ namespace ErpSystem.Core.Entities
         [Required]
         public Guid CreatedByUserId { get; set; }
 
-        public DateTime? LastUsed { get; set; }
-
-        public int UsageCount { get; set; }
-
         // Navigation properties
         public virtual ApplicationUser CreatedByUser { get; set; } = null!;
+        public virtual List<DataSourceUsageLog> UsageLogs { get; set; } = new();
+        
+        // Computed property for DataSourceType enum
+        [NotMapped]
+        public DataSourceType DataSourceType 
+        { 
+            get => (DataSourceType)Type;
+            set => Type = (int)value;
+        }
     }
 
     public enum DataSourceType

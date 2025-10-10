@@ -41,10 +41,11 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { useToast } from '../../hooks/use-toast';
-import { 
+import {
   dataSourcesService, 
   DataSource, 
   CreateDataSourceDto, 
+  UpdateDataSourceDto,
   DataSourceType,
   ConnectionStatus 
 } from '../../services/dataSources';
@@ -52,9 +53,23 @@ import {
 export default function DataSourcesPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedDataSource, setSelectedDataSource] = useState<DataSource | null>(null);
+  const [dataSourceToEdit, setDataSourceToEdit] = useState<DataSource | null>(null);
+  const [editForm, setEditForm] = useState<UpdateDataSourceDto>({});
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [dataSourceToDelete, setDataSourceToDelete] = useState<string | null>(null);
+  const [createForm, setCreateForm] = useState<CreateDataSourceDto>({
+    name: '',
+    description: '',
+    type: DataSourceType.SqlServer,
+    host: '',
+    port: 1433,
+    databaseName: '',
+    username: '',
+    password: '',
+    isActive: true,
+  });
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -93,6 +108,60 @@ export default function DataSourcesPage() {
       toast({
         title: 'Test Failed',
         description: error.response?.data?.message || 'Failed to test connection',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Create data source mutation
+  const createDataSourceMutation = useMutation({
+    mutationFn: dataSourcesService.createDataSource,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dataSources'] });
+      setIsCreateDialogOpen(false);
+      setCreateForm({
+        name: '',
+        description: '',
+        type: DataSourceType.SqlServer,
+        host: '',
+        port: 1433,
+        databaseName: '',
+        username: '',
+        password: '',
+        isActive: true,
+      });
+      toast({
+        title: 'Data Source Created',
+        description: 'Data source has been created successfully',
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Create Failed',
+        description: error.response?.data?.message || 'Failed to create data source',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Update data source mutation
+  const updateDataSourceMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdateDataSourceDto }) => 
+      dataSourcesService.updateDataSource(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dataSources'] });
+      setIsEditDialogOpen(false);
+      setDataSourceToEdit(null);
+      setEditForm({});
+      toast({
+        title: 'Data Source Updated',
+        description: 'Data source has been updated successfully',
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Update Failed',
+        description: error.response?.data?.message || 'Failed to update data source',
         variant: 'destructive',
       });
     },
@@ -140,6 +209,58 @@ export default function DataSourcesPage() {
 
   const handleTestConnection = (dataSourceId: string) => {
     testConnectionMutation.mutate(dataSourceId);
+  };
+
+  const handleCreateSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!createForm.name.trim()) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please enter a name for the data source',
+        variant: 'destructive',
+      });
+      return;
+    }
+    createDataSourceMutation.mutate(createForm);
+  };
+
+  const handleCreateFormChange = (field: keyof CreateDataSourceDto, value: any) => {
+    setCreateForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleEditDataSource = (dataSource: DataSource) => {
+    setDataSourceToEdit(dataSource);
+    setEditForm({
+      name: dataSource.name,
+      description: dataSource.description || '',
+      host: dataSource.host || '',
+      port: dataSource.port,
+      databaseName: dataSource.databaseName || '',
+      username: dataSource.username || '',
+      password: '', // Don't pre-fill password for security
+      isActive: dataSource.isActive,
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const handleEditFormChange = (field: keyof UpdateDataSourceDto, value: any) => {
+    setEditForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleEditSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dataSourceToEdit) return;
+    
+    if (!editForm.name?.trim()) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please enter a name for the data source',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    updateDataSourceMutation.mutate({ id: dataSourceToEdit.id, data: editForm });
   };
 
   const handleDeleteDataSource = (dataSourceId: string) => {
@@ -325,7 +446,7 @@ export default function DataSourcesPage() {
                         View Details
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleEditDataSource(dataSource)}>
                         <Edit className="h-4 w-4 mr-2" />
                         Edit
                       </DropdownMenuItem>
@@ -411,20 +532,295 @@ export default function DataSourcesPage() {
           </Card>
         )}
 
-        {/* Create Data Source Dialog - Placeholder */}
+        {/* Create Data Source Dialog */}
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Add New Data Source</DialogTitle>
               <DialogDescription>
                 Connect to external databases, APIs, or file sources for reporting
               </DialogDescription>
             </DialogHeader>
-            <div className="p-4 text-center text-muted-foreground">
-              <Database className="h-12 w-12 mx-auto mb-4" />
-              <p>Data source creation form will be implemented soon.</p>
-              <p>This will include connection settings for all supported data source types.</p>
-            </div>
+            <form onSubmit={handleCreateSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="create-name">Name *</Label>
+                  <Input
+                    id="create-name"
+                    value={createForm.name}
+                    onChange={(e) => handleCreateFormChange('name', e.target.value)}
+                    placeholder="Enter data source name"
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="create-type">Type</Label>
+                  <Select 
+                    value={createForm.type.toString()} 
+                    onValueChange={(value) => handleCreateFormChange('type', parseInt(value))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select data source type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {dataSourcesService.getDataSourceTypeOptions().map((option) => (
+                        <SelectItem key={option.value} value={option.value.toString()}>
+                          {option.icon} {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              <div>
+                <Label htmlFor="create-description">Description</Label>
+                <Input
+                  id="create-description"
+                  value={createForm.description || ''}
+                  onChange={(e) => handleCreateFormChange('description', e.target.value)}
+                  placeholder="Enter description (optional)"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="create-host">Host</Label>
+                  <Input
+                    id="create-host"
+                    value={createForm.host || ''}
+                    onChange={(e) => handleCreateFormChange('host', e.target.value)}
+                    placeholder="localhost"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="create-port">Port</Label>
+                  <Input
+                    id="create-port"
+                    type="number"
+                    value={createForm.port || ''}
+                    onChange={(e) => handleCreateFormChange('port', parseInt(e.target.value) || undefined)}
+                    placeholder="1433"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <Label htmlFor="create-database">Database Name</Label>
+                <Input
+                  id="create-database"
+                  value={createForm.databaseName || ''}
+                  onChange={(e) => handleCreateFormChange('databaseName', e.target.value)}
+                  placeholder="Enter database name"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="create-username">Username</Label>
+                  <Input
+                    id="create-username"
+                    value={createForm.username || ''}
+                    onChange={(e) => handleCreateFormChange('username', e.target.value)}
+                    placeholder="Enter username"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="create-password">Password</Label>
+                  <Input
+                    id="create-password"
+                    type="password"
+                    value={createForm.password || ''}
+                    onChange={(e) => handleCreateFormChange('password', e.target.value)}
+                    placeholder="Enter password"
+                  />
+                </div>
+              </div>
+              
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="create-active"
+                  checked={createForm.isActive}
+                  onChange={(e) => handleCreateFormChange('isActive', e.target.checked)}
+                  className="rounded"
+                />
+                <Label htmlFor="create-active">Active</Label>
+              </div>
+              
+              <div className="flex justify-end space-x-2 pt-4">
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => setIsCreateDialogOpen(false)}
+                  disabled={createDataSourceMutation.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  type="submit" 
+                  disabled={createDataSourceMutation.isPending || !createForm.name.trim()}
+                >
+                  {createDataSourceMutation.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Create Data Source
+                    </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Data Source Dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={(open) => {
+          setIsEditDialogOpen(open);
+          if (!open) {
+            setDataSourceToEdit(null);
+            setEditForm({});
+          }
+        }}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit Data Source</DialogTitle>
+              <DialogDescription>
+                Update connection settings and configuration for {dataSourceToEdit?.name}
+              </DialogDescription>
+            </DialogHeader>
+            {dataSourceToEdit && (
+              <form onSubmit={handleEditSubmit} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="edit-name">Name *</Label>
+                    <Input
+                      id="edit-name"
+                      value={editForm.name || ''}
+                      onChange={(e) => handleEditFormChange('name', e.target.value)}
+                      placeholder="Enter data source name"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-type-display">Type</Label>
+                    <Input
+                      id="edit-type-display"
+                      value={dataSourceToEdit.typeName}
+                      readOnly
+                      className="bg-muted"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">Type cannot be changed after creation</p>
+                  </div>
+                </div>
+                
+                <div>
+                  <Label htmlFor="edit-description">Description</Label>
+                  <Input
+                    id="edit-description"
+                    value={editForm.description || ''}
+                    onChange={(e) => handleEditFormChange('description', e.target.value)}
+                    placeholder="Enter description (optional)"
+                  />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="edit-host">Host</Label>
+                    <Input
+                      id="edit-host"
+                      value={editForm.host || ''}
+                      onChange={(e) => handleEditFormChange('host', e.target.value)}
+                      placeholder="localhost"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-port">Port</Label>
+                    <Input
+                      id="edit-port"
+                      type="number"
+                      value={editForm.port || ''}
+                      onChange={(e) => handleEditFormChange('port', parseInt(e.target.value) || undefined)}
+                      placeholder="1433"
+                    />
+                  </div>
+                </div>
+                
+                <div>
+                  <Label htmlFor="edit-database">Database Name</Label>
+                  <Input
+                    id="edit-database"
+                    value={editForm.databaseName || ''}
+                    onChange={(e) => handleEditFormChange('databaseName', e.target.value)}
+                    placeholder="Enter database name"
+                  />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="edit-username">Username</Label>
+                    <Input
+                      id="edit-username"
+                      value={editForm.username || ''}
+                      onChange={(e) => handleEditFormChange('username', e.target.value)}
+                      placeholder="Enter username"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-password">Password</Label>
+                    <Input
+                      id="edit-password"
+                      type="password"
+                      value={editForm.password || ''}
+                      onChange={(e) => handleEditFormChange('password', e.target.value)}
+                      placeholder="Enter new password (leave blank to keep current)"
+                    />
+                  </div>
+                </div>
+                
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="edit-active"
+                    checked={editForm.isActive ?? true}
+                    onChange={(e) => handleEditFormChange('isActive', e.target.checked)}
+                    className="rounded"
+                  />
+                  <Label htmlFor="edit-active">Active</Label>
+                </div>
+                
+                <div className="flex justify-end space-x-2 pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsEditDialogOpen(false)}
+                    disabled={updateDataSourceMutation.isPending}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={updateDataSourceMutation.isPending || !editForm.name?.trim()}
+                  >
+                    {updateDataSourceMutation.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Updating...
+                      </>
+                    ) : (
+                      <>
+                        <Edit className="h-4 w-4 mr-2" />
+                        Update Data Source
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
+            )}
           </DialogContent>
         </Dialog>
 

@@ -31,7 +31,7 @@ class TokenRefreshService {
       const response = await this.refreshPromise;
       
       // Store the new tokens
-      localStorage.setItem('token', response.token);
+      localStorage.setItem('authToken', response.token);
       localStorage.setItem('refreshToken', response.refreshToken);
       
       // Update token expiry time
@@ -55,12 +55,15 @@ class TokenRefreshService {
       throw new Error('No refresh token available');
     }
 
-    const response = await fetch('/api/auth/refresh', {
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+    const token = localStorage.getItem('authToken');
+    
+    const response = await fetch(`${baseUrl}/auth/refresh`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ refreshToken }),
+      body: JSON.stringify({ token, refreshToken }),
     });
 
     if (!response.ok) {
@@ -104,7 +107,7 @@ class TokenRefreshService {
    * Clear all tokens from storage
    */
   clearTokens(): void {
-    localStorage.removeItem('token');
+    localStorage.removeItem('authToken');
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('tokenExpiry');
   }

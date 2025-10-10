@@ -176,6 +176,9 @@ appsettings.json
 appsettings.*.json
 !appsettings.Development.json.template
 !appsettings.Production.json.template
+secrets.json
+secrets-local.json
+secrets-template.json
 
 # SSL certificates
 *.pfx

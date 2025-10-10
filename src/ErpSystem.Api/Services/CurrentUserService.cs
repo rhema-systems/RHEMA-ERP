@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using ErpSystem.Core.Services;
+using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Api.Services;
 
@@ -12,33 +12,78 @@ public class CurrentUserService : ICurrentUserService
         _httpContextAccessor = httpContextAccessor;
     }
 
-    public Guid? GetUserId()
+    public string? UserId
     {
-        var userIdClaim = _httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier);
-        if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var userId))
+        get
         {
-            return userId;
+            var userIdClaim = _httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier);
+            return userIdClaim?.Value;
         }
-        return null;
     }
 
-    public Guid? GetTenantId()
+    public string? UserName
     {
-        var tenantIdClaim = _httpContextAccessor.HttpContext?.User?.FindFirst("tenant_id");
-        if (tenantIdClaim != null && Guid.TryParse(tenantIdClaim.Value, out var tenantId))
+        get
         {
-            return tenantId;
+            return _httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.Name)?.Value;
         }
-        return null;
     }
 
-    public string? GetUsername()
+    public string? Email
     {
-        return _httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.Name)?.Value;
+        get
+        {
+            return _httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.Email)?.Value;
+        }
     }
 
-    public bool IsAuthenticated()
+    public Guid? TenantId
     {
-        return _httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated ?? false;
+        get
+        {
+            var tenantIdClaim = _httpContextAccessor.HttpContext?.User?.FindFirst("tenant_id");
+            if (tenantIdClaim != null && Guid.TryParse(tenantIdClaim.Value, out var tenantId))
+            {
+                return tenantId;
+            }
+            return null;
+        }
+    }
+
+    public bool IsAuthenticated
+    {
+        get
+        {
+            return _httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated ?? false;
+        }
+    }
+
+    public IEnumerable<string> Roles
+    {
+        get
+        {
+            return _httpContextAccessor.HttpContext?.User?.FindAll(ClaimTypes.Role)?.Select(c => c.Value) ?? Enumerable.Empty<string>();
+        }
+    }
+
+    public bool IsInRole(string role)
+    {
+        return _httpContextAccessor.HttpContext?.User?.IsInRole(role) ?? false;
+    }
+
+    public string? IpAddress
+    {
+        get
+        {
+            return _httpContextAccessor.HttpContext?.Connection?.RemoteIpAddress?.ToString();
+        }
+    }
+
+    public string? UserAgent
+    {
+        get
+        {
+            return _httpContextAccessor.HttpContext?.Request?.Headers["User-Agent"].FirstOrDefault();
+        }
     }
 }

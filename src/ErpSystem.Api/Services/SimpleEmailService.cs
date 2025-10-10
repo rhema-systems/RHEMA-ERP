@@ -98,4 +98,31 @@ public class SimpleEmailService : IEmailService
             return false;
         }
     }
+    
+    public async Task<bool> SendEmailAsync(string to, string subject, string body, bool isHtml = false)
+    {
+        try
+        {
+            if (_environment.IsDevelopment())
+            {
+                _logger.LogInformation("=== GENERIC EMAIL ===");
+                _logger.LogInformation("To: {Email}", to);
+                _logger.LogInformation("Subject: {Subject}", subject);
+                _logger.LogInformation("Is HTML: {IsHtml}", isHtml);
+                _logger.LogInformation("Body: {Body}", body);
+                _logger.LogInformation("=====================");
+                
+                await Task.Delay(300);
+                return true;
+            }
+            
+            _logger.LogWarning("Email service not configured for production environment");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send email to {Email}", to);
+            return false;
+        }
+    }
 }

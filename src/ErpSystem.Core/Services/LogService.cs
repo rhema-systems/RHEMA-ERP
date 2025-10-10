@@ -168,7 +168,7 @@ public class AuditLogService : IAuditLogService
         try
         {
             // Get tenant context from current user or try to get from user entity
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             
             // If no tenant context from current user (e.g., system operations), we need to get it another way
             if (!tenantId.HasValue)
@@ -360,7 +360,7 @@ public class SecurityLogService : ISecurityLogService
         try
         {
             // Get tenant context from current user
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             
             // If no tenant context, we need to handle this appropriately
             if (!tenantId.HasValue)

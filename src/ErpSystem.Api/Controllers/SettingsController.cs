@@ -166,7 +166,7 @@ public class SettingsController : ControllerBase
                 // Log the audit event
                 var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var usernameClaim = User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst(ClaimTypes.Email)?.Value;
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 
                 if (Guid.TryParse(userIdClaim, out var userId) && !string.IsNullOrEmpty(usernameClaim) && tenantId.HasValue)
                 {
@@ -297,7 +297,7 @@ public class SettingsController : ControllerBase
             // Log the audit event
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var usernameClaim = User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst(ClaimTypes.Email)?.Value;
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             
             if (Guid.TryParse(userIdClaim, out var userId) && !string.IsNullOrEmpty(usernameClaim) && tenantId.HasValue)
             {
@@ -366,7 +366,7 @@ public class SettingsController : ControllerBase
             // Log the audit event
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var usernameClaim = User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst(ClaimTypes.Email)?.Value;
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             
             if (Guid.TryParse(userIdClaim, out var userId) && !string.IsNullOrEmpty(usernameClaim) && tenantId.HasValue)
             {

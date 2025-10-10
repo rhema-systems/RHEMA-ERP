@@ -4,7 +4,7 @@ namespace ErpSystem.Core.Services
 {
     public class MockReportsService : IReportsService
     {
-        public async Task<List<ReportDefinitionDto>> GetReportsAsync(Guid tenantId, Guid userId, string? type = null, string? status = null, bool? favoriteOnly = null)
+        public async Task<List<ReportDefinitionDto>> GetReportsAsync(Guid tenantId, Guid userId, string? type = null, string? status = null, bool? favoriteOnly = null, bool bypassRoleFiltering = false)
         {
             await Task.Delay(100); // Simulate API delay
 
@@ -92,7 +92,7 @@ namespace ErpSystem.Core.Services
             };
         }
 
-        public async Task<ReportDefinitionDto?> UpdateReportAsync(Guid reportId, UpdateReportDto updateReportDto, Guid tenantId, Guid userId)
+        public async Task<ReportDefinitionDto?> UpdateReportAsync(Guid reportId, UpdateReportDto updateReportDto, Guid tenantId, Guid userId, bool isAdminUser = false)
         {
             await Task.Delay(150);
             return await GetReportAsync(reportId, tenantId);
@@ -104,7 +104,7 @@ namespace ErpSystem.Core.Services
             return true;
         }
 
-        public async Task<ReportResultDto> ExecuteReportAsync(Guid reportId, ExecuteReportDto executeReportDto, Guid tenantId, Guid userId)
+        public async Task<ReportResultDto> ExecuteReportAsync(Guid reportId, ExecuteReportDto executeReportDto, Guid tenantId, Guid userId, bool isAdminUser = false)
         {
             await Task.Delay(2000); // Simulate report execution time
 
@@ -130,7 +130,7 @@ namespace ErpSystem.Core.Services
             };
         }
 
-        public async Task<ReportExportResultDto> ExportReportAsync(Guid reportId, ExportReportDto exportReportDto, Guid tenantId, Guid userId)
+        public async Task<ReportExportResultDto> ExportReportAsync(Guid reportId, ExportReportDto exportReportDto, Guid tenantId, Guid userId, bool isAdminUser = false)
         {
             await Task.Delay(1000);
 
@@ -254,6 +254,24 @@ namespace ErpSystem.Core.Services
             return templates;
         }
 
+        public async Task<ReportTemplateDto> CreateReportTemplateAsync(CreateReportTemplateDto createTemplateDto, Guid tenantId, Guid userId)
+        {
+            await Task.Delay(200);
+            return new ReportTemplateDto
+            {
+                Id = Guid.NewGuid(),
+                Name = createTemplateDto.Name,
+                Description = createTemplateDto.Description,
+                Category = createTemplateDto.Category,
+                Type = createTemplateDto.Type,
+                IsCustom = true,
+                CreatedBy = "Current User",
+                CreatedAt = DateTime.Now,
+                UsageCount = 0,
+                Tags = createTemplateDto.Tags ?? new List<string>()
+            };
+        }
+
         public async Task<ReportAnalyticsDto> GetReportAnalyticsAsync(Guid tenantId, string period, string? tenantFilter = null, bool isSuperAdmin = false)
         {
             await Task.Delay(200);
@@ -282,6 +300,30 @@ namespace ErpSystem.Core.Services
         {
             await Task.Delay(100);
             return true; // Return new favorite status
+        }
+
+        public async Task<DateTime> PublishReportAsync(Guid reportId, Guid tenantId, Guid userId)
+        {
+            await Task.Delay(100);
+            return DateTime.UtcNow;
+        }
+
+        public async Task<DateTime> UnpublishReportAsync(Guid reportId, Guid tenantId, Guid userId)
+        {
+            await Task.Delay(100);
+            return DateTime.UtcNow;
+        }
+
+        public async Task<DateTime> AssignReportToModuleAsync(Guid reportId, Guid moduleId, Guid tenantId, Guid userId)
+        {
+            await Task.Delay(100);
+            return DateTime.UtcNow;
+        }
+
+        public async Task<DateTime> UnassignReportFromModuleAsync(Guid reportId, Guid tenantId, Guid userId)
+        {
+            await Task.Delay(100);
+            return DateTime.UtcNow;
         }
     }
 }

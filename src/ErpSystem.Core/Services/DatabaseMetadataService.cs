@@ -155,7 +155,7 @@ public class DatabaseMetadataService : IDatabaseMetadataService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
             {
                 throw new InvalidOperationException("No tenant context available");

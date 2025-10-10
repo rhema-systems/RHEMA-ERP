@@ -1,0 +1,212 @@
+using Microsoft.EntityFrameworkCore;
+using ErpSystem.Core.Entities.Workflow;
+using ErpSystem.Core.Interfaces.Repositories;
+
+namespace ErpSystem.Data.Repositories.Workflow
+{
+    /// <summary>
+    /// Repository implementation for WorkflowDefinition entity data access
+    /// </summary>
+    public class WorkflowDefinitionRepository
+    {
+        private readonly ApplicationDbContext _context;
+
+        public WorkflowDefinitionRepository(ApplicationDbContext context)
+        {
+            _context = context ?? throw new ArgumentNullException(nameof(context));
+        }
+
+        public async Task<WorkflowDefinition?> GetByIdAsync(int id, CancellationToken cancellationToken = default)
+        {
+            return await _context.WorkflowDefinitions
+                .Include(w => w.Steps)
+                    .ThenInclude(s => s.ApprovalRoles)
+                .FirstOrDefaultAsync(w => w.Id == id, cancellationToken);
+        }
+
+        public async Task<WorkflowDefinition?> GetByIdWithDetailsAsync(int id, CancellationToken cancellationToken = default)
+        {
+            return await _context.WorkflowDefinitions
+                .Include(w => w.Steps)
+                    .ThenInclude(s => s.ApprovalRoles)
+                .Include(w => w.Instances)
+                    .ThenInclude(i => i.Steps)
+                .Include(w => w.Instances)
+                    .ThenInclude(i => i.Approvals)
+                .FirstOrDefaultAsync(w => w.Id == id, cancellationToken);
+        }
+
+        public async Task<WorkflowDefinition?> GetByNameAsync(string name, string tenantId, CancellationToken cancellationToken = default)
+        {
+            return await _context.WorkflowDefinitions
+                .Include(w => w.Steps)
+                    .ThenInclude(s => s.ApprovalRoles)
+                .FirstOrDefaultAsync(w => w.Name == name && w.TenantId == tenantId, cancellationToken);
+        }
+
+        public async Task<WorkflowDefinition?> GetByKeyAsync(string workflowKey, string tenantId, CancellationToken cancellationToken = default)
+        {
+            return await _context.WorkflowDefinitions
+                .Include(w => w.Steps)
+                    .ThenInclude(s => s.ApprovalRoles)
+                .FirstOrDefaultAsync(w => w.WorkflowKey == workflowKey && w.TenantId == tenantId, cancellationToken);
+        }
+
+        public async Task<IEnumerable<WorkflowDefinition>> GetAllAsync(string tenantId, CancellationToken cancellationToken = default)
+        {
+            return await _context.WorkflowDefinitions
+                .Where(w => w.TenantId == tenantId)
+                .Include(w => w.Steps)
+                    .ThenInclude(s => s.ApprovalRoles)
+                .OrderBy(w => w.Name)
+                .ToListAsync(cancellationToken);
+        }
+
+        public async Task<IEnumerable<WorkflowDefinition>> GetActiveAsync(string tenantId, CancellationToken cancellationToken = default)
+        {
+            return await _context.WorkflowDefinitions
+                .Where(w => w.TenantId == tenantId && w.IsActive)
+                .Include(w => w.Steps)
+                    .ThenInclude(s => s.ApprovalRoles)
+                .OrderBy(w => w.Name)
+                .ToListAsync(cancellationToken);
+        }
+
+        public async Task<IEnumerable<WorkflowDefinition>> GetByEntityTypeAsync(string entityType, string tenantId, CancellationToken cancellationToken = default)
+        {
+            return await _context.WorkflowDefinitions
+                .Where(w => w.TenantId == tenantId && w.EntityType == entityType && w.IsActive)
+                .Include(w => w.Steps)
+                    .ThenInclude(s => s.ApprovalRoles)
+                .OrderBy(w => w.Name)
+                .ToListAsync(cancellationToken);
+        }
+
+        public async Task<IEnumerable<WorkflowDefinition>> GetByTriggerTypeAsync(string triggerType, string tenantId, CancellationToken cancellationToken = default)
+        {
+            return await _context.WorkflowDefinitions
+                .Where(w => w.TenantId == tenantId && w.TriggerType == triggerType && w.IsActive)
+                .Include(w => w.Steps)
+                    .ThenInclude(s => s.ApprovalRoles)
+                .OrderBy(w => w.Name)
+                .ToListAsync(cancellationToken);
+        }
+
+        public async Task<WorkflowDefinition> AddAsync(WorkflowDefinition workflowDefinition, CancellationToken cancellationToken = default)
+        {
+            if (workflowDefinition == null)
+                throw new ArgumentNullException(nameof(workflowDefinition));
+
+            _context.WorkflowDefinitions.Add(workflowDefinition);
+            await _context.SaveChangesAsync(cancellationToken);
+            return workflowDefinition;
+        }
+
+        public async Task<WorkflowDefinition> UpdateAsync(WorkflowDefinition workflowDefinition, CancellationToken cancellationToken = default)
+        {
+            if (workflowDefinition == null)
+                throw new ArgumentNullException(nameof(workflowDefinition));
+
+            _context.WorkflowDefinitions.Update(workflowDefinition);
+            await _context.SaveChangesAsync(cancellationToken);
+            return workflowDefinition;
+        }
+
+        public async Task<bool> DeleteAsync(int id, CancellationToken cancellationToken = default)
+        {
+            var workflowDefinition = await _context.WorkflowDefinitions
+                .FirstOrDefaultAsync(w => w.Id == id, cancellationToken);
+                
+            if (workflowDefinition == null)
+                return false;
+
+            // Check if there are active instances
+            var hasActiveInstances = await _context.WorkflowInstances
+                .AnyAsync(i => i.WorkflowDefinitionId == id && 
+                              i.Status != "Completed" && 
+                              i.Status != "Cancelled", cancellationToken);
+
+            if (hasActiveInstances)
+            {
+                // Cannot delete workflow with active instances - deactivate instead
+                workflowDefinition.IsActive = false;
+                workflowDefinition.ModifiedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync(cancellationToken);
+                return false;
+            }
+
+            _context.WorkflowDefinitions.Remove(workflowDefinition);
+            await _context.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+
+        public async Task<bool> ExistsAsync(int id, CancellationToken cancellationToken = default)
+        {
+            return await _context.WorkflowDefinitions
+                .AnyAsync(w => w.Id == id, cancellationToken);
+        }
+
+        public async Task<bool> ExistsByNameAsync(string name, string tenantId, int? excludeId = null, CancellationToken cancellationToken = default)
+        {
+            var query = _context.WorkflowDefinitions
+                .Where(w => w.Name == name && w.TenantId == tenantId);
+
+            if (excludeId.HasValue)
+            {
+                query = query.Where(w => w.Id != excludeId.Value);
+            }
+
+            return await query.AnyAsync(cancellationToken);
+        }
+
+        public async Task<bool> ExistsByKeyAsync(string workflowKey, string tenantId, int? excludeId = null, CancellationToken cancellationToken = default)
+        {
+            var query = _context.WorkflowDefinitions
+                .Where(w => w.WorkflowKey == workflowKey && w.TenantId == tenantId);
+
+            if (excludeId.HasValue)
+            {
+                query = query.Where(w => w.Id != excludeId.Value);
+            }
+
+            return await query.AnyAsync(cancellationToken);
+        }
+
+        public async Task<int> GetActiveInstanceCountAsync(int workflowDefinitionId, CancellationToken cancellationToken = default)
+        {
+            return await _context.WorkflowInstances
+                .CountAsync(i => i.WorkflowDefinitionId == workflowDefinitionId && 
+                               i.Status != "Completed" && 
+                               i.Status != "Cancelled", cancellationToken);
+        }
+
+        public async Task<IEnumerable<WorkflowDefinition>> SearchAsync(
+            string searchTerm, 
+            string tenantId, 
+            int skip = 0, 
+            int take = 50, 
+            CancellationToken cancellationToken = default)
+        {
+            var query = _context.WorkflowDefinitions
+                .Where(w => w.TenantId == tenantId);
+
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                searchTerm = searchTerm.ToLower();
+                query = query.Where(w => 
+                    w.Name.ToLower().Contains(searchTerm) ||
+                    w.Description.ToLower().Contains(searchTerm) ||
+                    w.WorkflowKey.ToLower().Contains(searchTerm) ||
+                    w.EntityType.ToLower().Contains(searchTerm));
+            }
+
+            return await query
+                .Include(w => w.Steps)
+                    .ThenInclude(s => s.ApprovalRoles)
+                .OrderBy(w => w.Name)
+                .Skip(skip)
+                .Take(take)
+                .ToListAsync(cancellationToken);
+        }
+    }
+}

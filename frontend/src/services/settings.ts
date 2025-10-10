@@ -271,6 +271,73 @@ class SettingsService {
     console.log('✅ Converted response for frontend:', result);
     return result;
   }
+
+  async getPublicSecuritySettings(): Promise<SecuritySettings> {
+    try {
+      // Use public endpoint directly for login/registration pages
+      console.log('🔄 Fetching public security settings from /auth/security-settings...');
+      const response = await apiService.publicRequest<PublicSecuritySettingsApiDto>('/auth/security-settings', {
+        method: 'GET',
+      });
+      
+      console.log('✅ Public endpoint response:', response);
+
+      // Convert public API response to frontend interface
+      return {
+        passwordMinLength: response.passwordMinLength,
+        passwordRequireUppercase: response.passwordRequireUppercase,
+        passwordRequireLowercase: response.passwordRequireLowercase,
+        passwordRequireDigits: response.passwordRequireDigits,
+        passwordRequireSpecialChars: response.passwordRequireSpecialChars,
+        passwordMaxAge: null, // Not available in public endpoint
+        passwordPreventReuse: null, // Not available in public endpoint
+        sessionTimeoutMinutes: 30, // Default values for admin-only fields
+        jwtTokenLifetimeMinutes: 60,
+        preventConcurrentLogin: 'Disabled',
+        maxFailedLoginAttempts: 5,
+        accountLockoutMinutes: 30,
+        rateLimitLoginMaxAttempts: 5,
+        rateLimitLoginWindowMinutes: 15,
+        rateLimitLoginBlockDurationMinutes: 30,
+        captchaEnabled: response.captchaEnabled,
+        captchaProvider: response.captchaProvider as 'recaptcha' | 'hcaptcha',
+        recaptchaSiteKey: response.recaptchaSiteKey,
+        recaptchaSecretKey: null, // Not exposed in public endpoint
+        hCaptchaSiteKey: response.hCaptchaSiteKey,
+        hCaptchaSecretKey: null, // Not exposed in public endpoint
+        termsOfServiceUrl: response.termsOfServiceUrl,
+        privacyPolicyUrl: response.privacyPolicyUrl,
+      };
+    } catch (error) {
+      console.warn('Failed to fetch public security settings, using defaults:', error);
+      // Return default security settings
+      return {
+        passwordMinLength: 8,
+        passwordRequireUppercase: true,
+        passwordRequireLowercase: true,
+        passwordRequireDigits: true,
+        passwordRequireSpecialChars: true,
+        passwordMaxAge: null,
+        passwordPreventReuse: null,
+        sessionTimeoutMinutes: 30,
+        jwtTokenLifetimeMinutes: 60,
+        preventConcurrentLogin: 'Disabled',
+        maxFailedLoginAttempts: 5,
+        accountLockoutMinutes: 30,
+        rateLimitLoginMaxAttempts: 5,
+        rateLimitLoginWindowMinutes: 15,
+        rateLimitLoginBlockDurationMinutes: 30,
+        captchaEnabled: false,
+        captchaProvider: 'recaptcha',
+        recaptchaSiteKey: null,
+        recaptchaSecretKey: null,
+        hCaptchaSiteKey: null,
+        hCaptchaSecretKey: null,
+        termsOfServiceUrl: null,
+        privacyPolicyUrl: null,
+      };
+    }
+  }
 }
 
 export const settingsService = new SettingsService();

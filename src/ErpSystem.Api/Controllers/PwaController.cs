@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using ErpSystem.Core.DTOs.Notifications;
 
@@ -50,7 +51,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -80,7 +81,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -110,7 +111,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -158,7 +159,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -203,7 +204,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");

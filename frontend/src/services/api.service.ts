@@ -211,17 +211,11 @@ class ApiService {
                                 url.pathname.includes('/auth/refresh') ||
                                 (url.pathname.includes('/tenant') && !this.token);
         
+        // Only trigger session blacklist if it's not a public endpoint
+        // The privateRequest method will handle token refresh attempts first
         if (!isPublicEndpoint && typeof window !== 'undefined') {
-          // Clear the token immediately to prevent further API calls with blacklisted token
-          this.clearToken();
-          
-          // Emit a custom event to notify about session termination
-          window.dispatchEvent(new CustomEvent('session-blacklisted', {
-            detail: {
-              status: response.status,
-              message: errorData.message || 'Session terminated'
-            }
-          }));
+          // Don't immediately clear token here - let the retry logic handle it first
+          // The session blacklist event will be handled by the privateRequest method after retry attempts fail
         }
       }
       
@@ -353,7 +347,7 @@ class ApiService {
   }
 
   // Rename private request method
-  private async privateRequest<T>(endpoint: string, options: RequestInit = {}, includeAuth: boolean = true, silent: boolean = false): Promise<T> {
+  private async privateRequest<T>(endpoint: string, options: RequestInit = {}, includeAuth: boolean = true, silent: boolean = false, retryCount: number = 0): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
     
     // Check if the body is FormData
@@ -368,7 +362,7 @@ class ApiService {
     const timestamp = new Date().toISOString();
     
     if (!silent) {
-      console.log(`🚀 API ${method} ${endpoint} - ${timestamp}`);
+      console.log(`🚀 API ${method} ${endpoint} - ${timestamp}${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
       if (method !== 'GET' && config.headers) {
         console.log('📤 Request headers:', config.headers);
         if (options.body) {
@@ -407,7 +401,53 @@ class ApiService {
       }
       
       return result;
-    } catch (error) {
+    } catch (error: any) {
+      // Handle 401 errors with token refresh attempt (only once)
+      if (error.status === 401 && includeAuth && retryCount === 0 && this.token) {
+        // Don't retry for auth endpoints to avoid infinite loops
+        const isAuthEndpoint = endpoint.includes('/auth/login') || 
+                              endpoint.includes('/auth/refresh') || 
+                              endpoint.includes('/auth/logout');
+        
+        if (!isAuthEndpoint) {
+          if (!silent) {
+            console.log('🔄 401 error detected, attempting token refresh...');
+          }
+          
+          try {
+            // Attempt to refresh token
+            await this.refreshToken();
+            
+            if (!silent) {
+              console.log('✅ Token refreshed, retrying original request...');
+            }
+            
+            // Retry the original request with the new token
+            return this.privateRequest<T>(endpoint, options, includeAuth, silent, retryCount + 1);
+          } catch (refreshError) {
+            if (!silent) {
+              console.error('❌ Token refresh failed:', refreshError);
+            }
+            
+            // Clear tokens and trigger session blacklist event
+            this.clearToken();
+            
+            // Trigger session blacklist event since token refresh failed
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('session-blacklisted', {
+                detail: {
+                  status: 401,
+                  message: 'Session terminated - token refresh failed'
+                }
+              }));
+            }
+            
+            // Still throw the original 401 error
+            throw error;
+          }
+        }
+      }
+      
       if (!silent) {
         console.error(`💥 API ${method} ${endpoint} failed:`, error);
       }

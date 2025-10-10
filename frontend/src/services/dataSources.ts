@@ -163,10 +163,7 @@ class DataSourcesService {
 
   async getActiveDataSources(): Promise<DataSource[]> {
     try {
-      const response = await axios.get(`${API_BASE_URL}/datasources/active`, {
-        headers: this.getAuthHeaders(),
-      });
-      return response.data;
+      return await apiService.request<DataSource[]>('/datasources/active');
     } catch (error) {
       console.error('Error fetching active data sources:', error);
       throw error;
@@ -175,10 +172,7 @@ class DataSourcesService {
 
   async getDataSource(dataSourceId: string): Promise<DataSource> {
     try {
-      const response = await axios.get(`${API_BASE_URL}/datasources/${dataSourceId}`, {
-        headers: this.getAuthHeaders(),
-      });
-      return response.data;
+      return await apiService.request<DataSource>(`/datasources/${dataSourceId}`);
     } catch (error) {
       console.error('Error fetching data source:', error);
       throw error;
@@ -187,10 +181,10 @@ class DataSourcesService {
 
   async createDataSource(createDto: CreateDataSourceDto): Promise<DataSource> {
     try {
-      const response = await axios.post(`${API_BASE_URL}/datasources`, createDto, {
-        headers: this.getAuthHeaders(),
+      return await apiService.request<DataSource>('/datasources', {
+        method: 'POST',
+        body: JSON.stringify(createDto),
       });
-      return response.data;
     } catch (error) {
       console.error('Error creating data source:', error);
       throw error;
@@ -199,10 +193,10 @@ class DataSourcesService {
 
   async updateDataSource(dataSourceId: string, updateDto: UpdateDataSourceDto): Promise<DataSource> {
     try {
-      const response = await axios.put(`${API_BASE_URL}/datasources/${dataSourceId}`, updateDto, {
-        headers: this.getAuthHeaders(),
+      return await apiService.request<DataSource>(`/datasources/${dataSourceId}`, {
+        method: 'PUT',
+        body: JSON.stringify(updateDto),
       });
-      return response.data;
     } catch (error) {
       console.error('Error updating data source:', error);
       throw error;
@@ -222,10 +216,10 @@ class DataSourcesService {
 
   async testConnection(testDto: TestConnectionDto): Promise<ConnectionTestResult> {
     try {
-      const response = await axios.post(`${API_BASE_URL}/datasources/test-connection`, testDto, {
-        headers: this.getAuthHeaders(),
+      return await apiService.request<ConnectionTestResult>('/datasources/test-connection', {
+        method: 'POST',
+        body: JSON.stringify(testDto),
       });
-      return response.data;
     } catch (error) {
       console.error('Error testing connection:', error);
       throw error;
@@ -234,10 +228,10 @@ class DataSourcesService {
 
   async testDataSourceConnection(dataSourceId: string): Promise<ConnectionTestResult> {
     try {
-      const response = await axios.post(`${API_BASE_URL}/datasources/${dataSourceId}/test-connection`, {}, {
-        headers: this.getAuthHeaders(),
+      return await apiService.request<ConnectionTestResult>(`/datasources/${dataSourceId}/test-connection`, {
+        method: 'POST',
+        body: JSON.stringify({}),
       });
-      return response.data;
     } catch (error) {
       console.error('Error testing data source connection:', error);
       throw error;
@@ -246,10 +240,7 @@ class DataSourcesService {
 
   async getSchema(dataSourceId: string): Promise<DataSourceSchema> {
     try {
-      const response = await axios.get(`${API_BASE_URL}/datasources/${dataSourceId}/schema`, {
-        headers: this.getAuthHeaders(),
-      });
-      return response.data;
+      return await apiService.request<DataSourceSchema>(`/datasources/${dataSourceId}/schema`);
     } catch (error) {
       console.error('Error fetching data source schema:', error);
       throw error;
@@ -258,10 +249,10 @@ class DataSourcesService {
 
   async executeQuery(dataSourceId: string, queryDto: QueryDataSourceDto): Promise<QueryResult> {
     try {
-      const response = await axios.post(`${API_BASE_URL}/datasources/${dataSourceId}/query`, queryDto, {
-        headers: this.getAuthHeaders(),
+      return await apiService.request<QueryResult>(`/datasources/${dataSourceId}/query`, {
+        method: 'POST',
+        body: JSON.stringify(queryDto),
       });
-      return response.data;
     } catch (error) {
       console.error('Error executing query:', error);
       throw error;

@@ -299,11 +299,11 @@ namespace ErpSystem.Data.Services
             return activities.OrderByDescending(a => a.Timestamp).Take(20).ToList();
         }
 
-        private async Task<List<NotificationDto>> GetNotificationsAsync(string tenantId)
+        private Task<List<NotificationDto>> GetNotificationsAsync(string tenantId)
         {
             // This would be implemented based on your notification system
             // For now, return some sample notifications
-            return new List<NotificationDto>
+            var notifications = new List<NotificationDto>
             {
                 new NotificationDto
                 {
@@ -316,6 +316,7 @@ namespace ErpSystem.Data.Services
                     IsRead = false
                 }
             };
+            return Task.FromResult(notifications);
         }
 
         private async Task<List<OnlineUserDto>> GetOnlineUsersAsync(string tenantId, bool isSuperAdmin = false)

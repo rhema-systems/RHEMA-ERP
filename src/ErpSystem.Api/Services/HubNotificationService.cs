@@ -56,5 +56,24 @@ namespace ErpSystem.Api.Services
                 throw;
             }
         }
+
+        public async Task SendNotificationToAllAsync(string message, string? type = null)
+        {
+            try
+            {
+                var notification = new
+                {
+                    Message = message,
+                    Type = type ?? "Info",
+                    Timestamp = DateTime.UtcNow
+                };
+                await _hubContext.Clients.All.SendAsync("GlobalNotification", notification);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending notification to all users: {Message}", message);
+                throw;
+            }
+        }
     }
 }

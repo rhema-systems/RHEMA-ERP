@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace ErpSystem.Core.DTOs.Reports
 {
     public class ReportDefinitionDto
@@ -13,11 +15,14 @@ namespace ErpSystem.Core.DTOs.Reports
         public DateTime? NextRun { get; set; }
         public bool IsScheduled { get; set; }
         public bool IsFavorite { get; set; }
+        public Guid? ModuleId { get; set; }
+        public string? ModuleName { get; set; }
         public Dictionary<string, object>? Parameters { get; set; }
         public string? Query { get; set; }
         public List<ReportColumnDto>? Columns { get; set; }
         public ReportVisualizationDto? Visualization { get; set; }
         public List<string>? Tags { get; set; }
+        public List<string>? AssignedRoles { get; set; } // Role names assigned to this report
     }
 
     public class CreateReportDto
@@ -72,6 +77,8 @@ namespace ErpSystem.Core.DTOs.Reports
         public DateTime? EndDate { get; set; }
         public int? MaxRows { get; set; }
         public bool IncludeMetadata { get; set; } = true;
+        public int Page { get; set; } = 1;
+        public int PageSize { get; set; } = 100;
     }
 
     public class ReportResultDto
@@ -85,6 +92,12 @@ namespace ErpSystem.Core.DTOs.Reports
         public List<Dictionary<string, object>> Data { get; set; } = new();
         public ReportMetadataDto? Metadata { get; set; }
         public List<ReportChartDataDto>? ChartData { get; set; }
+        // Pagination info
+        public int CurrentPage { get; set; } = 1;
+        public int PageSize { get; set; } = 100;
+        public int TotalPages { get; set; }
+        public bool HasNextPage { get; set; }
+        public bool HasPreviousPage { get; set; }
     }
 
     public class ReportMetadataDto
@@ -216,5 +229,79 @@ namespace ErpSystem.Core.DTOs.Reports
         public int UniqueUsers { get; set; }
         public DateTime LastRun { get; set; }
         public double AvgRating { get; set; }
+    }
+
+    public class CreateReportTemplateDto
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Category { get; set; } = string.Empty;
+        public string Type { get; set; } = string.Empty;
+        public string? ChartType { get; set; }
+        public bool IsCustom { get; set; } = true;
+        public List<string>? Tags { get; set; }
+        public string? PreviewImage { get; set; }
+        public Dictionary<string, object>? Configuration { get; set; }
+    }
+
+    public class ReportRoleAssignmentDto
+    {
+        public Guid Id { get; set; }
+        public Guid ReportId { get; set; }
+        public string ReportName { get; set; } = string.Empty;
+        public Guid RoleId { get; set; }
+        public string RoleName { get; set; } = string.Empty;
+        public bool CanRead { get; set; }
+        public bool CanExecute { get; set; }
+        public bool CanExport { get; set; }
+        public bool CanEdit { get; set; }
+        public bool CanSchedule { get; set; }
+        public DateTime AssignedAt { get; set; }
+        public string? AssignedBy { get; set; }
+    }
+
+    public class CreateReportRoleAssignmentDto
+    {
+        public Guid ReportId { get; set; }
+        public Guid RoleId { get; set; }
+        public bool CanRead { get; set; } = true;
+        public bool CanExecute { get; set; } = true;
+        public bool CanExport { get; set; } = false;
+        public bool CanEdit { get; set; } = false;
+        public bool CanSchedule { get; set; } = false;
+    }
+
+    public class UpdateReportRoleAssignmentDto
+    {
+        public bool CanRead { get; set; }
+        public bool CanExecute { get; set; }
+        public bool CanExport { get; set; }
+        public bool CanEdit { get; set; }
+        public bool CanSchedule { get; set; }
+    }
+
+    public class BulkAssignRolesToReportDto
+    {
+        public Guid ReportId { get; set; }
+        public List<CreateReportRoleAssignmentDto> RoleAssignments { get; set; } = new();
+    }
+
+    public class ReportAccessDto
+    {
+        public Guid ReportId { get; set; }
+        public string ReportName { get; set; } = string.Empty;
+        public bool HasAccess { get; set; }
+        public bool CanRead { get; set; }
+        public bool CanExecute { get; set; }
+        public bool CanExport { get; set; }
+        public bool CanEdit { get; set; }
+        public bool CanSchedule { get; set; }
+        public List<string> AccessibleRoles { get; set; } = new();
+    }
+
+    public class AssignModuleDto
+    {
+        [Required(ErrorMessage = "ModuleId is required")]
+        public Guid ModuleId { get; set; }
     }
 }

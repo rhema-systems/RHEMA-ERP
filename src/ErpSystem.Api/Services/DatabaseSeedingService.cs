@@ -83,6 +83,9 @@ namespace ErpSystem.Web.Services
 
             // Seed default tenant
             await SeedDefaultTenantAsync();
+            
+            // Seed default tenant modules
+            await SeedDefaultTenantModulesAsync();
 
             _logger.LogInformation("Basic data seeding completed");
         }
@@ -188,6 +191,52 @@ namespace ErpSystem.Web.Services
                 await _context.SaveChangesAsync();
                 _logger.LogDebug("Created default tenant: {TenantName}", tenant.Name);
             }
+        }
+
+        private async Task SeedDefaultTenantModulesAsync()
+        {
+            var defaultTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Code == "DEFAULT");
+            if (defaultTenant == null)
+            {
+                _logger.LogError("Default tenant not found for module seeding");
+                return;
+            }
+
+            var modules = new[]
+            {
+                new { ModuleName = "Financial", Description = "Financial reports and analytics" },
+                new { ModuleName = "Sales", Description = "Sales performance and CRM reports" },
+                new { ModuleName = "Human Resources", Description = "HR and employee reports" },
+                new { ModuleName = "Inventory", Description = "Stock and inventory reports" },
+                new { ModuleName = "Operations", Description = "Operational efficiency reports" },
+                new { ModuleName = "Procurement", Description = "Purchasing and supplier reports" },
+                new { ModuleName = "Marketing", Description = "Marketing campaigns and analytics" }
+            };
+
+            foreach (var moduleInfo in modules)
+            {
+                var existingModule = await _context.TenantModules
+                    .FirstOrDefaultAsync(tm => tm.TenantId == defaultTenant.Id && tm.ModuleName == moduleInfo.ModuleName);
+                    
+                if (existingModule == null)
+                {
+                    var module = new TenantModule
+                    {
+                        TenantId = defaultTenant.Id,
+                        ModuleName = moduleInfo.ModuleName,
+                        Description = moduleInfo.Description,
+                        Status = ModuleStatus.Enabled,
+                        EnabledDate = DateTime.UtcNow,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = "System"
+                    };
+
+                    _context.TenantModules.Add(module);
+                    _logger.LogDebug("Created tenant module: {ModuleName} for tenant {TenantName}", moduleInfo.ModuleName, defaultTenant.Name);
+                }
+            }
+
+            await _context.SaveChangesAsync();
         }
 
         private async Task CreateTestUserAsync(string username, string email, string password,

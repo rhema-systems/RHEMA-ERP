@@ -37,7 +37,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
                 if (!currentUserId.HasValue)
                 {
                     return Unauthorized();
@@ -71,7 +71,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
                 if (!currentUserId.HasValue)
                 {
                     return Unauthorized();
@@ -106,7 +106,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
                 if (!currentUserId.HasValue)
                 {
                     return Unauthorized();
@@ -149,7 +149,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
                 if (!currentUserId.HasValue)
                 {
                     return Unauthorized();
@@ -187,7 +187,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
                 if (!currentUserId.HasValue)
                 {
                     return Unauthorized();
@@ -215,7 +215,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
                 if (!currentUserId.HasValue)
                 {
                     return Unauthorized();
@@ -242,7 +242,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
                 if (!currentUserId.HasValue)
                 {
                     return Unauthorized();

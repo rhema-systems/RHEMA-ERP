@@ -77,9 +77,9 @@ public class UserTenantService : IUserTenantService
             existingRelationship.AccessLevel = accessLevel;
             existingRelationship.ExpiresAt = expiresAt;
             existingRelationship.ReactivatedAt = DateTime.UtcNow;
-            existingRelationship.StatusChangedBy = grantedBy ?? _currentUserService.GetUsername();
+            existingRelationship.StatusChangedBy = grantedBy ?? _currentUserService.UserName;
             existingRelationship.UpdatedAt = DateTime.UtcNow;
-            existingRelationship.UpdatedBy = grantedBy ?? _currentUserService.GetUsername();
+            existingRelationship.UpdatedBy = grantedBy ?? _currentUserService.UserName;
             existingRelationship.Notes = notes;
             
             // If previously soft-deleted, restore it
@@ -104,11 +104,11 @@ public class UserTenantService : IUserTenantService
             AccessLevel = accessLevel,
             Status = UserTenantStatus.Active,
             GrantedAt = DateTime.UtcNow,
-            GrantedBy = grantedBy ?? _currentUserService.GetUsername(),
+            GrantedBy = grantedBy ?? _currentUserService.UserName,
             ExpiresAt = expiresAt,
             Notes = notes,
             CreatedAt = DateTime.UtcNow,
-            CreatedBy = grantedBy ?? _currentUserService.GetUsername()
+            CreatedBy = grantedBy ?? _currentUserService.UserName
         };
 
         var userTenantRepo = _unitOfWork.Repository<UserTenant>();
@@ -132,9 +132,9 @@ public class UserTenantService : IUserTenantService
 
         // Update status to revoked instead of soft delete
         relationship.Status = UserTenantStatus.Revoked;
-        relationship.StatusChangedBy = revokedBy ?? _currentUserService.GetUsername();
+        relationship.StatusChangedBy = revokedBy ?? _currentUserService.UserName;
         relationship.UpdatedAt = DateTime.UtcNow;
-        relationship.UpdatedBy = revokedBy ?? _currentUserService.GetUsername();
+        relationship.UpdatedBy = revokedBy ?? _currentUserService.UserName;
         relationship.Notes = $"{relationship.Notes}\n[REVOKED] {DateTime.UtcNow}: {reason ?? "Access revoked"}".Trim();
 
         await _unitOfWork.SaveChangesAsync();
@@ -154,9 +154,9 @@ public class UserTenantService : IUserTenantService
 
         relationship.Status = UserTenantStatus.Suspended;
         relationship.SuspendedAt = DateTime.UtcNow;
-        relationship.StatusChangedBy = suspendedBy ?? _currentUserService.GetUsername();
+        relationship.StatusChangedBy = suspendedBy ?? _currentUserService.UserName;
         relationship.UpdatedAt = DateTime.UtcNow;
-        relationship.UpdatedBy = suspendedBy ?? _currentUserService.GetUsername();
+        relationship.UpdatedBy = suspendedBy ?? _currentUserService.UserName;
         relationship.Notes = $"{relationship.Notes}\n[SUSPENDED] {DateTime.UtcNow}: {reason ?? "User suspended"}".Trim();
 
         await _unitOfWork.SaveChangesAsync();
@@ -177,9 +177,9 @@ public class UserTenantService : IUserTenantService
 
         relationship.Status = UserTenantStatus.Active;
         relationship.ReactivatedAt = DateTime.UtcNow;
-        relationship.StatusChangedBy = reactivatedBy ?? _currentUserService.GetUsername();
+        relationship.StatusChangedBy = reactivatedBy ?? _currentUserService.UserName;
         relationship.UpdatedAt = DateTime.UtcNow;
-        relationship.UpdatedBy = reactivatedBy ?? _currentUserService.GetUsername();
+        relationship.UpdatedBy = reactivatedBy ?? _currentUserService.UserName;
         relationship.Notes = $"{relationship.Notes}\n[REACTIVATED] {DateTime.UtcNow}: User reactivated".Trim();
 
         await _unitOfWork.SaveChangesAsync();
@@ -198,9 +198,9 @@ public class UserTenantService : IUserTenantService
 
         var oldStatus = relationship.Status;
         relationship.Status = newStatus;
-        relationship.StatusChangedBy = changedBy ?? _currentUserService.GetUsername();
+        relationship.StatusChangedBy = changedBy ?? _currentUserService.UserName;
         relationship.UpdatedAt = DateTime.UtcNow;
-        relationship.UpdatedBy = changedBy ?? _currentUserService.GetUsername();
+        relationship.UpdatedBy = changedBy ?? _currentUserService.UserName;
         relationship.Notes = $"{relationship.Notes}\n[STATUS CHANGE] {DateTime.UtcNow}: {oldStatus} -> {newStatus} - {reason ?? "Status updated"}".Trim();
 
         await _unitOfWork.SaveChangesAsync();
@@ -222,7 +222,7 @@ public class UserTenantService : IUserTenantService
         {
             ut.IsDefault = ut.TenantId == tenantId;
             ut.UpdatedAt = DateTime.UtcNow;
-            ut.UpdatedBy = _currentUserService.GetUsername();
+            ut.UpdatedBy = _currentUserService.UserName;
         }
 
         await _unitOfWork.SaveChangesAsync();
@@ -238,7 +238,7 @@ public class UserTenantService : IUserTenantService
         var oldAccessLevel = relationship.AccessLevel;
         relationship.AccessLevel = newAccessLevel;
         relationship.UpdatedAt = DateTime.UtcNow;
-        relationship.UpdatedBy = changedBy ?? _currentUserService.GetUsername();
+        relationship.UpdatedBy = changedBy ?? _currentUserService.UserName;
         relationship.Notes = $"{relationship.Notes}\n[ACCESS LEVEL CHANGE] {DateTime.UtcNow}: {oldAccessLevel} -> {newAccessLevel}".Trim();
 
         await _unitOfWork.SaveChangesAsync();
@@ -310,7 +310,7 @@ public class UserTenantService : IUserTenantService
     public async Task<int> BulkGrantAccessAsync(IEnumerable<Guid> userIds, Guid tenantId, UserTenantAccessLevel accessLevel = UserTenantAccessLevel.Standard, string? grantedBy = null)
     {
         var count = 0;
-        var grantedByUser = grantedBy ?? _currentUserService.GetUsername();
+        var grantedByUser = grantedBy ?? _currentUserService.UserName;
 
         foreach (var userId in userIds)
         {
@@ -332,7 +332,7 @@ public class UserTenantService : IUserTenantService
     public async Task<int> BulkRevokeAccessAsync(IEnumerable<Guid> userIds, Guid tenantId, string? revokedBy = null)
     {
         var count = 0;
-        var revokedByUser = revokedBy ?? _currentUserService.GetUsername();
+        var revokedByUser = revokedBy ?? _currentUserService.UserName;
 
         foreach (var userId in userIds)
         {
@@ -360,7 +360,7 @@ public class UserTenantService : IUserTenantService
                         ut.Status == UserTenantStatus.Active)
             .ToListAsync();
 
-        var expiredByUser = expiredBy ?? _currentUserService.GetUsername();
+        var expiredByUser = expiredBy ?? _currentUserService.UserName;
         var expiredAt = DateTime.UtcNow;
 
         foreach (var relationship in activeRelationships)

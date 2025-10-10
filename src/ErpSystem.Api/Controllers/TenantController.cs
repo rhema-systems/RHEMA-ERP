@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using ErpSystem.Core.Entities;
 using ErpSystem.Shared;
@@ -180,12 +181,12 @@ public class TenantController : ControllerBase
             // Log audit trail for tenant creation
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
-                var currentUsername = _currentUserService.GetUsername();
-                var currentTenantId = _currentUserService.GetTenantId();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
+                var currentUsername = _currentUserService.UserName;
+                var currentTenantId = _currentUserService.TenantId;
                 
                 _logger.LogInformation("DEBUG: Attempting to log tenant creation. UserId: {UserId}, Username: {Username}, TenantId: {TenantId}, IsAuthenticated: {IsAuth}", 
-                    currentUserId, currentUsername, currentTenantId, _currentUserService.IsAuthenticated());
+                    currentUserId, currentUsername, currentTenantId, _currentUserService.IsAuthenticated);
                 
                 await _auditLogService.LogUserActionAsync(
                     currentUserId ?? Guid.Empty,
@@ -384,8 +385,8 @@ public class TenantController : ControllerBase
                 };
 
                 await _auditLogService.LogUserActionAsync(
-                    _currentUserService.GetUserId() ?? Guid.Empty,
-                    _currentUserService.GetUsername() ?? "Unknown",
+                    Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null ?? Guid.Empty,
+                    _currentUserService.UserName ?? "Unknown",
                     "Update",
                     "Tenant",
                     id.ToString(),
@@ -433,8 +434,8 @@ public class TenantController : ControllerBase
             try
             {
                 await _auditLogService.LogUserActionAsync(
-                    _currentUserService.GetUserId() ?? Guid.Empty,
-                    _currentUserService.GetUsername() ?? "Unknown",
+                    Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null ?? Guid.Empty,
+                    _currentUserService.UserName ?? "Unknown",
                     "Delete",
                     "Tenant",
                     id.ToString(),
@@ -516,6 +517,49 @@ public class TenantController : ControllerBase
                 Message = $"Error testing LDAP connection: {ex.Message}"
             });
         }
+    }
+
+    /// <summary>
+    /// Get modules for the current tenant
+    /// </summary>
+    /// <returns>List of tenant modules</returns>
+    [HttpGet("modules")]
+    public async Task<ActionResult<IEnumerable<TenantModuleDto>>> GetTenantModules()
+    {
+        try
+        {
+            var tenantId = _currentUserService.TenantId;
+            if (!tenantId.HasValue)
+            {
+                return BadRequest("TenantId not found in token");
+            }
+
+            var modules = await _tenantService.GetTenantModulesAsync(tenantId.Value);
+            var moduleDtos = modules.Select(MapToTenantModuleDto).ToList();
+
+            return Ok(moduleDtos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving tenant modules");
+            return StatusCode(500, "An error occurred while retrieving tenant modules");
+        }
+    }
+
+    /// <summary>
+    /// Helper method to map TenantModule entity to TenantModuleDto
+    /// </summary>
+    private TenantModuleDto MapToTenantModuleDto(TenantModule module)
+    {
+        return new TenantModuleDto
+        {
+            Id = module.Id.ToString(),
+            ModuleName = module.ModuleName,
+            Description = module.Description,
+            Status = module.Status.ToString(),
+            EnabledDate = module.EnabledDate,
+            DisabledDate = module.DisabledDate
+        };
     }
 
     /// <summary>
@@ -749,4 +793,14 @@ public class UpdateTenantRequest
     public string? WelcomeMessage { get; set; }
     public int DefaultPriority { get; set; } = 10;
     public bool EnableAutoSelection { get; set; } = false;
+}
+
+public class TenantModuleDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string ModuleName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public DateTime? EnabledDate { get; set; }
+    public DateTime? DisabledDate { get; set; }
 }

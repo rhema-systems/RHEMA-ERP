@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.Reports;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using System.Security.Claims;
 
@@ -36,19 +37,52 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
 
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
                 }
 
                 var reports = await _reportsService.GetReportsAsync(tenantId.Value, userId.Value, type, status, favoriteOnly);
+                return Ok(reports);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving reports");
+                return StatusCode(500, "An error occurred while retrieving reports");
+            }
+        }
+
+        /// <summary>
+        /// Get all reports for admin/management purposes (bypasses role filtering)
+        /// </summary>
+        [HttpGet("admin")]
+        public async Task<ActionResult<List<ReportDefinitionDto>>> GetReportsForAdmin(
+            [FromQuery] string? type = null,
+            [FromQuery] string? status = null)
+        {
+            try
+            {
+                var tenantId = _currentUserService.TenantId;
+                if (!tenantId.HasValue)
+                {
+                    return BadRequest("TenantId not found in token");
+                }
+
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
+                if (!userId.HasValue)
+                {
+                    return BadRequest("UserId not found in token");
+                }
+
+                // Admin context: bypass role filtering, only filter by tenant
+                var reports = await _reportsService.GetReportsAsync(tenantId.Value, userId.Value, type, status, null, bypassRoleFiltering: true);
                 return Ok(reports);
             }
             catch (Exception ex)
@@ -66,7 +100,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -95,13 +129,13 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
 
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -126,19 +160,22 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
 
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
                 }
 
-                var report = await _reportsService.UpdateReportAsync(reportId, updateReportDto, tenantId.Value, userId.Value);
+                // Check if user is admin (SuperAdmin role bypasses role/module filtering)
+                var isAdminUser = _currentUserService.IsInRole("SuperAdmin");
+                
+                var report = await _reportsService.UpdateReportAsync(reportId, updateReportDto, tenantId.Value, userId.Value, isAdminUser);
                 
                 if (report == null)
                 {
@@ -162,13 +199,13 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
 
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -198,26 +235,39 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
 
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
                 }
 
-                var result = await _reportsService.ExecuteReportAsync(reportId, executeReportDto, tenantId.Value, userId.Value);
+                // Check if user is admin (SuperAdmin role bypasses role/module filtering)
+                var isAdminUser = _currentUserService.IsInRole("SuperAdmin");
+                
+                var result = await _reportsService.ExecuteReportAsync(reportId, executeReportDto, tenantId.Value, userId.Value, isAdminUser);
                 
                 return Ok(result);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Unauthorized access to report {ReportId} by user {UserId}", reportId, _currentUserService.UserId);
+                return StatusCode(403, ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Invalid operation for report {ReportId}", reportId);
+                return BadRequest(ex.Message);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error executing report {ReportId}", reportId);
-                return StatusCode(500, "An error occurred while executing the report");
+                return StatusCode(500, "An error occurred while executing the report. Please try again or contact support if the issue persists.");
             }
         }
 
@@ -229,19 +279,22 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
 
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
                 }
 
-                var exportResult = await _reportsService.ExportReportAsync(reportId, exportReportDto, tenantId.Value, userId.Value);
+                // Check if user is admin (SuperAdmin role bypasses role/module filtering)
+                var isAdminUser = _currentUserService.IsInRole("SuperAdmin");
+                
+                var exportResult = await _reportsService.ExportReportAsync(reportId, exportReportDto, tenantId.Value, userId.Value, isAdminUser);
 
                 return File(
                     exportResult.Data, 
@@ -263,13 +316,13 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
 
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -294,7 +347,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -324,7 +377,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -341,6 +394,46 @@ namespace ErpSystem.Api.Controllers
         }
 
         /// <summary>
+        /// Create a new report template
+        /// </summary>
+        [HttpPost("templates")]
+        public async Task<ActionResult<ReportTemplateDto>> CreateReportTemplate(CreateReportTemplateDto createTemplateDto)
+        {
+            _logger.LogInformation("🏁 CreateReportTemplate API endpoint called with data: {@CreateTemplateDto}", createTemplateDto);
+            
+            try
+            {
+                var tenantId = _currentUserService.TenantId;
+                if (!tenantId.HasValue)
+                {
+                    _logger.LogWarning("⚠️ TenantId not found in token");
+                    return BadRequest("TenantId not found in token");
+                }
+
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
+                if (!userId.HasValue)
+                {
+                    _logger.LogWarning("⚠️ UserId not found in token");
+                    return BadRequest("UserId not found in token");
+                }
+
+                _logger.LogInformation("🔑 Authenticated user: TenantId={TenantId}, UserId={UserId}", tenantId.Value, userId.Value);
+                _logger.LogInformation("🔄 Calling reports service CreateReportTemplateAsync...");
+                
+                var template = await _reportsService.CreateReportTemplateAsync(createTemplateDto, tenantId.Value, userId.Value);
+                
+                _logger.LogInformation("✅ Report template created successfully: {@Template}", template);
+                
+                return CreatedAtAction(nameof(GetReportTemplates), new { category = template.Category }, template);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error creating report template: {ErrorMessage}", ex.Message);
+                return StatusCode(500, "An error occurred while creating the report template");
+            }
+        }
+
+        /// <summary>
         /// Get analytics data
         /// </summary>
         [HttpGet("analytics")]
@@ -350,7 +443,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -376,13 +469,13 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
 
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -396,6 +489,130 @@ namespace ErpSystem.Api.Controllers
             {
                 _logger.LogError(ex, "Error toggling favorite for report {ReportId}", reportId);
                 return StatusCode(500, "An error occurred while updating favorite status");
+            }
+        }
+
+        /// <summary>
+        /// Publish a report
+        /// </summary>
+        [HttpPost("{reportId:guid}/publish")]
+        public async Task<ActionResult> PublishReport(Guid reportId)
+        {
+            try
+            {
+                var tenantId = _currentUserService.TenantId;
+                if (!tenantId.HasValue)
+                {
+                    return BadRequest("TenantId not found in token");
+                }
+
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
+                if (!userId.HasValue)
+                {
+                    return BadRequest("UserId not found in token");
+                }
+
+                var result = await _reportsService.PublishReportAsync(reportId, tenantId.Value, userId.Value);
+                
+                return Ok(new { reportId, publishedAt = result });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error publishing report {ReportId}", reportId);
+                return StatusCode(500, "An error occurred while publishing the report");
+            }
+        }
+
+        /// <summary>
+        /// Unpublish a report
+        /// </summary>
+        [HttpPost("{reportId:guid}/unpublish")]
+        public async Task<ActionResult> UnpublishReport(Guid reportId)
+        {
+            try
+            {
+                var tenantId = _currentUserService.TenantId;
+                if (!tenantId.HasValue)
+                {
+                    return BadRequest("TenantId not found in token");
+                }
+
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
+                if (!userId.HasValue)
+                {
+                    return BadRequest("UserId not found in token");
+                }
+
+                var result = await _reportsService.UnpublishReportAsync(reportId, tenantId.Value, userId.Value);
+                
+                return Ok(new { reportId, unpublishedAt = result });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error unpublishing report {ReportId}", reportId);
+                return StatusCode(500, "An error occurred while unpublishing the report");
+            }
+        }
+
+        /// <summary>
+        /// Assign a report to a module
+        /// </summary>
+        [HttpPost("{reportId:guid}/assign-module")]
+        public async Task<ActionResult> AssignReportToModule(Guid reportId, [FromBody] AssignModuleDto assignModuleDto)
+        {
+            try
+            {
+                var tenantId = _currentUserService.TenantId;
+                if (!tenantId.HasValue)
+                {
+                    return BadRequest("TenantId not found in token");
+                }
+
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
+                if (!userId.HasValue)
+                {
+                    return BadRequest("UserId not found in token");
+                }
+
+                var result = await _reportsService.AssignReportToModuleAsync(reportId, assignModuleDto.ModuleId, tenantId.Value, userId.Value);
+                
+                return Ok(new { reportId, moduleId = assignModuleDto.ModuleId, assignedAt = result });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error assigning report {ReportId} to module {ModuleId}", reportId, assignModuleDto?.ModuleId);
+                return StatusCode(500, "An error occurred while assigning the report to module");
+            }
+        }
+
+        /// <summary>
+        /// Unassign a report from its current module
+        /// </summary>
+        [HttpPost("{reportId:guid}/unassign-module")]
+        public async Task<ActionResult> UnassignReportFromModule(Guid reportId)
+        {
+            try
+            {
+                var tenantId = _currentUserService.TenantId;
+                if (!tenantId.HasValue)
+                {
+                    return BadRequest("TenantId not found in token");
+                }
+
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
+                if (!userId.HasValue)
+                {
+                    return BadRequest("UserId not found in token");
+                }
+
+                var result = await _reportsService.UnassignReportFromModuleAsync(reportId, tenantId.Value, userId.Value);
+                
+                return Ok(new { reportId, unassignedAt = result });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error unassigning report {ReportId} from module", reportId);
+                return StatusCode(500, "An error occurred while unassigning the report from module");
             }
         }
     }

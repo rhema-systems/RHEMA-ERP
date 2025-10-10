@@ -41,7 +41,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentTenantId = _currentUserService.GetTenantId();
+                var currentTenantId = _currentUserService.TenantId;
                 if (!currentTenantId.HasValue)
                 {
                     return BadRequest(new { message = "No tenant context found" });
@@ -123,7 +123,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 
                 // Role-based access is handled by the [Authorize] attribute
                 // Additional logic can be added here if needed
@@ -166,8 +166,8 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
-                var currentUsername = _currentUserService.GetUsername();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
+                var currentUsername = _currentUserService.UserName;
 
                 if (!currentUserId.HasValue)
                 {
@@ -197,8 +197,8 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
-                var currentUsername = _currentUserService.GetUsername();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId2) ? (Guid?)parsedUserId2 : null;
+                var currentUsername = _currentUserService.UserName;
 
                 if (!currentUserId.HasValue)
                 {
@@ -229,8 +229,8 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
-                var currentUsername = _currentUserService.GetUsername();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
+                var currentUsername = _currentUserService.UserName;
 
                 if (!currentUserId.HasValue)
                 {
@@ -300,9 +300,9 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
-                var currentUsername = _currentUserService.GetUsername();
-                var currentTenantId = _currentUserService.GetTenantId();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
+                var currentUsername = _currentUserService.UserName;
+                var currentTenantId = _currentUserService.TenantId;
 
                 if (!currentUserId.HasValue || !currentTenantId.HasValue)
                 {
@@ -416,7 +416,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
                 
                 if (!currentUserId.HasValue)
                 {
@@ -457,7 +457,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
                 
                 if (!currentUserId.HasValue)
                 {
@@ -496,7 +496,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = _currentUserService.GetUserId();
+                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId3) ? (Guid?)parsedUserId3 : null;
                 
                 // Role-based access is handled by the [Authorize] attribute
                 // Additional logic can be added here if needed

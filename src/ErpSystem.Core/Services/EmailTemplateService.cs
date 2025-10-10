@@ -97,7 +97,7 @@ public class EmailTemplateService : IEmailTemplateService
     {
         try
         {
-            var tenantId = _currentUserService.GetTenantId();
+            var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
             {
                 throw new InvalidOperationException("Tenant context is required");
@@ -115,7 +115,7 @@ public class EmailTemplateService : IEmailTemplateService
             template.Id = Guid.NewGuid();
             template.TenantId = tenantId.Value;
             template.CreatedAt = DateTime.UtcNow;
-            template.CreatedBy = _currentUserService.GetUsername();
+            template.CreatedBy = _currentUserService.UserName;
 
             // Extract and store template variables from HTML body
             template.TemplateVariables = ExtractTemplateVariables(template.HtmlBody);
@@ -156,7 +156,7 @@ public class EmailTemplateService : IEmailTemplateService
             existingTemplate.Description = template.Description;
             existingTemplate.Category = template.Category;
             existingTemplate.UpdatedAt = DateTime.UtcNow;
-            existingTemplate.UpdatedBy = _currentUserService.GetUsername();
+            existingTemplate.UpdatedBy = _currentUserService.UserName;
 
             // Update template variables
             existingTemplate.TemplateVariables = ExtractTemplateVariables(template.HtmlBody);
@@ -189,7 +189,7 @@ public class EmailTemplateService : IEmailTemplateService
             // Soft delete
             template.IsActive = false;
             template.UpdatedAt = DateTime.UtcNow;
-            template.UpdatedBy = _currentUserService.GetUsername();
+            template.UpdatedBy = _currentUserService.UserName;
 
             await _unitOfWork.Repository<EmailTemplate>().UpdateAsync(template);
             await _unitOfWork.SaveChangesAsync();

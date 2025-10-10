@@ -74,20 +74,20 @@ public class TwoFactorAuthService : ITwoFactorAuthService
         }
     }
 
-    public async Task<bool> ValidateTotpAsync(ApplicationUser user, string totpCode)
+    public Task<bool> ValidateTotpAsync(ApplicationUser user, string totpCode)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(user.AuthenticatorKey))
             {
                 _logger.LogWarning("No authenticator key found for user {UserId}", user.Id);
-                return false;
+                return Task.FromResult(false);
             }
 
             if (string.IsNullOrWhiteSpace(totpCode) || totpCode.Length != 6)
             {
                 _logger.LogWarning("Invalid TOTP code format for user {UserId}: code length = {Length}, code = '{Code}'", user.Id, totpCode?.Length ?? 0, totpCode);
-                return false;
+                return Task.FromResult(false);
             }
 
             _logger.LogInformation("Validating TOTP for user {UserId}, code = '{Code}', secret key = '{SecretKey}'", user.Id, totpCode, user.AuthenticatorKey);
@@ -113,7 +113,7 @@ public class TwoFactorAuthService : ITwoFactorAuthService
                 if (expectedCode == totpCode)
                 {
                     _logger.LogInformation("TOTP validation successful for user {UserId} with window offset {WindowOffset}", user.Id, windowOffset);
-                    return true;
+                    return Task.FromResult(true);
                 }
             }
             
@@ -121,16 +121,16 @@ public class TwoFactorAuthService : ITwoFactorAuthService
                 user.Id, 
                 totpCode,
                 string.Join(", ", windows.Select(w => $"{w}:{totp.ComputeTotp(now.AddSeconds(w * 30))}").ToArray()));
-            return false;
+            return Task.FromResult(false);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error validating TOTP for user {UserId}: {ErrorMessage}", user.Id, ex.Message);
-            return false;
+            return Task.FromResult(false);
         }
     }
 
-    public async Task<List<string>> GenerateRecoveryCodesAsync(ApplicationUser user, int count = 8)
+    public Task<List<string>> GenerateRecoveryCodesAsync(ApplicationUser user, int count = 8)
     {
         try
         {
@@ -146,7 +146,7 @@ public class TwoFactorAuthService : ITwoFactorAuthService
             // For now, we'll just return them
             _logger.LogInformation("Generated {Count} recovery codes for user {UserId}", count, user.Id);
             
-            return recoveryCodes;
+            return Task.FromResult(recoveryCodes);
         }
         catch (Exception ex)
         {
@@ -155,7 +155,7 @@ public class TwoFactorAuthService : ITwoFactorAuthService
         }
     }
 
-    public async Task<bool> ValidateRecoveryCodeAsync(ApplicationUser user, string recoveryCode)
+    public Task<bool> ValidateRecoveryCodeAsync(ApplicationUser user, string recoveryCode)
     {
         try
         {
@@ -164,12 +164,12 @@ public class TwoFactorAuthService : ITwoFactorAuthService
             _logger.LogInformation("Recovery code validation for user {UserId}", user.Id);
             
             // For now, return false as we don't have recovery code storage implemented
-            return false;
+            return Task.FromResult(false);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error validating recovery code for user {UserId}", user.Id);
-            return false;
+            return Task.FromResult(false);
         }
     }
 

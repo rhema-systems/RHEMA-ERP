@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ErpSystem.Data;
-using ErpSystem.Core.Services;
+using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -33,8 +33,8 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
-                var userId = _currentUserService.GetUserId();
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
                 
                 if (!tenantId.HasValue)
                 {
@@ -132,7 +132,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 
                 if (!tenantId.HasValue)
                 {
@@ -188,9 +188,9 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
-                var userId = _currentUserService.GetUserId();
-                var userName = _currentUserService.GetUsername();
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
+                var userName = _currentUserService.UserName;
                 
                 // Check JWT token claims
                 var claims = User.Claims.Select(c => new { c.Type, c.Value }).ToList();

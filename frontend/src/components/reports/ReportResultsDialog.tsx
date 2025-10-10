@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Dialog,
@@ -26,7 +26,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  DropdownMenuCheckboxItem,
+} from '../ui/dropdown-menu';
 import { Input } from '../ui/input';
+import { Checkbox } from '../ui/checkbox';
 import {
   ChevronLeft,
   ChevronRight,
@@ -37,6 +46,11 @@ import {
   Loader2,
   Filter,
   X,
+  Columns3,
+  Settings,
+  GripVertical,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { reportsService, ReportResult, ReportColumn } from '../../services/reports';
 import { useToast } from '../../hooks/use-toast';
@@ -85,6 +99,13 @@ export default function ReportResultsDialog({
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [isExporting, setIsExporting] = useState(false);
+  
+  // Column management
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizingColumn, setResizingColumn] = useState<string | null>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
   
   const { toast } = useToast();
   const isClient = useIsClient();
@@ -184,25 +205,30 @@ export default function ReportResultsDialog({
     
     setIsExporting(true);
     try {
-      const blob = await reportsService.exportReport(reportId, { format });
+      const { fileName, blob } = await reportsService.exportReport(reportId, { format });
+      
+      // Create download link and trigger download
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = url;
-      a.download = `${reportName || 'report'}-results.${format}`;
+      a.download = fileName;
       document.body.appendChild(a);
       a.click();
+      
+      // Clean up
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
       
       toast({
         title: 'Export Successful',
-        description: `Report exported as ${format.toUpperCase()}`,
+        description: `Report exported as ${format.toUpperCase()}: ${fileName}`,
       });
     } catch (error: any) {
+      console.error('Export error:', error);
       toast({
         title: 'Export Failed',
-        description: error.response?.data?.message || 'Failed to export report',
+        description: error.message || 'Failed to export report',
         variant: 'destructive',
       });
     } finally {
@@ -217,12 +243,61 @@ export default function ReportResultsDialog({
     setCurrentPage(1);
   };
 
+  // Column resize handlers
+  const handleMouseDown = useCallback((columnName: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+    setResizingColumn(columnName);
+    
+    const startX = e.clientX;
+    const startWidth = columnWidths[columnName] || 150;
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = Math.max(80, startWidth + (e.clientX - startX));
+      setColumnWidths(prev => ({
+        ...prev,
+        [columnName]: newWidth
+      }));
+    };
+    
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      setResizingColumn(null);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, [columnWidths]);
+
+  // Column visibility handlers
+  const toggleColumnVisibility = useCallback((columnName: string) => {
+    setHiddenColumns(prev => {
+      const newHidden = new Set(prev);
+      if (newHidden.has(columnName)) {
+        newHidden.delete(columnName);
+      } else {
+        newHidden.add(columnName);
+      }
+      return newHidden;
+    });
+  }, []);
+
+  const showAllColumns = useCallback(() => {
+    setHiddenColumns(new Set());
+  }, []);
+
+  const resetColumnWidths = useCallback(() => {
+    setColumnWidths({});
+  }, []);
+
   if (!open || !reportId) return null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-7xl max-h-[90vh] overflow-hidden">
-        <DialogHeader>
+      <DialogContent className="max-w-[95vw] w-full max-h-[95vh] overflow-hidden flex flex-col">
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center justify-between">
             <div>
               <span>Report Results: {reportName || 'Unnamed Report'}</span>
@@ -233,6 +308,57 @@ export default function ReportResultsDialog({
               )}
             </div>
             <div className="flex items-center space-x-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Columns3 className="h-4 w-4 mr-2" />
+                    Columns
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <div className="p-2">
+                    <div className="text-sm font-medium mb-2">Column Visibility</div>
+                    <div className="max-h-48 overflow-y-auto space-y-1">
+                      {results?.columns.map((column) => (
+                        <DropdownMenuCheckboxItem
+                          key={column.name}
+                          checked={!hiddenColumns.has(column.name)}
+                          onCheckedChange={() => toggleColumnVisibility(column.name)}
+                          className="text-sm"
+                        >
+                          <div className="flex items-center space-x-2">
+                            {hiddenColumns.has(column.name) ? (
+                              <EyeOff className="h-3 w-3" />
+                            ) : (
+                              <Eye className="h-3 w-3" />
+                            )}
+                            <span>{column.displayName || column.name}</span>
+                          </div>
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                    </div>
+                    <DropdownMenuSeparator />
+                    <div className="flex space-x-2 pt-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={showAllColumns}
+                        className="flex-1 text-xs"
+                      >
+                        Show All
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={resetColumnWidths}
+                        className="flex-1 text-xs"
+                      >
+                        Reset Sizes
+                      </Button>
+                    </div>
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button
                 variant="outline"
                 size="sm"
@@ -301,7 +427,7 @@ export default function ReportResultsDialog({
           </div>
 
           {/* Results Table */}
-          <div className="flex-1 overflow-auto border rounded-md">
+          <div className="flex-1 overflow-hidden border rounded-md flex flex-col">
             {isLoading ? (
               <div className="flex items-center justify-center h-64">
                 <Loader2 className="h-8 w-8 animate-spin" />
@@ -311,39 +437,85 @@ export default function ReportResultsDialog({
                 <p>Failed to load results. Please try again.</p>
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {results?.columns.map((column) => (
-                      <TableHead
-                        key={column.name}
-                        className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => handleSort(column.name)}
-                      >
-                        <div className="flex items-center">
-                          {column.displayName || column.name}
-                          {sortColumn === column.name && (
-                            <span className="ml-1">
-                              {sortDirection === 'asc' ? '↑' : '↓'}
-                            </span>
-                          )}
-                        </div>
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {processedData.map((row, index) => (
-                    <TableRow key={index}>
-                      {results?.columns.map((column) => (
-                        <TableCell key={column.name}>
-                          {formatCellValue(row[column.name], column)}
-                        </TableCell>
-                      ))}
+              <div className="flex-1 overflow-auto" style={{ maxHeight: 'calc(95vh - 300px)' }}>
+                <Table ref={tableRef} className="relative">
+                  <TableHeader className="sticky top-0 bg-background z-10 border-b">
+                    <TableRow>
+                      {results?.columns
+                        .filter(column => !hiddenColumns.has(column.name))
+                        .map((column, index) => {
+                          const width = columnWidths[column.name] || 150;
+                          return (
+                            <TableHead
+                              key={column.name}
+                              className="cursor-pointer hover:bg-muted/50 whitespace-nowrap relative border-r bg-background"
+                              onClick={() => handleSort(column.name)}
+                              style={{ 
+                                width: `${width}px`,
+                                minWidth: `${width}px`,
+                                maxWidth: `${width}px`
+                              }}
+                            >
+                              <div className="flex items-center justify-between pr-4">
+                                <div className="flex items-center">
+                                  {column.displayName || column.name}
+                                  {sortColumn === column.name && (
+                                    <span className="ml-1">
+                                      {sortDirection === 'asc' ? '↑' : '↓'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              {/* Resize Handle */}
+                              <div
+                                className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-transparent hover:bg-border transition-colors z-20"
+                                onMouseDown={(e) => handleMouseDown(column.name, e)}
+                                style={{
+                                  cursor: resizingColumn === column.name ? 'col-resize' : 'col-resize'
+                                }}
+                              >
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 hover:opacity-100 transition-opacity" />
+                                </div>
+                              </div>
+                            </TableHead>
+                          );
+                        })
+                      }
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {processedData.map((row, index) => (
+                      <TableRow key={index}>
+                        {results?.columns
+                          .filter(column => !hiddenColumns.has(column.name))
+                          .map((column) => {
+                            const width = columnWidths[column.name] || 150;
+                            return (
+                              <TableCell 
+                                key={column.name} 
+                                className="border-r overflow-hidden text-ellipsis"
+                                style={{ 
+                                  width: `${width}px`,
+                                  minWidth: `${width}px`,
+                                  maxWidth: `${width}px`
+                                }}
+                              >
+                                <div 
+                                  className="truncate" 
+                                  title={String(formatCellValue(row[column.name], column))}
+                                >
+                                  {formatCellValue(row[column.name], column)}
+                                </div>
+                              </TableCell>
+                            );
+                          })
+                        }
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </div>
 

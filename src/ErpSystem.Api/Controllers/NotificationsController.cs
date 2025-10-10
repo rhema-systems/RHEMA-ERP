@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.Notifications;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 
 namespace ErpSystem.Api.Controllers
@@ -37,8 +38,8 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
-                var userId = _currentUserService.GetUserId();
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
                 
                 if (!tenantId.HasValue)
                 {
@@ -70,8 +71,8 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
-                var userId = _currentUserService.GetUserId();
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
                 
                 if (!tenantId.HasValue)
                 {
@@ -101,8 +102,8 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
-                var userId = _currentUserService.GetUserId();
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
                 
                 if (!tenantId.HasValue)
                 {
@@ -137,8 +138,8 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
-                var userId = _currentUserService.GetUserId();
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
                 
                 if (!tenantId.HasValue)
                 {
@@ -168,8 +169,8 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
-                var userId = _currentUserService.GetUserId();
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
                 
                 if (!tenantId.HasValue)
                 {
@@ -205,8 +206,8 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
-                var userId = _currentUserService.GetUserId();
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 
                 if (!tenantId.HasValue)
                 {
@@ -238,8 +239,8 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
-                var userId = _currentUserService.GetUserId();
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 
                 if (!tenantId.HasValue)
                 {
@@ -275,8 +276,8 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
-                var userId = _currentUserService.GetUserId();
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 
                 if (!tenantId.HasValue)
                 {
@@ -306,7 +307,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -330,7 +331,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -354,7 +355,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -378,7 +379,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -404,7 +405,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 
                 if (!tenantId.HasValue)
                 {
@@ -432,8 +433,8 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
-                var userId = _currentUserService.GetUserId();
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 
                 if (!tenantId.HasValue)
                 {
@@ -464,7 +465,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 
                 if (!tenantId.HasValue)
                 {
@@ -496,7 +497,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var tenantId = _currentUserService.GetTenantId();
+                var tenantId = _currentUserService.TenantId;
                 
                 if (!tenantId.HasValue)
                 {

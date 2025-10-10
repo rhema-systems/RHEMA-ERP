@@ -45,6 +45,18 @@ public class AzureBlobStorageService : IFileStorageService
         */
     }
 
+    public async Task<string> UploadFileAsync(Stream fileStream, string fileName, string folderPath)
+    {
+        // Placeholder implementation
+        throw new NotImplementedException("Azure Blob Storage service requires Azure.Storage.Blobs package. Please install the package and uncomment the implementation.");
+    }
+
+    public async Task<Stream> DownloadFileAsync(string filePath, Guid fileId)
+    {
+        // Placeholder implementation
+        throw new NotImplementedException("Azure Blob Storage service requires Azure.Storage.Blobs package. Please install the package and uncomment the implementation.");
+    }
+
     public async Task<FileStorageResult> UploadFileAsync(FileUploadRequest request)
     {
         try

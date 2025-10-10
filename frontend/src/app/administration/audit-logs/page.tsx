@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { DashboardLayout } from '../../../components/layout/dashboard-layout';
 import { DataTable, Column } from '../../../components/admin/data-table';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';

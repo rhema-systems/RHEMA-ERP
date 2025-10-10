@@ -1,428 +1,919 @@
 using ErpSystem.Core.DTOs.DataSources;
 using ErpSystem.Core.Entities;
-using ErpSystem.Core.Configuration;
+using ErpSystem.Core.Interfaces;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace ErpSystem.Core.Services
 {
     public class EnterpriseDataSourceService : IDataSourceService
     {
-        private readonly IConnectionPoolManager _connectionPoolManager;
-        private readonly IQueryCacheService _queryCacheService;
-        private readonly IQueryExecutionService _queryExecutionService;
-        private readonly IRateLimitingService _rateLimitingService;
+        private readonly IDataSourceRepository _dataSourceRepository;
+        private readonly IUnitOfWork _unitOfWork;
         private readonly ILogger<EnterpriseDataSourceService> _logger;
-        private readonly PerformanceSettings _performanceSettings;
 
         public EnterpriseDataSourceService(
-            IConnectionPoolManager connectionPoolManager,
-            IQueryCacheService queryCacheService,
-            IQueryExecutionService queryExecutionService,
-            IRateLimitingService rateLimitingService,
-            ILogger<EnterpriseDataSourceService> logger,
-            IOptions<PerformanceSettings> performanceSettings)
+            IDataSourceRepository dataSourceRepository,
+            IUnitOfWork unitOfWork,
+            ILogger<EnterpriseDataSourceService> logger)
         {
-            _connectionPoolManager = connectionPoolManager;
-            _queryCacheService = queryCacheService;
-            _queryExecutionService = queryExecutionService;
-            _rateLimitingService = rateLimitingService;
+            _dataSourceRepository = dataSourceRepository;
+            _unitOfWork = unitOfWork;
             _logger = logger;
-            _performanceSettings = performanceSettings.Value;
         }
 
         public async Task<List<DataSourceDto>> GetDataSourcesAsync(Guid tenantId)
         {
-            var cacheKey = $"datasources:tenant:{tenantId}";
-            var cached = await _queryCacheService.GetCachedResultAsync(cacheKey);
-            
-            if (cached != null)
+            try
             {
-                _logger.LogDebug("Returning cached data sources for tenant {TenantId}", tenantId);
-                return ConvertFromCachedResult<List<DataSourceDto>>(cached);
+                var dataSources = await _dataSourceRepository.GetDataSourcesByTenantAsync(tenantId);
+                var result = dataSources.Select(MapToDto).ToList();
+                
+                _logger.LogDebug("Retrieved {Count} data sources for tenant {TenantId}", result.Count, tenantId);
+                return result;
             }
-
-            // Simulate database call - replace with actual implementation
-            await Task.Delay(100);
-            
-            var dataSources = GetMockDataSources();
-            
-            // Cache the results
-            var resultToCache = CreateCacheableResult(dataSources);
-            await _queryCacheService.SetCachedResultAsync(
-                cacheKey, 
-                resultToCache, 
-                TimeSpan.FromMinutes(10)
-            );
-
-            return dataSources;
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving data sources for tenant {TenantId}", tenantId);
+                throw;
+            }
         }
 
         public async Task<DataSourceDto?> GetDataSourceAsync(Guid dataSourceId, Guid tenantId)
         {
-            var cacheKey = $"datasource:{dataSourceId}:tenant:{tenantId}";
-            var cached = await _queryCacheService.GetCachedResultAsync(cacheKey);
-            
-            if (cached != null)
+            try
             {
-                return ConvertFromCachedResult<DataSourceDto>(cached);
-            }
+                var dataSource = await _dataSourceRepository.GetDataSourceWithUsageAsync(dataSourceId, tenantId);
+                if (dataSource == null)
+                {
+                    _logger.LogWarning("Data source {DataSourceId} not found for tenant {TenantId}", dataSourceId, tenantId);
+                    return null;
+                }
 
-            // Simulate database call
-            await Task.Delay(50);
-            
-            var dataSource = GetMockDataSources().FirstOrDefault(ds => ds.Id == dataSourceId);
-            
-            if (dataSource != null)
+                return MapToDto(dataSource);
+            }
+            catch (Exception ex)
             {
-                var resultToCache = CreateCacheableResult(dataSource);
-                await _queryCacheService.SetCachedResultAsync(
-                    cacheKey, 
-                    resultToCache, 
-                    TimeSpan.FromMinutes(30)
-                );
+                _logger.LogError(ex, "Error retrieving data source {DataSourceId} for tenant {TenantId}", dataSourceId, tenantId);
+                throw;
             }
-
-            return dataSource;
         }
 
         public async Task<QueryResultDto> ExecuteQueryAsync(Guid dataSourceId, QueryDataSourceDto queryDto, Guid tenantId)
         {
-            var userId = Guid.NewGuid(); // Get from context in real implementation
-            
-            // Check rate limits first
-            var rateLimitCheck = await _rateLimitingService.CheckRateLimitAsync(new RateLimitRequest
+            try
             {
-                UserId = userId,
-                TenantId = tenantId,
-                DataSourceId = dataSourceId,
-                Type = RateLimitType.QueryExecution,
-                RequestedWeight = CalculateQueryWeight(queryDto)
-            });
-
-            if (!rateLimitCheck.IsAllowed)
-            {
-                _logger.LogWarning("Query execution rate limited for user {UserId}: {Reason}", 
-                    userId, rateLimitCheck.ReasonMessage);
-                throw new InvalidOperationException($"Rate limit exceeded: {rateLimitCheck.ReasonMessage}");
-            }
-
-            // Check cache first
-            var cacheKey = _queryCacheService.GenerateCacheKey(dataSourceId, queryDto.Query, queryDto.Parameters);
-            var cachedResult = await _queryCacheService.GetCachedResultAsync(cacheKey);
-            
-            if (cachedResult != null)
-            {
-                _logger.LogDebug("Returning cached query result for key {CacheKey}", cacheKey);
-                return ConvertFromCachedResult<QueryResultDto>(cachedResult);
-            }
-
-            // For long-running queries, use background processing
-            if (ShouldUseBackgroundProcessing(queryDto))
-            {
-                var executionId = await _queryExecutionService.SubmitQueryAsync(new QueryExecutionRequest
+                // Get the data source first
+                var dataSource = await _dataSourceRepository.GetByIdAsync(dataSourceId);
+                if (dataSource == null || dataSource.TenantId != tenantId)
                 {
-                    DataSourceId = dataSourceId,
-                    Query = queryDto.Query,
-                    Parameters = queryDto.Parameters,
-                    MaxRows = queryDto.MaxRows,
-                    UserId = userId,
-                    TenantId = tenantId,
-                    Priority = DetermineQueryPriority(userId),
-                    CacheResult = true
-                });
+                    throw new InvalidOperationException("Data source not found or access denied");
+                }
 
-                // For this demo, we'll simulate immediate execution
-                // In production, you'd return the execution ID and have the client poll for results
-                await Task.Delay(2000);
-                
-                var executionResult = await _queryExecutionService.GetQueryResultAsync(executionId);
-                return executionResult.Result ?? throw new InvalidOperationException("Query execution failed");
+                // Update usage statistics
+                await _dataSourceRepository.UpdateUsageCountAsync(dataSourceId);
+
+                // For now, return a simple mock result
+                // TODO: Implement actual query execution based on data source type
+                return new QueryResultDto
+                {
+                    Data = new List<Dictionary<string, object>>(),
+                    Columns = new List<ColumnInfo>(),
+                    TotalRows = 0,
+                    ExecutionTime = TimeSpan.FromMilliseconds(100),
+                    QueryUsed = queryDto.Query
+                };
             }
-
-            // Execute directly for simple queries
-            var result = await ExecuteQueryDirectly(dataSourceId, queryDto);
-
-            // Cache the result if it's not too large
-            if (ShouldCacheResult(result))
+            catch (Exception ex)
             {
-                var cacheExpiration = CalculateCacheExpiration(queryDto);
-                var resultToCache = CreateCacheableResult(result);
-                await _queryCacheService.SetCachedResultAsync(cacheKey, resultToCache, cacheExpiration);
+                _logger.LogError(ex, "Error executing query on data source {DataSourceId}", dataSourceId);
+                throw;
             }
-
-            return result;
         }
 
         public async Task<DataSourceDto> CreateDataSourceAsync(CreateDataSourceDto createDto, Guid tenantId, Guid userId)
         {
-            // Invalidate tenant cache
-            await _queryCacheService.InvalidateCachePatternAsync($"datasources:tenant:{tenantId}*");
-            
-            // Simulate creation
-            await Task.Delay(200);
-            
-            var dataSource = new DataSourceDto
+            try
             {
-                Id = Guid.NewGuid(),
-                Name = createDto.Name,
-                Description = createDto.Description,
-                Type = createDto.Type,
-                TypeName = GetTypeName(createDto.Type),
-                Host = createDto.Host,
-                Port = createDto.Port,
-                DatabaseName = createDto.DatabaseName,
-                Username = createDto.Username,
-                AdditionalSettings = createDto.AdditionalSettings,
-                IsActive = createDto.IsActive,
-                CreatedBy = "Current User",
-                CreatedAt = DateTime.Now,
-                UsageCount = 0,
-                Status = ConnectionStatus.Unknown
-            };
-
-            // Warm up connection pool for new data source
-            if (_performanceSettings.ConnectionPool.EnableWarmup)
-            {
-                _ = Task.Run(async () =>
+                // Check if name already exists
+                var existingByName = await _dataSourceRepository.GetByNameAsync(createDto.Name, tenantId);
+                if (existingByName != null)
                 {
-                    try
-                    {
-                        await _connectionPoolManager.WarmupPoolAsync(
-                            dataSource.Id, 
-                            _performanceSettings.ConnectionPool.WarmupConnectionCount
-                        );
-                        _logger.LogInformation("Connection pool warmed up for data source {DataSourceId}", dataSource.Id);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to warm up connection pool for data source {DataSourceId}", dataSource.Id);
-                    }
-                });
-            }
+                    throw new InvalidOperationException($"A data source with the name '{createDto.Name}' already exists");
+                }
 
-            return dataSource;
+                var dataSource = new DataSource
+                {
+                    Id = Guid.NewGuid(),
+                    Name = createDto.Name,
+                    Description = createDto.Description,
+                    Type = (int)createDto.Type,
+                    Host = createDto.Host,
+                    Port = createDto.Port,
+                    DatabaseName = createDto.DatabaseName,
+                    Username = createDto.Username,
+                    EncryptedPassword = EncryptPassword(createDto.Password),
+                    AdditionalSettings = System.Text.Json.JsonSerializer.Serialize(createDto.AdditionalSettings),
+                    IsActive = createDto.IsActive,
+                    TenantId = tenantId,
+                    CreatedByUserId = userId,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                await _dataSourceRepository.AddAsync(dataSource);
+                await _unitOfWork.SaveChangesAsync();
+                
+                _logger.LogInformation("Created data source {DataSourceId} for tenant {TenantId}", dataSource.Id, tenantId);
+                return MapToDto(dataSource);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating data source for tenant {TenantId}", tenantId);
+                throw;
+            }
         }
 
         public async Task<DataSourceDto?> UpdateDataSourceAsync(Guid dataSourceId, UpdateDataSourceDto updateDto, Guid tenantId, Guid userId)
         {
-            // Invalidate caches
-            await _queryCacheService.InvalidateCacheAsync(dataSourceId);
-            await _queryCacheService.InvalidateCachePatternAsync($"datasources:tenant:{tenantId}*");
+            try
+            {
+                var dataSource = await _dataSourceRepository.GetByIdAsync(dataSourceId);
+                if (dataSource == null || dataSource.TenantId != tenantId)
+                {
+                    return null;
+                }
 
-            // Clear connection pool to pick up new settings
-            await _connectionPoolManager.ClearPoolAsync(dataSourceId);
+                // Check if name change conflicts with existing
+                if (!string.IsNullOrEmpty(updateDto.Name) && updateDto.Name != dataSource.Name)
+                {
+                    var nameExists = await _dataSourceRepository.IsDataSourceNameExistsAsync(updateDto.Name, tenantId, dataSourceId);
+                    if (nameExists)
+                    {
+                        throw new InvalidOperationException($"A data source with the name '{updateDto.Name}' already exists");
+                    }
+                    dataSource.Name = updateDto.Name;
+                }
 
-            // Simulate update
-            await Task.Delay(150);
-            return await GetDataSourceAsync(dataSourceId, tenantId);
+                // Update properties
+                if (!string.IsNullOrEmpty(updateDto.Description))
+                    dataSource.Description = updateDto.Description;
+                if (!string.IsNullOrEmpty(updateDto.Host))
+                    dataSource.Host = updateDto.Host;
+                if (updateDto.Port.HasValue)
+                    dataSource.Port = updateDto.Port;
+                if (!string.IsNullOrEmpty(updateDto.DatabaseName))
+                    dataSource.DatabaseName = updateDto.DatabaseName;
+                if (!string.IsNullOrEmpty(updateDto.Username))
+                    dataSource.Username = updateDto.Username;
+                if (!string.IsNullOrEmpty(updateDto.Password))
+                    dataSource.EncryptedPassword = EncryptPassword(updateDto.Password);
+                if (updateDto.AdditionalSettings != null)
+                    dataSource.AdditionalSettings = System.Text.Json.JsonSerializer.Serialize(updateDto.AdditionalSettings);
+                if (updateDto.IsActive.HasValue)
+                    dataSource.IsActive = updateDto.IsActive.Value;
+
+                dataSource.UpdatedAt = DateTime.UtcNow;
+
+                await _dataSourceRepository.UpdateAsync(dataSource);
+                await _unitOfWork.SaveChangesAsync();
+                
+                _logger.LogInformation("Updated data source {DataSourceId} for tenant {TenantId}", dataSourceId, tenantId);
+                return MapToDto(dataSource);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating data source {DataSourceId}", dataSourceId);
+                throw;
+            }
         }
 
         public async Task<bool> DeleteDataSourceAsync(Guid dataSourceId, Guid tenantId, Guid userId)
         {
-            // Clear all related caches and resources
-            await _queryCacheService.InvalidateCacheAsync(dataSourceId);
-            await _queryCacheService.InvalidateCachePatternAsync($"datasources:tenant:{tenantId}*");
-            await _connectionPoolManager.ClearPoolAsync(dataSourceId);
+            try
+            {
+                var dataSource = await _dataSourceRepository.GetByIdAsync(dataSourceId);
+                if (dataSource == null || dataSource.TenantId != tenantId)
+                {
+                    return false;
+                }
 
-            await Task.Delay(100);
-            return true;
+                // Soft delete
+                dataSource.IsDeleted = true;
+                dataSource.DeletedAt = DateTime.UtcNow;
+                await _dataSourceRepository.UpdateAsync(dataSource);
+                await _unitOfWork.SaveChangesAsync();
+
+                _logger.LogInformation("Deleted data source {DataSourceId} for tenant {TenantId}", dataSourceId, tenantId);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting data source {DataSourceId}", dataSourceId);
+                throw;
+            }
         }
 
         public async Task<ConnectionTestResult> TestConnectionAsync(TestConnectionDto testDto)
         {
-            // Rate limit connection tests
-            var userId = Guid.NewGuid(); // Get from context
-            var rateLimitCheck = await _rateLimitingService.CheckRateLimitAsync(new RateLimitRequest
+            var startTime = DateTime.UtcNow;
+            try
             {
-                UserId = userId,
-                TenantId = Guid.NewGuid(), // Get from context
-                DataSourceId = Guid.NewGuid(),
-                Type = RateLimitType.ConnectionTest
-            });
-
-            if (!rateLimitCheck.IsAllowed)
+                _logger.LogInformation("Testing connection to {Host}:{Port} database {Database} as {Username}", 
+                    testDto.Host, testDto.Port, testDto.DatabaseName, testDto.Username);
+                
+                var connectionString = BuildConnectionString(testDto);
+                var connectionInfo = await TestDatabaseConnectionAsync(connectionString, testDto.Type);
+                
+                var responseTime = DateTime.UtcNow - startTime;
+                
+                return new ConnectionTestResult
+                {
+                    IsSuccess = true,
+                    ResponseTime = responseTime,
+                    TestedAt = DateTime.UtcNow,
+                    ConnectionInfo = connectionInfo
+                };
+            }
+            catch (Exception ex)
             {
+                var responseTime = DateTime.UtcNow - startTime;
+                _logger.LogError(ex, "Error testing connection to {Host}:{Port}", testDto.Host, testDto.Port);
+                
                 return new ConnectionTestResult
                 {
                     IsSuccess = false,
-                    ErrorMessage = "Rate limit exceeded for connection tests",
-                    ResponseTime = TimeSpan.Zero,
-                    TestedAt = DateTime.Now
+                    ErrorMessage = ex.Message,
+                    ResponseTime = responseTime,
+                    TestedAt = DateTime.UtcNow
                 };
             }
-
-            await Task.Delay(2000); // Simulate connection test
-            return CreateMockConnectionResult();
         }
 
         public async Task<ConnectionTestResult> TestDataSourceConnectionAsync(Guid dataSourceId, Guid tenantId)
         {
-            await Task.Delay(1500);
-            return CreateMockConnectionResult();
+            var startTime = DateTime.UtcNow;
+            try
+            {
+                var dataSource = await _dataSourceRepository.GetByIdAsync(dataSourceId);
+                if (dataSource == null || dataSource.TenantId != tenantId)
+                {
+                    return new ConnectionTestResult
+                    {
+                        IsSuccess = false,
+                        ErrorMessage = "Data source not found",
+                        ResponseTime = TimeSpan.Zero,
+                        TestedAt = DateTime.UtcNow
+                    };
+                }
+
+                _logger.LogInformation("Testing connection for data source {DataSourceId} ({Name})", dataSourceId, dataSource.Name);
+                
+                // Build connection string from data source
+                var testDto = new TestConnectionDto
+                {
+                    Type = (DataSourceType)dataSource.Type,
+                    Host = dataSource.Host,
+                    Port = dataSource.Port,
+                    DatabaseName = dataSource.DatabaseName,
+                    Username = dataSource.Username,
+                    Password = DecryptPassword(dataSource.EncryptedPassword)
+                };
+                
+                var connectionString = BuildConnectionString(testDto);
+                var connectionInfo = await TestDatabaseConnectionAsync(connectionString, testDto.Type);
+                
+                var responseTime = DateTime.UtcNow - startTime;
+                
+                // Update connection test status in database
+                await _dataSourceRepository.UpdateConnectionStatusAsync(dataSourceId, true);
+                await _unitOfWork.SaveChangesAsync();
+
+                return new ConnectionTestResult
+                {
+                    IsSuccess = true,
+                    ResponseTime = responseTime,
+                    TestedAt = DateTime.UtcNow,
+                    ConnectionInfo = connectionInfo
+                };
+            }
+            catch (Exception ex)
+            {
+                var responseTime = DateTime.UtcNow - startTime;
+                _logger.LogError(ex, "Error testing connection for data source {DataSourceId}", dataSourceId);
+                
+                // Update connection status to failed
+                try
+                {
+                    await _dataSourceRepository.UpdateConnectionStatusAsync(dataSourceId, false, ex.Message);
+                    await _unitOfWork.SaveChangesAsync();
+                }
+                catch (Exception updateEx)
+                {
+                    _logger.LogError(updateEx, "Failed to update connection status for data source {DataSourceId}", dataSourceId);
+                }
+                
+                return new ConnectionTestResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = ex.Message,
+                    ResponseTime = responseTime,
+                    TestedAt = DateTime.UtcNow
+                };
+            }
         }
 
         public async Task<DataSourceSchemaDto> GetSchemaAsync(Guid dataSourceId, Guid tenantId)
         {
-            var cacheKey = $"schema:{dataSourceId}";
-            var cached = await _queryCacheService.GetCachedResultAsync(cacheKey);
-            
-            if (cached != null)
+            try
             {
-                return ConvertFromCachedResult<DataSourceSchemaDto>(cached);
+                var dataSource = await _dataSourceRepository.GetByIdAsync(dataSourceId);
+                if (dataSource == null || dataSource.TenantId != tenantId)
+                {
+                    throw new InvalidOperationException("Data source not found or access denied");
+                }
+
+                _logger.LogInformation("Retrieving schema for data source {DataSourceId} ({Name})", dataSourceId, dataSource.Name);
+
+                // Validate data source configuration
+                if (string.IsNullOrEmpty(dataSource.Host) || string.IsNullOrEmpty(dataSource.DatabaseName))
+                {
+                    _logger.LogWarning("Data source {DataSourceId} has incomplete connection configuration, returning sample schema", dataSourceId);
+                    return GetSampleSchema();
+                }
+
+                // Build connection string
+                var testDto = new TestConnectionDto
+                {
+                    Type = (DataSourceType)dataSource.Type,
+                    Host = dataSource.Host,
+                    Port = dataSource.Port,
+                    DatabaseName = dataSource.DatabaseName,
+                    Username = dataSource.Username,
+                    Password = DecryptPassword(dataSource.EncryptedPassword)
+                };
+
+                var connectionString = BuildConnectionString(testDto);
+                return await RetrieveDatabaseSchemaAsync(connectionString, testDto.Type);
             }
-
-            await Task.Delay(1000);
-            var schema = CreateMockSchema();
-            
-            // Cache schema for longer periods since it changes infrequently
-            var resultToCache = CreateCacheableResult(schema);
-            await _queryCacheService.SetCachedResultAsync(
-                cacheKey, 
-                resultToCache, 
-                TimeSpan.FromHours(4)
-            );
-
-            return schema;
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving schema for data source {DataSourceId}, returning sample schema", dataSourceId);
+                return GetSampleSchema();
+            }
         }
 
         public async Task<List<DataSourceDto>> GetActiveDataSourcesAsync(Guid tenantId)
         {
-            var allDataSources = await GetDataSourcesAsync(tenantId);
-            return allDataSources.Where(ds => ds.IsActive).ToList();
+            try
+            {
+                var dataSources = await _dataSourceRepository.GetDataSourcesByTenantAsync(tenantId, activeOnly: true);
+                return dataSources.Select(MapToDto).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving active data sources for tenant {TenantId}", tenantId);
+                throw;
+            }
+        }
+
+        private string BuildConnectionString(TestConnectionDto dto)
+        {
+            switch (dto.Type)
+            {
+                case DataSourceType.SqlServer:
+                    var portPart = dto.Port.HasValue ? $",{dto.Port.Value}" : string.Empty;
+                    return $"Server={dto.Host}{portPart};Database={dto.DatabaseName};User Id={dto.Username};Password={dto.Password};TrustServerCertificate=true;";
+                // TODO: Add other providers
+                default:
+                    throw new NotSupportedException($"Connection test for {dto.Type} is not yet supported.");
+            }
+        }
+
+        private async Task<Dictionary<string, object>> TestDatabaseConnectionAsync(string connectionString, DataSourceType type)
+        {
+            switch (type)
+            {
+                case DataSourceType.SqlServer:
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    await using (var conn = new Microsoft.Data.SqlClient.SqlConnection(connectionString))
+                    {
+                        await conn.OpenAsync();
+                        var serverVersion = conn.ServerVersion;
+                        await using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.CommandText = "SELECT 1";
+                            await cmd.ExecuteScalarAsync();
+                        }
+                        sw.Stop();
+                        return new Dictionary<string, object>
+                        {
+                            ["Status"] = "Connected",
+                            ["ServerVersion"] = serverVersion,
+                            ["ElapsedMs"] = sw.ElapsedMilliseconds
+                        };
+                    }
+                default:
+                    throw new NotSupportedException($"Connection test for {type} is not yet supported.");
+            }
+        }
+
+        private async Task<DataSourceSchemaDto> RetrieveDatabaseSchemaAsync(string connectionString, DataSourceType type)
+        {
+            switch (type)
+            {
+                case DataSourceType.SqlServer:
+                    return await RetrieveSqlServerSchemaAsync(connectionString);
+                default:
+                    throw new NotSupportedException($"Schema retrieval for {type} is not yet supported.");
+            }
+        }
+
+        private async Task<DataSourceSchemaDto> RetrieveSqlServerSchemaAsync(string connectionString)
+        {
+            var tables = new List<TableInfo>();
+            var views = new List<ViewInfo>();
+            var storedProcedures = new List<StoredProcedureInfo>();
+
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            // Get Tables - First collect table info, then get columns separately
+            var tableInfoList = new List<(string SchemaName, string TableName, int RowCount)>();
+            
+            const string tablesQuery = @"
+                SELECT 
+                    TABLE_SCHEMA as SchemaName,
+                    TABLE_NAME as TableName,
+                    0 as [RowCount]
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE = 'BASE TABLE'
+                ORDER BY TABLE_SCHEMA, TABLE_NAME";
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = tablesQuery;
+                await using var reader = await cmd.ExecuteReaderAsync();
+                
+                while (await reader.ReadAsync())
+                {
+                    var schemaName = reader.GetString(0);
+                    var tableName = reader.GetString(1);
+                    var rowCount = reader.GetInt32(2); // Now it's always 0
+                    
+                    tableInfoList.Add((schemaName, tableName, rowCount));
+                }
+            }
+            
+            // Now get columns for each table (after the reader is closed)
+            foreach (var (schemaName, tableName, rowCount) in tableInfoList)
+            {
+                tables.Add(new TableInfo
+                {
+                    Name = tableName,
+                    Schema = schemaName,
+                    RowCount = rowCount,
+                    Columns = await GetTableColumnsAsync(conn, schemaName, tableName)
+                });
+            }
+
+            // Get Views - First collect view info, then get columns separately
+            var viewInfoList = new List<(string SchemaName, string ViewName)>();
+            
+            const string viewsQuery = @"
+                SELECT 
+                    TABLE_SCHEMA as SchemaName,
+                    TABLE_NAME as ViewName
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE = 'VIEW'
+                ORDER BY TABLE_SCHEMA, TABLE_NAME";
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = viewsQuery;
+                await using var reader = await cmd.ExecuteReaderAsync();
+                
+                while (await reader.ReadAsync())
+                {
+                    var schemaName = reader.GetString(0);
+                    var viewName = reader.GetString(1);
+                    
+                    viewInfoList.Add((schemaName, viewName));
+                }
+            }
+            
+            // Now get columns for each view (after the reader is closed)
+            foreach (var (schemaName, viewName) in viewInfoList)
+            {
+                views.Add(new ViewInfo
+                {
+                    Name = viewName,
+                    Schema = schemaName,
+                    Columns = await GetViewColumnsAsync(conn, schemaName, viewName)
+                });
+            }
+
+            // Get Stored Procedures - First collect procedure info, then get parameters separately
+            var procedureInfoList = new List<(string SchemaName, string ProcedureName)>();
+            
+            const string proceduresQuery = @"
+                SELECT 
+                    ROUTINE_SCHEMA as SchemaName,
+                    ROUTINE_NAME as ProcedureName
+                FROM INFORMATION_SCHEMA.ROUTINES
+                WHERE ROUTINE_TYPE = 'PROCEDURE'
+                ORDER BY ROUTINE_SCHEMA, ROUTINE_NAME";
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = proceduresQuery;
+                await using var reader = await cmd.ExecuteReaderAsync();
+                
+                while (await reader.ReadAsync())
+                {
+                    var schemaName = reader.GetString(0);
+                    var procedureName = reader.GetString(1);
+                    
+                    procedureInfoList.Add((schemaName, procedureName));
+                }
+            }
+            
+            // Now get parameters for each stored procedure (after the reader is closed)
+            foreach (var (schemaName, procedureName) in procedureInfoList)
+            {
+                storedProcedures.Add(new StoredProcedureInfo
+                {
+                    Name = procedureName,
+                    Schema = schemaName,
+                    Parameters = await GetProcedureParametersAsync(conn, schemaName, procedureName)
+                });
+            }
+
+            return new DataSourceSchemaDto
+            {
+                Tables = tables,
+                Views = views,
+                StoredProcedures = storedProcedures
+            };
+        }
+
+        private async Task<List<ColumnInfo>> GetTableColumnsAsync(Microsoft.Data.SqlClient.SqlConnection conn, string schemaName, string tableName)
+        {
+            var columns = new List<ColumnInfo>();
+            
+            const string columnsQuery = @"
+                SELECT 
+                    c.COLUMN_NAME,
+                    c.DATA_TYPE,
+                    c.IS_NULLABLE,
+                    c.CHARACTER_MAXIMUM_LENGTH,
+                    c.NUMERIC_PRECISION,
+                    c.NUMERIC_SCALE,
+                    CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 1 ELSE 0 END as IS_PRIMARY_KEY
+                FROM INFORMATION_SCHEMA.COLUMNS c
+                LEFT JOIN (
+                    SELECT ku.COLUMN_NAME
+                    FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku
+                    INNER JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc ON ku.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+                    WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY' 
+                        AND ku.TABLE_SCHEMA = @SchemaName 
+                        AND ku.TABLE_NAME = @TableName
+                ) pk ON c.COLUMN_NAME = pk.COLUMN_NAME
+                WHERE c.TABLE_SCHEMA = @SchemaName AND c.TABLE_NAME = @TableName
+                ORDER BY c.ORDINAL_POSITION";
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = columnsQuery;
+            cmd.Parameters.AddWithValue("@SchemaName", schemaName);
+            cmd.Parameters.AddWithValue("@TableName", tableName);
+            
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                columns.Add(new ColumnInfo
+                {
+                    Name = reader.GetString(0),
+                    DataType = reader.GetString(1),
+                    IsNullable = reader.GetString(2) == "YES",
+                    IsPrimaryKey = reader.GetInt32(6) == 1,
+                    MaxLength = reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                    Precision = reader.IsDBNull(4) ? null : reader.GetByte(4),
+                    Scale = reader.IsDBNull(5) ? null : reader.GetInt32(5)
+                });
+            }
+            
+            return columns;
+        }
+
+        private async Task<List<ColumnInfo>> GetViewColumnsAsync(Microsoft.Data.SqlClient.SqlConnection conn, string schemaName, string viewName)
+        {
+            var columns = new List<ColumnInfo>();
+            
+            const string columnsQuery = @"
+                SELECT 
+                    COLUMN_NAME,
+                    DATA_TYPE,
+                    IS_NULLABLE,
+                    CHARACTER_MAXIMUM_LENGTH,
+                    NUMERIC_PRECISION,
+                    NUMERIC_SCALE
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = @SchemaName AND TABLE_NAME = @ViewName
+                ORDER BY ORDINAL_POSITION";
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = columnsQuery;
+            cmd.Parameters.AddWithValue("@SchemaName", schemaName);
+            cmd.Parameters.AddWithValue("@ViewName", viewName);
+            
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                columns.Add(new ColumnInfo
+                {
+                    Name = reader.GetString(0),
+                    DataType = reader.GetString(1),
+                    IsNullable = reader.GetString(2) == "YES",
+                    IsPrimaryKey = false, // Views don't have primary keys
+                    MaxLength = reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                    Precision = reader.IsDBNull(4) ? null : reader.GetByte(4),
+                    Scale = reader.IsDBNull(5) ? null : reader.GetInt32(5)
+                });
+            }
+            
+            return columns;
+        }
+
+        private async Task<List<ParameterInfo>> GetProcedureParametersAsync(Microsoft.Data.SqlClient.SqlConnection conn, string schemaName, string procedureName)
+        {
+            var parameters = new List<ParameterInfo>();
+            
+            const string parametersQuery = @"
+                SELECT 
+                    PARAMETER_NAME,
+                    DATA_TYPE,
+                    PARAMETER_MODE
+                FROM INFORMATION_SCHEMA.PARAMETERS
+                WHERE SPECIFIC_SCHEMA = @SchemaName AND SPECIFIC_NAME = @ProcedureName
+                ORDER BY ORDINAL_POSITION";
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = parametersQuery;
+            cmd.Parameters.AddWithValue("@SchemaName", schemaName);
+            cmd.Parameters.AddWithValue("@ProcedureName", procedureName);
+            
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                parameters.Add(new ParameterInfo
+                {
+                    Name = reader.GetString(0),
+                    DataType = reader.GetString(1),
+                    IsOutput = reader.GetString(2).Contains("OUT")
+                });
+            }
+            
+            return parameters;
         }
 
         public async Task UpdateUsageStatsAsync(Guid dataSourceId)
         {
-            // Invalidate cached data source to update usage stats
-            await _queryCacheService.InvalidateCachePatternAsync($"datasource:{dataSourceId}*");
-            await Task.Delay(10);
-        }
-
-        // Private helper methods
-        private int CalculateQueryWeight(QueryDataSourceDto queryDto)
-        {
-            var weight = 1;
-            
-            // Increase weight for complex queries
-            if (queryDto.Query.ToLower().Contains("join")) weight += 2;
-            if (queryDto.Query.ToLower().Contains("group by")) weight += 1;
-            if (queryDto.Query.ToLower().Contains("order by")) weight += 1;
-            if (queryDto.MaxRows > 10_000) weight += 2;
-
-            return weight;
-        }
-
-        private bool ShouldUseBackgroundProcessing(QueryDataSourceDto queryDto)
-        {
-            return _performanceSettings.QueryExecution.EnableBackgroundProcessing &&
-                   (queryDto.MaxRows > 10_000 || 
-                    queryDto.Query.Length > 1000 ||
-                    queryDto.Query.ToLower().Contains("join"));
-        }
-
-        private QueryPriority DetermineQueryPriority(Guid userId)
-        {
-            // In real implementation, check user role/permissions
-            return QueryPriority.Normal;
-        }
-
-        private bool ShouldCacheResult(QueryResultDto result)
-        {
-            return result.TotalRows <= _performanceSettings.QueryCache.MaxResultRowsToCache;
-        }
-
-        private TimeSpan CalculateCacheExpiration(QueryDataSourceDto queryDto)
-        {
-            // Shorter cache for large result sets, longer for small ones
-            if (queryDto.MaxRows > 5000)
-                return TimeSpan.FromMinutes(5);
-            else if (queryDto.MaxRows > 1000)
-                return TimeSpan.FromMinutes(15);
-            else
-                return _performanceSettings.QueryCache.DefaultExpiration;
-        }
-
-        private async Task<QueryResultDto> ExecuteQueryDirectly(Guid dataSourceId, QueryDataSourceDto queryDto)
-        {
-            // Use connection pool
-            using var connection = await _connectionPoolManager.GetConnectionAsync(dataSourceId);
-            
-            // Simulate query execution
-            await Task.Delay(1500);
-            
-            return CreateMockQueryResult(queryDto.Query);
-        }
-
-        // Mock data methods (replace with actual implementations)
-        private List<DataSourceDto> GetMockDataSources() => MockDataProvider.GetMockDataSourcesList();
-        private ConnectionTestResult CreateMockConnectionResult() => new()
-        {
-            IsSuccess = true,
-            ResponseTime = TimeSpan.FromMilliseconds(new Random().Next(100, 2000)),
-            TestedAt = DateTime.Now,
-            ConnectionInfo = new Dictionary<string, object> { ["Status"] = "Connected" }
-        };
-        
-        private DataSourceSchemaDto CreateMockSchema() => new()
-        {
-            Tables = new List<TableInfo>
+            try
             {
-                new() { Name = "Users", Schema = "dbo", RowCount = 1000, Columns = new List<ColumnInfo>() }
+                await _dataSourceRepository.UpdateUsageCountAsync(dataSourceId);
             }
-        };
-
-        private QueryResultDto CreateMockQueryResult(string query) => new()
-        {
-            Data = new List<Dictionary<string, object>>(),
-            Columns = new List<ColumnInfo>(),
-            TotalRows = 0,
-            ExecutionTime = TimeSpan.FromMilliseconds(1500),
-            QueryUsed = query
-        };
-
-        private string GetTypeName(DataSourceType type) => type.ToString();
-
-        // Cache conversion helpers
-        private T ConvertFromCachedResult<T>(QueryResultDto cached) => 
-            System.Text.Json.JsonSerializer.Deserialize<T>(cached.Data.First()["data"].ToString() ?? "{}") ?? default!;
-        
-        private QueryResultDto CreateCacheableResult<T>(T data) => new()
-        {
-            Data = new List<Dictionary<string, object>>
+            catch (Exception ex)
             {
-                new() { ["data"] = System.Text.Json.JsonSerializer.Serialize(data) }
-            },
-            Columns = new List<ColumnInfo>(),
-            TotalRows = 1,
-            ExecutionTime = TimeSpan.Zero
-        };
-    }
-
-    // Helper class to provide mock data
-    public static class MockDataProvider
-    {
-        public static List<DataSourceDto> GetMockDataSourcesList() => new()
-        {
-            new() {
-                Id = Guid.NewGuid(),
-                Name = "Main SQL Server",
-                Description = "Primary application database",
-                Type = DataSourceType.SqlServer,
-                TypeName = "SQL Server",
-                Host = "localhost",
-                Port = 1433,
-                DatabaseName = "ErpSystemDb",
-                Username = "sa",
-                IsActive = true,
-                LastConnectionTest = DateTime.Now.AddMinutes(-5),
-                LastConnectionSuccess = true,
-                CreatedBy = "System Admin",
-                CreatedAt = DateTime.Now.AddDays(-30),
-                LastUsed = DateTime.Now.AddHours(-2),
-                UsageCount = 145,
-                Status = ConnectionStatus.Connected
+                _logger.LogError(ex, "Error updating usage stats for data source {DataSourceId}", dataSourceId);
+                // Don't throw - this is not critical
             }
-        };
+        }
+
+        // Helper methods
+        private DataSourceDto MapToDto(DataSource dataSource)
+        {
+            return new DataSourceDto
+            {
+                Id = dataSource.Id,
+                Name = dataSource.Name,
+                Description = dataSource.Description,
+                Type = (DataSourceType)dataSource.Type,
+                TypeName = ((DataSourceType)dataSource.Type).ToString(),
+                Host = dataSource.Host,
+                Port = dataSource.Port,
+                DatabaseName = dataSource.DatabaseName,
+                Username = dataSource.Username,
+                AdditionalSettings = ParseAdditionalSettings(dataSource.AdditionalSettings),
+                IsActive = dataSource.IsActive,
+                LastConnectionTest = dataSource.LastConnectionTest,
+                LastConnectionSuccess = dataSource.LastConnectionSuccess,
+                LastConnectionError = dataSource.LastConnectionError,
+                CreatedBy = "User", // TODO: Get from CreatedByUser navigation property
+                CreatedAt = dataSource.CreatedAt,
+                LastUsed = dataSource.LastUsed,
+                UsageCount = dataSource.UsageCount,
+                Status = DetermineConnectionStatus(dataSource)
+            };
+        }
+
+        private Dictionary<string, object>? ParseAdditionalSettings(string? settingsJson)
+        {
+            if (string.IsNullOrEmpty(settingsJson))
+                return null;
+
+            try
+            {
+                return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(settingsJson);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private ConnectionStatus DetermineConnectionStatus(DataSource dataSource)
+        {
+            if (!dataSource.LastConnectionTest.HasValue)
+                return ConnectionStatus.Unknown;
+
+            if (dataSource.LastConnectionSuccess == true)
+                return ConnectionStatus.Connected;
+
+            if (dataSource.LastConnectionSuccess == false)
+                return ConnectionStatus.Error;
+
+            return ConnectionStatus.Unknown;
+        }
+
+        private string? EncryptPassword(string? password)
+        {
+            if (string.IsNullOrEmpty(password))
+                return null;
+
+            // TODO: Implement proper encryption
+            // For now, just encode as base64 (NOT SECURE - implement proper encryption)
+            return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(password));
+        }
+
+        private string? DecryptPassword(string? encryptedPassword)
+        {
+            if (string.IsNullOrEmpty(encryptedPassword))
+                return null;
+
+            try
+            {
+                // TODO: Implement proper decryption
+                // For now, just decode from base64 (matches the EncryptPassword method above)
+                return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encryptedPassword));
+            }
+            catch
+            {
+                _logger.LogWarning("Failed to decrypt password, returning null");
+                return null;
+            }
+        }
+
+        public async Task<DataSourceSchemaDto> RetrieveDatabaseSchemaDirectAsync(string connectionString)
+        {
+            return await RetrieveDatabaseSchemaAsync(connectionString, DataSourceType.SqlServer);
+        }
+        
+        public async Task<DataSourceSchemaDto> GetSampleSchemaAsync()
+        {
+            return await Task.FromResult(GetSampleSchema());
+        }
+        
+        private DataSourceSchemaDto GetSampleSchema()
+        {
+            // Return a comprehensive sample schema for demonstration
+            return new DataSourceSchemaDto
+            {
+                Tables = new List<TableInfo>
+                {
+                    new TableInfo
+                    {
+                        Name = "Users",
+                        Schema = "dbo",
+                        RowCount = 1250,
+                        Columns = new List<ColumnInfo>
+                        {
+                            new ColumnInfo { Name = "Id", DataType = "uniqueidentifier", IsPrimaryKey = true, IsNullable = false },
+                            new ColumnInfo { Name = "FirstName", DataType = "nvarchar", MaxLength = 50, IsNullable = false },
+                            new ColumnInfo { Name = "LastName", DataType = "nvarchar", MaxLength = 50, IsNullable = false },
+                            new ColumnInfo { Name = "Email", DataType = "nvarchar", MaxLength = 256, IsNullable = false },
+                            new ColumnInfo { Name = "PhoneNumber", DataType = "nvarchar", MaxLength = 20, IsNullable = true },
+                            new ColumnInfo { Name = "DateOfBirth", DataType = "date", IsNullable = true },
+                            new ColumnInfo { Name = "IsActive", DataType = "bit", IsNullable = false },
+                            new ColumnInfo { Name = "CreatedAt", DataType = "datetime2", IsNullable = false },
+                            new ColumnInfo { Name = "UpdatedAt", DataType = "datetime2", IsNullable = true }
+                        }
+                    },
+                    new TableInfo
+                    {
+                        Name = "Orders",
+                        Schema = "dbo",
+                        RowCount = 5680,
+                        Columns = new List<ColumnInfo>
+                        {
+                            new ColumnInfo { Name = "Id", DataType = "uniqueidentifier", IsPrimaryKey = true, IsNullable = false },
+                            new ColumnInfo { Name = "UserId", DataType = "uniqueidentifier", IsNullable = false },
+                            new ColumnInfo { Name = "OrderNumber", DataType = "nvarchar", MaxLength = 50, IsNullable = false },
+                            new ColumnInfo { Name = "OrderDate", DataType = "datetime2", IsNullable = false },
+                            new ColumnInfo { Name = "TotalAmount", DataType = "decimal", Precision = 18, Scale = 2, IsNullable = false },
+                            new ColumnInfo { Name = "TaxAmount", DataType = "decimal", Precision = 18, Scale = 2, IsNullable = false },
+                            new ColumnInfo { Name = "DiscountAmount", DataType = "decimal", Precision = 18, Scale = 2, IsNullable = true },
+                            new ColumnInfo { Name = "Status", DataType = "nvarchar", MaxLength = 20, IsNullable = false },
+                            new ColumnInfo { Name = "ShippingAddress", DataType = "nvarchar", MaxLength = 500, IsNullable = true }
+                        }
+                    },
+                    new TableInfo
+                    {
+                        Name = "Products",
+                        Schema = "dbo",
+                        RowCount = 2340,
+                        Columns = new List<ColumnInfo>
+                        {
+                            new ColumnInfo { Name = "Id", DataType = "uniqueidentifier", IsPrimaryKey = true, IsNullable = false },
+                            new ColumnInfo { Name = "Name", DataType = "nvarchar", MaxLength = 200, IsNullable = false },
+                            new ColumnInfo { Name = "Description", DataType = "nvarchar", MaxLength = 1000, IsNullable = true },
+                            new ColumnInfo { Name = "SKU", DataType = "nvarchar", MaxLength = 50, IsNullable = false },
+                            new ColumnInfo { Name = "Price", DataType = "decimal", Precision = 18, Scale = 2, IsNullable = false },
+                            new ColumnInfo { Name = "Cost", DataType = "decimal", Precision = 18, Scale = 2, IsNullable = true },
+                            new ColumnInfo { Name = "StockQuantity", DataType = "int", IsNullable = false },
+                            new ColumnInfo { Name = "CategoryId", DataType = "uniqueidentifier", IsNullable = true },
+                            new ColumnInfo { Name = "IsDiscontinued", DataType = "bit", IsNullable = false }
+                        }
+                    },
+                    new TableInfo
+                    {
+                        Name = "Categories",
+                        Schema = "dbo",
+                        RowCount = 45,
+                        Columns = new List<ColumnInfo>
+                        {
+                            new ColumnInfo { Name = "Id", DataType = "uniqueidentifier", IsPrimaryKey = true, IsNullable = false },
+                            new ColumnInfo { Name = "Name", DataType = "nvarchar", MaxLength = 100, IsNullable = false },
+                            new ColumnInfo { Name = "Description", DataType = "nvarchar", MaxLength = 500, IsNullable = true },
+                            new ColumnInfo { Name = "ParentCategoryId", DataType = "uniqueidentifier", IsNullable = true },
+                            new ColumnInfo { Name = "SortOrder", DataType = "int", IsNullable = false }
+                        }
+                    }
+                },
+                Views = new List<ViewInfo>
+                {
+                    new ViewInfo
+                    {
+                        Name = "UserOrderSummary",
+                        Schema = "dbo",
+                        Columns = new List<ColumnInfo>
+                        {
+                            new ColumnInfo { Name = "UserId", DataType = "uniqueidentifier", IsNullable = false },
+                            new ColumnInfo { Name = "UserName", DataType = "nvarchar", MaxLength = 101, IsNullable = false },
+                            new ColumnInfo { Name = "Email", DataType = "nvarchar", MaxLength = 256, IsNullable = false },
+                            new ColumnInfo { Name = "OrderCount", DataType = "int", IsNullable = false },
+                            new ColumnInfo { Name = "TotalSpent", DataType = "decimal", Precision = 18, Scale = 2, IsNullable = false },
+                            new ColumnInfo { Name = "LastOrderDate", DataType = "datetime2", IsNullable = true }
+                        }
+                    },
+                    new ViewInfo
+                    {
+                        Name = "ProductSalesReport",
+                        Schema = "dbo",
+                        Columns = new List<ColumnInfo>
+                        {
+                            new ColumnInfo { Name = "ProductId", DataType = "uniqueidentifier", IsNullable = false },
+                            new ColumnInfo { Name = "ProductName", DataType = "nvarchar", MaxLength = 200, IsNullable = false },
+                            new ColumnInfo { Name = "CategoryName", DataType = "nvarchar", MaxLength = 100, IsNullable = true },
+                            new ColumnInfo { Name = "UnitsSold", DataType = "int", IsNullable = false },
+                            new ColumnInfo { Name = "TotalRevenue", DataType = "decimal", Precision = 18, Scale = 2, IsNullable = false },
+                            new ColumnInfo { Name = "AveragePrice", DataType = "decimal", Precision = 18, Scale = 2, IsNullable = false }
+                        }
+                    }
+                },
+                StoredProcedures = new List<StoredProcedureInfo>
+                {
+                    new StoredProcedureInfo
+                    {
+                        Name = "GetUserOrders",
+                        Schema = "dbo",
+                        Parameters = new List<ParameterInfo>
+                        {
+                            new ParameterInfo { Name = "@UserId", DataType = "uniqueidentifier", IsOutput = false },
+                            new ParameterInfo { Name = "@StartDate", DataType = "datetime2", IsOutput = false, DefaultValue = null },
+                            new ParameterInfo { Name = "@EndDate", DataType = "datetime2", IsOutput = false, DefaultValue = null }
+                        }
+                    },
+                    new StoredProcedureInfo
+                    {
+                        Name = "CalculateMonthlyRevenue",
+                        Schema = "dbo",
+                        Parameters = new List<ParameterInfo>
+                        {
+                            new ParameterInfo { Name = "@Year", DataType = "int", IsOutput = false },
+                            new ParameterInfo { Name = "@Month", DataType = "int", IsOutput = false },
+                            new ParameterInfo { Name = "@TotalRevenue", DataType = "decimal", IsOutput = true }
+                        }
+                    }
+                }
+            };
+        }
     }
 }

@@ -60,7 +60,7 @@ export default function RegisterPage() {
   // Fetch security settings for CAPTCHA configuration and password validation
   const { data: securitySettings } = useQuery({
     queryKey: ['securitySettings'],
-    queryFn: () => settingsService.getSecuritySettings(),
+    queryFn: () => settingsService.getPublicSecuritySettings(),
   });
 
   const {

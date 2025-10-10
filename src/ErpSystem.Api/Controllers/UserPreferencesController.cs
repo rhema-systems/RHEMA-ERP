@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using ErpSystem.Core.Services;
+using ErpSystem.Core.Interfaces;
 using System.Security.Claims;
 
 namespace ErpSystem.Api.Controllers
@@ -29,7 +29,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return Unauthorized();
@@ -69,7 +69,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return Unauthorized();
@@ -110,7 +110,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var userId = _currentUserService.GetUserId();
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
                 if (!userId.HasValue)
                 {
                     return Unauthorized();

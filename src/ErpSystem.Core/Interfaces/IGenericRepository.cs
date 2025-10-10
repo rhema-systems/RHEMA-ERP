@@ -42,5 +42,8 @@ namespace ErpSystem.Core.Interfaces
         IQueryable<T> GetQueryable(Expression<Func<T, bool>> predicate);
         Task<IEnumerable<TResult>> GetProjectedAsync<TResult>(Expression<Func<T, TResult>> projection);
         Task<IEnumerable<TResult>> GetProjectedAsync<TResult>(Expression<Func<T, bool>> predicate, Expression<Func<T, TResult>> projection);
+        
+        // Unit of work
+        Task<int> SaveChangesAsync();
     }
 }

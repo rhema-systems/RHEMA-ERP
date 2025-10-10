@@ -1,6 +1,7 @@
 "use client"
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Button } from '../ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Badge } from '../ui/badge'
@@ -9,6 +10,7 @@ import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 import { Textarea } from '../ui/textarea'
 import { Separator } from '../ui/separator'
+import { Checkbox } from '../ui/checkbox'
 import { 
   Database, 
   Calendar, 
@@ -20,8 +22,12 @@ import {
   Plus,
   X,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Loader2
 } from 'lucide-react'
+import { reportsService } from '../../services/reports'
+import { useToast } from '../../hooks/use-toast'
+import { API_CONFIG } from '../../config/api'
 
 interface FilterCondition {
   id: string
@@ -39,60 +45,114 @@ interface SelectedField {
 
 interface ReportBuilderProps {
   onClose?: () => void;
+  onReportCreated?: () => void;
+  onTemplateCreated?: () => void;
+  editingReportId?: string;
+  editingReport?: any;
 }
 
-const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose }) => {
+const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose, onReportCreated, onTemplateCreated, editingReportId, editingReport }) => {
   const [reportName, setReportName] = useState('')
   const [reportDescription, setReportDescription] = useState('')
-  const [selectedDataSource, setSelectedDataSource] = useState('')
+  const [selectedTableOrView, setSelectedTableOrView] = useState('')
   const [selectedFields, setSelectedFields] = useState<SelectedField[]>([])
   const [filters, setFilters] = useState<FilterCondition[]>([])
   const [chartType, setChartType] = useState('table')
+  const [isCreatingReport, setIsCreatingReport] = useState(false)
+  const [isCreatingTemplate, setIsCreatingTemplate] = useState(false)
   const [expandedSections, setExpandedSections] = useState({
-    dataSource: true,
+    tableView: true,
     fields: true,
     filters: true,
     visualization: true
   })
-
-  // Mock data sources
-  const dataSources = [
-    { id: 'users', name: 'Users', description: 'User account information' },
-    { id: 'transactions', name: 'Transactions', description: 'Financial transactions' },
-    { id: 'products', name: 'Products', description: 'Product catalog data' },
-    { id: 'orders', name: 'Orders', description: 'Customer orders' },
-    { id: 'inventory', name: 'Inventory', description: 'Stock and inventory data' }
-  ]
-
-  // Mock available fields based on selected data source
-  const getAvailableFields = (dataSourceId: string) => {
-    const fieldSets: Record<string, Array<{id: string, name: string, type: string}>> = {
-      users: [
-        { id: 'id', name: 'User ID', type: 'number' },
-        { id: 'name', name: 'Full Name', type: 'string' },
-        { id: 'email', name: 'Email', type: 'string' },
-        { id: 'created_at', name: 'Registration Date', type: 'date' },
-        { id: 'status', name: 'Account Status', type: 'string' },
-        { id: 'tenant_id', name: 'Tenant ID', type: 'number' }
-      ],
-      transactions: [
-        { id: 'id', name: 'Transaction ID', type: 'number' },
-        { id: 'amount', name: 'Amount', type: 'currency' },
-        { id: 'type', name: 'Transaction Type', type: 'string' },
-        { id: 'date', name: 'Transaction Date', type: 'date' },
-        { id: 'user_id', name: 'User ID', type: 'number' },
-        { id: 'status', name: 'Status', type: 'string' }
-      ],
-      products: [
-        { id: 'id', name: 'Product ID', type: 'number' },
-        { id: 'name', name: 'Product Name', type: 'string' },
-        { id: 'category', name: 'Category', type: 'string' },
-        { id: 'price', name: 'Price', type: 'currency' },
-        { id: 'stock_quantity', name: 'Stock Quantity', type: 'number' },
-        { id: 'created_at', name: 'Created Date', type: 'date' }
-      ]
+  
+  const { toast } = useToast()
+  
+  // Populate form when editing existing report
+  useEffect(() => {
+    if (editingReport && editingReportId) {
+      setReportName(editingReport.name || '')
+      setReportDescription(editingReport.description || '')
+      setChartType(editingReport.type || 'table')
+      
+      // If the report has existing data, we'll populate basic info
+      // Note: Complex table/field selection would require more sophisticated parsing
+      // For now, we'll just populate the basic metadata
     }
-    return fieldSets[dataSourceId] || []
+  }, [editingReport, editingReportId])
+
+  // Fetch ERP database schema directly (simplified approach)
+  const {
+    data: dataSourceSchema,
+    isLoading: schemaLoading,
+    error: schemaError
+  } = useQuery({
+    queryKey: ['erp-schema'],
+    queryFn: async () => {
+      const baseUrl = API_CONFIG.BASE_URL.replace('/api', '');
+      const response = await fetch(`${baseUrl}/api/datasources/schema`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch schema');
+      }
+      return response.json();
+    },
+    refetchOnWindowFocus: false,
+  })
+
+  // Get available fields from the data source schema - filtered by selected table/view
+  const getAvailableFields = () => {
+    if (!dataSourceSchema || !selectedTableOrView) return []
+    
+    const fields: Array<{id: string, name: string, type: string, table?: string}> = []
+    
+    // Find the selected table or view and return only its columns
+    const selectedTable = dataSourceSchema.tables.find(table => table.name === selectedTableOrView)
+    const selectedView = dataSourceSchema.views.find(view => view.name === selectedTableOrView)
+    
+    if (selectedTable) {
+      selectedTable.columns.forEach(column => {
+        fields.push({
+          id: `${selectedTable.name}.${column.name}`,
+          name: `${selectedTable.name}.${column.name}`,
+          type: column.dataType.toLowerCase(),
+          table: selectedTable.name
+        })
+      })
+    } else if (selectedView) {
+      selectedView.columns.forEach(column => {
+        fields.push({
+          id: `${selectedView.name}.${column.name}`,
+          name: `${selectedView.name}.${column.name}`,
+          type: column.dataType.toLowerCase(),
+          table: selectedView.name
+        })
+      })
+    }
+    
+    return fields
+  }
+
+  // Get available tables and views for selection
+  const getAvailableTablesAndViews = () => {
+    if (!dataSourceSchema) return { tables: [], views: [] }
+    
+    return {
+      tables: dataSourceSchema.tables.map(table => ({
+        name: table.name,
+        schema: table.schema,
+        type: 'table',
+        rowCount: table.rowCount,
+        columnCount: table.columns.length
+      })),
+      views: dataSourceSchema.views.map(view => ({
+        name: view.name,
+        schema: view.schema,
+        type: 'view',
+        rowCount: null,
+        columnCount: view.columns.length
+      }))
+    }
   }
 
   const operators = [
@@ -168,56 +228,221 @@ const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose }) => {
     setFilters(prev => prev.filter(f => f.id !== filterId))
   }
 
-  const generateReport = async () => {
+  const saveAsTemplate = async () => {
     if (!reportName.trim()) {
-      alert('Please enter a report name');
-      return;
+      toast({
+        title: 'Validation Error',
+        description: 'Please enter a report name for the template',
+        variant: 'destructive'
+      })
+      return
     }
     
-    if (!selectedDataSource) {
-      alert('Please select a data source');
-      return;
+    
+    if (!selectedTableOrView) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please select a table or view',
+        variant: 'destructive'
+      })
+      return
     }
     
     if (selectedFields.length === 0) {
-      alert('Please select at least one field');
-      return;
+      toast({
+        title: 'Validation Error',
+        description: 'Please select at least one field',
+        variant: 'destructive'
+      })
+      return
     }
     
-    const reportConfig = {
-      name: reportName,
-      description: reportDescription,
-      type: selectedDataSource, // Use data source as report type
-      query: `SELECT ${selectedFields.map(f => f.name).join(', ')} FROM ${selectedDataSource}`,
-      columns: selectedFields.map((field, index) => ({
-        name: field.name,
-        displayName: field.name,
-        dataType: field.type,
-        isVisible: true,
-        order: index,
-        aggregationType: field.aggregation !== 'none' ? field.aggregation : undefined
-      })),
-      parameters: {}
-    }
-    
-    console.log('Creating Report Config:', reportConfig)
+    setIsCreatingTemplate(true)
     
     try {
-      // For now, we'll just show a success message
-      // In a real implementation, you'd call the reports service
-      alert(`Report "${reportName}" created successfully!\n\nThis would create a report with:\n- Data Source: ${selectedDataSource}\n- Fields: ${selectedFields.map(f => f.name).join(', ')}\n- Filters: ${filters.length} filter(s)`);
-      
-      // Close dialog after generating report
-      if (onClose) {
-        onClose();
+      const templateData = {
+        name: `${reportName} Template`,
+        description: reportDescription || `Template for ${reportName} reports`,
+        category: 'custom',
+        type: chartType,
+        chartType: chartType !== 'table' ? chartType : null,
+        isCustom: true,
+        tags: ['custom', chartType, 'user-created'],
+        configuration: {
+          tableOrView: selectedTableOrView,
+          fields: selectedFields.map(f => ({
+            name: f.name,
+            type: f.type,
+            aggregation: f.aggregation
+          })),
+          filters: filters,
+          visualization: {
+            type: chartType,
+            settings: {}
+          }
+        }
       }
-    } catch (error) {
-      console.error('Error creating report:', error);
-      alert('Failed to create report. Please try again.');
+      
+      await reportsService.createReportTemplate(templateData)
+      
+      toast({
+        title: 'Template Created',
+        description: `Template "${templateData.name}" has been saved successfully`,
+      })
+      
+      if (onTemplateCreated) {
+        onTemplateCreated()
+      }
+      
+    } catch (error: any) {
+      console.error('Error saving template:', error)
+      toast({
+        title: 'Error Creating Template',
+        description: error.response?.data?.message || 'Failed to save template. Please try again.',
+        variant: 'destructive'
+      })
+    } finally {
+      setIsCreatingTemplate(false)
     }
   }
 
-  const availableFields = selectedDataSource ? getAvailableFields(selectedDataSource) : []
+  const generateReport = async () => {
+    if (!reportName.trim()) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please enter a report name',
+        variant: 'destructive'
+      })
+      return
+    }
+    
+    
+    if (!selectedTableOrView) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please select a table or view',
+        variant: 'destructive'
+      })
+      return
+    }
+    
+    if (selectedFields.length === 0) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please select at least one field',
+        variant: 'destructive'
+      })
+      return
+    }
+    
+    setIsCreatingReport(true)
+    
+    try {
+      // Get schema info for the selected table/view to build proper table reference
+      const { tables, views } = getAvailableTablesAndViews()
+      const selectedEntity = tables.find(t => t.name === selectedTableOrView) || views.find(v => v.name === selectedTableOrView)
+      const fullTableName = selectedEntity?.schema 
+        ? `${selectedEntity.schema}.${selectedTableOrView}` 
+        : selectedTableOrView
+      
+      // Build SQL query with proper field references
+      const selectFields = selectedFields.map(field => {
+        const fieldName = field.name.includes('.') ? field.name : `${selectedTableOrView}.${field.name}`
+        
+        if (field.aggregation && field.aggregation !== 'none') {
+          const alias = field.name.replace(/[^a-zA-Z0-9_]/g, '_')
+          return `${field.aggregation.toUpperCase()}(${fieldName}) AS ${alias}_${field.aggregation}`
+        }
+        return fieldName
+      })
+      
+      const whereClause = filters.length > 0 
+        ? 'WHERE ' + filters.map(f => {
+            const filterField = f.field.includes('.') ? f.field : `${selectedTableOrView}.${f.field}`
+            const operator = f.operator.replace('_', ' ').toUpperCase()
+            return `${filterField} ${operator} '${f.value}'`
+          }).join(' AND ')
+        : ''
+      
+      const query = `SELECT ${selectFields.join(', ')} FROM ${fullTableName} ${whereClause}`.trim()
+      
+      const reportData = {
+        name: reportName,
+        description: reportDescription || `Report generated from ERP database`,
+        type: chartType,
+        query: query,
+        columns: selectedFields.map((field, index) => ({
+          name: field.name.replace('.', '_'),
+          displayName: field.name,
+          dataType: field.type,
+          isVisible: true,
+          order: index,
+          aggregationType: field.aggregation !== 'none' ? field.aggregation : undefined
+        })),
+        visualization: {
+          type: chartType,
+          chartType: chartType !== 'table' ? chartType : null,
+          configuration: {}
+        },
+        parameters: filters.reduce((acc, filter, index) => {
+          acc[`param_${index}`] = {
+            name: filter.field,
+            type: 'string',
+            defaultValue: filter.value,
+            required: true
+          }
+          return acc
+        }, {} as Record<string, any>),
+        tags: ['generated', chartType, 'erp-database']
+      }
+      
+      if (editingReportId) {
+        // Update existing report
+        await reportsService.updateReport(editingReportId, {
+          name: reportData.name,
+          description: reportData.description,
+          query: reportData.query,
+          columns: reportData.columns,
+          visualization: reportData.visualization,
+          tags: reportData.tags
+        })
+        
+        toast({
+          title: 'Report Updated',
+          description: `Report "${reportName}" has been updated successfully`,
+        })
+      } else {
+        // Create new report
+        await reportsService.createReport(reportData)
+        
+        toast({
+          title: 'Report Created',
+          description: `Report "${reportName}" has been created successfully`,
+        })
+      }
+      
+      if (onReportCreated) {
+        onReportCreated()
+      }
+      
+      // Close dialog after creating report
+      if (onClose) {
+        onClose()
+      }
+      
+    } catch (error: any) {
+      console.error('Error creating report:', error)
+      toast({
+        title: 'Error Creating Report',
+        description: error.response?.data?.message || 'Failed to create report. Please try again.',
+        variant: 'destructive'
+      })
+    } finally {
+      setIsCreatingReport(false)
+    }
+  }
+
+  const availableFields = getAvailableFields()
 
   return (
     <div className="space-y-6 pb-20">
@@ -272,57 +497,150 @@ const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose }) => {
         </CardContent>
       </Card>
 
-      {/* Data Source Selection */}
-      <Card>
-        <CardHeader 
-          className="cursor-pointer" 
-          onClick={() => toggleSection('dataSource')}
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Database className="h-5 w-5" />
-                Data Source
-              </CardTitle>
-              <CardDescription>Select the primary data source for your report</CardDescription>
+      {/* Table/View Selection */}
+        <Card>
+          <CardHeader 
+            className="cursor-pointer" 
+            onClick={() => toggleSection('tableView')}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Table2 className="h-5 w-5" />
+                  Select Table or View
+                </CardTitle>
+                <CardDescription>Choose a specific table or view to build your report from</CardDescription>
+              </div>
+              {expandedSections.tableView ? 
+                <ChevronDown className="h-4 w-4" /> : 
+                <ChevronRight className="h-4 w-4" />
+              }
             </div>
-            {expandedSections.dataSource ? 
-              <ChevronDown className="h-4 w-4" /> : 
-              <ChevronRight className="h-4 w-4" />
-            }
-          </div>
-        </CardHeader>
-        {expandedSections.dataSource && (
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {dataSources.map(source => (
-                <Card 
-                  key={source.id}
-                  className={`cursor-pointer transition-colors ${
-                    selectedDataSource === source.id 
-                      ? 'ring-2 ring-primary' 
-                      : 'hover:bg-muted/50'
-                  }`}
-                  onClick={() => setSelectedDataSource(source.id)}
-                >
-                  <CardContent className="p-4">
-                    <div className="flex items-start gap-3">
-                      <Database className="h-5 w-5 text-muted-foreground mt-0.5" />
-                      <div>
-                        <h4 className="font-medium">{source.name}</h4>
-                        <p className="text-sm text-muted-foreground">{source.description}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </CardContent>
-        )}
-      </Card>
+          </CardHeader>
+          {expandedSections.tableView && (
+            <CardContent>
+              {schemaLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  <span className="text-sm">Loading schema...</span>
+                </div>
+              ) : schemaError ? (
+                <div className="text-center py-4 text-destructive text-sm">
+                  <p>Failed to load data source schema</p>
+                  <p className="text-muted-foreground mt-1">Please check the data source connection</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="table-view-select">Select Table or View</Label>
+                    <Select 
+                      value={selectedTableOrView} 
+                      onValueChange={(value) => {
+                        setSelectedTableOrView(value)
+                        setSelectedFields([]) // Clear fields when changing table/view
+                        setFilters([]) // Clear filters when changing table/view
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choose a table or view" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(() => {
+                          const { tables, views } = getAvailableTablesAndViews()
+                          return (
+                            <>
+                              {/* Tables */}
+                              {tables.length > 0 && (
+                                <>
+                                  <div className="px-2 py-1.5 text-sm font-semibold text-muted-foreground">
+                                    Tables
+                                  </div>
+                                  {tables.map(table => (
+                                    <SelectItem key={`table-${table.name}`} value={table.name}>
+                                      <div className="flex items-center gap-2">
+                                        <Table2 className="h-4 w-4" />
+                                        <span>{table.name}</span>
+                                        {table.schema && (
+                                          <span className="text-xs text-muted-foreground">({table.schema})</span>
+                                        )}
+                                        <Badge variant="secondary" className="ml-auto text-xs">
+                                          {table.columnCount} cols
+                                        </Badge>
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                                </>
+                              )}
+                              
+                              {/* Views */}
+                              {views.length > 0 && (
+                                <>
+                                  {tables.length > 0 && <div className="h-px bg-border my-1" />}
+                                  <div className="px-2 py-1.5 text-sm font-semibold text-muted-foreground">
+                                    Views
+                                  </div>
+                                  {views.map(view => (
+                                    <SelectItem key={`view-${view.name}`} value={view.name}>
+                                      <div className="flex items-center gap-2">
+                                        <Database className="h-4 w-4" />
+                                        <span>{view.name}</span>
+                                        {view.schema && (
+                                          <span className="text-xs text-muted-foreground">({view.schema})</span>
+                                        )}
+                                        <Badge variant="outline" className="ml-auto text-xs">
+                                          {view.columnCount} cols
+                                        </Badge>
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                                </>
+                              )}
+                              
+                              {tables.length === 0 && views.length === 0 && (
+                                <div className="px-2 py-8 text-center text-muted-foreground text-sm">
+                                  No tables or views available
+                                </div>
+                              )}
+                            </>
+                          )
+                        })()}
+                      </SelectContent>
+                    </Select>
+                    
+                    {/* Selected table/view info */}
+                    {selectedTableOrView && (() => {
+                      const { tables, views } = getAvailableTablesAndViews()
+                      const selectedEntity = tables.find(t => t.name === selectedTableOrView) || views.find(v => v.name === selectedTableOrView)
+                      return selectedEntity ? (
+                        <div className="text-sm text-muted-foreground bg-muted/30 p-3 rounded-lg">
+                          <div className="flex items-center gap-2 mb-1">
+                            {tables.find(t => t.name === selectedTableOrView) ? (
+                              <><Table2 className="h-4 w-4" /> Table: <strong>{selectedTableOrView}</strong></>
+                            ) : (
+                              <><Database className="h-4 w-4" /> View: <strong>{selectedTableOrView}</strong></>
+                            )}
+                          </div>
+                          <div className="space-y-1">
+                            {selectedEntity.schema && (
+                              <p><span className="font-medium">Schema:</span> {selectedEntity.schema}</p>
+                            )}
+                            <p><span className="font-medium">Columns:</span> {selectedEntity.columnCount}</p>
+                            {selectedEntity.rowCount !== null && (
+                              <p><span className="font-medium">Rows:</span> {selectedEntity.rowCount.toLocaleString()}</p>
+                            )}
+                          </div>
+                        </div>
+                      ) : null
+                    })()}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          )}
+        </Card>
 
       {/* Field Selection */}
-      {selectedDataSource && (
+      {selectedTableOrView && (
         <Card>
           <CardHeader 
             className="cursor-pointer" 
@@ -331,7 +649,7 @@ const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose }) => {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>Select Fields</CardTitle>
-                <CardDescription>Choose which fields to include in your report</CardDescription>
+                <CardDescription>Choose which fields from {selectedTableOrView} to include in your report</CardDescription>
               </div>
               {expandedSections.fields ? 
                 <ChevronDown className="h-4 w-4" /> : 
@@ -343,84 +661,144 @@ const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose }) => {
             <CardContent className="space-y-4">
               {/* Available Fields */}
               <div>
-                <Label className="text-sm font-medium">Available Fields</Label>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 mt-2">
-                  {availableFields.map(field => (
-                    <Button
-                      key={field.id}
-                      variant="outline"
-                      size="sm"
-                      onClick={() => addField(field)}
-                      className="justify-start"
-                      disabled={selectedFields.some(f => f.name === field.name)}
-                    >
-                      <Plus className="h-3 w-3 mr-2" />
-                      {field.name}
-                      <Badge variant="secondary" className="ml-auto text-xs">
-                        {field.type}
-                      </Badge>
-                    </Button>
-                  ))}
-                </div>
+                <Label className="text-sm font-medium">Select Fields ({selectedFields.length} selected)</Label>
+                {schemaLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    <span className="text-sm">Loading schema...</span>
+                  </div>
+                ) : schemaError ? (
+                  <div className="text-center py-4 text-destructive text-sm">
+                    <p>Failed to load data source schema</p>
+                    <p className="text-muted-foreground mt-1">Please check the data source connection</p>
+                  </div>
+                ) : availableFields.length === 0 ? (
+                  <div className="text-center py-4 text-muted-foreground text-sm">
+                    <p>No fields available</p>
+                    <p className="mt-1">Select a table or view first</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 mt-3">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Checkbox 
+                        id="select-all-fields"
+                        checked={selectedFields.length === availableFields.length && availableFields.length > 0}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            // Select all fields
+                            const newFields = availableFields.filter(field => 
+                              !selectedFields.some(sf => sf.name === field.name)
+                            )
+                            newFields.forEach(field => addField(field))
+                          } else {
+                            // Deselect all fields
+                            setSelectedFields([])
+                          }
+                        }}
+                      />
+                      <Label htmlFor="select-all-fields" className="text-sm font-medium cursor-pointer">
+                        Select All Fields
+                      </Label>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto border rounded-lg p-3 bg-muted/20">
+                      {availableFields.map(field => {
+                        const isSelected = selectedFields.some(f => f.name === field.name)
+                        return (
+                          <div key={field.id} className="flex items-center space-x-3 p-2 rounded-md hover:bg-muted/50">
+                            <Checkbox 
+                              id={`field-${field.id}`}
+                              checked={isSelected}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  addField(field)
+                                } else {
+                                  const selectedField = selectedFields.find(sf => sf.name === field.name)
+                                  if (selectedField) {
+                                    removeField(selectedField.id)
+                                  }
+                                }
+                              }}
+                            />
+                            <Label htmlFor={`field-${field.id}`} className="flex-1 cursor-pointer">
+                              <div className="flex items-center justify-between">
+                                <span className="font-medium text-sm">{field.name.split('.').pop()}</span>
+                                <Badge variant="secondary" className="text-xs ml-2">
+                                  {field.type}
+                                </Badge>
+                              </div>
+                              <div className="text-xs text-muted-foreground mt-1">
+                                {field.name}
+                              </div>
+                            </Label>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <Separator />
-
-              {/* Selected Fields */}
-              <div>
-                <Label className="text-sm font-medium">Selected Fields ({selectedFields.length})</Label>
-                <div className="space-y-2 mt-2">
-                  {selectedFields.map(field => (
-                    <div key={field.id} className="flex items-center gap-3 p-3 bg-muted rounded-lg">
-                      <div className="flex-1">
-                        <div className="font-medium">{field.name}</div>
-                        <Badge variant="outline" className="text-xs">{field.type}</Badge>
-                      </div>
-                      
-                      {field.type === 'number' || field.type === 'currency' ? (
-                        <Select 
-                          value={field.aggregation} 
-                          onValueChange={(value) => updateFieldAggregation(field.id, value)}
-                        >
-                          <SelectTrigger className="w-32">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {aggregations.map(agg => (
-                              <SelectItem key={agg.value} value={agg.value}>
-                                {agg.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <div className="w-32 text-sm text-muted-foreground">No aggregation</div>
-                      )}
-                      
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeField(field.id)}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
+              {/* Field Configuration - only show if fields are selected */}
+              {selectedFields.length > 0 && (
+                <>
+                  <Separator />
+                  <div>
+                    <Label className="text-sm font-medium">Field Configuration</Label>
+                    <div className="text-xs text-muted-foreground mb-3">Configure aggregations and settings for numeric fields</div>
+                    <div className="space-y-2">
+                      {selectedFields.map(field => {
+                        const showAggregation = field.type === 'number' || field.type === 'currency' || field.type === 'int' || field.type === 'decimal' || field.type === 'float'
+                        return (
+                          <div key={field.id} className="flex items-center gap-3 p-2 bg-muted/30 rounded-lg">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm truncate">{field.name.split('.').pop()}</div>
+                              <div className="text-xs text-muted-foreground truncate">{field.name}</div>
+                            </div>
+                            <Badge variant="outline" className="text-xs flex-shrink-0">{field.type}</Badge>
+                            
+                            {showAggregation ? (
+                              <Select 
+                                value={field.aggregation} 
+                                onValueChange={(value) => updateFieldAggregation(field.id, value)}
+                              >
+                                <SelectTrigger className="w-28 h-8">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {aggregations.map(agg => (
+                                    <SelectItem key={agg.value} value={agg.value}>
+                                      {agg.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <div className="w-28 text-xs text-muted-foreground text-center">No aggregation</div>
+                            )}
+                            
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeField(field.id)}
+                              className="h-8 w-8 p-0 flex-shrink-0"
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        )
+                      })}
                     </div>
-                  ))}
-                  
-                  {selectedFields.length === 0 && (
-                    <div className="text-center py-8 text-muted-foreground">
-                      No fields selected. Add fields from the available list above.
-                    </div>
-                  )}
-                </div>
-              </div>
+                  </div>
+                </>
+              )}
             </CardContent>
           )}
         </Card>
       )}
 
       {/* Filters */}
-      {selectedDataSource && (
+      {selectedTableOrView && (
         <Card>
           <CardHeader 
             className="cursor-pointer" 
@@ -520,12 +898,20 @@ const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose }) => {
           )}
         </div>
         <div className="flex gap-3">
-          <Button variant="outline">Save as Template</Button>
+          <Button 
+            variant="outline"
+            onClick={saveAsTemplate}
+            disabled={!reportName || !selectedTableOrView || selectedFields.length === 0 || isCreatingTemplate}
+          >
+            {isCreatingTemplate && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            Save as Template
+          </Button>
           <Button 
             onClick={generateReport}
-            disabled={!reportName || !selectedDataSource || selectedFields.length === 0}
+            disabled={!reportName || !selectedTableOrView || selectedFields.length === 0 || isCreatingReport}
           >
-            Generate Report
+            {isCreatingReport && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            {editingReportId ? 'Update Report' : 'Generate Report'}
           </Button>
         </div>
       </div>

@@ -2,10 +2,11 @@ using Microsoft.AspNetCore.Identity;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Shared;
+using ErpSystem.Shared.Interfaces;
 
 namespace ErpSystem.Core.Entities;
 
-public class ApplicationUser : IdentityUser<Guid>
+public class ApplicationUser : IdentityUser<Guid>, IAuditable
 {
     [Required]
     [StringLength(100)]
@@ -98,7 +99,7 @@ public class ApplicationUserRole : IdentityUserRole<Guid>
 }
 
 // Junction entity for many-to-many relationship between Users and Tenants
-public class UserTenant : BaseEntity
+public class UserTenant : BaseEntity, IAuditable
 {
     [Required]
     public Guid UserId { get; set; }
