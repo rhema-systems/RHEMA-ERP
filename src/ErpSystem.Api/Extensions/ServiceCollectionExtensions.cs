@@ -6,6 +6,8 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 using Serilog;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Services;
 using ErpSystem.Core.Interfaces;
@@ -126,6 +128,89 @@ namespace ErpSystem.Api.Extensions
             // Specific repositories
             services.AddScoped<ITenantRepository, TenantRepository>();
             
+            // Report repositories
+            services.AddScoped<IReportRepository, ReportRepository>();
+            services.AddScoped<IReportScheduleRepository, ReportScheduleRepository>();
+            services.AddScoped<IReportTemplateRepository, ReportTemplateRepository>();
+            services.AddScoped<IReportExecutionRepository, ReportExecutionRepository>();
+            services.AddScoped<IUserReportFavoriteRepository, UserReportFavoriteRepository>();
+            services.AddScoped<IReportExportRepository, ReportExportRepository>();
+            services.AddScoped<IReportRoleAssignmentRepository, ReportRoleAssignmentRepository>();
+            
+            // Data source repositories
+            services.AddScoped<IDataSourceRepository, DataSourceRepository>();
+            
+            // HR repositories using consolidated HR namespace interfaces
+            services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeRepository, ErpSystem.Data.Repositories.EmployeeRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.HR.IDepartmentRepository, ErpSystem.Data.Repositories.DepartmentRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.HR.ISectionRepository, ErpSystem.Data.Repositories.SectionRepository>();
+            
+            // TODO: Additional HR repositories to be implemented as needed:
+            // - EmployeePositionRepository: needs implementation
+            // - SkillRepository: needs implementation
+            // - EmployeeSkillRepository: needs implementation
+            // - CountryRepository: needs implementation
+            // - ShiftRepository: needs implementation
+            // - AttendanceRecordRepository: needs implementation
+            // - WorkStationRepository: needs implementation
+            //
+            // Current status: Basic HR repositories (Employee, Department, Section) are working
+            // Interface conflicts have been resolved by consolidating duplicate interfaces into HR namespace
+            //
+            // Additional repositories can be implemented following the same pattern:
+            // services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeePositionRepository, ErpSystem.Data.Repositories.EmployeePositionRepository>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.HR.ISkillRepository, ErpSystem.Data.Repositories.SkillRepository>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeSkillRepository, ErpSystem.Data.Repositories.EmployeeSkillRepository>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.HR.ICountryRepository, ErpSystem.Data.Repositories.CountryRepository>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.HR.IShiftRepository, ErpSystem.Data.Repositories.ShiftRepository>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.HR.IAttendanceRecordRepository, ErpSystem.Data.Repositories.AttendanceRecordRepository>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.HR.IWorkStationRepository, ErpSystem.Data.Repositories.WorkStationRepository>();
+            
+            // Procurement repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderItemRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderItemRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierRepository, ErpSystem.Data.Repositories.Procurement.SupplierRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseRequisitionRepository, ErpSystem.Data.Repositories.Procurement.PurchaseRequisitionRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseRequisitionItemRepository, ErpSystem.Data.Repositories.Procurement.PurchaseRequisitionItemRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderReceiptRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderReceiptRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderReceiptItemRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderReceiptItemRepository>();
+            
+            // Maintenance repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetRepository, ErpSystem.Data.Repositories.Maintenance.MaintenanceAssetRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetCategoryRepository, ErpSystem.Data.Repositories.Maintenance.MaintenanceAssetCategoryRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderRepository, ErpSystem.Data.Repositories.Maintenance.WorkOrderRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderTypeRepository, ErpSystem.Data.Repositories.Maintenance.WorkOrderTypeRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceTypeRepository, ErpSystem.Data.Repositories.Maintenance.MaintenanceTypeRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IPriorityLevelRepository, ErpSystem.Data.Repositories.Maintenance.PriorityLevelRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderTaskRepository, ErpSystem.Data.Repositories.Maintenance.WorkOrderTaskRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderPartRepository, ErpSystem.Data.Repositories.Maintenance.WorkOrderPartRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderLaborRepository, ErpSystem.Data.Repositories.Maintenance.WorkOrderLaborRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderDocumentRepository, ErpSystem.Data.Repositories.Maintenance.WorkOrderDocumentRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderCommentRepository, ErpSystem.Data.Repositories.Maintenance.WorkOrderCommentRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceScheduleRepository, ErpSystem.Data.Repositories.Maintenance.MaintenanceScheduleRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IInspectionTemplateRepository, ErpSystem.Data.Repositories.Maintenance.InspectionTemplateRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetInspectionRepository, ErpSystem.Data.Repositories.Maintenance.AssetInspectionRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IInspectionDocumentRepository, ErpSystem.Data.Repositories.Maintenance.InspectionDocumentRepository>();
+            // TODO: Create missing maintenance repositories
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianTeamRepository, ErpSystem.Data.Repositories.Maintenance.TechnicianTeamRepository>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianTeamMemberRepository, ErpSystem.Data.Repositories.Maintenance.TechnicianTeamMemberRepository>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianSkillRepository, ErpSystem.Data.Repositories.Maintenance.TechnicianSkillRepository>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IUserTechnicianSkillRepository, ErpSystem.Data.Repositories.Maintenance.UserTechnicianSkillRepository>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetDowntimeRepository, ErpSystem.Data.Repositories.Maintenance.AssetDowntimeRepository>();
+            
+            // Technician Scheduling repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianScheduleRepository, ErpSystem.Data.Repositories.Maintenance.TechnicianScheduleRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianAvailabilityRepository, ErpSystem.Data.Repositories.Maintenance.TechnicianAvailabilityRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianShiftRepository, ErpSystem.Data.Repositories.Maintenance.TechnicianShiftRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IEmployeeRepository, ErpSystem.Data.Repositories.Maintenance.EmployeeRepository>();
+            
+            // TODO: Workflow repositories - temporarily commented out until implementations are created
+            // services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowDefinitionRepository, ErpSystem.Data.Repositories.Workflow.WorkflowDefinitionRepository>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowInstanceRepository, ErpSystem.Data.Repositories.Workflow.WorkflowInstanceRepository>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowStepInstanceRepository, ErpSystem.Data.Repositories.Workflow.WorkflowStepInstanceRepository>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowApprovalRepository, ErpSystem.Data.Repositories.Workflow.WorkflowApprovalRepository>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowActivityLogRepository, ErpSystem.Data.Repositories.Workflow.WorkflowActivityLogRepository>();
+            
             // Unit of Work
             services.AddScoped<IUnitOfWork, UnitOfWork>();
 
@@ -186,10 +271,78 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Services.IDashboardService, ErpSystem.Data.Services.DashboardService>();
             
             // Reports service
-            services.AddScoped<IReportsService, MockReportsService>();
+            services.AddScoped<IReportsService, ErpSystem.Data.Services.DatabaseReportsService>();
             
             // Data source service
-            services.AddScoped<IDataSourceService, MockDataSourceService>();
+            services.AddScoped<IDataSourceService, EnterpriseDataSourceService>();
+            
+            // TODO: Workflow services - temporarily commented out due to compilation errors
+            // The existing workflow service implementations need to be updated to match actual entity properties
+            // services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowEngine, ErpSystem.Core.Services.Workflow.WorkflowEngine>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowDefinitionService, ErpSystem.Core.Services.Workflow.WorkflowDefinitionService>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowInstanceService, ErpSystem.Core.Services.Workflow.WorkflowInstanceService>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowStepService, ErpSystem.Core.Services.Workflow.WorkflowStepService>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowApprovalService, ErpSystem.Core.Services.Workflow.WorkflowApprovalService>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowConditionEvaluator, ErpSystem.Core.Services.Workflow.WorkflowConditionEvaluator>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowNotificationService, ErpSystem.Core.Services.Workflow.WorkflowNotificationService>();
+            
+            // TODO: Enhanced maintenance workflow integration - temporarily commented out until dependencies resolved
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IEnhancedMaintenanceWorkflowService, ErpSystem.Core.Services.Maintenance.EnhancedMaintenanceWorkflowService>();
+            
+            // TODO: Temporarily disabled Maintenance services until dependencies are properly implemented
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetService, ErpSystem.Api.Services.Maintenance.MaintenanceAssetService>();
+            
+            // Inventory repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryItemRepository, ErpSystem.Data.Repositories.Inventory.InventoryItemRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryCategoryRepository, ErpSystem.Data.Repositories.Inventory.InventoryCategoryRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IStockMovementRepository, ErpSystem.Data.Repositories.Inventory.StockMovementRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryLocationRepository, ErpSystem.Data.Repositories.Inventory.InventoryLocationRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryAllocationRepository, ErpSystem.Data.Repositories.Inventory.InventoryAllocationRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IWarehouseRepository, ErpSystem.Data.Repositories.Inventory.WarehouseRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IWarehouseLocationRepository, ErpSystem.Data.Repositories.Inventory.WarehouseLocationRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IStockAdjustmentRepository, ErpSystem.Data.Repositories.Inventory.StockAdjustmentRepository>();
+            
+            // Inventory services
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryManagementService, ErpSystem.Core.Services.Inventory.InventoryManagementService>();
+            
+            // Phase 1: Core Maintenance Services - workflow-ready implementation
+            // TODO: Temporarily disabled WorkOrderService until IMaintenanceInventoryService is available
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderService, ErpSystem.Core.Services.Maintenance.WorkOrderService>();
+            // MaintenanceInventoryService - now enabled with IInventoryManagementService dependency
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceInventoryService, ErpSystem.Core.Services.Maintenance.MaintenanceInventoryService>();
+            
+            // Phase 1.4: Quality Control Service - foundation for inspection workflows
+            services.AddScoped<ErpSystem.Core.Services.Maintenance.IQualityControlService, ErpSystem.Core.Services.Maintenance.QualityControlService>();
+            
+            // TODO: Quality Control requires inspection services - will be implemented in Phase 2
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IInspectionTemplateService, ErpSystem.Core.Services.Maintenance.InspectionTemplateService>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetInspectionService, ErpSystem.Core.Services.Maintenance.AssetInspectionService>();
+            
+            // TODO: Additional maintenance services to be enabled in later phases
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianSchedulingService, ErpSystem.Core.Services.Maintenance.TechnicianSchedulingService>();
+            
+            // TODO: Create proper maintenance services implementations later
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetCategoryService, ErpSystem.Core.Services.Maintenance.MaintenanceAssetCategoryService>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceScheduleService, ErpSystem.Core.Services.Maintenance.MaintenanceScheduleService>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IInspectionTemplateService, ErpSystem.Core.Services.Maintenance.InspectionTemplateService>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetInspectionService, ErpSystem.Core.Services.Maintenance.AssetInspectionService>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianTeamService, ErpSystem.Core.Services.Maintenance.TechnicianTeamService>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetDowntimeService, ErpSystem.Core.Services.Maintenance.AssetDowntimeService>();
+            
+            // Technician Scheduling services
+            // TODO: Create missing maintenance services
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianSchedulingService, ErpSystem.Core.Services.Maintenance.TechnicianSchedulingService>();
+            // services.AddScoped<ErpSystem.Core.Services.Maintenance.WorkOrderSchedulingService>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceInventoryService, ErpSystem.Core.Services.Maintenance.MaintenanceInventoryService>();
+            
+            // TODO: Temporarily commented out HR Service until HR wrapper repositories are properly implemented
+            // services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeService, ErpSystem.Core.Services.HR.EmployeeService>();
+            
+            // Maintenance background services - temporarily disabled to get API running
+            // services.AddHostedService<ErpSystem.Api.Services.Maintenance.MaintenanceBackgroundService>();
+            
+            // Add AutoMapper - using assembly scanning approach
+            services.AddAutoMapper(typeof(Program).Assembly, typeof(ErpSystem.Core.Services.TenantService).Assembly, typeof(ErpSystem.Data.ApplicationDbContext).Assembly);
 
             return services;
         }
@@ -274,6 +427,9 @@ namespace ErpSystem.Api.Extensions
                         Email = "admin@system.com"
                     }
                 });
+                
+                // Fix schema ID conflicts by using fully qualified names
+                c.CustomSchemaIds(type => type.FullName?.Replace("+", "."));
 
                 // Add JWT Authentication to Swagger
                 c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
@@ -319,34 +475,6 @@ namespace ErpSystem.Api.Extensions
             return services;
         }
 
-        public static IServiceCollection AddErpSystemCors(this IServiceCollection services, IConfiguration configuration)
-        {
-            var corsSettings = configuration.GetSection("CorsSettings");
-            var allowedOrigins = corsSettings.GetSection("AllowedOrigins").Get<string[]>() ?? new[] { "http://localhost:3000" };
-
-            services.AddCors(options =>
-            {
-                options.AddPolicy("ErpSystemCorsPolicy", builder =>
-                {
-                    builder
-                        .WithOrigins(allowedOrigins)
-                        .AllowAnyMethod()
-                        .AllowAnyHeader()
-                        .AllowCredentials() // Important for Next.js auth and SignalR
-                        .SetIsOriginAllowedToAllowWildcardSubdomains()
-                        .SetIsOriginAllowed(origin => 
-                        {
-                            // Allow configured origins
-                            if (allowedOrigins.Contains(origin)) return true;
-                            // Allow null origin for file:// protocol (testing only)
-                            if (origin == null || origin == "null") return true;
-                            return false;
-                        });
-                });
-            });
-
-            return services;
-        }
 
         public static IServiceCollection AddErpSystemLogging(this IServiceCollection services, IConfiguration configuration)
         {
@@ -576,6 +704,104 @@ namespace ErpSystem.Api.Extensions
 
             // Register Hub notification service
             services.AddScoped<ErpSystem.Core.Interfaces.IHubNotificationService, ErpSystem.Api.Services.HubNotificationService>();
+
+            return services;
+        }
+
+        public static IServiceCollection AddErpSystemCors(this IServiceCollection services, IConfiguration configuration)
+        {
+            // Get allowed origins from environment variables or configuration
+            var allowedOriginsEnv = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS");
+            var allowedOrigins = new List<string>();
+
+            if (!string.IsNullOrEmpty(allowedOriginsEnv))
+            {
+                allowedOrigins.AddRange(allowedOriginsEnv.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(o => o.Trim())
+                    .Where(o => !string.IsNullOrEmpty(o)));
+            }
+            else
+            {
+                // Fallback to configuration
+                var configOrigins = configuration.GetSection("CorsSettings:AllowedOrigins").Get<string[]>();
+                if (configOrigins != null && configOrigins.Length > 0)
+                {
+                    allowedOrigins.AddRange(configOrigins.Where(o => !string.IsNullOrEmpty(o)));
+                }
+            }
+
+            // If no origins configured, use development defaults
+            if (!allowedOrigins.Any())
+            {
+                allowedOrigins.AddRange(new[]
+                {
+                    "http://localhost:3000",
+                    "https://localhost:3000",
+                    "http://localhost:3001",
+                    "https://localhost:3001"
+                });
+            }
+
+            services.AddCors(options =>
+            {
+                options.AddPolicy("ErpSystemCorsPolicy", policy =>
+                {
+                    policy.WithOrigins(allowedOrigins.ToArray())
+                          .AllowAnyMethod()
+                          .AllowAnyHeader()
+                          .AllowCredentials()
+                          .SetIsOriginAllowedToAllowWildcardSubdomains();
+                });
+            });
+
+            return services;
+        }
+
+        public static IServiceCollection AddErpSystemRateLimiting(this IServiceCollection services)
+        {
+            services.AddRateLimiter(rateLimiterOptions =>
+            {
+                // General API rate limiting
+                rateLimiterOptions.AddFixedWindowLimiter(policyName: "ApiPolicy", options =>
+                {
+                    options.PermitLimit = 100;
+                    options.Window = TimeSpan.FromMinutes(1);
+                    options.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+                    options.QueueLimit = 10;
+                });
+
+                // Stricter rate limiting for authentication endpoints
+                rateLimiterOptions.AddFixedWindowLimiter(policyName: "AuthPolicy", options =>
+                {
+                    options.PermitLimit = 10;
+                    options.Window = TimeSpan.FromMinutes(1);
+                    options.QueueLimit = 2;
+                });
+
+                // Very strict rate limiting for sensitive endpoints
+                rateLimiterOptions.AddFixedWindowLimiter(policyName: "SensitivePolicy", options =>
+                {
+                    options.PermitLimit = 5;
+                    options.Window = TimeSpan.FromMinutes(1);
+                    options.QueueLimit = 0; // No queuing for sensitive endpoints
+                });
+
+                // Global rejection response
+                rateLimiterOptions.OnRejected = async (context, token) =>
+                {
+                    context.HttpContext.Response.StatusCode = 429;
+                    context.HttpContext.Response.ContentType = "application/json";
+                    
+                    var response = new
+                    {
+                        error = "Rate limit exceeded",
+                        message = "Too many requests. Please try again later.",
+                        retryAfter = "60" // Fixed retry time since metadata access may not work
+                    };
+
+                    await context.HttpContext.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(response), token);
+                };
+            });
 
             return services;
         }
