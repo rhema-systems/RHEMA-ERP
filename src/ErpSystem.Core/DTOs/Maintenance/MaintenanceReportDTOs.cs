@@ -184,13 +184,6 @@ public class TechnicianUtilizationDto
     public double AvailableHours { get; set; }
 }
 
-public class SkillUtilizationDto
-{
-    public string Skill { get; set; } = string.Empty;
-    public int TechniciansWithSkill { get; set; }
-    public int WorkOrdersRequiringSkill { get; set; }
-    public double UtilizationPercentage { get; set; }
-}
 
 public class TeamUtilizationDto
 {

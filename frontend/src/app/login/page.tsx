@@ -62,6 +62,12 @@ function LoginFormWithSearchParams() {
   const { data: tenants, isLoading: tenantsLoading, error: tenantsError } = useQuery({
     queryKey: ['tenants'],
     queryFn: () => apiService.getTenants(),
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+    staleTime: 10 * 60 * 1000, // 10 minutes
+    refetchOnWindowFocus: false, // Disable refetch on window focus to prevent the error
+    refetchOnMount: false, // Only fetch once
+    refetchOnReconnect: false,
   });
 
   // Debug: Log tenant data

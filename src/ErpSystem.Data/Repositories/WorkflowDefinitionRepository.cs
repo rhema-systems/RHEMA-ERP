@@ -8,174 +8,56 @@ namespace ErpSystem.Data.Repositories;
 /// <summary>
 /// Repository implementation for workflow definitions using Entity Framework
 /// </summary>
-public class WorkflowDefinitionRepository : IWorkflowDefinitionRepository
+public class WorkflowDefinitionRepository : GenericRepository<WorkflowDefinition>, IWorkflowDefinitionRepository
 {
-    private readonly ApplicationDbContext _context;
-
-    public WorkflowDefinitionRepository(ApplicationDbContext context)
+    public WorkflowDefinitionRepository(ApplicationDbContext context) : base(context)
     {
-        _context = context;
     }
 
-    #region Basic CRUD Operations
-
-    public async Task<WorkflowDefinition?> GetByIdAsync(Guid id)
+    /// <summary>
+    /// Gets active workflow definitions for a specific entity type
+    /// </summary>
+    public async Task<IEnumerable<WorkflowDefinition>> GetActiveByEntityTypeAsync(Guid entityTypeId, CancellationToken cancellationToken = default)
     {
-        return await _context.WorkflowDefinitions
-            .FirstOrDefaultAsync(wd => wd.Id == id);
+        return await _dbSet
+            .Include(wd => wd.EntityType)
+            .Where(wd => wd.EntityTypeId == entityTypeId && wd.IsActive && !wd.IsDeleted)
+            .OrderBy(wd => wd.Name)
+            .ToListAsync(cancellationToken);
     }
 
-    public async Task<WorkflowDefinition?> GetByIdWithStepsAsync(Guid id)
+    /// <summary>
+    /// Gets a workflow definition by name
+    /// </summary>
+    public async Task<WorkflowDefinition?> GetByNameAsync(string name, Guid tenantId, CancellationToken cancellationToken = default)
     {
-        return await _context.WorkflowDefinitions
+        return await _dbSet
+            .FirstOrDefaultAsync(wd => wd.Name == name && wd.TenantId == tenantId && !wd.IsDeleted, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets workflow definitions with their steps and transitions
+    /// </summary>
+    public async Task<WorkflowDefinition?> GetWithDetailsAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _dbSet
             .Include(wd => wd.Steps.OrderBy(s => s.Order))
-            .ThenInclude(s => s.OutgoingTransitions.OrderBy(t => t.Priority))
-            .FirstOrDefaultAsync(wd => wd.Id == id);
+            .ThenInclude(s => s.OutgoingTransitions)
+            .Include(wd => wd.Steps)
+            .ThenInclude(s => s.IncomingTransitions)
+            .Include(wd => wd.EntityType)
+            .FirstOrDefaultAsync(wd => wd.Id == id && !wd.IsDeleted, cancellationToken);
     }
 
-    public async Task<WorkflowDefinition?> GetByNameAsync(string name, string entityType)
+    /// <summary>
+    /// Gets all active workflow definitions
+    /// </summary>
+    public async Task<IEnumerable<WorkflowDefinition>> GetActiveDefinitionsAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
-        return await _context.WorkflowDefinitions
-            .Include(wd => wd.Steps.OrderBy(s => s.Order))
-            .ThenInclude(s => s.OutgoingTransitions.OrderBy(t => t.Priority))
-            .FirstOrDefaultAsync(wd => wd.Name == name && wd.EntityType == entityType);
-    }
-
-    public async Task<IEnumerable<WorkflowDefinition>> GetAllAsync()
-    {
-        return await _context.WorkflowDefinitions
+        return await _dbSet
+            .Include(wd => wd.EntityType)
+            .Where(wd => wd.TenantId == tenantId && wd.IsActive && !wd.IsDeleted)
             .OrderBy(wd => wd.Name)
-            .ThenBy(wd => wd.Version)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<WorkflowDefinition>> GetByEntityTypeAsync(string entityType, bool activeOnly = true)
-    {
-        var query = _context.WorkflowDefinitions
-            .Where(wd => wd.EntityType == entityType);
-
-        if (activeOnly)
-        {
-            query = query.Where(wd => wd.IsActive);
-        }
-
-        return await query
-            .OrderBy(wd => wd.Name)
-            .ThenByDescending(wd => wd.Version)
-            .ToListAsync();
-    }
-
-    public async Task<WorkflowDefinition> CreateAsync(WorkflowDefinition definition)
-    {
-        definition.Id = Guid.NewGuid();
-        definition.CreatedDate = DateTime.UtcNow;
-        
-        await _context.WorkflowDefinitions.AddAsync(definition);
-        return definition;
-    }
-
-    public async Task<WorkflowDefinition> UpdateAsync(WorkflowDefinition definition)
-    {
-        definition.LastModifiedDate = DateTime.UtcNow;
-        _context.WorkflowDefinitions.Update(definition);
-        return definition;
-    }
-
-    public async Task DeleteAsync(Guid id)
-    {
-        var definition = await GetByIdAsync(id);
-        if (definition != null)
-        {
-            _context.WorkflowDefinitions.Remove(definition);
-        }
-    }
-
-    #endregion
-
-    #region Specific Queries
-
-    public async Task<IEnumerable<WorkflowDefinition>> GetActiveDefinitionsAsync()
-    {
-        return await _context.WorkflowDefinitions
-            .Where(wd => wd.IsActive)
-            .OrderBy(wd => wd.EntityType)
-            .ThenBy(wd => wd.Name)
-            .ToListAsync();
-    }
-
-    public async Task<WorkflowDefinition?> GetLatestVersionAsync(string name, string entityType)
-    {
-        return await _context.WorkflowDefinitions
-            .Where(wd => wd.Name == name && wd.EntityType == entityType)
-            .OrderByDescending(wd => wd.Version)
-            .FirstOrDefaultAsync();
-    }
-
-    public async Task<IEnumerable<WorkflowDefinition>> GetVersionsAsync(string name, string entityType)
-    {
-        return await _context.WorkflowDefinitions
-            .Where(wd => wd.Name == name && wd.EntityType == entityType)
-            .OrderByDescending(wd => wd.Version)
-            .ToListAsync();
-    }
-
-    public async Task<bool> HasActiveInstancesAsync(Guid definitionId)
-    {
-        return await _context.WorkflowInstances
-            .AnyAsync(wi => wi.WorkflowDefinitionId == definitionId && 
-                           (wi.Status == "InProgress" || wi.Status == "Pending"));
-    }
-
-    public async Task<int> GetInstanceCountAsync(Guid definitionId)
-    {
-        return await _context.WorkflowInstances
-            .CountAsync(wi => wi.WorkflowDefinitionId == definitionId);
-    }
-
-    public async Task<bool> ExistsAsync(string name, string entityType)
-    {
-        return await _context.WorkflowDefinitions
-            .AnyAsync(wd => wd.Name == name && wd.EntityType == entityType);
-    }
-
-    #endregion
-
-    #region Validation and Checks
-
-    public async Task<bool> CanDeleteAsync(Guid id)
-    {
-        // Check if there are any workflow instances associated with this definition
-        var hasInstances = await _context.WorkflowInstances
-            .AnyAsync(wi => wi.WorkflowDefinitionId == id);
-        
-        return !hasInstances;
-    }
-
-    public async Task<IEnumerable<WorkflowDefinition>> SearchAsync(string searchTerm, string? entityType = null)
-    {
-        var query = _context.WorkflowDefinitions.AsQueryable();
-
-        if (!string.IsNullOrWhiteSpace(searchTerm))
-        {
-            query = query.Where(wd => wd.Name.Contains(searchTerm) || 
-                                     (wd.Description != null && wd.Description.Contains(searchTerm)));
-        }
-
-        if (!string.IsNullOrWhiteSpace(entityType))
-        {
-            query = query.Where(wd => wd.EntityType == entityType);
-        }
-
-        return await query
-            .OrderBy(wd => wd.Name)
-            .ThenByDescending(wd => wd.Version)
-            .ToListAsync();
-    }
-
-    #endregion
-
-    public async Task SaveChangesAsync()
-    {
-        await _context.SaveChangesAsync();
+            .ToListAsync(cancellationToken);
     }
 }

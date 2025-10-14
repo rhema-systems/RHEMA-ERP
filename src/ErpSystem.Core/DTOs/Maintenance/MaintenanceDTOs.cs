@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.DTOs.HR;
 
 namespace ErpSystem.Core.DTOs.Maintenance;
 
@@ -15,17 +16,834 @@ public class PagedResult<T>
     public bool HasNext => Page < TotalPages;
 }
 
-public class EmployeeDto
+#endregion
+
+#region Technician DTOs
+
+/// <summary>
+/// Technician DTO for maintenance operations
+/// </summary>
+public class TechnicianDto
+{
+    public Guid Id { get; set; }
+    public Guid? EmployeeId { get; set; }
+    public string EmployeeNumber { get; set; } = string.Empty;
+    public string FullName { get; set; } = string.Empty;
+    public string FirstName { get; set; } = string.Empty;
+    public string LastName { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string EmailAddress { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string? MobileNumber { get; set; }
+    public string PhoneNumber { get; set; } = string.Empty;
+    public string Phone { get; set; } = string.Empty;
+    public string PositionTitle { get; set; } = string.Empty;
+    public string Position { get; set; } = string.Empty;
+    public string Department { get; set; } = string.Empty;
+    public string? Specialization { get; set; }
+    public string? CertificationLevel { get; set; }
+    public string? ExperienceLevel { get; set; }
+    public DateTime? HireDate { get; set; }
+    public bool IsActive { get; set; }
+    public bool IsAvailable { get; set; }
+    public List<TechnicianSkillDto> Skills { get; set; } = new();
+    public int CurrentWorkOrders { get; set; }
+    public decimal WorkloadScore { get; set; }
+    public decimal CurrentWorkload { get; set; }
+    public decimal MaxWorkload { get; set; }
+    public int SkillsCount { get; set; }
+    public decimal AverageRating { get; set; }
+    public int CompletedWorkOrders { get; set; }
+    public string? BadgeNumber { get; set; }
+    public string? ShiftName { get; set; }
+    public DateTime? LastSyncDate { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    
+    // Additional properties for controller compatibility
+    public string? JobTitle { get; set; }
+    public string? EmploymentStatus { get; set; }
+    public int ActiveWorkOrdersCount { get; set; }
+    public decimal PerformanceRating { get; set; }
+    public string? Location { get; set; }
+    public string? ShiftSchedule { get; set; }
+    public decimal HourlyRate { get; set; }
+    public string? Supervisor { get; set; }
+    public int YearsOfExperience { get; set; }
+    public decimal WorkloadCapacity { get; set; }
+    public int CompletedWorkOrdersCount { get; set; }
+    public TimeSpan AverageCompletionTime { get; set; }
+    public bool IsFromHRModule { get; set; }
+    public string? Notes { get; set; }
+    public List<string> Specializations { get; set; } = new();
+    public List<TechnicianSkillAssignmentDto> SkillAssignments { get; set; } = new();
+    public List<object> Certifications { get; set; } = new();
+}
+
+/// <summary>
+/// DTO for creating technicians
+/// </summary>
+public class CreateTechnicianDto
+{
+    [Required]
+    public Guid EmployeeId { get; set; }
+    
+    [StringLength(50)]
+    public string? EmployeeNumber { get; set; }
+    
+    [Required, StringLength(100)]
+    public string FirstName { get; set; } = string.Empty;
+    
+    [Required, StringLength(100)]
+    public string LastName { get; set; } = string.Empty;
+    
+    [EmailAddress, StringLength(200)]
+    public string? Email { get; set; }
+    
+    [StringLength(20)]
+    public string? Phone { get; set; }
+    
+    [StringLength(100)]
+    public string? Department { get; set; }
+    
+    [StringLength(100)]
+    public string? Position { get; set; }
+    
+    [StringLength(500)]
+    public string? Specialization { get; set; }
+    
+    [StringLength(500)]
+    public string? Specializations { get; set; }
+    
+    [StringLength(100)]
+    public string? CertificationLevel { get; set; }
+    
+    [StringLength(50)]
+    public string? ExperienceLevel { get; set; }
+    
+    public DateTime? HireDate { get; set; }
+    
+    [Range(0, 100)]
+    public decimal MaxWorkload { get; set; } = 40;
+    
+    [StringLength(1000)]
+    public string? Notes { get; set; }
+    
+    public bool IsActive { get; set; } = true;
+}
+
+/// <summary>
+/// DTO for updating technicians
+/// </summary>
+public class UpdateTechnicianDto
+{
+    [StringLength(100)]
+    public string? FirstName { get; set; }
+    
+    [StringLength(100)]
+    public string? LastName { get; set; }
+    
+    [EmailAddress, StringLength(200)]
+    public string? Email { get; set; }
+    
+    [StringLength(20)]
+    public string? Phone { get; set; }
+    
+    [StringLength(100)]
+    public string? Department { get; set; }
+    
+    [StringLength(100)]
+    public string? Position { get; set; }
+    
+    [StringLength(500)]
+    public string? Specialization { get; set; }
+    
+    [StringLength(500)]
+    public string? Specializations { get; set; }
+    
+    [StringLength(100)]
+    public string? CertificationLevel { get; set; }
+    
+    [StringLength(50)]
+    public string? ExperienceLevel { get; set; }
+    
+    [Range(0, 100)]
+    public decimal? MaxWorkload { get; set; }
+    
+    [StringLength(1000)]
+    public string? Notes { get; set; }
+    
+    public bool IsActive { get; set; } = true;
+}
+
+/// <summary>
+/// Technician skill DTO
+/// </summary>
+public class TechnicianSkillDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string SkillName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string? Category { get; set; }
+    public int Level { get; set; }
+    public bool IsActive { get; set; }
+    public bool IsCertified { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    
+    // Additional property for mapping profile compatibility
+    public int UserCount { get; set; }
+}
+
+/// <summary>
+/// Technician skill assignment DTO
+/// </summary>
+public class TechnicianSkillAssignmentDto
+{
+    public Guid Id { get; set; }
+    public Guid TechnicianId { get; set; }
+    public Guid SkillId { get; set; }
+    public string SkillName { get; set; } = string.Empty;
+    public string? Category { get; set; }
+    public int ProficiencyLevel { get; set; }
+    public string? ProficiencyDescription { get; set; }
+    public DateTime? CertificationDate { get; set; }
+    public DateTime? AcquiredDate { get; set; }
+    public DateTime? CertificationExpiry { get; set; }
+    public DateTime? ExpirationDate { get; set; }
+    public string? CertifyingBody { get; set; }
+    public string? CertificationNumber { get; set; }
+    public bool IsVerified { get; set; }
+    public string? VerifiedBy { get; set; }
+    public DateTime? LastAssessmentDate { get; set; }
+    public string? Notes { get; set; }
+    public TechnicianDto? Technician { get; set; }
+    public TechnicianSkillDto? Skill { get; set; }
+    public bool IsExpired { get; set; }
+    public bool IsExpiringSoon => CertificationExpiry.HasValue && CertificationExpiry.Value < DateTime.UtcNow.AddDays(30);
+    public int? DaysUntilExpiration { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// DTO for creating technician skill assignments
+/// </summary>
+public class CreateTechnicianSkillAssignmentDto
+{
+    [Required]
+    public Guid TechnicianId { get; set; }
+    
+    [Required]
+    public Guid SkillId { get; set; }
+    
+    [Range(1, 4)]
+    public int ProficiencyLevel { get; set; } = 1;
+    
+    [StringLength(500)]
+    public string? ProficiencyDescription { get; set; }
+    
+    public DateTime? CertificationDate { get; set; }
+    public DateTime? AcquiredDate { get; set; }
+    public DateTime? CertificationExpiry { get; set; }
+    public DateTime? ExpirationDate { get; set; }
+    
+    [StringLength(200)]
+    public string? CertifyingBody { get; set; }
+    
+    [StringLength(100)]
+    public string? CertificationNumber { get; set; }
+    
+    public bool IsVerified { get; set; }
+    
+    [StringLength(200)]
+    public string? VerifiedBy { get; set; }
+    
+    public DateTime? LastAssessmentDate { get; set; }
+    
+    [StringLength(1000)]
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// DTO for updating technician skill assignments
+/// </summary>
+public class UpdateTechnicianSkillAssignmentDto
+{
+    [Range(1, 4)]
+    public int ProficiencyLevel { get; set; }
+    
+    [StringLength(500)]
+    public string? ProficiencyDescription { get; set; }
+    
+    public DateTime? CertificationDate { get; set; }
+    public DateTime? CertificationExpiry { get; set; }
+    public DateTime? ExpirationDate { get; set; }
+    
+    [StringLength(200)]
+    public string? CertifyingBody { get; set; }
+    
+    [StringLength(100)]
+    public string? CertificationNumber { get; set; }
+    
+    public bool IsVerified { get; set; }
+    
+    [StringLength(200)]
+    public string? VerifiedBy { get; set; }
+    
+    public DateTime? LastAssessmentDate { get; set; }
+    
+    [StringLength(1000)]
+    public string? Notes { get; set; }
+}
+
+#endregion
+
+#region Missing List DTOs
+
+/// <summary>
+/// List DTO for technicians
+/// </summary>
+public class TechnicianListDto
 {
     public Guid Id { get; set; }
     public string EmployeeNumber { get; set; } = string.Empty;
-    public string FirstName { get; set; } = string.Empty;
-    public string LastName { get; set; } = string.Empty;
+    public string FullName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
-    public string FullName => $"{FirstName} {LastName}";
-    public string? Title { get; set; }
-    public string? DepartmentName { get; set; }
-    public string? PositionName { get; set; }
+    public string Department { get; set; } = string.Empty;
+    public string JobTitle { get; set; } = string.Empty;
+    public string EmploymentStatus { get; set; } = string.Empty;
+    public string ExperienceLevel { get; set; } = string.Empty;
+    public bool IsAvailable { get; set; }
+    public int ActiveWorkOrdersCount { get; set; }
+    public int SkillsCount { get; set; }
+    public int CertificationsCount { get; set; }
+    public int ExpiredCertificationsCount { get; set; }
+    public int ExpiringCertificationsCount { get; set; }
+    public decimal PerformanceRating { get; set; }
+    public string Location { get; set; } = string.Empty;
+    public DateTime? LastSyncDate { get; set; }
+}
+
+/// <summary>
+/// List DTO for technical skills
+/// </summary>
+public class TechnicalSkillListDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string SkillLevel { get; set; } = string.Empty;
+    public string Complexity { get; set; } = string.Empty;
+    public string RiskLevel { get; set; } = string.Empty;
+    public int EstimatedLearningHours { get; set; }
+    public bool IsActive { get; set; }
+    public bool IsFromHRModule { get; set; }
+    public DateTime? LastSyncDate { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    
+    // Additional properties for controller compatibility
+    public int TechniciansCount { get; set; }
+    public decimal AverageRating { get; set; }
+}
+
+/// <summary>
+/// List DTO for safety protocols
+/// </summary>
+public class SafetyProtocolListDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string Severity { get; set; } = string.Empty;
+    public string RegulatoryStandard { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+    public bool IsMandatory { get; set; }
+    public DateTime? NextReviewDate { get; set; }
+    public bool IsReviewDue { get; set; }
+    public string ApprovalStatus { get; set; } = string.Empty;
+    public string Version { get; set; } = string.Empty;
+    public int IncidentCount { get; set; }
+    public decimal CompliancePercentage { get; set; }
+}
+
+/// <summary>
+/// List DTO for maintenance schedules
+/// </summary>
+public class MaintenanceScheduleListDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public string MaintenanceTypeName { get; set; } = string.Empty;
+    public string Frequency { get; set; } = string.Empty;
+    public DateTime NextDueDate { get; set; }
+    public string Priority { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+    public bool IsOverdue { get; set; }
+    public int DaysUntilDue { get; set; }
+    public string AssignedTechnicianName { get; set; } = string.Empty;
+    public decimal CompliancePercentage { get; set; }
+}
+
+#endregion
+
+#region Missing Filter DTOs
+
+/// <summary>
+/// Filter DTO for technicians
+/// </summary>
+public class TechnicianFilterDto
+{
+    public string? SearchTerm { get; set; }
+    public bool? IsActive { get; set; }
+    public bool? IsAvailable { get; set; }
+    public string? Department { get; set; }
+    public string? Specialization { get; set; }
+    public string? CertificationLevel { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public List<Guid>? SkillIds { get; set; }
+    
+    // Additional filter properties
+    public string? JobTitle { get; set; }
+    public string? EmploymentStatus { get; set; }
+    public string? ExperienceLevel { get; set; }
+    public string? ShiftSchedule { get; set; }
+    public Guid? SkillId { get; set; }
+    public string? Location { get; set; }
+    public bool? HasExpiredCertifications { get; set; }
+    public bool? HasExpiringCertifications { get; set; }
+    
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 10;
+}
+
+/// <summary>
+/// Filter DTO for technical skills
+/// </summary>
+public class TechnicalSkillFilterDto
+{
+    public string? SearchTerm { get; set; }
+    public string? Category { get; set; }
+    public string? SkillLevel { get; set; }
+    public string? Complexity { get; set; }
+    public string? RiskLevel { get; set; }
+    public bool? IsActive { get; set; }
+    public bool? IsFromHRModule { get; set; }
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 10;
+}
+
+/// <summary>
+/// Filter DTO for safety protocols
+/// </summary>
+public class SafetyProtocolFilterDto
+{
+    public string? SearchTerm { get; set; }
+    public string? Category { get; set; }
+    public string? Severity { get; set; }
+    public string? RiskLevel { get; set; }
+    public bool? IsActive { get; set; }
+    public bool? IsMandatory { get; set; }
+    public bool? IsRegulatory { get; set; }
+    public bool? NeedsReview { get; set; }
+    public bool? IsExpired { get; set; }
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 10;
+    public int PageNumber { get; set; } = 1;
+    
+    // Additional properties for controller compatibility
+    public string? RegulatoryStandard { get; set; }
+    public string? ApprovalStatus { get; set; }
+    public bool? ReviewDue { get; set; }
+}
+
+#endregion
+
+#region Missing Missing DTOs
+
+/// <summary>
+/// Technician certification DTO
+/// </summary>
+public class TechnicianCertificationDto
+{
+    public Guid Id { get; set; }
+    public Guid TechnicianId { get; set; }
+    public string CertificationName { get; set; } = string.Empty;
+    public string CertificationNumber { get; set; } = string.Empty;
+    public string IssuingOrganization { get; set; } = string.Empty;
+    public DateTime IssueDate { get; set; }
+    public DateTime? ExpirationDate { get; set; }
+    public bool IsExpired { get; set; }
+    public bool IsExpiringSoon { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Work order assignment DTO
+/// </summary>
+public class WorkOrderAssignmentDto
+{
+    public Guid Id { get; set; }
+    public Guid WorkOrderId { get; set; }
+    public string WorkOrderNumber { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string Priority { get; set; } = string.Empty;
+    public DateTime? ScheduledStartDate { get; set; }
+    public DateTime? ScheduledEndDate { get; set; }
+    public double EstimatedHours { get; set; }
+    public string AssetName { get; set; } = string.Empty;
+    public DateTime AssignedAt { get; set; }
+}
+
+/// <summary>
+/// Skill utilization DTO
+/// </summary>
+public class SkillUtilizationDto
+{
+    public Guid SkillId { get; set; }
+    public string SkillName { get; set; } = string.Empty;
+    public string Skill { get; set; } = string.Empty; // Property expected by service
+    public string Category { get; set; } = string.Empty;
+    public int TechniciansCount { get; set; }
+    public int TechniciansWithSkill { get; set; } // Property expected by service
+    public int WorkOrdersCount { get; set; }
+    public int WorkOrdersRequiringSkill { get; set; } // Property expected by service
+    public double TotalHoursUsed { get; set; }
+    public double AverageHoursPerWorkOrder { get; set; }
+    public decimal UtilizationPercentage { get; set; } // Expected as decimal by service
+    public DateTime ReportPeriodStart { get; set; }
+    public DateTime ReportPeriodEnd { get; set; }
+}
+
+
+#endregion
+
+#region Missing Scheduling DTOs
+
+/// <summary>
+/// Schedule work order DTO
+/// </summary>
+public class ScheduleWorkOrderDto
+{
+    [Required]
+    public Guid WorkOrderId { get; set; }
+    
+    [Required]
+    public Guid TechnicianId { get; set; }
+    
+    public Guid? AssignedTechnicianId { get; set; }
+    public Guid? AssignedTeamId { get; set; }
+    
+    public DateTime ScheduledStartDate { get; set; }
+    public DateTime? ScheduledEndDate { get; set; }
+    public DateTime? RequestedStartDate { get; set; }
+    public DateTime? RequestedCompletionDate { get; set; }
+    public DateTime StartTime { get; set; }
+    public DateTime EndTime { get; set; }
+    public decimal EstimatedHours { get; set; }
+    public bool ReserveParts { get; set; } = false;
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// Technician schedule DTO
+/// </summary>
+public class TechnicianScheduleDto
+{
+    public Guid Id { get; set; }
+    public Guid TechnicianId { get; set; }
+    public Guid WorkOrderId { get; set; }
+    public DateTime ScheduledStart { get; set; }
+    public DateTime StartTime { get; set; }
+    public DateTime? ScheduledEnd { get; set; }
+    public DateTime EndTime { get; set; }
+    public DateTime? ActualStart { get; set; }
+    public DateTime? ActualEnd { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Location { get; set; } = string.Empty;
+    public string Priority { get; set; } = string.Empty;
+    public string WorkOrderType { get; set; } = string.Empty;
+    public decimal EstimatedHours { get; set; }
+    public string? Notes { get; set; }
+    public TechnicianDto? Technician { get; set; }
+    public WorkOrderDto? WorkOrder { get; set; }
+}
+
+/// <summary>
+/// Technician availability DTO
+/// </summary>
+public class TechnicianAvailabilityDto
+{
+    public Guid TechnicianId { get; set; }
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string TechnicianName { get; set; } = string.Empty;
+    public DateTime Date { get; set; }
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public bool IsAvailable { get; set; }
+    public double AvailableHours { get; set; }
+    public double ScheduledHours { get; set; }
+    public double RemainingHours { get; set; }
+    public double TotalAvailableHours { get; set; }
+    public List<TimeSlotDto> AvailableSlots { get; set; } = new();
+    public DateTime? AvailableFrom { get; set; }
+    public DateTime? AvailableUntil { get; set; }
+    public string? UnavailabilityReason { get; set; }
+    public int CurrentWorkOrders { get; set; }
+    public decimal WorkloadPercentage { get; set; }
+    public decimal Utilization { get; set; }
+    
+    // Additional properties for controller compatibility
+    public string AvailabilityStatus { get; set; } = string.Empty;
+    public string? ShiftSchedule { get; set; }
+    public string? ReasonForUnavailability { get; set; }
+    public DateTime? LastUpdated { get; set; }
+}
+
+/// <summary>
+/// Technician workload DTO
+/// </summary>
+public class TechnicianWorkloadDto
+{
+    public Guid TechnicianId { get; set; }
+    public string TechnicianName { get; set; } = string.Empty;
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public double TotalHours { get; set; }
+    public double ScheduledHours { get; set; }
+    public double TotalScheduledHours { get; set; }
+    public double AvailableHours { get; set; }
+    public double TotalAvailableHours { get; set; }
+    public double UtilizationPercentage { get; set; }
+    public int ActiveWorkOrders { get; set; }
+    public int ScheduledWorkOrders { get; set; }
+    public int PendingWorkOrders { get; set; }
+    public int CompletedThisWeek { get; set; }
+    public TimeSpan TotalScheduledTimeSpan { get; set; }
+    public TimeSpan AvailableTimeSpan { get; set; }
+    
+    // Additional properties for controller compatibility
+    public double EstimatedHours { get; set; }
+    public double CapacityUtilization { get; set; }
+    public bool IsOverloaded { get; set; }
+    public DateTime? NextAvailableDate { get; set; }
+    public List<WorkOrderAssignmentDto> CurrentAssignments { get; set; } = new();
+}
+
+/// <summary>
+/// Technician recommendation DTO
+/// </summary>
+public class TechnicianRecommendationDto
+{
+    public Guid TechnicianId { get; set; }
+    public string TechnicianName { get; set; } = string.Empty;
+    public decimal MatchScore { get; set; }
+    public decimal Score { get; set; }
+    public List<string> MatchedSkills { get; set; } = new();
+    public List<string> MissingSkills { get; set; } = new();
+    public decimal CurrentWorkload { get; set; }
+    public bool IsAvailable { get; set; }
+    public DateTime? NextAvailable { get; set; }
+    public DateTime? AvailableFrom { get; set; }
+    public string RecommendationReason { get; set; } = string.Empty;
+    public string ReasonForRecommendation { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Set availability DTO
+/// </summary>
+public class SetAvailabilityDto
+{
+    [Required]
+    public Guid TechnicianId { get; set; }
+    
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public bool IsAvailable { get; set; } = true;
+    public string? Reason { get; set; }
+    public string AvailabilityType { get; set; } = string.Empty;
+    public string? Notes { get; set; }
+    public bool IsRecurring { get; set; }
+    public string? RecurrencePattern { get; set; }
+    public decimal AvailableHours { get; set; }
+    public decimal CapacityPercentage { get; set; }
+}
+
+/// <summary>
+/// Technician availability record DTO
+/// </summary>
+public class TechnicianAvailabilityRecordDto
+{
+    public Guid Id { get; set; }
+    public Guid TechnicianId { get; set; }
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public bool IsAvailable { get; set; }
+    public string? Reason { get; set; }
+    public string AvailabilityType { get; set; } = string.Empty;
+    public string? Notes { get; set; }
+    public bool IsRecurring { get; set; }
+    public string? RecurrencePattern { get; set; }
+    public decimal AvailableHours { get; set; }
+    public decimal CapacityPercentage { get; set; }
+    public TechnicianDto? Technician { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Time slot DTO
+/// </summary>
+public class TimeSlotDto
+{
+    public DateTime Start { get; set; }
+    public DateTime StartTime { get; set; }
+    public DateTime End { get; set; }
+    public DateTime EndTime { get; set; }
+    public bool IsAvailable { get; set; }
+    public string? Reason { get; set; }
+    public decimal AvailableHours { get; set; }
+}
+
+#endregion
+
+#region Missing Performance DTOs
+
+/// <summary>
+/// Technician performance DTO
+/// </summary>
+public class TechnicianPerformanceDto
+{
+    public Guid TechnicianId { get; set; }
+    public string TechnicianName { get; set; } = string.Empty;
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public int WorkOrdersCompleted { get; set; }
+    public double AverageCompletionTime { get; set; }
+    public double OnTimeCompletionRate { get; set; }
+    public decimal TotalCost { get; set; }
+    public double UtilizationRate { get; set; }
+    public double QualityScore { get; set; }
+    
+    // Additional properties for controller compatibility
+    public int CompletedWorkOrders { get; set; }
+    public double AverageQualityRating { get; set; }
+    public int OnTimeCompletions { get; set; }
+    public int LateCompletions { get; set; }
+    public double OnTimePercentage { get; set; }
+    public int SafetyIncidents { get; set; }
+    public DateTime? LastIncidentDate { get; set; }
+    public DateTime ReportPeriodStart { get; set; }
+    public DateTime ReportPeriodEnd { get; set; }
+    public List<object> SkillUtilization { get; set; } = new();
+}
+
+/// <summary>
+/// Technician stats DTO
+/// </summary>
+public class TechnicianStatsDto
+{
+    public Guid TechnicianId { get; set; }
+    public string TechnicianName { get; set; } = string.Empty;
+    public int TotalWorkOrders { get; set; }
+    public int CompletedWorkOrders { get; set; }
+    public int InProgressWorkOrders { get; set; }
+    public double CompletionRate { get; set; }
+    public double AverageRating { get; set; }
+    public TimeSpan TotalHoursWorked { get; set; }
+    public decimal TotalCostSaved { get; set; }
+    
+    // Additional properties for controller compatibility
+    public int TotalTechnicians { get; set; }
+    public int ActiveTechnicians { get; set; }
+    public int AvailableTechnicians { get; set; }
+    public int TechniciansOnAssignment { get; set; }
+    public int TechniciansOnLeave { get; set; }
+    public double AverageExperience { get; set; }
+    public double AveragePerformanceRating { get; set; }
+    public int CertificationsExpiring { get; set; }
+    public int ExpiredCertifications { get; set; }
+    public DateTime? LastSyncFromHR { get; set; }
+}
+
+#endregion
+
+#region Missing Safety Compliance DTOs
+
+/// <summary>
+/// Safety compliance report DTO
+/// </summary>
+public class SafetyComplianceReportDto
+{
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public double OverallComplianceRate { get; set; }
+    public int TotalProtocols { get; set; }
+    public int ComplianceChecks { get; set; }
+    public int Violations { get; set; }
+    public List<ProtocolComplianceDto> ProtocolCompliance { get; set; } = new();
+    public List<SafetyViolationSummaryDto> TopViolations { get; set; } = new();
+    
+    // Additional properties for controller compatibility
+    public int ActiveProtocols { get; set; }
+    public int MandatoryProtocols { get; set; }
+    public int ProtocolsDueForReview { get; set; }
+    public int OverdueProtocols { get; set; }
+    public decimal OverallCompliancePercentage { get; set; }
+    public int TotalIncidents { get; set; }
+    public int ViolationsThisMonth { get; set; }
+    public DateTime ReportGeneratedDate { get; set; }
+    public List<CategoryComplianceDto> CategoryCompliance { get; set; } = new();
+}
+
+/// <summary>
+/// Protocol compliance DTO
+/// </summary>
+public class ProtocolComplianceDto
+{
+    public Guid ProtocolId { get; set; }
+    public string ProtocolName { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public double ComplianceRate { get; set; }
+    public int TotalChecks { get; set; }
+    public int ComplianceCount { get; set; }
+    public int ViolationCount { get; set; }
+    
+    // Additional properties for controller compatibility
+    public decimal CompliancePercentage { get; set; }
+    public DateTime? LastViolationDate { get; set; }
+}
+
+/// <summary>
+/// Safety violation summary DTO
+/// </summary>
+public class SafetyViolationSummaryDto
+{
+    public string ViolationType { get; set; } = string.Empty;
+    public int Count { get; set; }
+    public string Severity { get; set; } = string.Empty;
+    public decimal TotalCost { get; set; }
+    
+    // Additional properties for controller compatibility
+    public Guid Id { get; set; }
+    public string ProtocolCode { get; set; } = string.Empty;
+    public string ProtocolName { get; set; } = string.Empty;
+    public DateTime Date { get; set; }
+    public string Status { get; set; } = string.Empty;
 }
 
 #endregion
@@ -295,6 +1113,644 @@ public class RecordQualityValidationDto
     public string? ValidationNotes { get; set; }
     public List<QualityChecklistResultDto>? ChecklistResults { get; set; }
 }
+
+#endregion
+
+#region Maintenance Setup DTOs
+
+// Maintenance Types DTOs
+public class MaintenanceTypeDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string Priority { get; set; } = string.Empty;
+    public decimal EstimatedDuration { get; set; }
+    public bool IsActive { get; set; }
+    public bool RequiresDowntime { get; set; }
+    public string Color { get; set; } = string.Empty;
+    public string Icon { get; set; } = string.Empty;
+    public string Frequency { get; set; } = string.Empty;
+    public string SkillLevel { get; set; } = string.Empty;
+    public string SafetyRequirements { get; set; } = string.Empty;
+    public string ToolsRequired { get; set; } = string.Empty;
+    public string Notes { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+public class CreateMaintenanceTypeDto
+{
+    [Required, StringLength(100)]
+    public string Name { get; set; } = string.Empty;
+    
+    [Required, StringLength(20)]
+    public string Code { get; set; } = string.Empty;
+    
+    [StringLength(500)]
+    public string Description { get; set; } = string.Empty;
+    
+    [Required, StringLength(50)]
+    public string Category { get; set; } = string.Empty;
+    
+    [Required, StringLength(20)]
+    public string Priority { get; set; } = string.Empty;
+    
+    [Range(0.1, 24)]
+    public decimal EstimatedDuration { get; set; } = 1.0m;
+    
+    public bool IsActive { get; set; } = true;
+    public bool RequiresDowntime { get; set; } = false;
+    
+    [StringLength(10)]
+    public string Color { get; set; } = "#3b82f6";
+    
+    [StringLength(50)]
+    public string Icon { get; set; } = "wrench";
+    
+    [StringLength(50)]
+    public string Frequency { get; set; } = "As Needed";
+    
+    [StringLength(50)]
+    public string SkillLevel { get; set; } = "Basic";
+    
+    [StringLength(1000)]
+    public string SafetyRequirements { get; set; } = string.Empty;
+    
+    [StringLength(500)]
+    public string ToolsRequired { get; set; } = string.Empty;
+    
+    [StringLength(1000)]
+    public string Notes { get; set; } = string.Empty;
+}
+
+public class UpdateMaintenanceTypeDto : CreateMaintenanceTypeDto
+{
+}
+
+public class MaintenanceTypeFilterDto
+{
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 25;
+    public string? SearchTerm { get; set; }
+    public string? Category { get; set; }
+    public bool? IsActive { get; set; }
+}
+
+// Priority Levels DTOs
+public class PriorityLevelDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public int Level { get; set; }
+    public bool IsActive { get; set; }
+    public string Color { get; set; } = string.Empty;
+    public string Icon { get; set; } = string.Empty;
+    public int ResponseTime { get; set; }
+    public int EscalationTime { get; set; }
+    public bool RequiresApproval { get; set; }
+    public string NotificationRules { get; set; } = string.Empty;
+    public int SlaHours { get; set; }
+    public bool AutoAssign { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+public class CreatePriorityLevelDto
+{
+    [Required, StringLength(50)]
+    public string Name { get; set; } = string.Empty;
+    
+    [Required, StringLength(10)]
+    public string Code { get; set; } = string.Empty;
+    
+    [StringLength(500)]
+    public string Description { get; set; } = string.Empty;
+    
+    [Range(1, 10)]
+    public int Level { get; set; } = 1;
+    
+    public bool IsActive { get; set; } = true;
+    
+    [StringLength(10)]
+    public string Color { get; set; } = "#3b82f6";
+    
+    [StringLength(50)]
+    public string Icon { get; set; } = "alert-triangle";
+    
+    [Range(1, 43200)] // Up to 30 days in minutes
+    public int ResponseTime { get; set; } = 60;
+    
+    [Range(1, 43200)]
+    public int EscalationTime { get; set; } = 120;
+    
+    public bool RequiresApproval { get; set; } = false;
+    
+    [StringLength(1000)]
+    public string NotificationRules { get; set; } = string.Empty;
+    
+    [Range(1, 8760)] // Up to 1 year in hours
+    public int SlaHours { get; set; } = 24;
+    
+    public bool AutoAssign { get; set; } = false;
+}
+
+public class UpdatePriorityLevelDto : CreatePriorityLevelDto
+{
+}
+
+public class PriorityLevelFilterDto
+{
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 25;
+    public string? SearchTerm { get; set; }
+    public bool? IsActive { get; set; }
+    public int? Level { get; set; }
+}
+
+// Inspection Templates DTOs
+public class InspectionTemplateDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string Frequency { get; set; } = string.Empty;
+    public int EstimatedDuration { get; set; }
+    public bool IsActive { get; set; }
+    public bool RequiresSignature { get; set; }
+    public bool AllowPhotos { get; set; }
+    public string Version { get; set; } = string.Empty;
+    public string Priority { get; set; } = string.Empty;
+    public List<string> AssetTypes { get; set; } = new();
+    public List<string> InspectorRoles { get; set; } = new();
+    public List<InspectionChecklistItemDto> ChecklistItems { get; set; } = new();
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+public class InspectionChecklistItemDto
+{
+    public Guid Id { get; set; }
+    public string Item { get; set; } = string.Empty;
+    public string Type { get; set; } = string.Empty; // checklist, text, number, measurement
+    public bool Required { get; set; }
+    public int Order { get; set; }
+}
+
+public class CreateInspectionTemplateDto
+{
+    [Required, StringLength(100)]
+    public string Name { get; set; } = string.Empty;
+    
+    [Required, StringLength(20)]
+    public string Code { get; set; } = string.Empty;
+    
+    [StringLength(500)]
+    public string Description { get; set; } = string.Empty;
+    
+    [Required, StringLength(50)]
+    public string Category { get; set; } = string.Empty;
+    
+    [Required, StringLength(50)]
+    public string Frequency { get; set; } = string.Empty;
+    
+    [Range(1, 1440)] // Up to 24 hours in minutes
+    public int EstimatedDuration { get; set; } = 60;
+    
+    public bool IsActive { get; set; } = true;
+    public bool RequiresSignature { get; set; } = false;
+    public bool AllowPhotos { get; set; } = false;
+    
+    [StringLength(10)]
+    public string Version { get; set; } = "1.0";
+    
+    [Required, StringLength(20)]
+    public string Priority { get; set; } = "Medium";
+    
+    public List<string> AssetTypes { get; set; } = new();
+    public List<string> InspectorRoles { get; set; } = new();
+    public List<CreateInspectionChecklistItemDto> ChecklistItems { get; set; } = new();
+}
+
+public class CreateInspectionChecklistItemDto
+{
+    [Required, StringLength(200)]
+    public string Item { get; set; } = string.Empty;
+    
+    [Required, StringLength(20)]
+    public string Type { get; set; } = "checklist";
+    
+    public bool Required { get; set; } = false;
+    public int Order { get; set; }
+}
+
+public class UpdateInspectionTemplateDto : CreateInspectionTemplateDto
+{
+}
+
+public class InspectionTemplateFilterDto
+{
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 25;
+    public string? SearchTerm { get; set; }
+    public string? Category { get; set; }
+    public string? Frequency { get; set; }
+    public bool? IsActive { get; set; }
+}
+
+// Maintenance Schedules DTOs
+public class MaintenanceScheduleDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public Guid AssetId { get; set; }
+    public Guid MaintenanceTypeId { get; set; }
+    public string MaintenanceType { get; set; } = string.Empty;
+    public string MaintenanceTypeName { get; set; } = string.Empty;
+    public string Priority { get; set; } = string.Empty;
+    public string Frequency { get; set; } = string.Empty;
+    public int FrequencyValue { get; set; }
+    public string FrequencyUnit { get; set; } = string.Empty;
+    public int FrequencyInterval { get; set; }
+    public DateTime StartDate { get; set; }
+    public DateTime? NextDue { get; set; }
+    public DateTime NextDueDate { get; set; }
+    public DateTime NextScheduledDate { get; set; }
+    public DateTime? LastCompleted { get; set; }
+    public DateTime? LastCompletedDate { get; set; }
+    public int EstimatedDuration { get; set; }
+    public decimal EstimatedHours { get; set; }
+    public decimal EstimatedCost { get; set; }
+    public Guid? AssignedTechnicianId { get; set; }
+    public string AssignedTechnicianName { get; set; } = string.Empty;
+    public Guid? AssignedTeamId { get; set; }
+    public string AssignedTeam { get; set; } = string.Empty;
+    public string AssignedTeamName { get; set; } = string.Empty;
+    public string AssetCategory { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public string Instructions { get; set; } = string.Empty;
+    public string SafetyNotes { get; set; } = string.Empty;
+    public List<string> RequiredSkills { get; set; } = new();
+    public List<string> RequiredTools { get; set; } = new();
+    public List<string> RequiredParts { get; set; } = new();
+    public bool IsActive { get; set; }
+    public bool IsOverdue { get; set; }
+    public int DaysUntilDue { get; set; }
+    public decimal CompliancePercentage { get; set; }
+    public bool AutoCreate { get; set; }
+    public bool AutoGenerateWorkOrders { get; set; }
+    public int LeadTime { get; set; }
+    public int? AdvanceNotificationDays { get; set; }
+    public string? NotificationRecipients { get; set; }
+    public int MaxDelayDays { get; set; }
+    public int CompletedCount { get; set; }
+    public int CompletedWorkOrdersCount { get; set; }
+    public int OverdueCount { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string Notes { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public DateTime CreatedDate { get; set; }
+    public string? CreatedBy { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    public DateTime? LastModifiedDate { get; set; }
+    public string? LastModifiedBy { get; set; }
+    
+    // Additional properties for mapping profile compatibility
+    public MaintenanceAssetDto? Asset { get; set; }
+    public TechnicianDto? DefaultTechnician { get; set; }
+    public TechnicianTeamDto? DefaultTeam { get; set; }
+    public PriorityLevelDto? PriorityLevel { get; set; }
+}
+
+public class CreateMaintenanceScheduleDto
+{
+    [Required, StringLength(100)]
+    public string Name { get; set; } = string.Empty;
+    
+    [Required, StringLength(20)]
+    public string Code { get; set; } = string.Empty;
+    
+    [StringLength(500)]
+    public string Description { get; set; } = string.Empty;
+    
+    [Required]
+    public Guid AssetId { get; set; }
+    
+    [Required]
+    public Guid MaintenanceTypeId { get; set; }
+    
+    [Required, StringLength(50)]
+    public string MaintenanceType { get; set; } = string.Empty;
+    
+    [Required, StringLength(20)]
+    public string Priority { get; set; } = string.Empty;
+    
+    [Required, StringLength(50)]
+    public string Frequency { get; set; } = string.Empty;
+    
+    public int FrequencyValue { get; set; } = 1;
+    
+    [Required, StringLength(20)]
+    public string FrequencyUnit { get; set; } = string.Empty;
+    
+    [Range(1, 365)]
+    public int FrequencyInterval { get; set; } = 1;
+    
+    public DateTime StartDate { get; set; } = DateTime.Today;
+    public DateTime NextDueDate { get; set; } = DateTime.Today.AddDays(30);
+    
+    [Range(1, 1440)]
+    public int EstimatedDuration { get; set; } = 60;
+    
+    public decimal EstimatedHours { get; set; } = 4;
+    public decimal EstimatedCost { get; set; } = 0;
+    
+    [StringLength(100)]
+    public string AssignedTeam { get; set; } = string.Empty;
+    
+    public Guid? AssignedTechnicianId { get; set; }
+    public Guid? AssignedTeamId { get; set; }
+    
+    [StringLength(100)]
+    public string AssetCategory { get; set; } = string.Empty;
+    
+    [StringLength(2000)]
+    public string Instructions { get; set; } = string.Empty;
+    
+    [StringLength(1000)]
+    public string SafetyNotes { get; set; } = string.Empty;
+    
+    public List<string> RequiredSkills { get; set; } = new();
+    public List<string> RequiredTools { get; set; } = new();
+    public List<string> RequiredParts { get; set; } = new();
+    
+    public bool IsActive { get; set; } = true;
+    public bool AutoCreate { get; set; } = true;
+    public bool AutoGenerateWorkOrders { get; set; } = true;
+    
+    [Range(0, 365)]
+    public int LeadTime { get; set; } = 5;
+    
+    public int? AdvanceNotificationDays { get; set; } = 7;
+    
+    [StringLength(500)]
+    public string? NotificationRecipients { get; set; }
+    
+    [Range(0, 30)]
+    public int MaxDelayDays { get; set; } = 3;
+    
+    [StringLength(1000)]
+    public string Notes { get; set; } = string.Empty;
+}
+
+public class UpdateMaintenanceScheduleDto : CreateMaintenanceScheduleDto
+{
+}
+
+public class MaintenanceScheduleFilterDto
+{
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 25;
+    public string? SearchTerm { get; set; }
+    public string? Priority { get; set; }
+    public string? Frequency { get; set; }
+    public bool? IsActive { get; set; }
+    public Guid? AssetId { get; set; }
+    public Guid? MaintenanceTypeId { get; set; }
+    public bool? IsOverdue { get; set; }
+    public Guid? AssignedTechnicianId { get; set; }
+    public Guid? AssignedTeamId { get; set; }
+    public DateTime? DueDateFrom { get; set; }
+    public DateTime? DueDateTo { get; set; }
+}
+
+// Technical Skills DTOs
+public class TechnicalSkillDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string SkillLevel { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+    public List<string> Prerequisites { get; set; } = new();
+    public List<string> Certifications { get; set; } = new();
+    public int EstimatedLearningHours { get; set; }
+    public string Complexity { get; set; } = string.Empty;
+    public string RiskLevel { get; set; } = string.Empty;
+    public List<string> ToolsRequired { get; set; } = new();
+    public string SafetyRequirements { get; set; } = string.Empty;
+    public List<string> CompetencyAreas { get; set; } = new();
+    public List<string> RelatedMaintenanceTypes { get; set; } = new();
+    public int TechniciansCount { get; set; }
+    public decimal AverageRating { get; set; }
+    public bool IsFromHRModule { get; set; }
+    public DateTime? LastSyncDate { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime CreatedDate { get; set; }
+    public string? CreatedBy { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    public DateTime? LastModifiedDate { get; set; }
+    public string? LastModifiedBy { get; set; }
+    
+    // Additional property for mapping profile compatibility
+    public int UserCount { get; set; }
+}
+
+public class CreateTechnicalSkillDto
+{
+    [Required, StringLength(100)]
+    public string Name { get; set; } = string.Empty;
+    
+    [Required, StringLength(20)]
+    public string Code { get; set; } = string.Empty;
+    
+    [StringLength(500)]
+    public string Description { get; set; } = string.Empty;
+    
+    [Required, StringLength(50)]
+    public string Category { get; set; } = string.Empty;
+    
+    [Required, StringLength(20)]
+    public string SkillLevel { get; set; } = "Basic";
+    
+    public bool IsActive { get; set; } = true;
+    public List<string> Prerequisites { get; set; } = new();
+    public List<string> Certifications { get; set; } = new();
+    
+    [Range(1, 1000)]
+    public int EstimatedLearningHours { get; set; } = 40;
+    
+    [Required, StringLength(20)]
+    public string Complexity { get; set; } = "Low";
+    
+    [Required, StringLength(20)]
+    public string RiskLevel { get; set; } = "Low";
+    
+    public List<string> ToolsRequired { get; set; } = new();
+    
+    [StringLength(1000)]
+    public string SafetyRequirements { get; set; } = string.Empty;
+    
+    public List<string> CompetencyAreas { get; set; } = new();
+    public List<string> RelatedMaintenanceTypes { get; set; } = new();
+}
+
+public class UpdateTechnicalSkillDto : CreateTechnicalSkillDto
+{
+}
+
+// TechnicalSkillFilterDto - duplicate removed, using definition from above
+
+// Safety Protocols DTOs
+public class SafetyProtocolDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string RiskLevel { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+    public bool IsMandatory { get; set; }
+    public bool IsRegulatory { get; set; }
+    public string Version { get; set; } = string.Empty;
+    public string DocumentVersion { get; set; } = string.Empty;
+    public DateTime LastUpdated { get; set; }
+    public string ReviewFrequency { get; set; } = string.Empty;
+    public int ReviewFrequencyMonths { get; set; }
+    public DateTime? LastReviewDate { get; set; }
+    public DateTime? NextReviewDate { get; set; }
+    public string ReviewedBy { get; set; } = string.Empty;
+    public string ApprovedBy { get; set; } = string.Empty;
+    public DateTime? ApprovalDate { get; set; }
+    public DateTime? EffectiveDate { get; set; }
+    public DateTime? ExpirationDate { get; set; }
+    public List<string> ApplicableAreas { get; set; } = new();
+    public List<string> ApplicableEnvironments { get; set; } = new();
+    public List<string> RequiredTraining { get; set; } = new();
+    public List<string> RequiredCertifications { get; set; } = new();
+    public List<string> Procedures { get; set; } = new();
+    public List<string> EmergencyProcedures { get; set; } = new();
+    public List<string> ComplianceCheckpoints { get; set; } = new();
+    public List<string> RegulatorySources { get; set; } = new();
+    public List<string> EquipmentTypes { get; set; } = new();
+    public List<string> MaintenanceTypes { get; set; } = new();
+    public string MinimumTrainingLevel { get; set; } = string.Empty;
+    public int EstimatedTime { get; set; }
+    public List<string> Steps { get; set; } = new();
+    public List<string> RequiredPPE { get; set; } = new();
+    public List<string> EmergencyContacts { get; set; } = new();
+    public List<string> Documents { get; set; } = new();
+    public int TrainingRecords { get; set; }
+    public decimal ComplianceRate { get; set; }
+    public decimal ComplianceScore { get; set; }
+    public int TotalViolations { get; set; }
+    public int IncidentsLastYear { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime CreatedDate { get; set; }
+    public string? CreatedBy { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    public DateTime? LastModifiedDate { get; set; }
+    public string? LastModifiedBy { get; set; }
+    
+    // Additional properties for controller compatibility
+    public string Severity { get; set; } = string.Empty;
+    public string RegulatoryStandard { get; set; } = string.Empty;
+    public string ApprovalStatus { get; set; } = string.Empty;
+    public int IncidentCount { get; set; }
+    public decimal CompliancePercentage { get; set; }
+    public List<string> RequiredEquipment { get; set; } = new();
+    public List<string> PreventiveMeasures { get; set; } = new();
+    public List<string> ApplicableMaintenanceTypes { get; set; } = new();
+    public List<string> ApplicableAssetTypes { get; set; } = new();
+}
+
+public class CreateSafetyProtocolDto
+{
+    [Required, StringLength(100)]
+    public string Name { get; set; } = string.Empty;
+    
+    [Required, StringLength(100)]
+    public string Title { get; set; } = string.Empty;
+    
+    [Required, StringLength(20)]
+    public string Code { get; set; } = string.Empty;
+    
+    [StringLength(500)]
+    public string Description { get; set; } = string.Empty;
+    
+    [Required, StringLength(50)]
+    public string Category { get; set; } = string.Empty;
+    
+    [Required, StringLength(20)]
+    public string RiskLevel { get; set; } = "Medium";
+    
+    public bool IsActive { get; set; } = true;
+    public bool IsMandatory { get; set; } = false;
+    public bool IsRegulatory { get; set; } = false;
+    
+    [StringLength(10)]
+    public string Version { get; set; } = "1.0";
+    
+    [StringLength(10)]
+    public string DocumentVersion { get; set; } = "1.0";
+    
+    [Required, StringLength(20)]
+    public string ReviewFrequency { get; set; } = "Annual";
+    
+    public int ReviewFrequencyMonths { get; set; } = 12;
+    
+    public List<string> ApplicableAreas { get; set; } = new();
+    public List<string> ApplicableEnvironments { get; set; } = new();
+    public List<string> RequiredTraining { get; set; } = new();
+    public List<string> RequiredCertifications { get; set; } = new();
+    public List<string> Procedures { get; set; } = new();
+    public List<string> EmergencyProcedures { get; set; } = new();
+    public List<string> ComplianceCheckpoints { get; set; } = new();
+    public List<string> RegulatorySources { get; set; } = new();
+    public List<string> EquipmentTypes { get; set; } = new();
+    public List<string> MaintenanceTypes { get; set; } = new();
+    
+    [Range(1, 1440)]
+    public int EstimatedTime { get; set; } = 15;
+    
+    [StringLength(50)]
+    public string MinimumTrainingLevel { get; set; } = string.Empty;
+    
+    public List<string> Steps { get; set; } = new();
+    public List<string> RequiredPPE { get; set; } = new();
+    public List<string> EmergencyContacts { get; set; } = new();
+    public List<string> Documents { get; set; } = new();
+    
+    public DateTime? LastReviewDate { get; set; }
+    public DateTime? NextReviewDate { get; set; }
+    public DateTime? EffectiveDate { get; set; }
+    public DateTime? ExpirationDate { get; set; }
+    public DateTime? ApprovalDate { get; set; }
+    
+    [StringLength(100)]
+    public string ReviewedBy { get; set; } = string.Empty;
+    
+    [StringLength(100)]
+    public string ApprovedBy { get; set; } = string.Empty;
+}
+
+public class UpdateSafetyProtocolDto : CreateSafetyProtocolDto
+{
+}
+
+// SafetyProtocolFilterDto - duplicate removed, using definition from above
 
 #endregion
 
@@ -615,6 +2071,27 @@ public class MaintenanceAssetCategoryDto
     public string? Icon { get; set; }
     public bool IsActive { get; set; }
     public int AssetCount { get; set; }
+    
+    // Parent-child relationship
+    public Guid? ParentCategoryId { get; set; }
+    public MaintenanceAssetCategoryDto? ParentCategory { get; set; }
+    public ICollection<MaintenanceAssetCategoryDto> ChildCategories { get; set; } = new List<MaintenanceAssetCategoryDto>();
+    
+    // Maintenance Schedule Configuration
+    public string MaintenanceScheduleType { get; set; } = "single";
+    
+    // Primary Maintenance Criteria
+    public string MaintenanceType { get; set; } = "Time";
+    public string? MaintenanceFrequency { get; set; }
+    public double? MaintenanceValue { get; set; }
+    public string? MaintenanceUnit { get; set; }
+    
+    // Secondary Maintenance Criteria
+    public string? SecondaryMaintenanceType { get; set; }
+    public string? SecondaryMaintenanceFrequency { get; set; }
+    public double? SecondaryMaintenanceValue { get; set; }
+    public string? SecondaryMaintenanceUnit { get; set; }
+    
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 }
@@ -638,6 +2115,37 @@ public class CreateMaintenanceAssetCategoryDto
     public string? Icon { get; set; }
 
     public bool IsActive { get; set; } = true;
+    
+    // Parent-child relationship
+    public Guid? ParentCategoryId { get; set; }
+    
+    // Maintenance Schedule Configuration
+    [StringLength(20)]
+    public string MaintenanceScheduleType { get; set; } = "single";
+    
+    // Primary Maintenance Criteria
+    [StringLength(20)]
+    public string MaintenanceType { get; set; } = "Time";
+    
+    [StringLength(50)]
+    public string? MaintenanceFrequency { get; set; }
+    
+    public double? MaintenanceValue { get; set; }
+    
+    [StringLength(20)]
+    public string? MaintenanceUnit { get; set; }
+    
+    // Secondary Maintenance Criteria
+    [StringLength(20)]
+    public string? SecondaryMaintenanceType { get; set; }
+    
+    [StringLength(50)]
+    public string? SecondaryMaintenanceFrequency { get; set; }
+    
+    public double? SecondaryMaintenanceValue { get; set; }
+    
+    [StringLength(20)]
+    public string? SecondaryMaintenanceUnit { get; set; }
 }
 
 public class UpdateMaintenanceAssetCategoryDto
@@ -659,6 +2167,49 @@ public class UpdateMaintenanceAssetCategoryDto
     public string? Icon { get; set; }
 
     public bool IsActive { get; set; } = true;
+    
+    // Parent-child relationship
+    public Guid? ParentCategoryId { get; set; }
+    
+    // Maintenance Schedule Configuration
+    [StringLength(20)]
+    public string MaintenanceScheduleType { get; set; } = "single";
+    
+    // Primary Maintenance Criteria
+    [StringLength(20)]
+    public string MaintenanceType { get; set; } = "Time";
+    
+    [StringLength(50)]
+    public string? MaintenanceFrequency { get; set; }
+    
+    public double? MaintenanceValue { get; set; }
+    
+    [StringLength(20)]
+    public string? MaintenanceUnit { get; set; }
+    
+    // Secondary Maintenance Criteria
+    [StringLength(20)]
+    public string? SecondaryMaintenanceType { get; set; }
+    
+    [StringLength(50)]
+    public string? SecondaryMaintenanceFrequency { get; set; }
+    
+    public double? SecondaryMaintenanceValue { get; set; }
+    
+    [StringLength(20)]
+    public string? SecondaryMaintenanceUnit { get; set; }
+}
+
+// Filter DTOs - PriorityLevelFilterDto duplicate removed, using definition from above
+
+public class WorkOrderTypeFilterDto
+{
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 25;
+    public string? SearchTerm { get; set; }
+    public string? Category { get; set; }
+    public string? Priority { get; set; }
+    public bool? IsActive { get; set; }
 }
 
 #endregion
@@ -792,6 +2343,7 @@ public class CreateWorkOrderDto
     public Guid PriorityLevelId { get; set; }
 
     public string Type { get; set; } = string.Empty;
+    public string WorkOrderType { get; set; } = string.Empty;
     public string Priority { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public string Instructions { get; set; } = string.Empty;
@@ -944,115 +2496,9 @@ public class UpdateWorkOrderTypeDto
     public int DefaultPriority { get; set; } = 3;
 }
 
-// Maintenance Type DTOs
-public class MaintenanceTypeDto
-{
-    public Guid Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public string Code { get; set; } = string.Empty;
-    public string? Description { get; set; }
-    public string Category { get; set; } = string.Empty;
-    public string? Color { get; set; }
-    public bool IsActive { get; set; }
-}
+// Maintenance Type DTOs - duplicate removed, using original definitions from above
 
-public class CreateMaintenanceTypeDto
-{
-    [Required]
-    [StringLength(100)]
-    public string Name { get; set; } = string.Empty;
-
-    [StringLength(50)]
-    public string Code { get; set; } = string.Empty;
-
-    [StringLength(1000)]
-    public string? Description { get; set; }
-
-    [Required]
-    [StringLength(20)]
-    public string Category { get; set; } = "Scheduled";
-
-    [StringLength(7)]
-    public string? Color { get; set; }
-
-    public bool IsActive { get; set; } = true;
-}
-
-public class UpdateMaintenanceTypeDto
-{
-    [Required]
-    [StringLength(100)]
-    public string Name { get; set; } = string.Empty;
-
-    [StringLength(50)]
-    public string Code { get; set; } = string.Empty;
-
-    [StringLength(1000)]
-    public string? Description { get; set; }
-
-    [Required]
-    [StringLength(20)]
-    public string Category { get; set; } = string.Empty;
-
-    [StringLength(7)]
-    public string? Color { get; set; }
-
-    public bool IsActive { get; set; } = true;
-}
-
-// Priority Level DTOs
-public class PriorityLevelDto
-{
-    public Guid Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public int Level { get; set; }
-    public string? Description { get; set; }
-    public string Color { get; set; } = string.Empty;
-    public int ResponseTimeHours { get; set; }
-    public bool IsActive { get; set; }
-}
-
-public class CreatePriorityLevelDto
-{
-    [Required]
-    [StringLength(50)]
-    public string Name { get; set; } = string.Empty;
-
-    [Required]
-    public int Level { get; set; }
-
-    [StringLength(1000)]
-    public string? Description { get; set; }
-
-    [StringLength(7)]
-    public string Color { get; set; } = "#6B7280";
-
-    [Range(1, 8760)]
-    public int ResponseTimeHours { get; set; } = 24;
-
-    public bool IsActive { get; set; } = true;
-}
-
-public class UpdatePriorityLevelDto
-{
-    [Required]
-    [StringLength(50)]
-    public string Name { get; set; } = string.Empty;
-
-    [Required]
-    public int Level { get; set; }
-
-    [StringLength(1000)]
-    public string? Description { get; set; }
-
-    [StringLength(7)]
-    public string Color { get; set; } = string.Empty;
-
-    [Range(1, 8760)]
-    public int ResponseTimeHours { get; set; }
-
-    public bool IsActive { get; set; } = true;
-}
+// Priority Level DTOs - duplicate removed, using original definitions from above
 
 #endregion
 
@@ -1385,168 +2831,7 @@ public class LaborReportDto
 
 #region Maintenance Scheduling DTOs
 
-public class MaintenanceScheduleDto
-{
-    public Guid Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public string? Description { get; set; }
-    public Guid AssetId { get; set; }
-    public Guid MaintenanceTypeId { get; set; }
-    public string ScheduleType { get; set; } = string.Empty;
-    public string Frequency { get; set; } = string.Empty;
-    public int IntervalValue { get; set; }
-    public TimeOnly? PreferredTime { get; set; }
-    public int? DayOfWeek { get; set; }
-    public int? DayOfMonth { get; set; }
-    public double? UsageInterval { get; set; }
-    public string? UsageUnit { get; set; }
-    public string? ConditionParameters { get; set; }
-    public DateTime StartDate { get; set; }
-    public DateTime? EndDate { get; set; }
-    public DateTime? LastGeneratedDate { get; set; }
-    public DateTime? NextDueDate { get; set; }
-    public int LeadTimeDays { get; set; }
-    public bool IsActive { get; set; }
-    public double EstimatedHours { get; set; }
-    public decimal EstimatedCost { get; set; }
-    public string? WorkOrderTitle { get; set; }
-    public string? WorkOrderDescription { get; set; }
-    public Guid? DefaultTechnicianId { get; set; }
-    public Guid? DefaultTeamId { get; set; }
-    public Guid? PriorityLevelId { get; set; }
-
-    public MaintenanceAssetDto? Asset { get; set; }
-    public MaintenanceTypeDto? MaintenanceType { get; set; }
-    public string? DefaultTechnician { get; set; }
-    public TechnicianTeamDto? DefaultTeam { get; set; }
-    public PriorityLevelDto? PriorityLevel { get; set; }
-
-    public DateTime CreatedAt { get; set; }
-    public DateTime? UpdatedAt { get; set; }
-}
-
-public class CreateMaintenanceScheduleDto
-{
-    [Required]
-    [StringLength(200)]
-    public string Name { get; set; } = string.Empty;
-
-    [StringLength(1000)]
-    public string? Description { get; set; }
-
-    [Required]
-    public Guid AssetId { get; set; }
-
-    [Required]
-    public Guid MaintenanceTypeId { get; set; }
-
-    [Required]
-    [StringLength(20)]
-    public string ScheduleType { get; set; } = "TimeBased";
-
-    [Required]
-    [StringLength(20)]
-    public string Frequency { get; set; } = "Monthly";
-
-    [Range(1, int.MaxValue)]
-    public int IntervalValue { get; set; } = 1;
-
-    public TimeOnly? PreferredTime { get; set; }
-
-    [Range(0, 6)]
-    public int? DayOfWeek { get; set; }
-
-    [Range(1, 31)]
-    public int? DayOfMonth { get; set; }
-
-    public double? UsageInterval { get; set; }
-
-    [StringLength(20)]
-    public string? UsageUnit { get; set; }
-
-    public string? ConditionParameters { get; set; }
-
-    public DateTime StartDate { get; set; } = DateTime.UtcNow;
-    public DateTime? EndDate { get; set; }
-
-    [Range(0, 365)]
-    public int LeadTimeDays { get; set; } = 7;
-
-    public bool IsActive { get; set; } = true;
-    public double EstimatedHours { get; set; }
-    public decimal EstimatedCost { get; set; }
-
-    [StringLength(200)]
-    public string? WorkOrderTitle { get; set; }
-
-    [StringLength(2000)]
-    public string? WorkOrderDescription { get; set; }
-
-    public Guid? DefaultTechnicianId { get; set; }
-    public Guid? DefaultTeamId { get; set; }
-    public Guid? PriorityLevelId { get; set; }
-    public string? TaskTemplate { get; set; }
-    public string? PartsTemplate { get; set; }
-}
-
-public class UpdateMaintenanceScheduleDto
-{
-    [Required]
-    [StringLength(200)]
-    public string Name { get; set; } = string.Empty;
-
-    [StringLength(1000)]
-    public string? Description { get; set; }
-
-    [Required]
-    public Guid MaintenanceTypeId { get; set; }
-
-    [Required]
-    [StringLength(20)]
-    public string ScheduleType { get; set; } = string.Empty;
-
-    [Required]
-    [StringLength(20)]
-    public string Frequency { get; set; } = string.Empty;
-
-    [Range(1, int.MaxValue)]
-    public int IntervalValue { get; set; }
-
-    public TimeOnly? PreferredTime { get; set; }
-
-    [Range(0, 6)]
-    public int? DayOfWeek { get; set; }
-
-    [Range(1, 31)]
-    public int? DayOfMonth { get; set; }
-
-    public double? UsageInterval { get; set; }
-
-    [StringLength(20)]
-    public string? UsageUnit { get; set; }
-
-    public string? ConditionParameters { get; set; }
-    public DateTime? EndDate { get; set; }
-
-    [Range(0, 365)]
-    public int LeadTimeDays { get; set; }
-
-    public bool IsActive { get; set; }
-    public double EstimatedHours { get; set; }
-    public decimal EstimatedCost { get; set; }
-
-    [StringLength(200)]
-    public string? WorkOrderTitle { get; set; }
-
-    [StringLength(2000)]
-    public string? WorkOrderDescription { get; set; }
-
-    public Guid? DefaultTechnicianId { get; set; }
-    public Guid? DefaultTeamId { get; set; }
-    public Guid? PriorityLevelId { get; set; }
-    public string? TaskTemplate { get; set; }
-    public string? PartsTemplate { get; set; }
-}
+// MaintenanceScheduleDto and related DTOs - duplicate removed, using original definitions from above
 
 public class ScheduleComplianceReportDto
 {
@@ -1559,64 +2844,476 @@ public class ScheduleComplianceReportDto
     public double CompliancePercentage { get; set; }
     public Dictionary<string, double> ComplianceByAssetCategory { get; set; } = new();
     public Dictionary<string, double> ComplianceByMaintenanceType { get; set; } = new();
+    
+    // Additional properties for service compatibility
+    public int ActiveSchedules { get; set; }
+    public int OverdueSchedules { get; set; }
+    public int SchedulesDueToday { get; set; }
+    public int SchedulesDueThisWeek { get; set; }
+    public decimal OverallCompliancePercentage { get; set; }
+    public decimal OnTimeCompletionRate { get; set; }
+    public int TotalWorkOrdersGenerated { get; set; }
+    public DateTime ReportPeriodStart { get; set; }
+    public DateTime ReportPeriodEnd { get; set; }
+    public DateTime ReportGeneratedDate { get; set; }
+    public List<ScheduleComplianceDetail> ScheduleCompliance { get; set; } = new();
+    public List<AssetComplianceDto> AssetCompliance { get; set; } = new();
+}
+
+public class ScheduleComplianceDetail
+{
+    public Guid ScheduleId { get; set; }
+    public string ScheduleName { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public DateTime ScheduledDate { get; set; }
+    public DateTime? CompletedDate { get; set; }
+    public string ComplianceStatus { get; set; } = string.Empty;
+    public int DaysOverdue { get; set; }
+    public string MaintenanceType { get; set; } = string.Empty;
+    public string Frequency { get; set; } = string.Empty;
+    public int WorkOrdersGenerated { get; set; }
+    public int CompletedOnTime { get; set; }
+    public decimal CompliancePercentage { get; set; }
+    public DateTime? NextDueDate { get; set; }
+}
+
+public class AssetComplianceDto
+{
+    public Guid AssetId { get; set; }
+    public string AssetName { get; set; } = string.Empty;
+    public string AssetNumber { get; set; } = string.Empty;
+    public int TotalSchedules { get; set; }
+    public int CompletedOnTime { get; set; }
+    public int CompletedLate { get; set; }
+    public int Missed { get; set; }
+    public decimal CompliancePercentage { get; set; }
+    public string Category { get; set; } = string.Empty;
+    public string AssetType { get; set; } = string.Empty;
+    public int ScheduleCount { get; set; }
+    public decimal AverageCompliance { get; set; }
+    public int OverdueSchedules { get; set; }
+    public DateTime? LastMaintenanceDate { get; set; }
+}
+
+public class SafetyComplianceRecordDto
+{
+    public Guid Id { get; set; }
+    public Guid SafetyProtocolId { get; set; }
+    public Guid ProtocolId => SafetyProtocolId; // Alias for compatibility
+    public string SafetyProtocolName { get; set; } = string.Empty;
+    public Guid TechnicianId { get; set; }
+    public string TechnicianName { get; set; } = string.Empty;
+    public Guid? WorkOrderId { get; set; }
+    public string? WorkOrderNumber { get; set; }
+    public DateTime ComplianceDate { get; set; }
+    public DateTime CheckDate => ComplianceDate; // Alias for compatibility
+    public string ComplianceStatus { get; set; } = string.Empty;
+    public string? Notes { get; set; }
+    public bool IsCompliant { get; set; }
+    public string? ViolationType { get; set; }
+    public string? CorrectiveActions { get; set; }
+    public DateTime? CorrectiveActionDueDate { get; set; }
+    
+    // Additional properties for service compatibility
+    public List<ComplianceChecklistItemDto>? ChecklistItems { get; set; }
+    public List<ComplianceViolationDto>? Violations { get; set; }
+    public Guid? InspectorId { get; set; }
+    public string? InspectorNotes { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime CreatedDate => CreatedAt; // Alias for compatibility
+    public string CreatedBy { get; set; } = string.Empty;
+}
+
+public class CreateSafetyComplianceRecordDto
+{
+    [Required]
+    public Guid SafetyProtocolId { get; set; }
+    
+    // Alias for compatibility
+    public Guid ProtocolId 
+    {
+        get => SafetyProtocolId;
+        set => SafetyProtocolId = value;
+    }
+    
+    [Required]
+    public Guid TechnicianId { get; set; }
+    
+    public Guid? WorkOrderId { get; set; }
+    
+    [Required]
+    public DateTime ComplianceDate { get; set; }
+    
+    // Alias for compatibility
+    public DateTime CheckDate 
+    {
+        get => ComplianceDate;
+        set => ComplianceDate = value;
+    }
+    
+    [Required]
+    [MaxLength(20)]
+    public string ComplianceStatus { get; set; } = string.Empty;
+    
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+    
+    public bool IsCompliant { get; set; }
+    
+    [MaxLength(50)]
+    public string? ViolationType { get; set; }
+    
+    [MaxLength(2000)]
+    public string? CorrectiveActions { get; set; }
+    
+    public DateTime? CorrectiveActionDueDate { get; set; }
+    
+    // Additional properties for service compatibility
+    public List<ComplianceChecklistItemDto>? ChecklistItems { get; set; }
+    public List<ComplianceViolationDto>? Violations { get; set; }
+    public Guid? InspectorId { get; set; }
+    
+    [MaxLength(2000)]
+    public string? InspectorNotes { get; set; }
+}
+
+public class UpdateSafetyComplianceRecordDto
+{
+    [Required]
+    [MaxLength(20)]
+    public string ComplianceStatus { get; set; } = string.Empty;
+    
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+    
+    public bool IsCompliant { get; set; }
+    
+    [MaxLength(50)]
+    public string? ViolationType { get; set; }
+    
+    [MaxLength(2000)]
+    public string? CorrectiveActions { get; set; }
+    
+    public DateTime? CorrectiveActionDueDate { get; set; }
+    
+    // Additional properties for service compatibility
+    public List<ComplianceChecklistItemDto>? ChecklistItems { get; set; }
+    public List<ComplianceViolationDto>? Violations { get; set; }
+    public Guid? InspectorId { get; set; }
+    
+    [MaxLength(2000)]
+    public string? InspectorNotes { get; set; }
+}
+
+public class ComplianceChecklistItemDto
+{
+    public Guid Id { get; set; }
+    public string Item { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public bool IsCompleted { get; set; }
+    public string? Notes { get; set; }
+    public DateTime? CompletedDate { get; set; }
+    public string? CompletedBy { get; set; }
+}
+
+public class ComplianceViolationDto
+{
+    public Guid Id { get; set; }
+    public string ViolationType { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Severity { get; set; } = string.Empty;
+    public DateTime IdentifiedDate { get; set; }
+    public string? CorrectiveAction { get; set; }
+    public DateTime? CorrectiveDueDate { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? IdentifiedBy { get; set; }
+}
+
+public class ComplianceReportDto
+{
+    public DateTime ReportDate { get; set; }
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public int TotalProtocols { get; set; }
+    public int TotalChecks { get; set; }
+    public int CompliantRecords { get; set; }
+    public int CompliantChecks { get; set; }
+    public int ViolationRecords { get; set; }
+    public int NonCompliantChecks { get; set; }
+    public int PartiallyCompliantChecks { get; set; }
+    public decimal ComplianceRate { get; set; }
+    public Dictionary<string, int> ViolationsByProtocol { get; set; } = new();
+    public DateTime GeneratedDate { get; set; }
+    public IEnumerable<SafetyProtocolComplianceDto> ProtocolCompliance { get; set; } = new List<SafetyProtocolComplianceDto>();
+    public IEnumerable<CategoryComplianceDto> CategoryCompliance { get; set; } = new List<CategoryComplianceDto>();
+}
+
+public class SafetyProtocolComplianceDto
+{
+    public Guid ProtocolId { get; set; }
+    public string ProtocolName { get; set; } = string.Empty;
+    public string ProtocolTitle { get; set; } = string.Empty;
+    public string ProtocolCode { get; set; } = string.Empty;
+    public int TotalRecords { get; set; }
+    public int CompliantRecords { get; set; }
+    public int ViolationRecords { get; set; }
+    public int TotalAdherence { get; set; }
+    public int TotalViolations { get; set; }
+    public decimal ComplianceRate { get; set; }
+    public DateTime? LastAuditDate { get; set; }
+}
+
+public class CategoryComplianceDto
+{
+    public string Category { get; set; } = string.Empty;
+    public int TotalRecords { get; set; }
+    public int CompliantRecords { get; set; }
+    public int TotalProtocols { get; set; }
+    public int TotalAdherence { get; set; }
+    public int TotalViolations { get; set; }
+    public decimal ComplianceRate { get; set; }
+    
+    // Additional properties for controller compatibility
+    public int ProtocolCount { get; set; }
+    public decimal AverageCompliance { get; set; }
+}
+
+public class SafetyAnalyticsDto
+{
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public int TotalIncidents { get; set; }
+    public int TotalViolations { get; set; }
+    public int TotalProtocols { get; set; }
+    public int ActiveProtocols { get; set; }
+    public int RegulatoryProtocols { get; set; }
+    public int ProtocolsDueForReview { get; set; }
+    public int ExpiredProtocols { get; set; }
+    public int TotalComplianceChecks { get; set; }
+    public decimal OverallComplianceRate { get; set; }
+    public DateTime AnalysisPeriodStart { get; set; }
+    public DateTime AnalysisPeriodEnd { get; set; }
+    public IEnumerable<TrendDataDto> ComplianceTrends { get; set; } = new List<TrendDataDto>();
+    public IEnumerable<ViolationTypeDto> ViolationsByType { get; set; } = new List<ViolationTypeDto>();
+    
+    // Additional properties for controller compatibility
+    public int CriticalViolations { get; set; }
+    public Dictionary<string, int> ProtocolsByCategory { get; set; } = new();
+    public List<SafetyViolationSummaryDto> RecentViolations { get; set; } = new();
+}
+
+public class TrendDataDto
+{
+    public DateTime Date { get; set; }
+    public decimal Value { get; set; }
+    public string Metric { get; set; } = string.Empty;
+}
+
+public class ViolationTypeDto
+{
+    public string Type { get; set; } = string.Empty;
+    public int Count { get; set; }
+    public decimal Percentage { get; set; }
+}
+
+public class TechnicianAnalyticsDto
+{
+    public Guid TechnicianId { get; set; }
+    public string TechnicianName { get; set; } = string.Empty;
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public int CompletedWorkOrders { get; set; }
+    public decimal TotalHours { get; set; }
+    public decimal UtilizationRate { get; set; }
+    public decimal AverageTimePerOrder { get; set; }
+    public decimal ComplianceRate { get; set; }
+    public IEnumerable<SkillUtilizationDto> SkillUtilization { get; set; } = new List<SkillUtilizationDto>();
+    public int TotalTechnicians { get; set; }
+    public int ActiveTechnicians { get; set; }
+    public int TechniciansWithSkills { get; set; }
+    public decimal AverageSkillsPerTechnician { get; set; }
+    public Dictionary<string, int> DepartmentBreakdown { get; set; } = new();
+    public Dictionary<string, int> SpecializationBreakdown { get; set; } = new();
+    public WorkloadAnalysisDto? WorkloadAnalysis { get; set; }
+    public DateTime AnalysisPeriodStart { get; set; }
+    public DateTime AnalysisPeriodEnd { get; set; }
+    public int TotalWorkOrders { get; set; }
+    public decimal AverageCompletionTime { get; set; }
+    public decimal EfficiencyRating { get; set; }
+    public decimal TotalHoursWorked { get; set; }
+}
+
+public class WorkloadAnalysisDto
+{
+    public int TotalTechnicians { get; set; }
+    public int OverloadedTechnicians { get; set; }
+    public int UnderutilizedTechnicians { get; set; }
+    public int OptimallyUtilizedTechnicians { get; set; }
+    public decimal AverageUtilization { get; set; }
+    public decimal MaxWorkloadCapacity { get; set; }
+}
+
+public class ApprovalRequestDto
+{
+    [Required]
+    [MaxLength(2000)]
+    public string Comments { get; set; } = string.Empty;
+    
+    [Required]
+    public Guid ApproverId { get; set; }
+    
+    public string ApproverName { get; set; } = string.Empty;
+    
+    public DateTime ApprovalDate { get; set; } = DateTime.UtcNow;
+}
+
+public class CreateProtocolAdherenceDto
+{
+    [Required]
+    public Guid ProtocolId { get; set; }
+    
+    [Required]
+    public Guid TechnicianId { get; set; }
+    
+    public Guid? WorkOrderId { get; set; }
+    
+    [Required]
+    public DateTime AdherenceDate { get; set; }
+    
+    [MaxLength(20)]
+    public string AdherenceLevel { get; set; } = "Full";
+    
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+}
+
+public class CreateProtocolViolationDto
+{
+    [Required]
+    public Guid ProtocolId { get; set; }
+    
+    [Required]
+    public Guid TechnicianId { get; set; }
+    
+    public Guid? WorkOrderId { get; set; }
+    
+    [Required]
+    public DateTime ViolationDate { get; set; }
+    
+    [Required]
+    [MaxLength(50)]
+    public string ViolationType { get; set; } = string.Empty;
+    
+    [Required]
+    [MaxLength(20)]
+    public string Severity { get; set; } = string.Empty;
+    
+    [MaxLength(2000)]
+    public string? Description { get; set; }
+    
+    [MaxLength(2000)]
+    public string? CorrectiveActions { get; set; }
+    
+    [MaxLength(2000)]
+    public string? CorrectiveAction { get; set; }
+    
+    public DateTime? CorrectiveActionDueDate { get; set; }
+}
+
+public class CreateProtocolTrainingDto
+{
+    [Required]
+    public Guid ProtocolId { get; set; }
+    
+    [Required]
+    public Guid TechnicianId { get; set; }
+    
+    [Required]
+    public DateTime TrainingDate { get; set; }
+    
+    [Required]
+    [MaxLength(50)]
+    public string TrainingType { get; set; } = string.Empty;
+    
+    [MaxLength(20)]
+    public string CompletionStatus { get; set; } = "NotStarted";
+    
+    public int? Score { get; set; }
+    
+    public bool CertificationIssued { get; set; } = false;
+    
+    [MaxLength(200)]
+    public string? TrainerName { get; set; }
+    
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+    
+    public bool Passed { get; set; }
+    
+    public DateTime? CertificationExpiry { get; set; }
+}
+
+public class ProtocolAdherenceDto
+{
+    public Guid Id { get; set; }
+    public Guid ProtocolId { get; set; }
+    public string ProtocolName { get; set; } = string.Empty;
+    public Guid TechnicianId { get; set; }
+    public string TechnicianName { get; set; } = string.Empty;
+    public Guid? WorkOrderId { get; set; }
+    public string? WorkOrderNumber { get; set; }
+    public DateTime AdherenceDate { get; set; }
+    public string AdherenceLevel { get; set; } = string.Empty;
+    public string? Notes { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public string CreatedBy { get; set; } = string.Empty;
+}
+
+public class ProtocolViolationDto
+{
+    public Guid Id { get; set; }
+    public Guid ProtocolId { get; set; }
+    public string ProtocolName { get; set; } = string.Empty;
+    public Guid TechnicianId { get; set; }
+    public string TechnicianName { get; set; } = string.Empty;
+    public Guid? WorkOrderId { get; set; }
+    public string? WorkOrderNumber { get; set; }
+    public DateTime ViolationDate { get; set; }
+    public string ViolationType { get; set; } = string.Empty;
+    public string Severity { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string? CorrectiveActions { get; set; }
+    public string? CorrectiveAction { get; set; }
+    public DateTime? CorrectiveActionDueDate { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public string CreatedBy { get; set; } = string.Empty;
+}
+
+public class ProtocolTrainingDto
+{
+    public Guid Id { get; set; }
+    public Guid ProtocolId { get; set; }
+    public string ProtocolName { get; set; } = string.Empty;
+    public Guid TechnicianId { get; set; }
+    public string TechnicianName { get; set; } = string.Empty;
+    public DateTime TrainingDate { get; set; }
+    public string TrainingType { get; set; } = string.Empty;
+    public string CompletionStatus { get; set; } = string.Empty;
+    public int? Score { get; set; }
+    public bool CertificationIssued { get; set; }
+    public string? TrainerName { get; set; }
+    public string? Notes { get; set; }
+    public bool Passed { get; set; }
+    public DateTime? CertificationExpiry { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public string CreatedBy { get; set; } = string.Empty;
 }
 
 #endregion
 
 #region Inspection DTOs
 
-public class InspectionTemplateDto
-{
-    public Guid Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public string? Description { get; set; }
-    public string? Category { get; set; }
-    public string InspectionType { get; set; } = string.Empty;
-    public bool IsActive { get; set; }
-    public string ChecklistItems { get; set; } = string.Empty;
-    public DateTime CreatedAt { get; set; }
-    public DateTime? UpdatedAt { get; set; }
-}
-
-public class CreateInspectionTemplateDto
-{
-    [Required]
-    [StringLength(200)]
-    public string Name { get; set; } = string.Empty;
-
-    [StringLength(1000)]
-    public string? Description { get; set; }
-
-    [StringLength(100)]
-    public string? Category { get; set; }
-
-    [Required]
-    [StringLength(50)]
-    public string InspectionType { get; set; } = "Safety";
-
-    public bool IsActive { get; set; } = true;
-    public string ChecklistItems { get; set; } = "[]";
-}
-
-public class UpdateInspectionTemplateDto
-{
-    [Required]
-    [StringLength(200)]
-    public string Name { get; set; } = string.Empty;
-
-    [StringLength(1000)]
-    public string? Description { get; set; }
-
-    [StringLength(100)]
-    public string? Category { get; set; }
-
-    [Required]
-    [StringLength(50)]
-    public string InspectionType { get; set; } = string.Empty;
-
-    public bool IsActive { get; set; } = true;
-    public string ChecklistItems { get; set; } = string.Empty;
-}
+// InspectionTemplateDto and related DTOs - duplicate removed, using original definitions from above
 
 public class AssetInspectionDto
 {
@@ -1840,7 +3537,10 @@ public class UserTechnicianSkillDto
     public Guid Id { get; set; }
     public Guid EmployeeId { get; set; }
     public Guid SkillId { get; set; }
+    public string SkillName { get; set; } = string.Empty;
     public int ProficiencyLevel { get; set; }
+    public int Level { get; set; }
+    public bool IsCertified { get; set; }
     public DateTime? CertificationDate { get; set; }
     public DateTime? CertificationExpiry { get; set; }
     public string? CertifyingBody { get; set; }
@@ -1928,6 +3628,57 @@ public class SkillGapAnalysisDto
     public Dictionary<string, double> AverageProficiencyLevels { get; set; } = new();
     public List<string> SkillsWithShortages { get; set; } = new();
     public List<UserTechnicianSkillDto> ExpiringCertifications { get; set; } = new();
+    public List<SkillDeficitDto> SkillDeficits { get; set; } = new();
+    public List<OverstaffedSkillDto> OverstaffedSkills { get; set; } = new();
+    public List<CriticalSkillDto> CriticalSkills { get; set; } = new();
+    public int TotalSkillsAnalyzed { get; set; }
+    public DateTime AnalysisDate { get; set; }
+}
+
+public class SkillDeficitDto
+{
+    public Guid SkillId { get; set; }
+    public string SkillName { get; set; } = string.Empty;
+    public int RequiredCount { get; set; }
+    public int AvailableCount { get; set; }
+    public int DeficitCount { get; set; }
+    public string Category { get; set; } = string.Empty;
+    public decimal ImpactScore { get; set; }
+    
+    // Additional properties for controller compatibility
+    public int RequiredTechnicians { get; set; }
+    public int CurrentTechnicians { get; set; }
+    public int Deficit { get; set; }
+    public string Priority { get; set; } = "Medium";
+}
+
+public class OverstaffedSkillDto
+{
+    public Guid SkillId { get; set; }
+    public string SkillName { get; set; } = string.Empty;
+    public int RequiredCount { get; set; }
+    public int AvailableCount { get; set; }
+    public int ExcessCount { get; set; }
+    public string Category { get; set; } = string.Empty;
+    
+    // Additional properties for controller compatibility
+    public int RequiredTechnicians { get; set; }
+    public int CurrentTechnicians { get; set; }
+    public int Excess { get; set; }
+}
+
+public class CriticalSkillDto
+{
+    public Guid SkillId { get; set; }
+    public string SkillName { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public int TechniciansWithSkill { get; set; }
+    public decimal CriticalityScore { get; set; }
+    public string RiskLevel { get; set; } = string.Empty;
+    
+    // Additional properties for controller compatibility
+    public int TechnicianCount { get; set; }
+    public string MitegationActions { get; set; } = string.Empty;
 }
 
 #endregion

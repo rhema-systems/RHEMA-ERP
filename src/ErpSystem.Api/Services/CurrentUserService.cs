@@ -3,7 +3,7 @@ using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Api.Services;
 
-public class CurrentUserService : ICurrentUserService
+public class CurrentUserService : ICurrentUserService, ICurrentUserProvider
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
 
@@ -18,6 +18,73 @@ public class CurrentUserService : ICurrentUserService
         {
             var userIdClaim = _httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier);
             return userIdClaim?.Value;
+        }
+    }
+
+    // ICurrentUserProvider implementation
+    Guid ICurrentUserProvider.UserId
+    {
+        get
+        {
+            var userIdClaim = _httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var userId))
+            {
+                return userId;
+            }
+            return Guid.Empty; // or throw exception based on requirements
+        }
+    }
+
+    Guid ICurrentUserProvider.TenantId
+    {
+        get
+        {
+            var tenantIdClaim = _httpContextAccessor.HttpContext?.User?.FindFirst("tenant_id");
+            if (tenantIdClaim != null && Guid.TryParse(tenantIdClaim.Value, out var tenantId))
+            {
+                return tenantId;
+            }
+            return Guid.Empty; // or throw exception based on requirements
+        }
+    }
+
+    public string Username
+    {
+        get
+        {
+            return _httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.Name)?.Value ?? string.Empty;
+        }
+    }
+
+    public string FullName
+    {
+        get
+        {
+            return _httpContextAccessor.HttpContext?.User?.FindFirst("full_name")?.Value ?? 
+                   _httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.GivenName)?.Value ?? 
+                   Username;
+        }
+    }
+
+    public bool HasRole(string role)
+    {
+        return _httpContextAccessor.HttpContext?.User?.IsInRole(role) ?? false;
+    }
+
+    public IDictionary<string, string> Claims
+    {
+        get
+        {
+            var claims = new Dictionary<string, string>();
+            var user = _httpContextAccessor.HttpContext?.User;
+            if (user != null)
+            {
+                foreach (var claim in user.Claims)
+                {
+                    claims[claim.Type] = claim.Value;
+                }
+            }
+            return claims;
         }
     }
 

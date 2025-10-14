@@ -127,6 +127,48 @@ public class Employee : TenantEntity
 
     public DateTime? NextReviewDate { get; set; }
 
+    // Maintenance-specific properties (for employees who are technicians)
+    /// <summary>
+    /// Primary technical specialization (for maintenance technicians)
+    /// </summary>
+    [MaxLength(100)]
+    public string? Specialization { get; set; }
+
+    /// <summary>
+    /// Certification level for technical work (Level 1, Level 2, etc.)
+    /// </summary>
+    [MaxLength(50)]
+    public string? CertificationLevel { get; set; }
+
+    /// <summary>
+    /// Experience level (Junior, Intermediate, Senior, Expert)
+    /// </summary>
+    [MaxLength(50)]
+    public string? ExperienceLevel { get; set; }
+
+    /// <summary>
+    /// Current workload percentage for maintenance technicians (0-100)
+    /// </summary>
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal CurrentWorkload { get; set; } = 0;
+
+    /// <summary>
+    /// Maximum workload capacity percentage for maintenance technicians
+    /// </summary>
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal MaxWorkload { get; set; } = 100;
+
+    /// <summary>
+    /// Last synchronization date with maintenance systems
+    /// </summary>
+    public DateTime? LastSyncDate { get; set; }
+
+    /// <summary>
+    /// Additional notes about the employee (maintenance-specific or general)
+    /// </summary>
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
     // Computed Properties
     [NotMapped]
     public string FullName => string.IsNullOrEmpty(MiddleName) 
@@ -148,6 +190,37 @@ public class Employee : TenantEntity
     public bool CanBeAssignedToMaintenance => IsActive && 
         (StaffStatus == StaffStatus.Active || StaffStatus == StaffStatus.Probation) &&
         Department?.DepartmentType == DepartmentType.Maintenance;
+
+    // Alias properties for service compatibility
+    /// <summary>
+    /// Alias for EmployeeNumber (for TechnicianService compatibility)
+    /// </summary>
+    [NotMapped]
+    public string EmployeeId
+    {
+        get => EmployeeNumber;
+        set => EmployeeNumber = value;
+    }
+
+    /// <summary>
+    /// Alias for EmailAddress (for TechnicianService compatibility)
+    /// </summary>
+    [NotMapped]
+    public string? Email
+    {
+        get => EmailAddress;
+        set => EmailAddress = value ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Alias for TelephoneNumber/MobileNumber (for TechnicianService compatibility)
+    /// </summary>
+    [NotMapped]
+    public string? Phone
+    {
+        get => MobileNumber ?? TelephoneNumber;
+        set => MobileNumber = value;
+    }
 
     // Navigation Properties
     public virtual Department Department { get; set; } = null!;

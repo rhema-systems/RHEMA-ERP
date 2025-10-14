@@ -147,6 +147,39 @@ public class MaintenanceAssetCategory : TenantEntity
 
     public bool IsActive { get; set; } = true;
 
+    // Parent-child relationship
+    public Guid? ParentCategoryId { get; set; }
+    public virtual MaintenanceAssetCategory? ParentCategory { get; set; }
+    public virtual ICollection<MaintenanceAssetCategory> ChildCategories { get; set; } = new List<MaintenanceAssetCategory>();
+
+    // Maintenance Schedule Configuration
+    [MaxLength(20)]
+    public string MaintenanceScheduleType { get; set; } = "single"; // 'single' or 'multi'
+
+    // Primary Maintenance Criteria
+    [MaxLength(20)]
+    public string MaintenanceType { get; set; } = "Time"; // 'Time', 'Distance', 'Usage', 'Cycles'
+    
+    [MaxLength(50)]
+    public string? MaintenanceFrequency { get; set; } // For time-based: 'Monthly', 'Quarterly', etc.
+    
+    public double? MaintenanceValue { get; set; } // For non-time-based: 5000, 250, etc.
+    
+    [MaxLength(20)]
+    public string? MaintenanceUnit { get; set; } // 'km', 'miles', 'hours', 'cycles', etc.
+
+    // Secondary Maintenance Criteria (for multi-criteria schedules)
+    [MaxLength(20)]
+    public string? SecondaryMaintenanceType { get; set; } // 'Time', 'Distance', 'Usage', 'Cycles'
+    
+    [MaxLength(50)]
+    public string? SecondaryMaintenanceFrequency { get; set; } // For time-based secondary criteria
+    
+    public double? SecondaryMaintenanceValue { get; set; } // For non-time-based secondary criteria
+    
+    [MaxLength(20)]
+    public string? SecondaryMaintenanceUnit { get; set; } // Unit for secondary criteria
+
     // Navigation properties
     public virtual ICollection<MaintenanceAsset> Assets { get; set; } = new List<MaintenanceAsset>();
 }
@@ -631,84 +664,7 @@ public class WorkOrderComment : TenantEntity
 
 #region Maintenance Scheduling
 
-public class MaintenanceSchedule : TenantEntity
-{
-    [Required]
-    [MaxLength(200)]
-    public string Name { get; set; } = string.Empty;
-
-    [MaxLength(1000)]
-    public string? Description { get; set; }
-
-    [Required]
-    public Guid AssetId { get; set; }
-
-    [Required]
-    public Guid MaintenanceTypeId { get; set; }
-
-    [Required]
-    [MaxLength(20)]
-    public string ScheduleType { get; set; } = "TimeBased"; // TimeBased, UsageBased, ConditionBased
-
-    // Time-based scheduling
-    [Required]
-    [MaxLength(20)]
-    public string Frequency { get; set; } = "Monthly"; // Daily, Weekly, Monthly, Quarterly, Yearly, Custom
-
-    public int IntervalValue { get; set; } = 1; // Every X days/weeks/months
-    
-    public TimeOnly? PreferredTime { get; set; }
-    public int? DayOfWeek { get; set; } // 0-6 for weekly schedules
-    public int? DayOfMonth { get; set; } // 1-31 for monthly schedules
-
-    // Usage-based scheduling
-    public double? UsageInterval { get; set; } // Every X hours/miles/cycles
-    [MaxLength(20)]
-    public string? UsageUnit { get; set; } // Hours, Miles, Cycles
-
-    // Condition-based parameters
-    [Column(TypeName = "nvarchar(max)")]
-    public string? ConditionParameters { get; set; } // JSON for sensor thresholds
-
-    public DateTime StartDate { get; set; } = DateTime.UtcNow;
-    public DateTime? EndDate { get; set; }
-
-    public DateTime? LastGeneratedDate { get; set; }
-    public DateTime? NextDueDate { get; set; }
-
-    // Lead time for work order generation (days before due)
-    public int LeadTimeDays { get; set; } = 7;
-
-    public bool IsActive { get; set; } = true;
-
-    // Estimated resources
-    public double EstimatedHours { get; set; } = 0;
-    [Column(TypeName = "decimal(18,2)")]
-    public decimal EstimatedCost { get; set; } = 0;
-
-    // Work order template
-    [MaxLength(200)]
-    public string? WorkOrderTitle { get; set; }
-    [MaxLength(2000)]
-    public string? WorkOrderDescription { get; set; }
-    public Guid? DefaultTechnicianId { get; set; }
-    public Guid? DefaultTeamId { get; set; }
-    public Guid? PriorityLevelId { get; set; }
-
-    [Column(TypeName = "nvarchar(max)")]
-    public string? TaskTemplate { get; set; } // JSON array of default tasks
-
-    [Column(TypeName = "nvarchar(max)")]
-    public string? PartsTemplate { get; set; } // JSON array of typical parts needed
-
-    // Navigation properties
-    public virtual MaintenanceAsset Asset { get; set; } = null!;
-    public virtual MaintenanceType MaintenanceType { get; set; } = null!;
-    public virtual Employee? DefaultTechnician { get; set; }
-    public virtual TechnicianTeam? DefaultTeam { get; set; }
-    public virtual PriorityLevel? PriorityLevel { get; set; }
-    public virtual ICollection<WorkOrder> GeneratedWorkOrders { get; set; } = new List<WorkOrder>();
-}
+// MaintenanceSchedule class is defined in separate MaintenanceSchedule.cs file
 
 #endregion
 
@@ -1053,6 +1009,77 @@ public class AssetDowntime : TenantEntity
     // Navigation properties
     public virtual MaintenanceAsset Asset { get; set; } = null!;
     public virtual WorkOrder? WorkOrder { get; set; }
+}
+
+#endregion
+
+#region Safety Compliance Tracking
+
+public class SafetyComplianceRecord : TenantEntity
+{
+    [Required]
+    public Guid SafetyProtocolId { get; set; }
+    
+    // Alias for compatibility with services
+    public Guid ProtocolId 
+    { 
+        get => SafetyProtocolId; 
+        set => SafetyProtocolId = value; 
+    }
+    
+    [Required]
+    public Guid TechnicianId { get; set; }
+    
+    public Guid? WorkOrderId { get; set; }
+    
+    [Required]
+    public DateTime ComplianceDate { get; set; }
+    
+    // Alias for compatibility with services
+    public DateTime CheckDate 
+    { 
+        get => ComplianceDate; 
+        set => ComplianceDate = value; 
+    }
+    
+    [Required]
+    [MaxLength(20)]
+    public string ComplianceStatus { get; set; } = string.Empty; // Compliant, NonCompliant, PartialCompliance
+    
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+    
+    public bool IsCompliant { get; set; }
+    
+    [MaxLength(50)]
+    public string? ViolationType { get; set; }
+    
+    [MaxLength(2000)]
+    public string? CorrectiveActions { get; set; }
+    
+    public DateTime? CorrectiveActionDueDate { get; set; }
+    
+    // Additional properties for service compatibility
+    [Column(TypeName = "nvarchar(max)")]
+    public string? ChecklistItems { get; set; } // JSON serialized list of checklist items
+    
+    [Column(TypeName = "nvarchar(max)")]
+    public string? Violations { get; set; } // JSON serialized list of violations
+    
+    public Guid? InspectorId { get; set; }
+    
+    [MaxLength(2000)]
+    public string? InspectorNotes { get; set; }
+    
+    public Guid? VerifiedById { get; set; }
+    public DateTime? VerifiedDate { get; set; }
+    
+    // Navigation properties
+    public virtual SafetyProtocol SafetyProtocol { get; set; } = null!;
+    public virtual Employee Technician { get; set; } = null!;
+    public virtual WorkOrder? WorkOrder { get; set; }
+    public virtual Employee? Inspector { get; set; }
+    public virtual Employee? VerifiedBy { get; set; }
 }
 
 #endregion

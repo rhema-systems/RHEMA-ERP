@@ -63,6 +63,41 @@ public interface IAssetTypeService
 
 #endregion
 
+#region Priority Level Services
+
+public interface IPriorityLevelService
+{
+    Task<PriorityLevelDto> CreatePriorityLevelAsync(CreatePriorityLevelDto createDto);
+    Task<PriorityLevelDto> UpdatePriorityLevelAsync(Guid id, UpdatePriorityLevelDto updateDto);
+    Task DeletePriorityLevelAsync(Guid id);
+    Task<PriorityLevelDto?> GetPriorityLevelByIdAsync(Guid id);
+    Task<IEnumerable<PriorityLevelDto>> GetAllPriorityLevelsAsync();
+    Task<IEnumerable<PriorityLevelDto>> GetActivePriorityLevelsAsync();
+    Task<PagedResult<PriorityLevelDto>> GetPriorityLevelsPagedAsync(PriorityLevelFilterDto filter);
+    Task<PriorityLevelDto> TogglePriorityLevelStatusAsync(Guid id);
+    Task<bool> IsPriorityLevelCodeUniqueAsync(string code, Guid? excludeId = null);
+}
+
+#endregion
+
+#region Work Order Type Services
+
+public interface IWorkOrderTypeService
+{
+    Task<WorkOrderTypeDto> CreateWorkOrderTypeAsync(CreateWorkOrderTypeDto createDto);
+    Task<WorkOrderTypeDto> UpdateWorkOrderTypeAsync(Guid id, UpdateWorkOrderTypeDto updateDto);
+    Task DeleteWorkOrderTypeAsync(Guid id);
+    Task<WorkOrderTypeDto?> GetWorkOrderTypeByIdAsync(Guid id);
+    Task<IEnumerable<WorkOrderTypeDto>> GetAllWorkOrderTypesAsync();
+    Task<IEnumerable<WorkOrderTypeDto>> GetActiveWorkOrderTypesAsync();
+    Task<IEnumerable<WorkOrderTypeDto>> GetWorkOrderTypesByCategoryAsync(string category);
+    Task<PagedResult<WorkOrderTypeDto>> GetWorkOrderTypesPagedAsync(WorkOrderTypeFilterDto filter);
+    Task<WorkOrderTypeDto> ToggleWorkOrderTypeStatusAsync(Guid id);
+    Task<bool> IsWorkOrderTypeCodeUniqueAsync(string code, Guid? excludeId = null);
+}
+
+#endregion
+
 #region Work Order Services
 
 public interface IWorkOrderService
@@ -166,6 +201,11 @@ public interface IMaintenanceScheduleService
 
     // Analytics
     Task<ScheduleComplianceReportDto> GetScheduleComplianceReportAsync(DateTime startDate, DateTime endDate);
+    
+    // Additional methods needed by controllers
+    Task<PagedResult<MaintenanceScheduleDto>> GetSchedulesPagedAsync(MaintenanceScheduleFilterDto filter);
+    Task<IEnumerable<MaintenanceScheduleDto>> GetOverdueSchedulesAsync();
+    Task<MaintenanceScheduleDto> ToggleScheduleStatusAsync(Guid id);
 }
 
 #endregion
@@ -275,6 +315,95 @@ public interface IAssetDowntimeService
 
 #endregion
 
+#region Technician Services
+
+public interface ITechnicianService
+{
+    Task<TechnicianDto> CreateTechnicianAsync(CreateTechnicianDto createDto);
+    Task<TechnicianDto> UpdateTechnicianAsync(Guid id, UpdateTechnicianDto updateDto);
+    Task DeleteTechnicianAsync(Guid id);
+    Task<TechnicianDto?> GetTechnicianByIdAsync(Guid id);
+    Task<IEnumerable<TechnicianDto>> GetAllTechniciansAsync();
+    Task<IEnumerable<TechnicianDto>> GetActiveTechniciansAsync();
+    Task<PagedResult<TechnicianDto>> GetTechniciansPagedAsync(TechnicianFilterDto filter);
+    Task<IEnumerable<TechnicianDto>> GetTechniciansBySkillAsync(Guid skillId);
+    Task<IEnumerable<TechnicianDto>> GetAvailableTechniciansAsync(DateTime startTime, DateTime endTime);
+    Task<TechnicianDto?> GetTechnicianWithSkillsAsync(Guid technicianId);
+    Task<bool> IsTechnicianAvailableAsync(Guid technicianId, DateTime startTime, DateTime endTime);
+    Task<IEnumerable<TechnicianDto>> GetTechniciansByTeamAsync(Guid teamId);
+    Task<TechnicianWorkloadDto> GetTechnicianWorkloadAsync(Guid technicianId, DateTime startDate, DateTime endDate);
+    Task<TechnicianAvailabilityDto> GetTechnicianAvailabilityAsync(Guid technicianId, DateTime date);
+    Task<IEnumerable<TechnicianDto>> GetTechniciansByLocationAsync(Guid locationId);
+    Task<TechnicianAnalyticsDto> GetTechnicianAnalyticsAsync(Guid technicianId, DateTime startDate, DateTime endDate);
+    Task<SkillUtilizationDto> GetSkillUtilizationAsync(Guid skillId, DateTime startDate, DateTime endDate);
+    Task<IEnumerable<TechnicianDto>> FindTechniciansForWorkOrderAsync(Guid workOrderId);
+}
+
+public interface ITechnicalSkillService
+{
+    Task<TechnicalSkillDto> CreateSkillAsync(CreateTechnicalSkillDto createDto);
+    Task<TechnicalSkillDto> UpdateSkillAsync(Guid id, UpdateTechnicalSkillDto updateDto);
+    Task DeleteSkillAsync(Guid id);
+    Task<TechnicalSkillDto?> GetSkillByIdAsync(Guid id);
+    Task<IEnumerable<TechnicalSkillDto>> GetAllSkillsAsync();
+    Task<IEnumerable<TechnicalSkillDto>> GetActiveSkillsAsync();
+    Task<PagedResult<TechnicalSkillDto>> GetSkillsPagedAsync(TechnicalSkillFilterDto filter);
+    Task<IEnumerable<TechnicalSkillDto>> GetSkillsByCategoryAsync(string category);
+    Task<IEnumerable<TechnicalSkillDto>> GetSkillsByComplexityAsync(string complexity);
+    Task<IEnumerable<TechnicalSkillDto>> GetSkillsByRiskLevelAsync(string riskLevel);
+    Task<bool> IsSkillNameUniqueAsync(string name, Guid? excludeId = null);
+    Task<SkillGapAnalysisDto> GetSkillGapAnalysisAsync();
+    Task<IEnumerable<TechnicalSkillDto>> GetRecommendedSkillsAsync(Guid technicianId);
+    
+    // Additional methods needed by controllers
+    Task<IEnumerable<TechnicalSkillDto>> SyncSkillsFromHRAsync();
+    Task<IEnumerable<TechnicianDto>> GetTechniciansWithSkillAsync(Guid skillId);
+    Task<TechnicianSkillAssignmentDto> AssignSkillToTechnicianAsync(CreateTechnicianSkillAssignmentDto createDto);
+    Task<IEnumerable<TechnicianSkillAssignmentDto>> GetTechnicianSkillsAsync(Guid technicianId);
+}
+
+public interface ISafetyProtocolService
+{
+    Task<SafetyProtocolDto> CreateProtocolAsync(CreateSafetyProtocolDto createDto);
+    Task<SafetyProtocolDto> UpdateProtocolAsync(Guid id, UpdateSafetyProtocolDto updateDto);
+    Task DeleteProtocolAsync(Guid id);
+    Task<SafetyProtocolDto?> GetProtocolByIdAsync(Guid id);
+    Task<IEnumerable<SafetyProtocolDto>> GetAllProtocolsAsync();
+    Task<IEnumerable<SafetyProtocolDto>> GetActiveProtocolsAsync();
+    Task<PagedResult<SafetyProtocolDto>> GetProtocolsPagedAsync(SafetyProtocolFilterDto filter);
+    Task<IEnumerable<SafetyProtocolDto>> GetProtocolsByCategoryAsync(string category);
+    Task<IEnumerable<SafetyProtocolDto>> GetMandatoryProtocolsAsync();
+    Task<IEnumerable<SafetyProtocolDto>> GetProtocolsBySeverityAsync(string severity);
+    Task<IEnumerable<SafetyProtocolDto>> GetProtocolsByRegulatoryStandardAsync(string standard);
+    Task<IEnumerable<SafetyProtocolDto>> GetProtocolsDueForReviewAsync();
+    Task<IEnumerable<SafetyProtocolDto>> GetOverdueProtocolsAsync();
+    
+    // Approval workflow
+    Task SubmitForApprovalAsync(Guid protocolId);
+    Task ApproveProtocolAsync(Guid protocolId, ApprovalRequestDto approvalRequest);
+    Task RejectProtocolAsync(Guid protocolId, ApprovalRequestDto approvalRequest);
+    Task RequestChangesAsync(Guid protocolId, ApprovalRequestDto approvalRequest);
+    
+    // Compliance tracking
+    Task RecordAdherenceAsync(CreateProtocolAdherenceDto createDto);
+    Task RecordViolationAsync(CreateProtocolViolationDto createDto);
+    Task<IEnumerable<ProtocolAdherenceDto>> GetAdherenceHistoryAsync(Guid protocolId);
+    Task<IEnumerable<ProtocolViolationDto>> GetViolationHistoryAsync(Guid protocolId);
+    
+    // Training tracking
+    Task RecordTrainingAsync(CreateProtocolTrainingDto createDto);
+    Task<IEnumerable<ProtocolTrainingDto>> GetProtocolTrainingHistoryAsync(Guid protocolId);
+    Task<IEnumerable<ProtocolTrainingDto>> GetTechnicianTrainingHistoryAsync(Guid technicianId);
+    
+    // Reporting
+    Task<ComplianceReportDto> GetComplianceReportAsync(DateTime startDate, DateTime endDate);
+    Task<IEnumerable<SafetyProtocolComplianceDto>> GetProtocolComplianceAsync(DateTime startDate, DateTime endDate);
+    Task<IEnumerable<CategoryComplianceDto>> GetCategoryComplianceAsync();
+    Task<SafetyAnalyticsDto> GetSafetyAnalyticsAsync(DateTime startDate, DateTime endDate);
+}
+
+#endregion
+
 #region Analytics and Reporting Services
 
 public interface IMaintenanceAnalyticsService
@@ -337,6 +466,27 @@ public interface IMaintenanceAttachmentService
 
 #endregion
 
+#region Maintenance Type Services
+
+public interface IMaintenanceTypeService
+{
+    Task<MaintenanceTypeDto> CreateMaintenanceTypeAsync(CreateMaintenanceTypeDto createDto);
+    Task<MaintenanceTypeDto> UpdateMaintenanceTypeAsync(Guid id, UpdateMaintenanceTypeDto updateDto);
+    Task DeleteMaintenanceTypeAsync(Guid id);
+    Task<MaintenanceTypeDto?> GetMaintenanceTypeByIdAsync(Guid id);
+    Task<IEnumerable<MaintenanceTypeDto>> GetAllMaintenanceTypesAsync();
+    Task<IEnumerable<MaintenanceTypeDto>> GetActiveMaintenanceTypesAsync();
+    Task<PagedResult<MaintenanceTypeDto>> GetMaintenanceTypesPagedAsync(MaintenanceTypeFilterDto filter);
+    Task<IEnumerable<MaintenanceTypeDto>> GetMaintenanceTypesByCategoryAsync(string category);
+    Task<bool> IsMaintenanceTypeCodeUniqueAsync(string code, Guid? excludeId = null);
+    Task<bool> IsMaintenanceTypeNameUniqueAsync(string name, Guid? excludeId = null);
+    Task<MaintenanceTypeDto> ToggleMaintenanceTypeStatusAsync(Guid id);
+    Task<IEnumerable<MaintenanceTypeDto>> GetMaintenanceTypesForAssetCategoryAsync(Guid assetCategoryId);
+    Task<IEnumerable<string>> GetMaintenanceTypeCategoriesAsync();
+}
+
+#endregion
+
 #region Background Services
 
 public interface IMaintenanceBackgroundService
@@ -348,6 +498,57 @@ public interface IMaintenanceBackgroundService
     Task CalculateAssetDowntimeAsync();
     Task GenerateMaintenanceAlertsAsync();
 }
+#endregion
+
+#region Maintenance Schedule Services
+
+// IMaintenanceScheduleService is defined earlier in the file
 
 #endregion
 
+#region Technical Skill Services
+
+// ITechnicalSkillService - duplicate removed, using definition from above
+
+#endregion
+
+#region Safety Protocol Services
+
+// ISafetyProtocolService - duplicate removed, using definition from above
+
+#endregion
+
+#region Technician Data Services (HR Integration)
+
+public interface ITechnicianDataService
+{
+    // Read-only technician data from HR module
+    Task<TechnicianDto?> GetTechnicianByIdAsync(Guid id);
+    Task<IEnumerable<TechnicianDto>> GetAllTechniciansAsync();
+    Task<PagedResult<TechnicianListDto>> GetTechniciansPagedAsync(TechnicianFilterDto filter);
+    
+    // HR Module synchronization
+    Task<IEnumerable<TechnicianDto>> SyncTechniciansFromHRAsync();
+    Task<TechnicianDto?> GetTechnicianFromHRAsync(Guid hrEmployeeId);
+    Task UpdateTechnicianFromHRAsync(TechnicianDto hrTechnician);
+    
+    // Availability and workload
+    Task<IEnumerable<TechnicianDto>> GetAvailableTechniciansAsync();
+    Task<IEnumerable<TechnicianDto>> GetTechniciansByLocationAsync(string location);
+    Task<IEnumerable<TechnicianDto>> GetTechniciansByDepartmentAsync(string department);
+    Task<IEnumerable<TechnicianDto>> GetTechniciansBySkillAsync(Guid skillId);
+    Task<IEnumerable<TechnicianDto>> GetTechniciansByExperienceLevelAsync(string experienceLevel);
+    
+    // Workload and performance
+    Task<TechnicianWorkloadDto> GetTechnicianWorkloadAsync(Guid technicianId);
+    Task<IEnumerable<TechnicianWorkloadDto>> GetTeamWorkloadAsync();
+    Task<TechnicianPerformanceDto> GetTechnicianPerformanceAsync(Guid technicianId, DateTime startDate, DateTime endDate);
+    Task<TechnicianAvailabilityDto> GetTechnicianAvailabilityAsync(Guid technicianId);
+    
+    // Statistics and analytics
+    Task<TechnicianStatsDto> GetTechnicianStatsAsync();
+    Task<IEnumerable<TechnicianDto>> GetTechniciansWithExpiringCertificationsAsync(int days = 30);
+    Task<IEnumerable<TechnicianDto>> GetTechniciansWithExpiredCertificationsAsync();
+}
+
+#endregion

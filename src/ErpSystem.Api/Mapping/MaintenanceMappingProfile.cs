@@ -53,7 +53,9 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.Downtimes, opt => opt.Ignore());
 
         CreateMap<MaintenanceAssetCategory, MaintenanceAssetCategoryDto>()
-            .ForMember(dest => dest.AssetCount, opt => opt.MapFrom(src => src.Assets.Count));
+            .ForMember(dest => dest.AssetCount, opt => opt.MapFrom(src => src.Assets.Count))
+            .ForMember(dest => dest.ParentCategory, opt => opt.MapFrom(src => src.ParentCategory))
+            .ForMember(dest => dest.ChildCategories, opt => opt.MapFrom(src => src.ChildCategories));
 
         CreateMap<CreateMaintenanceAssetCategoryDto, MaintenanceAssetCategory>()
             .ForMember(dest => dest.Id, opt => opt.Ignore())
@@ -62,7 +64,9 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.UpdatedAt, opt => opt.Ignore())
             .ForMember(dest => dest.IsDeleted, opt => opt.Ignore())
             .ForMember(dest => dest.DeletedAt, opt => opt.Ignore())
-            .ForMember(dest => dest.Assets, opt => opt.Ignore());
+            .ForMember(dest => dest.Assets, opt => opt.Ignore())
+            .ForMember(dest => dest.ParentCategory, opt => opt.Ignore())
+            .ForMember(dest => dest.ChildCategories, opt => opt.Ignore());
 
         CreateMap<UpdateMaintenanceAssetCategoryDto, MaintenanceAssetCategory>()
             .ForMember(dest => dest.Id, opt => opt.Ignore())
@@ -71,7 +75,9 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.UpdatedAt, opt => opt.Ignore())
             .ForMember(dest => dest.IsDeleted, opt => opt.Ignore())
             .ForMember(dest => dest.DeletedAt, opt => opt.Ignore())
-            .ForMember(dest => dest.Assets, opt => opt.Ignore());
+            .ForMember(dest => dest.Assets, opt => opt.Ignore())
+            .ForMember(dest => dest.ParentCategory, opt => opt.Ignore())
+            .ForMember(dest => dest.ChildCategories, opt => opt.Ignore());
 
         // Work Order Mappings
         CreateMap<WorkOrder, WorkOrderDto>()

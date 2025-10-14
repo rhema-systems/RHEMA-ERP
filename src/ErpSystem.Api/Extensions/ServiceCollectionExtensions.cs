@@ -144,11 +144,11 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeRepository, ErpSystem.Data.Repositories.EmployeeRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.HR.IDepartmentRepository, ErpSystem.Data.Repositories.DepartmentRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.HR.ISectionRepository, ErpSystem.Data.Repositories.SectionRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeSkillRepository, ErpSystem.Data.Repositories.EmployeeSkillRepository>();
             
             // TODO: Additional HR repositories to be implemented as needed:
             // - EmployeePositionRepository: needs implementation
             // - SkillRepository: needs implementation
-            // - EmployeeSkillRepository: needs implementation
             // - CountryRepository: needs implementation
             // - ShiftRepository: needs implementation
             // - AttendanceRecordRepository: needs implementation
@@ -191,11 +191,19 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IInspectionTemplateRepository, ErpSystem.Data.Repositories.Maintenance.InspectionTemplateRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetInspectionRepository, ErpSystem.Data.Repositories.Maintenance.AssetInspectionRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IInspectionDocumentRepository, ErpSystem.Data.Repositories.Maintenance.InspectionDocumentRepository>();
-            // TODO: Create missing maintenance repositories
+            // New maintenance module repositories - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicalSkillRepository, ErpSystem.Data.Repositories.Maintenance.TechnicalSkillRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianSkillAssignmentRepository, ErpSystem.Data.Repositories.Maintenance.TechnicianSkillAssignmentRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ISafetyProtocolRepository, ErpSystem.Data.Repositories.Maintenance.SafetyProtocolRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ISafetyComplianceRepository, ErpSystem.Data.Repositories.Maintenance.SafetyComplianceRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IProtocolAdherenceRepository, ErpSystem.Data.Repositories.Maintenance.ProtocolAdherenceRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IProtocolViolationRepository, ErpSystem.Data.Repositories.Maintenance.ProtocolViolationRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IProtocolTrainingRepository, ErpSystem.Data.Repositories.Maintenance.ProtocolTrainingRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianRepository, ErpSystem.Data.Repositories.Maintenance.TechnicianRepository>();
+            
+            // TODO: Additional maintenance repositories to be implemented as needed:
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianTeamRepository, ErpSystem.Data.Repositories.Maintenance.TechnicianTeamRepository>();
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianTeamMemberRepository, ErpSystem.Data.Repositories.Maintenance.TechnicianTeamMemberRepository>();
-            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianSkillRepository, ErpSystem.Data.Repositories.Maintenance.TechnicianSkillRepository>();
-            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IUserTechnicianSkillRepository, ErpSystem.Data.Repositories.Maintenance.UserTechnicianSkillRepository>();
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetDowntimeRepository, ErpSystem.Data.Repositories.Maintenance.AssetDowntimeRepository>();
             
             // Technician Scheduling repositories
@@ -204,12 +212,15 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianShiftRepository, ErpSystem.Data.Repositories.Maintenance.TechnicianShiftRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IEmployeeRepository, ErpSystem.Data.Repositories.Maintenance.EmployeeRepository>();
             
-            // TODO: Workflow repositories - temporarily commented out until implementations are created
-            // services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowDefinitionRepository, ErpSystem.Data.Repositories.Workflow.WorkflowDefinitionRepository>();
-            // services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowInstanceRepository, ErpSystem.Data.Repositories.Workflow.WorkflowInstanceRepository>();
-            // services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowStepInstanceRepository, ErpSystem.Data.Repositories.Workflow.WorkflowStepInstanceRepository>();
-            // services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowApprovalRepository, ErpSystem.Data.Repositories.Workflow.WorkflowApprovalRepository>();
-            // services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowActivityLogRepository, ErpSystem.Data.Repositories.Workflow.WorkflowActivityLogRepository>();
+            // Workflow repositories - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowDefinitionRepository, ErpSystem.Data.Repositories.WorkflowDefinitionRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowStepRepository, ErpSystem.Data.Repositories.WorkflowStepRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowTransitionRepository, ErpSystem.Data.Repositories.WorkflowTransitionRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowInstanceRepository, ErpSystem.Data.Repositories.WorkflowInstanceRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowStepInstanceRepository, ErpSystem.Data.Repositories.WorkflowStepInstanceRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowApprovalRepository, ErpSystem.Data.Repositories.WorkflowApprovalRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowActivityLogRepository, ErpSystem.Data.Repositories.WorkflowActivityLogRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowEntityTypeRepository, ErpSystem.Data.Repositories.WorkflowEntityTypeRepository>();
             
             // Unit of Work
             services.AddScoped<IUnitOfWork, UnitOfWork>();
@@ -266,6 +277,7 @@ namespace ErpSystem.Api.Extensions
             // User context services
             services.AddHttpContextAccessor();
             services.AddScoped<ICurrentUserService, ErpSystem.Api.Services.CurrentUserService>();
+            services.AddScoped<ICurrentUserProvider, ErpSystem.Api.Services.CurrentUserService>();
 
             // Dashboard service
             services.AddScoped<ErpSystem.Core.Services.IDashboardService, ErpSystem.Data.Services.DashboardService>();
@@ -276,21 +288,27 @@ namespace ErpSystem.Api.Extensions
             // Data source service
             services.AddScoped<IDataSourceService, EnterpriseDataSourceService>();
             
-            // TODO: Workflow services - temporarily commented out due to compilation errors
-            // The existing workflow service implementations need to be updated to match actual entity properties
-            // services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowEngine, ErpSystem.Core.Services.Workflow.WorkflowEngine>();
-            // services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowDefinitionService, ErpSystem.Core.Services.Workflow.WorkflowDefinitionService>();
-            // services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowInstanceService, ErpSystem.Core.Services.Workflow.WorkflowInstanceService>();
-            // services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowStepService, ErpSystem.Core.Services.Workflow.WorkflowStepService>();
-            // services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowApprovalService, ErpSystem.Core.Services.Workflow.WorkflowApprovalService>();
-            // services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowConditionEvaluator, ErpSystem.Core.Services.Workflow.WorkflowConditionEvaluator>();
-            // services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowNotificationService, ErpSystem.Core.Services.Workflow.WorkflowNotificationService>();
+            // Workflow services - NOW ENABLED for maintenance integration
+            services.AddScoped<ErpSystem.Core.Interfaces.Services.IWorkflowDefinitionService, ErpSystem.Core.Services.Workflow.WorkflowDefinitionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Services.IWorkflowInstanceService, ErpSystem.Core.Services.Workflow.WorkflowInstanceService>();
+            // TODO: Implement missing workflow services
+            // services.AddScoped<ErpSystem.Core.Interfaces.Services.IWorkflowStepService, ErpSystem.Core.Services.Workflow.WorkflowStepService>();
+            // services.AddScoped<ErpSystem.Core.Interfaces.Services.IWorkflowApprovalService, ErpSystem.Core.Services.Workflow.WorkflowApprovalService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Services.IWorkflowActivityService, ErpSystem.Core.Services.Workflow.WorkflowActivityService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Services.IWorkflowEntityTypeService, ErpSystem.Core.Services.Workflow.WorkflowEntityTypeService>();
             
-            // TODO: Enhanced maintenance workflow integration - temporarily commented out until dependencies resolved
-            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IEnhancedMaintenanceWorkflowService, ErpSystem.Core.Services.Maintenance.EnhancedMaintenanceWorkflowService>();
+            // Core workflow engine and supporting services
+            services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowEngine, ErpSystem.Core.Services.Workflow.WorkflowEngine>();
             
-            // TODO: Temporarily disabled Maintenance services until dependencies are properly implemented
-            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetService, ErpSystem.Api.Services.Maintenance.MaintenanceAssetService>();
+            // Workflow supporting services (stub implementations)
+            services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowConditionEvaluator, ErpSystem.Core.Services.Workflow.WorkflowConditionEvaluator>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowNotificationService, ErpSystem.Core.Services.Workflow.WorkflowNotificationService>();
+            
+            // Enhanced maintenance workflow integration - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IEnhancedMaintenanceWorkflowService, ErpSystem.Core.Services.Maintenance.EnhancedMaintenanceWorkflowService>();
+            
+            // Maintenance asset service - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetService, ErpSystem.Api.Services.Maintenance.MaintenanceAssetService>();
             
             // Inventory repositories
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryItemRepository, ErpSystem.Data.Repositories.Inventory.InventoryItemRepository>();
@@ -305,9 +323,8 @@ namespace ErpSystem.Api.Extensions
             // Inventory services
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryManagementService, ErpSystem.Core.Services.Inventory.InventoryManagementService>();
             
-            // Phase 1: Core Maintenance Services - workflow-ready implementation
-            // TODO: Temporarily disabled WorkOrderService until IMaintenanceInventoryService is available
-            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderService, ErpSystem.Core.Services.Maintenance.WorkOrderService>();
+            // Phase 1: Core Maintenance Services - workflow-ready implementation - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderService, ErpSystem.Core.Services.Maintenance.WorkOrderService>();
             // MaintenanceInventoryService - now enabled with IInventoryManagementService dependency
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceInventoryService, ErpSystem.Core.Services.Maintenance.MaintenanceInventoryService>();
             
@@ -318,12 +335,38 @@ namespace ErpSystem.Api.Extensions
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IInspectionTemplateService, ErpSystem.Core.Services.Maintenance.InspectionTemplateService>();
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetInspectionService, ErpSystem.Core.Services.Maintenance.AssetInspectionService>();
             
-            // TODO: Additional maintenance services to be enabled in later phases
-            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianSchedulingService, ErpSystem.Core.Services.Maintenance.TechnicianSchedulingService>();
+            // Additional maintenance services - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianSchedulingService, ErpSystem.Core.Services.Maintenance.TechnicianSchedulingService>();
             
-            // TODO: Create proper maintenance services implementations later
+            // Asset type service - using core namespace
+            // NOTE: This service registration was temporarily commented out as IAssetTypeService might not be needed
+            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetTypeService, ErpSystem.Core.Services.Maintenance.AssetTypeService>();
+            
+            // New maintenance module services - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceScheduleService, ErpSystem.Core.Services.Maintenance.MaintenanceScheduleService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicalSkillService, ErpSystem.Core.Services.Maintenance.TechnicalSkillService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ISafetyProtocolService, ErpSystem.Core.Services.Maintenance.SafetyProtocolService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianService, ErpSystem.Core.Services.Maintenance.TechnicianService>();
+            
+            // Phase 2 Enhanced Services - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IInspectionTemplateService, ErpSystem.Core.Services.Maintenance.InspectionTemplateService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAnalyticsService, ErpSystem.Core.Services.Maintenance.MaintenanceAnalyticsService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceNotificationService, ErpSystem.Core.Services.Maintenance.MaintenanceNotificationService>();
+            
+            // Phase 3 IoT Integration - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IIoTMaintenanceService, ErpSystem.Core.Services.Maintenance.IoTMaintenanceService>();
+            
+            // Phase 2 Mobile API Enhancement - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMobileMaintenanceService, ErpSystem.Core.Services.Maintenance.MobileMaintenanceService>();
+            
+            // Phase 3 Advanced Reporting - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAdvancedMaintenanceReportingService, ErpSystem.Core.Services.Maintenance.AdvancedMaintenanceReportingService>();
+            
+            // Phase 3 Asset Performance Analytics - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetPerformanceAnalyticsService, ErpSystem.Core.Services.Maintenance.AssetPerformanceAnalyticsService>();
+            
+            // TODO: Additional maintenance services to be implemented as needed:
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetCategoryService, ErpSystem.Core.Services.Maintenance.MaintenanceAssetCategoryService>();
-            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceScheduleService, ErpSystem.Core.Services.Maintenance.MaintenanceScheduleService>();
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IInspectionTemplateService, ErpSystem.Core.Services.Maintenance.InspectionTemplateService>();
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetInspectionService, ErpSystem.Core.Services.Maintenance.AssetInspectionService>();
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianTeamService, ErpSystem.Core.Services.Maintenance.TechnicianTeamService>();
@@ -335,8 +378,8 @@ namespace ErpSystem.Api.Extensions
             // services.AddScoped<ErpSystem.Core.Services.Maintenance.WorkOrderSchedulingService>();
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceInventoryService, ErpSystem.Core.Services.Maintenance.MaintenanceInventoryService>();
             
-            // TODO: Temporarily commented out HR Service until HR wrapper repositories are properly implemented
-            // services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeService, ErpSystem.Core.Services.HR.EmployeeService>();
+            // HR Services - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeService, ErpSystem.Core.Services.HR.EmployeeService>();
             
             // Maintenance background services - temporarily disabled to get API running
             // services.AddHostedService<ErpSystem.Api.Services.Maintenance.MaintenanceBackgroundService>();
@@ -467,8 +510,57 @@ namespace ErpSystem.Api.Extensions
                     c.IncludeXmlComments(xmlPath);
                 }
                 
-                // Group controllers by tags
-                c.TagActionsBy(api => new[] { api.GroupName ?? api.ActionDescriptor.RouteValues["controller"] });
+                // Group controllers by modules/tags for better organization
+                c.TagActionsBy(api =>
+                {
+                    var controllerName = api.ActionDescriptor.RouteValues["controller"];
+                    
+                    // Categorize by module
+                    return controllerName switch
+                    {
+                        // Authentication & Authorization
+                        "Auth" or "Security" or "Users" or "Roles" or "Permissions" => new[] { "🔐 Authentication & Security" },
+                        
+                        // Administration
+                        "Tenants" or "Settings" or "AuditLogs" or "SecurityLogs" => new[] { "⚙️ Administration" },
+                        
+                        // HR Module
+                        "Employees" or "Departments" or "Sections" or "EmployeeSkills" => new[] { "👥 Human Resources" },
+                        
+                        // Maintenance Module
+                        "Assets" or "WorkOrders" or "Maintenance" or "AssetCategories" or "WorkOrderTypes" or "MaintenanceTypes" or "PriorityLevels" => new[] { "🔧 Maintenance" },
+                        
+                        // Procurement Module
+                        "PurchaseOrders" or "Suppliers" or "PurchaseRequisitions" or "Procurement" => new[] { "🛒 Procurement" },
+                        
+                        // Inventory Module
+                        "Inventory" or "InventoryItems" or "StockMovements" or "Warehouses" => new[] { "📦 Inventory" },
+                        
+                        // Workflow Module
+                        "Workflows" or "WorkflowDefinitions" or "WorkflowInstances" or "WorkflowSteps" or "WorkflowApprovals" => new[] { "🔄 Workflow" },
+                        
+                        // Reports Module
+                        "Reports" or "ReportTemplates" or "ReportSchedules" or "ReportExecutions" => new[] { "📊 Reports" },
+                        
+                        // Data Sources
+                        "DataSources" or "DatabaseMetadata" => new[] { "🗃️ Data Sources" },
+                        
+                        // Development & Testing
+                        "Development" or "DevInfo" or "Features" or "SampleData" => new[] { "🔬 Development" },
+                        
+                        // System Health
+                        "Health" or "System" or "Monitoring" => new[] { "💚 System Health" },
+                        
+                        // Dashboard
+                        "Dashboard" or "Analytics" => new[] { "📈 Dashboard" },
+                        
+                        // File Management
+                        "Files" or "Storage" or "Upload" => new[] { "📁 File Management" },
+                        
+                        // Default fallback
+                        _ => new[] { $"📋 {controllerName}" }
+                    };
+                });
                 c.DocInclusionPredicate((name, api) => true);
             });
 

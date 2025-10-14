@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
 using System.Linq.Expressions;
 using ErpSystem.Core.Entities.Maintenance;
 
@@ -144,6 +145,7 @@ public interface IMaintenanceScheduleRepository : IGenericRepository<Maintenance
     Task<IEnumerable<MaintenanceSchedule>> GetSchedulesDueInDaysAsync(int days);
     Task UpdateNextDueDateAsync(Guid scheduleId, DateTime nextDueDate);
     Task UpdateLastGeneratedDateAsync(Guid scheduleId, DateTime lastGeneratedDate);
+    Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null);
 }
 
 #endregion
@@ -201,11 +203,80 @@ public interface ITechnicianTeamMemberRepository : IGenericRepository<Technician
     Task<TechnicianTeamMember?> GetActiveMembershipAsync(Guid technicianId, Guid teamId);
 }
 
-public interface ITechnicianSkillRepository : IGenericRepository<TechnicianSkill>
+public interface ITechnicalSkillRepository : IGenericRepository<TechnicalSkill>
 {
-    Task<IEnumerable<TechnicianSkill>> GetActiveAsync();
-    Task<IEnumerable<TechnicianSkill>> GetByCategoryAsync(string category);
-    Task<int> GetUserCountBySkillAsync(Guid skillId);
+    Task<IEnumerable<TechnicalSkill>> GetActiveAsync();
+    Task<IEnumerable<TechnicalSkill>> GetByCategoryAsync(string category);
+    Task<IEnumerable<TechnicalSkill>> GetByComplexityAsync(string complexity);
+    Task<IEnumerable<TechnicalSkill>> GetByRiskLevelAsync(string riskLevel);
+    Task<bool> IsSkillNameUniqueAsync(string name, Guid? excludeId = null);
+    Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null);
+    Task<int> GetTechnicianCountBySkillAsync(Guid skillId);
+    Task<IEnumerable<TechnicalSkill>> GetBySkillLevelAsync(int skillLevel);
+    Task<bool> IsNameUniqueAsync(string name, Guid? excludeId = null);
+    Task<IEnumerable<TechnicalSkill>> SyncFromHRAsync();
+    Task<IEnumerable<TechnicalSkill>> GetFromHRModuleAsync();
+    Task<TechnicalSkill?> GetByCodeAsync(string code);
+}
+
+public interface ITechnicianSkillAssignmentRepository : IGenericRepository<TechnicianSkillAssignment>
+{
+    Task<IEnumerable<TechnicianSkillAssignment>> GetByTechnicianIdAsync(Guid technicianId);
+    Task<IEnumerable<TechnicianSkillAssignment>> GetByTechnicalSkillIdAsync(Guid skillId);
+    Task<IEnumerable<TechnicianSkillAssignment>> GetByProficiencyLevelAsync(int proficiencyLevel);
+    Task<IEnumerable<TechnicianSkillAssignment>> GetExpiredCertificationsAsync();
+    Task<IEnumerable<TechnicianSkillAssignment>> GetCertificationsExpiringInDaysAsync(int days);
+    Task<TechnicianSkillAssignment?> GetTechnicianSkillAsync(Guid technicianId, Guid skillId);
+    Task<bool> HasTechnicianSkillAsync(Guid technicianId, Guid skillId);
+    Task<IEnumerable<Employee>> GetTechniciansBySkillAsync(Guid skillId, int? minProficiencyLevel = null);
+    Task<IEnumerable<TechnicianSkillAssignment>> GetBySkillIdAsync(Guid skillId);
+}
+
+public interface ITechnicianCertificationRepository : IGenericRepository<TechnicianCertification>
+{
+    Task<IEnumerable<TechnicianCertification>> GetByTechnicianIdAsync(Guid technicianId);
+    Task<IEnumerable<TechnicianCertification>> GetExpiredCertificationsAsync();
+    Task<IEnumerable<TechnicianCertification>> GetExpiringSoonAsync(int daysAhead = 30);
+    Task<IEnumerable<TechnicianCertification>> GetByCategoryAsync(string category);
+    Task<IEnumerable<TechnicianCertification>> GetByStatusAsync(string status);
+    Task<IEnumerable<TechnicianCertification>> GetMandatoryCertificationsAsync();
+    Task<TechnicianCertification?> GetByCertificationNumberAsync(string certificationNumber);
+    Task<bool> IsCertificationNumberUniqueAsync(string certificationNumber, Guid? excludeId = null);
+    Task<IEnumerable<TechnicianCertification>> GetByIssuingOrganizationAsync(string organization);
+    Task<IEnumerable<TechnicianCertification>> GetUnverifiedCertificationsAsync();
+    Task<IEnumerable<TechnicianCertification>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
+    Task<int> GetCertificationCountByTechnicianAsync(Guid technicianId);
+    Task<int> GetExpiredCountByTechnicianAsync(Guid technicianId);
+}
+
+public interface ISafetyProtocolRepository : IGenericRepository<SafetyProtocol>
+{
+    Task<IEnumerable<SafetyProtocol>> GetActiveAsync();
+    Task<IEnumerable<SafetyProtocol>> GetByCategoryAsync(string category);
+    Task<IEnumerable<SafetyProtocol>> GetBySeverityAsync(string severity);
+    Task<IEnumerable<SafetyProtocol>> GetByRegulatoryStandardAsync(string standard);
+    Task<IEnumerable<SafetyProtocol>> GetMandatoryProtocolsAsync();
+    Task<IEnumerable<SafetyProtocol>> GetProtocolsDueForReviewAsync();
+    Task<IEnumerable<SafetyProtocol>> GetOverdueProtocolsAsync();
+    Task<bool> IsProtocolNameUniqueAsync(string name, Guid? excludeId = null);
+    Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null);
+    Task<IEnumerable<SafetyProtocol>> GetByRiskLevelAsync(string riskLevel);
+    Task<IEnumerable<SafetyProtocol>> GetMandatoryAsync();
+    Task<IEnumerable<SafetyProtocol>> GetOverdueAsync();
+    Task<IEnumerable<SafetyProtocol>> GetDueForReviewAsync();
+    Task<IEnumerable<SafetyProtocol>> GetExpiredAsync();
+}
+
+public interface ISafetyComplianceRepository : IGenericRepository<SafetyComplianceRecord>
+{
+    Task<IEnumerable<SafetyComplianceRecord>> GetByProtocolIdAsync(Guid protocolId);
+    Task<IEnumerable<SafetyComplianceRecord>> GetByTechnicianIdAsync(Guid technicianId);
+    Task<IEnumerable<SafetyComplianceRecord>> GetByWorkOrderIdAsync(Guid workOrderId);
+    Task<IEnumerable<SafetyComplianceRecord>> GetByComplianceStatusAsync(string status);
+    Task<IEnumerable<SafetyComplianceRecord>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
+    Task<SafetyComplianceRecord?> GetLatestComplianceAsync(Guid protocolId, Guid technicianId);
+    Task<decimal> GetComplianceRateAsync(Guid protocolId, DateTime startDate, DateTime endDate);
+    Task<IEnumerable<SafetyComplianceRecord>> GetViolationsAsync(DateTime? startDate = null, DateTime? endDate = null);
 }
 
 public interface IUserTechnicianSkillRepository : IGenericRepository<UserTechnicianSkill>
@@ -218,6 +289,30 @@ public interface IUserTechnicianSkillRepository : IGenericRepository<UserTechnic
     Task<UserTechnicianSkill?> GetUserSkillAsync(Guid userId, Guid skillId);
     Task<bool> HasUserSkillAsync(Guid userId, Guid skillId);
     Task<IEnumerable<ApplicationUser>> GetUsersBySkillAsync(Guid skillId, int? minProficiencyLevel = null);
+}
+
+#endregion
+
+#region Technician Repositories
+
+public interface ITechnicianRepository : IGenericRepository<Employee>
+{
+    Task<IEnumerable<Employee>> GetTechniciansAsync();
+    Task<IEnumerable<Employee>> GetActiveTechniciansAsync();
+    Task<IEnumerable<Employee>> GetTechniciansBySkillAsync(Guid skillId);
+    Task<IEnumerable<Employee>> GetAvailableTechniciansAsync(DateTime startTime, DateTime endTime);
+    Task<Employee?> GetTechnicianWithSkillsAsync(Guid technicianId);
+    Task<bool> IsTechnicianAvailableAsync(Guid technicianId, DateTime startTime, DateTime endTime);
+    Task<IEnumerable<Employee>> GetTechniciansByTeamAsync(Guid teamId);
+    Task<double> GetTechnicianWorkloadAsync(Guid technicianId, DateTime startDate, DateTime endDate);
+    Task<IEnumerable<Employee>> GetTechniciansByLocationAsync(Guid locationId);
+    Task<IEnumerable<Employee>> GetActiveAsync();
+    Task<IEnumerable<Employee>> GetByDepartmentAsync(string department);
+    Task<IEnumerable<Employee>> GetBySpecializationAsync(string specialization);
+    Task<IEnumerable<Employee>> GetAvailableAsync(DateTime startTime, DateTime endTime);
+    Task<IEnumerable<Employee>> SyncFromHRAsync();
+    Task<IEnumerable<Employee>> GetFromHRModuleAsync();
+    Task<Employee?> GetByEmployeeIdAsync(Guid employeeId);
 }
 
 #endregion
@@ -236,6 +331,113 @@ public interface IAssetDowntimeRepository : IGenericRepository<AssetDowntime>
     Task<decimal> GetTotalCostImpactByAssetAsync(Guid assetId, DateTime startDate, DateTime endDate);
     Task<AssetDowntime?> GetActiveDowntimeByAssetAsync(Guid assetId);
     Task<double> GetDowntimePercentageByAssetAsync(Guid assetId, DateTime startDate, DateTime endDate);
+}
+
+#endregion
+
+#region Technical Skill Repositories
+
+// Duplicate repositories removed - using definitions from above
+
+public interface ISkillAssessmentRepository : IGenericRepository<SkillAssessment>
+{
+    Task<IEnumerable<SkillAssessment>> GetByTechnicianIdAsync(Guid technicianId);
+    Task<IEnumerable<SkillAssessment>> GetBySkillIdAsync(Guid skillId);
+    Task<IEnumerable<SkillAssessment>> GetByAssessorIdAsync(Guid assessorId);
+    Task<IEnumerable<SkillAssessment>> GetByAssessmentTypeAsync(string assessmentType);
+    Task<IEnumerable<SkillAssessment>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
+    Task<SkillAssessment?> GetLatestAssessmentAsync(Guid technicianId, Guid skillId);
+    Task<IEnumerable<SkillAssessment>> GetPassedAssessmentsAsync();
+    Task<IEnumerable<SkillAssessment>> GetFailedAssessmentsAsync();
+    Task<decimal> GetAverageScoreAsync(Guid skillId);
+    Task<decimal> GetTechnicianAverageScoreAsync(Guid technicianId);
+}
+
+public interface ISkillGapAnalysisRepository : IGenericRepository<SkillGapAnalysis>
+{
+    Task<IEnumerable<SkillGapAnalysis>> GetBySkillIdAsync(Guid skillId);
+    Task<IEnumerable<SkillGapAnalysis>> GetByImpactLevelAsync(string impactLevel);
+    Task<IEnumerable<SkillGapAnalysis>> GetByStatusAsync(string status);
+    Task<IEnumerable<SkillGapAnalysis>> GetByAnalysisPeriodAsync(DateTime startDate, DateTime endDate);
+    Task<IEnumerable<SkillGapAnalysis>> GetSkillDeficitsAsync();
+    Task<IEnumerable<SkillGapAnalysis>> GetSkillSurplusAsync();
+    Task<IEnumerable<SkillGapAnalysis>> GetCriticalGapsAsync();
+    Task<SkillGapAnalysis?> GetLatestAnalysisAsync(Guid skillId);
+}
+
+#endregion
+
+#region Safety Protocol Repositories
+
+// Using ISafetyProtocolRepository definition from above
+
+public interface IProtocolAdherenceRepository : IGenericRepository<ProtocolAdherence>
+{
+    Task<IEnumerable<ProtocolAdherence>> GetByProtocolIdAsync(Guid protocolId);
+    Task<IEnumerable<ProtocolAdherence>> GetByWorkOrderIdAsync(Guid workOrderId);
+    Task<IEnumerable<ProtocolAdherence>> GetByTechnicianIdAsync(Guid technicianId);
+    Task<IEnumerable<ProtocolAdherence>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
+    Task<IEnumerable<ProtocolAdherence>> GetByComplianceScoreRangeAsync(int minScore, int maxScore);
+    Task<IEnumerable<ProtocolAdherence>> GetVerifiedAdherenceAsync();
+    Task<IEnumerable<ProtocolAdherence>> GetUnverifiedAdherenceAsync();
+    Task<decimal> GetComplianceRateAsync(Guid protocolId, DateTime startDate, DateTime endDate);
+    Task<decimal> GetTechnicianComplianceRateAsync(Guid technicianId, DateTime startDate, DateTime endDate);
+    Task<int> GetAdherenceCountAsync(Guid protocolId, DateTime startDate, DateTime endDate);
+}
+
+public interface IProtocolViolationRepository : IGenericRepository<ProtocolViolation>
+{
+    Task<IEnumerable<ProtocolViolation>> GetByProtocolIdAsync(Guid protocolId);
+    Task<IEnumerable<ProtocolViolation>> GetByWorkOrderIdAsync(Guid workOrderId);
+    Task<IEnumerable<ProtocolViolation>> GetByTechnicianIdAsync(Guid technicianId);
+    Task<IEnumerable<ProtocolViolation>> GetBySeverityAsync(string severity);
+    Task<IEnumerable<ProtocolViolation>> GetByInvestigationStatusAsync(string status);
+    Task<IEnumerable<ProtocolViolation>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
+    Task<IEnumerable<ProtocolViolation>> GetWithInjuriesAsync();
+    Task<IEnumerable<ProtocolViolation>> GetWithPropertyDamageAsync();
+    Task<IEnumerable<ProtocolViolation>> GetOpenInvestigationsAsync();
+    Task<IEnumerable<ProtocolViolation>> GetOverdueInvestigationsAsync();
+    Task<decimal> GetTotalCostImpactAsync(DateTime startDate, DateTime endDate);
+    Task<int> GetViolationCountByTechnicianAsync(Guid technicianId, DateTime startDate, DateTime endDate);
+}
+
+public interface IProtocolTrainingRepository : IGenericRepository<ProtocolTraining>
+{
+    Task<IEnumerable<ProtocolTraining>> GetByProtocolIdAsync(Guid protocolId);
+    Task<IEnumerable<ProtocolTraining>> GetByTechnicianIdAsync(Guid technicianId);
+    Task<IEnumerable<ProtocolTraining>> GetByTrainingMethodAsync(string trainingMethod);
+    Task<IEnumerable<ProtocolTraining>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
+    Task<IEnumerable<ProtocolTraining>> GetCompletedTrainingsAsync();
+    Task<IEnumerable<ProtocolTraining>> GetIncompleteTrainingsAsync();
+    Task<IEnumerable<ProtocolTraining>> GetExpiredTrainingsAsync();
+    Task<IEnumerable<ProtocolTraining>> GetExpiringInDaysAsync(int days);
+    Task<ProtocolTraining?> GetLatestTrainingAsync(Guid protocolId, Guid technicianId);
+    Task<bool> HasValidTrainingAsync(Guid protocolId, Guid technicianId);
+    Task<decimal> GetAverageTrainingHoursAsync(Guid protocolId);
+    Task<decimal> GetCompletionRateAsync(Guid protocolId);
+}
+
+public interface ISafetyAuditRepository : IGenericRepository<SafetyAudit>
+{
+    Task<IEnumerable<SafetyAudit>> GetByAuditorAsync(string auditor);
+    Task<IEnumerable<SafetyAudit>> GetByStatusAsync(string status);
+    Task<IEnumerable<SafetyAudit>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
+    Task<IEnumerable<SafetyAudit>> GetByScoreRangeAsync(int minScore, int maxScore);
+    Task<IEnumerable<SafetyAudit>> GetCompletedAuditsAsync();
+    Task<IEnumerable<SafetyAudit>> GetAuditsRequiringFollowUpAsync();
+    Task<SafetyAudit?> GetLatestAuditAsync();
+    Task<decimal> GetAverageAuditScoreAsync(DateTime startDate, DateTime endDate);
+}
+
+public interface IProtocolAuditDetailRepository : IGenericRepository<ProtocolAuditDetail>
+{
+    Task<IEnumerable<ProtocolAuditDetail>> GetByAuditIdAsync(Guid auditId);
+    Task<IEnumerable<ProtocolAuditDetail>> GetByProtocolIdAsync(Guid protocolId);
+    Task<IEnumerable<ProtocolAuditDetail>> GetFailedAuditsAsync();
+    Task<IEnumerable<ProtocolAuditDetail>> GetByPriorityAsync(string priority);
+    Task<IEnumerable<ProtocolAuditDetail>> GetByComplianceScoreRangeAsync(int minScore, int maxScore);
+    Task<decimal> GetAverageComplianceScoreAsync(Guid protocolId);
+    Task<int> GetFailureCountAsync(Guid protocolId);
 }
 
 #endregion

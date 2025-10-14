@@ -444,7 +444,7 @@ public class ResourceAllocationController : ControllerBase
                         TechnicianId = request.TechnicianId.Value,
                         StartTime = request.StartTime,
                         EndTime = request.EndTime,
-                        EstimatedHours = request.EstimatedHours,
+                        EstimatedHours = (decimal)request.EstimatedHours,
                         Notes = "Scheduled via resource planning"
                     };
 

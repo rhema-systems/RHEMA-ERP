@@ -57,7 +57,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
                 Skills = t.Skills?.Select(s => new TechnicianSkillDto
                 {
                     SkillName = s.SkillName,
-                    Level = s.Level.ToString(),
+                    Level = s.Level,
                     IsCertified = s.IsCertified
                 }).ToList() ?? new List<TechnicianSkillDto>()
             });
@@ -178,7 +178,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
                 TotalAvailableHours = availableSlots.Sum(slot => 
                     (slot.EndTime - slot.StartTime).TotalHours),
                 ScheduledHours = schedules.Sum(s => s.EstimatedHours),
-                Utilization = CalculateUtilization(availability, schedules, startDate, endDate)
+                Utilization = (decimal)CalculateUtilization(availability, schedules, startDate, endDate)
             };
         }
         catch (Exception ex)
@@ -213,7 +213,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
                 
             // Business rule validation
             var actualHours = (request.EndTime - request.StartTime).TotalHours;
-            if (Math.Abs(actualHours - request.EstimatedHours) > 0.5) // Allow 30 minute variance
+            if (Math.Abs(actualHours - (double)request.EstimatedHours) > 0.5) // Allow 30 minute variance
             {
                 _logger.LogWarning("Time span ({ActualHours:F2}h) differs significantly from estimated hours ({EstimatedHours:F2}h) for work order {WorkOrderId}", 
                     actualHours, request.EstimatedHours, request.WorkOrderId);
@@ -242,7 +242,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
                 Description = workOrder.Description ?? string.Empty,
                 Location = "Asset Location", // Would need to be loaded from Asset repository
                 Priority = workOrder.PriorityLevel?.Name ?? "Medium",
-                EstimatedHours = request.EstimatedHours,
+                EstimatedHours = (double)request.EstimatedHours,
                 Status = "Scheduled",
                 Notes = request.Notes
             };
@@ -267,7 +267,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
                 Location = createdSchedule.Location ?? string.Empty,
                 Priority = createdSchedule.Priority ?? "Medium",
                 Status = createdSchedule.Status ?? "Scheduled",
-                EstimatedHours = createdSchedule.EstimatedHours,
+                EstimatedHours = (decimal)createdSchedule.EstimatedHours,
                 Notes = createdSchedule.Notes ?? string.Empty
             };
         }
@@ -319,8 +319,8 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
                 {
                     TechnicianId = technician.Id,
                     TechnicianName = technician.FullName ?? "Unknown Technician",
-                    Score = score,
-                    CurrentWorkload = workload,
+                    Score = (decimal)score,
+                    CurrentWorkload = (decimal)workload.UtilizationPercentage,
                     IsAvailable = true,
                     AvailableFrom = preferredStartTime,
                     ReasonForRecommendation = GenerateRecommendationReason(score, workload)
@@ -396,8 +396,8 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
                 Notes = request.Notes,
                 IsRecurring = request.IsRecurring,
                 RecurrencePattern = request.RecurrencePattern,
-                AvailableHours = request.AvailableHours,
-                CapacityPercentage = request.CapacityPercentage
+                AvailableHours = (double?)request.AvailableHours,
+                CapacityPercentage = (double?)request.CapacityPercentage
             };
 
             await _availabilityRepository.AddAsync(availability);
@@ -414,8 +414,8 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
                 Notes = created.Notes ?? string.Empty,
                 IsRecurring = created.IsRecurring,
                 RecurrencePattern = created.RecurrencePattern ?? string.Empty,
-                AvailableHours = created.AvailableHours ?? 0,
-                CapacityPercentage = created.CapacityPercentage ?? 0
+                AvailableHours = (decimal)(created.AvailableHours ?? 0),
+                CapacityPercentage = (decimal)(created.CapacityPercentage ?? 0)
             };
         }
         catch (Exception ex)
@@ -460,7 +460,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
                     {
                         StartTime = dayStart,
                         EndTime = dayEnd,
-                        AvailableHours = 8.0 // Standard 8-hour day
+                        AvailableHours = 8.0m // Standard 8-hour day
                     });
                 }
             }
@@ -678,10 +678,10 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
                 var avgSkillLevel = technician.Skills.Average(s => 
                     s.Level switch 
                     {
-                        "Beginner" => 1.0,
-                        "Intermediate" => 2.0,
-                        "Advanced" => 3.0,
-                        "Expert" => 4.0,
+                        1 => 1.0,
+                        2 => 2.0,
+                        3 => 3.0,
+                        4 => 4.0,
                         _ => 1.0
                     });
                     
@@ -782,7 +782,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
             TechnicianId = technicianId,
             StartTime = scheduledDate,
             EndTime = scheduledDate.AddHours(8), // Default 8 hours
-            EstimatedHours = 8.0
+            EstimatedHours = 8.0m
         };
         var result = await ScheduleWorkOrderAsync(request);
         return result;

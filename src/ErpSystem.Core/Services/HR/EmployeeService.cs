@@ -637,12 +637,12 @@ public class EmployeeService : IEmployeeService
             PositionTitle = employee.Position?.Title ?? string.Empty,
             IsActive = employee.IsActive,
             IsAvailable = employee.IsActive && employee.StaffStatus == StaffStatus.Active,
-            Skills = employee.Skills?.Select(es => new MaintenanceDTOs.TechnicianSkillDto
+            Skills = employee.Skills?.Select(es => new MaintenanceDTOs.UserTechnicianSkillDto
             {
                 SkillName = es.Skill.Name,
-                Level = es.SkillLevel.ToString(),
+                Level = (int)es.SkillLevel,
                 IsCertified = es.CertificationDate.HasValue
-            }).ToList() ?? new List<MaintenanceDTOs.TechnicianSkillDto>(),
+            }).ToList() ?? new List<MaintenanceDTOs.UserTechnicianSkillDto>(),
             CurrentWorkOrders = 0, // Would come from work order service
             WorkloadScore = 0, // Would come from workload calculation
             BadgeNumber = employee.BadgeNumber,

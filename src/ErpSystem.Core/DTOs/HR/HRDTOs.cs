@@ -645,7 +645,7 @@ public class MaintenanceTechnicianDto
     public string PositionTitle { get; set; } = string.Empty;
     public bool IsActive { get; set; }
     public bool IsAvailable { get; set; }
-    public List<TechnicianSkillDto> Skills { get; set; } = new();
+    public List<UserTechnicianSkillDto> Skills { get; set; } = new();
     public int CurrentWorkOrders { get; set; }
     public decimal WorkloadScore { get; set; }
     public string? BadgeNumber { get; set; }

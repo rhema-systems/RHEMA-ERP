@@ -102,6 +102,21 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<TechnicianAvailability> TechnicianAvailabilities { get; set; }
     public DbSet<TechnicianShift> TechnicianShifts { get; set; }
     
+    // New Maintenance Management entities
+    public DbSet<TechnicalSkill> TechnicalSkills { get; set; }
+    public DbSet<TechnicianSkillAssignment> TechnicianSkillAssignments { get; set; }
+    public DbSet<SafetyProtocol> SafetyProtocols { get; set; }
+    public DbSet<SafetyComplianceRecord> SafetyComplianceRecords { get; set; }
+    public DbSet<Technician> Technicians { get; set; }
+    
+    // Additional Maintenance entities
+    public DbSet<TechnicianCertification> TechnicianCertifications { get; set; }
+    public DbSet<ProtocolAdherence> ProtocolAdherences { get; set; }
+    public DbSet<ProtocolViolation> ProtocolViolations { get; set; }
+    public DbSet<ProtocolTraining> ProtocolTrainings { get; set; }
+    public DbSet<SafetyAudit> SafetyAudits { get; set; }
+    public DbSet<ProtocolAuditDetail> ProtocolAuditDetails { get; set; }
+    
     // HR entities
     public DbSet<Employee> Employees { get; set; }
     public DbSet<Department> Departments { get; set; }
@@ -152,6 +167,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<WorkflowStepInstance> WorkflowStepInstances { get; set; }
     public DbSet<WorkflowActivityLog> WorkflowActivityLogs { get; set; }
     public DbSet<WorkflowApproval> WorkflowApprovals { get; set; }
+    public DbSet<WorkflowEntityType> WorkflowEntityTypes { get; set; }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -558,16 +574,66 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     
     private void ConfigureWorkflowEntities(ModelBuilder builder)
     {
-        // WorkflowDefinition -> WorkflowStep (1:M)
-        builder.Entity<WorkflowDefinition>()
-            .HasMany(wd => wd.Steps)
-            .WithOne(ws => ws.WorkflowDefinition)
-            .HasForeignKey(ws => ws.WorkflowDefinitionId)
-            .OnDelete(DeleteBehavior.Cascade);
+        // Configure WorkflowEntityType relationships
+        builder.Entity<WorkflowEntityType>(entity =>
+        {
+            entity.HasIndex(et => et.Name);
+            entity.HasIndex(et => et.IsActive);
+            entity.HasIndex(et => new { et.TenantId, et.Name }).IsUnique();
+            
+            entity.HasMany(et => et.WorkflowDefinitions)
+                .WithOne(wd => wd.EntityType)
+                .HasForeignKey(wd => wd.EntityTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+                
+            // WorkflowInstances navigation property will be configured in WorkflowInstance entity
+        });
+        
+        // Configure WorkflowDefinition relationships
+        builder.Entity<WorkflowDefinition>(entity =>
+        {
+            entity.HasIndex(wd => wd.EntityTypeId);
+            entity.HasIndex(wd => wd.Name);
+            entity.HasIndex(wd => wd.IsActive);
+            entity.HasIndex(wd => new { wd.TenantId, wd.Name }).IsUnique();
+            
+            entity.HasMany(wd => wd.Steps)
+                .WithOne(ws => ws.WorkflowDefinition)
+                .HasForeignKey(ws => ws.WorkflowDefinitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasMany(wd => wd.Instances)
+                .WithOne(wi => wi.WorkflowDefinition)
+                .HasForeignKey(wi => wi.WorkflowDefinitionId)
+                .OnDelete(DeleteBehavior.Restrict); // Avoid cascade conflicts
+        });
+        
+        // Configure WorkflowStep relationships
+        builder.Entity<WorkflowStep>(entity =>
+        {
+            entity.HasIndex(ws => ws.WorkflowDefinitionId);
+            entity.HasIndex(ws => ws.Name);
+            entity.HasIndex(ws => ws.Order);
+            entity.HasIndex(ws => ws.StepType);
+            entity.HasIndex(ws => ws.IsStartStep);
+            entity.HasIndex(ws => ws.IsEndStep);
+            
+            entity.HasMany(ws => ws.StepInstances)
+                .WithOne(si => si.WorkflowStep)
+                .HasForeignKey(si => si.WorkflowStepId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         // Configure WorkflowTransition self-referencing relationships
         builder.Entity<WorkflowTransition>(entity =>
         {
+            entity.HasIndex(wt => wt.WorkflowDefinitionId);
+            entity.HasIndex(wt => wt.FromStepId);
+            entity.HasIndex(wt => wt.ToStepId);
+            entity.HasIndex(wt => wt.Priority);
+            entity.HasIndex(wt => wt.IsDefault);
+            entity.HasIndex(wt => new { wt.FromStepId, wt.ToStepId });
+            
             // FromStep (OutgoingTransitions)
             entity.HasOne(t => t.FromStep)
                 .WithMany(s => s.OutgoingTransitions)
@@ -579,18 +645,31 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(s => s.IncomingTransitions)
                 .HasForeignKey(t => t.ToStepId)
                 .OnDelete(DeleteBehavior.Restrict);
-
-            entity.HasIndex(t => new { t.FromStepId, t.ToStepId });
-            entity.HasIndex(t => t.Priority);
-            entity.HasIndex(t => t.IsDefault);
         });
 
-        // WorkflowDefinition -> WorkflowInstance (1:M)
-        builder.Entity<WorkflowDefinition>()
-            .HasMany(wd => wd.Instances)
-            .WithOne()
-            .HasForeignKey(wi => wi.WorkflowDefinitionId)
-            .OnDelete(DeleteBehavior.Cascade);
+        // Configure WorkflowInstance relationships
+        builder.Entity<WorkflowInstance>(entity =>
+        {
+            entity.HasIndex(wi => wi.WorkflowDefinitionId);
+            entity.HasIndex(wi => wi.EntityTypeId);
+            entity.HasIndex(wi => wi.EntityId);
+            entity.HasIndex(wi => wi.Status);
+            entity.HasIndex(wi => wi.StartedById);
+            entity.HasIndex(wi => wi.StartedDate);
+            // WorkflowInstance doesn't have DueDate property
+            entity.HasIndex(wi => wi.Priority);
+            entity.HasIndex(wi => new { wi.EntityTypeId, wi.EntityId });
+            
+            entity.HasOne(wi => wi.CurrentStep)
+                .WithMany()
+                .HasForeignKey(wi => wi.CurrentStepId)
+                .OnDelete(DeleteBehavior.NoAction); // Avoid cycles
+                
+            entity.HasOne(wi => wi.InitiatedBy)
+                .WithMany()
+                .HasForeignKey(wi => wi.InitiatedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
 
         // WorkflowStepInstance configuration
         builder.Entity<WorkflowStepInstance>(entity =>
@@ -598,6 +677,64 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(si => si.WorkflowInstanceId);
             entity.HasIndex(si => si.WorkflowStepId);
             entity.HasIndex(si => si.Status);
+            entity.HasIndex(si => si.AssignedToId);
+            entity.HasIndex(si => si.StartedDate);
+            entity.HasIndex(si => si.DueDate);
+            
+            entity.HasOne(si => si.WorkflowInstance)
+                .WithMany(wi => wi.StepInstances)
+                .HasForeignKey(si => si.WorkflowInstanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasOne(si => si.AssignedTo)
+                .WithMany()
+                .HasForeignKey(si => si.AssignedToId)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasMany(si => si.Approvals)
+                .WithOne(wa => wa.StepInstance)
+                .HasForeignKey(wa => wa.StepInstanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        
+        // Configure WorkflowApproval relationships
+        builder.Entity<WorkflowApproval>(entity =>
+        {
+            entity.HasIndex(wa => wa.StepInstanceId);
+            entity.HasIndex(wa => wa.ApproverId);
+            entity.HasIndex(wa => wa.Status);
+            entity.HasIndex(wa => wa.RequestedDate);
+            entity.HasIndex(wa => wa.DueDate);
+            
+            entity.HasOne(wa => wa.Approver)
+                .WithMany()
+                .HasForeignKey(wa => wa.ApproverId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+        
+        // Configure WorkflowActivityLog relationships
+        builder.Entity<WorkflowActivityLog>(entity =>
+        {
+            entity.HasIndex(wal => wal.WorkflowInstanceId);
+            entity.HasIndex(wal => wal.StepInstanceId);
+            entity.HasIndex(wal => wal.ActivityType);
+            entity.HasIndex(wal => wal.ActivityDate);
+            entity.HasIndex(wal => wal.PerformedById);
+            
+            entity.HasOne(wal => wal.WorkflowInstance)
+                .WithMany(wi => wi.ActivityLogs)
+                .HasForeignKey(wal => wal.WorkflowInstanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasOne(wal => wal.StepInstance)
+                .WithMany()
+                .HasForeignKey(wal => wal.StepInstanceId)
+                .OnDelete(DeleteBehavior.NoAction); // Optional relationship
+                
+            entity.HasOne(wal => wal.PerformedBy)
+                .WithMany()
+                .HasForeignKey(wal => wal.PerformedById)
+                .OnDelete(DeleteBehavior.NoAction);
         });
     }
 
@@ -629,6 +766,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.HasIndex(c => c.Code);
             entity.HasIndex(c => c.IsActive);
+            entity.HasIndex(c => c.ParentCategoryId);
+            
+            // Configure parent-child relationship
+            entity.HasOne(c => c.ParentCategory)
+                .WithMany(pc => pc.ChildCategories)
+                .HasForeignKey(c => c.ParentCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
         
         // Configure WorkOrder entity
@@ -690,7 +834,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
                 
             entity.HasOne(wo => wo.MaintenanceSchedule)
-                .WithMany(ms => ms.GeneratedWorkOrders)
+                .WithMany()
                 .HasForeignKey(wo => wo.MaintenanceScheduleId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
@@ -1036,6 +1180,96 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ts => ts.IsActive);
             entity.HasIndex(ts => ts.StartTime);
         });
+        
+        // Configure new maintenance entities
+        
+        // Configure TechnicalSkill entity
+        builder.Entity<TechnicalSkill>(entity =>
+        {
+            entity.HasIndex(ts => ts.Code).IsUnique();
+            entity.HasIndex(ts => ts.Name);
+            entity.HasIndex(ts => ts.Category);
+            entity.HasIndex(ts => ts.SkillLevel);
+            entity.HasIndex(ts => ts.Complexity);
+            entity.HasIndex(ts => ts.RiskLevel);
+            entity.HasIndex(ts => ts.IsActive);
+            entity.HasIndex(ts => ts.IsFromHRModule);
+            entity.HasIndex(ts => ts.LastSyncDate);
+        });
+        
+        // Configure TechnicianSkillAssignment entity
+        builder.Entity<TechnicianSkillAssignment>(entity =>
+        {
+            entity.HasIndex(tsa => tsa.TechnicianId);
+            entity.HasIndex(tsa => tsa.SkillId);
+            entity.HasIndex(tsa => tsa.ProficiencyLevel);
+            entity.HasIndex(tsa => tsa.IsVerified);
+            entity.HasIndex(tsa => tsa.ExpirationDate);
+            entity.HasIndex(tsa => tsa.LastAssessmentDate);
+            entity.HasIndex(tsa => new { tsa.TechnicianId, tsa.SkillId }).IsUnique();
+            
+            entity.HasOne(tsa => tsa.Technician)
+                .WithMany()
+                .HasForeignKey(tsa => tsa.TechnicianId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasOne(tsa => tsa.Skill)
+                .WithMany(ts => ts.TechnicianAssignments)
+                .HasForeignKey(tsa => tsa.SkillId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        
+        // Configure SafetyProtocol entity
+        builder.Entity<SafetyProtocol>(entity =>
+        {
+            entity.HasIndex(sp => sp.Code).IsUnique();
+            entity.HasIndex(sp => sp.Name);
+            entity.HasIndex(sp => sp.Category);
+            entity.HasIndex(sp => sp.Severity);
+            entity.HasIndex(sp => sp.IsActive);
+            entity.HasIndex(sp => sp.IsMandatory);
+            entity.HasIndex(sp => sp.EffectiveDate);
+            entity.HasIndex(sp => sp.NextReviewDate);
+        });
+        
+        // Configure SafetyComplianceRecord entity
+        builder.Entity<SafetyComplianceRecord>(entity =>
+        {
+            entity.HasIndex(scr => scr.SafetyProtocolId);
+            entity.HasIndex(scr => scr.TechnicianId);
+            entity.HasIndex(scr => scr.WorkOrderId);
+            entity.HasIndex(scr => scr.ComplianceDate);
+            entity.HasIndex(scr => scr.ComplianceStatus);
+            entity.HasIndex(scr => scr.InspectorId);
+            
+            entity.HasOne(scr => scr.SafetyProtocol)
+                .WithMany()
+                .HasForeignKey(scr => scr.SafetyProtocolId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasOne(scr => scr.Technician)
+                .WithMany()
+                .HasForeignKey(scr => scr.TechnicianId)
+                .OnDelete(DeleteBehavior.Restrict);
+                
+            entity.HasOne(scr => scr.WorkOrder)
+                .WithMany()
+                .HasForeignKey(scr => scr.WorkOrderId)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(scr => scr.Inspector)
+                .WithMany()
+                .HasForeignKey(scr => scr.InspectorId)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(scr => scr.VerifiedBy)
+                .WithMany()
+                .HasForeignKey(scr => scr.VerifiedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+        
+        // Configure Technician entity (now using Employee entity directly)
+        // Technician-specific configurations are handled in the Employee entity configuration
     }
     
     private void ConfigureHREntities(ModelBuilder builder)
