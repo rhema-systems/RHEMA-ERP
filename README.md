@@ -338,7 +338,7 @@ NEXT_PUBLIC_ENVIRONMENT=development
 
 ### **Email Service Configuration**
 
-The system includes a flexible email service architecture:
+The system includes a flexible, database-driven email service architecture with automatic environment-based switching:
 
 #### **Development Mode**
 In development, the `SimpleEmailService` logs email content to the console instead of sending actual emails:
@@ -354,23 +354,77 @@ In development, the `SimpleEmailService` logs email content to the console inste
 ```
 
 #### **Production Email Service**
-For production, implement a real email service by:
+In production, the system automatically uses `ProductionEmailService` which reads SMTP configuration from the `emailsettings` database table:
 
-1. **Create custom email service** implementing `IEmailService`
-2. **Register in DI container** in `ServiceCollectionExtensions.cs`
-3. **Configure SMTP/Email provider** (SendGrid, AWS SES, etc.)
+**Step 1**: Configure SMTP settings in the admin panel
+- Navigate to **Administration → Settings → Email**
+- Configure your SMTP server settings:
+  - **SMTP Host**: Your email server (e.g., smtp.gmail.com, smtp.office365.com)
+  - **SMTP Port**: Usually 587 for TLS or 465 for SSL
+  - **Username**: Your email account username
+  - **Password**: Your email account password (stored encrypted)
+  - **Use TLS**: Enable for secure connection
+  - **From Address**: The sender email address
+  - **From Name**: The sender display name
 
-```csharp
-// Example: Replace SimpleEmailService with production service
-services.AddScoped<ErpSystem.Web.Services.IEmailService, ProductionEmailService>();
-services.AddScoped<ErpSystem.Core.Interfaces.Common.IEmailService, CoreEmailServiceAdapter>();
+**Step 2**: Test email configuration
+- Use the "Test Email" feature in the admin panel
+- Send a test email to verify SMTP settings work correctly
+
+**Step 3**: Deploy in production environment
+- Set `ASPNETCORE_ENVIRONMENT=Production`
+- The system automatically switches to database-driven email service
+
+#### **Common SMTP Provider Examples**
+
+**Gmail:**
+```
+SMTP Host: smtp.gmail.com
+SMTP Port: 587
+Use TLS: true
+Username: your-email@gmail.com
+Password: your-app-password (not regular password)
+```
+
+**Microsoft 365:**
+```
+SMTP Host: smtp.office365.com
+SMTP Port: 587
+Use TLS: true
+Username: your-email@yourdomain.com
+Password: your-password
+```
+
+**SendGrid:**
+```
+SMTP Host: smtp.sendgrid.net
+SMTP Port: 587
+Use TLS: true
+Username: apikey
+Password: your-sendgrid-api-key
 ```
 
 #### **Email Service Architecture**
-- **Core Interface**: `ErpSystem.Core.Interfaces.Common.IEmailService`
-- **API Interface**: `ErpSystem.Web.Services.IEmailService` 
-- **Adapter Pattern**: `CoreEmailServiceAdapter` bridges both interfaces
-- **Development Service**: `SimpleEmailService` for development/testing
+- **Automatic Environment Switching**: Development vs Production services
+- **Database-Driven Configuration**: SMTP settings stored in `emailsettings` table
+- **Encrypted Password Storage**: Passwords encrypted using `ICryptoService`
+- **Rich HTML Templates**: Professional email templates for all system emails
+- **Fallback Handling**: Graceful fallback to logging when SMTP is misconfigured
+- **Security Features**: Encrypted storage, connection timeouts, error handling
+
+#### **Email Templates**
+The production email service includes professional HTML templates for:
+- 📧 **Password Reset**: Branded password reset emails with security warnings
+- 👋 **Welcome Email**: New user onboarding with temporary password
+- 🔒 **Account Locked**: Security notifications for locked accounts
+- ✉️ **Generic Email**: Flexible template for custom email content
+
+#### **Troubleshooting Email Issues**
+- **Check logs**: Email service logs all attempts with detailed error messages
+- **Test connectivity**: Use the admin panel's test email feature
+- **Verify credentials**: Ensure SMTP username/password are correct
+- **Check firewall**: Ensure SMTP ports (587/465) are not blocked
+- **Gmail users**: Use App Passwords instead of regular passwords
 
 ## 📊 **ERP Modules**
 

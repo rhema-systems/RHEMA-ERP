@@ -254,8 +254,21 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<IAuditLogService, AuditLogService>();
             services.AddScoped<ISecurityLogService, SecurityLogService>();
             
-            // Communication services
-            services.AddScoped<ErpSystem.Web.Services.IEmailService, SimpleEmailService>();
+            // Communication services - conditional based on environment
+            services.AddScoped<ErpSystem.Web.Services.IEmailService>(serviceProvider =>
+            {
+                var environment = serviceProvider.GetRequiredService<IWebHostEnvironment>();
+                if (environment.IsProduction())
+                {
+                    return serviceProvider.GetRequiredService<ProductionEmailService>();
+                }
+                return serviceProvider.GetRequiredService<SimpleEmailService>();
+            });
+            
+            // Register both email service implementations
+            services.AddScoped<SimpleEmailService>();
+            services.AddScoped<ProductionEmailService>();
+            
             services.AddScoped<ErpSystem.Core.Interfaces.Common.IEmailService, CoreEmailServiceAdapter>();
             
             // Security services
