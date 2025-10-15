@@ -147,15 +147,57 @@ npm install
 ```
 
 ### **2. Configure Database**
-Edit `src/ErpSystem.Api/appsettings.json`:
+
+**⚠️ IMPORTANT: For security reasons, use User Secrets for sensitive configuration data.**
+
+#### **Option A: Using User Secrets (Recommended for Development)**
+```bash
+cd src/ErpSystem.Api
+
+# Initialize user secrets
+dotnet user-secrets init
+
+# Set database configuration
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=(localdb)\\mssqllocaldb;Database=ErpSystemDB;Trusted_Connection=true;MultipleActiveResultSets=true"
+dotnet user-secrets set "JwtSettings:SecretKey" "your-super-secret-256-bit-key-here-make-it-long-and-random"
+dotnet user-secrets set "JwtSettings:Issuer" "ErpSystem"
+dotnet user-secrets set "JwtSettings:Audience" "ErpSystemUsers"
+
+# For other database providers:
+# SQL Server
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost;Database=ErpSystemDB;User Id=sa;Password=YourPassword123!;TrustServerCertificate=true"
+
+# PostgreSQL
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Database=erpsystem;Username=postgres;Password=yourpassword"
+
+# MySQL
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost;Database=erpsystem;Uid=root;Pwd=yourpassword;"
+```
+
+#### **Option B: appsettings.json (Development Only)**
+Edit `src/ErpSystem.Api/appsettings.Development.json`:
 ```json
 {
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=(localdb)\\mssqllocaldb;Database=ErpSystemDB;Trusted_Connection=true;MultipleActiveResultSets=true"
+  },
+  "JwtSettings": {
+    "SecretKey": "your-super-secret-256-bit-key-here-make-it-long-and-random",
+    "Issuer": "ErpSystem",
+    "Audience": "ErpSystemUsers",
+    "ExpiryMinutes": 60
+  },
   "Database": {
-    "Provider": "SqlServer",  // Choose: SqlServer, PostgreSQL, MySQL, etc.
-    "ConnectionString": "your-connection-string-here"
+    "Provider": "SqlServer"
   }
 }
 ```
+
+**🔒 Security Notes:**
+- ✅ **User Secrets**: Stores sensitive data outside of source control
+- ✅ **Environment Variables**: Use in production with proper secret management
+- ❌ **appsettings.json**: Never commit sensitive data to source control
+- ❌ **Hardcoded Values**: Never hardcode connection strings or secrets
 
 ### **3. Run Database Migrations**
 ```bash
@@ -294,6 +336,42 @@ NEXT_PUBLIC_ENVIRONMENT=development
 }
 ```
 
+### **Email Service Configuration**
+
+The system includes a flexible email service architecture:
+
+#### **Development Mode**
+In development, the `SimpleEmailService` logs email content to the console instead of sending actual emails:
+
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "ErpSystem.Web.Services.SimpleEmailService": "Information"
+    }
+  }
+}
+```
+
+#### **Production Email Service**
+For production, implement a real email service by:
+
+1. **Create custom email service** implementing `IEmailService`
+2. **Register in DI container** in `ServiceCollectionExtensions.cs`
+3. **Configure SMTP/Email provider** (SendGrid, AWS SES, etc.)
+
+```csharp
+// Example: Replace SimpleEmailService with production service
+services.AddScoped<ErpSystem.Web.Services.IEmailService, ProductionEmailService>();
+services.AddScoped<ErpSystem.Core.Interfaces.Common.IEmailService, CoreEmailServiceAdapter>();
+```
+
+#### **Email Service Architecture**
+- **Core Interface**: `ErpSystem.Core.Interfaces.Common.IEmailService`
+- **API Interface**: `ErpSystem.Web.Services.IEmailService` 
+- **Adapter Pattern**: `CoreEmailServiceAdapter` bridges both interfaces
+- **Development Service**: `SimpleEmailService` for development/testing
+
 ## 📊 **ERP Modules**
 
 ### **Core Modules**
@@ -305,7 +383,14 @@ NEXT_PUBLIC_ENVIRONMENT=development
 - ✅ **File Management**: Flexible storage abstraction with provider switching
 - ✅ **User Interface**: Responsive design with enhanced forms and authentication flows
 
-### **Business Modules** (Roadmap)
+### **Business Modules**
+- ✅ **Maintenance Management**: Asset tracking, work orders, analytics, technician management
+  - 🔧 **Asset Analytics**: Comprehensive performance metrics and OEE analysis
+  - 📊 **Asset Performance Dashboard**: Real-time monitoring with interactive charts
+  - 🔍 **Maintenance Analytics**: Efficiency trends, uptime tracking, cost analysis
+  - 📱 **Mobile Maintenance**: Mobile-optimized interfaces for technicians
+  - 🛡️ **Safety Protocols**: Protocol adherence tracking and compliance
+  - ⚡ **Real-time Notifications**: Maintenance alerts and status updates
 - 🔄 **Finance**: Accounting, invoicing, payments
 - 🔄 **Human Resources**: Employee management, payroll
 - 🔄 **Sales & CRM**: Customer relationship management
@@ -378,7 +463,7 @@ JWT_SECRET_KEY=your-super-secret-256-bit-key-here
 ASPNETCORE_ENVIRONMENT=Production
 ```
 
-## 📈 **Performance**
+## 📊 **Performance**
 
 ### **Database Performance**
 - Connection pooling
@@ -400,6 +485,85 @@ ASPNETCORE_ENVIRONMENT=Production
 - Image optimization
 - Lazy loading
 - CDN support
+
+## 🔧 **Troubleshooting**
+
+### **Common Build Issues**
+
+#### **⚠️ "IEmailService cannot be resolved"**
+**Problem**: Dependency injection error on startup
+```
+Unable to resolve service for type 'ErpSystem.Core.Interfaces.Common.IEmailService'
+```
+**Solution**: The system uses both API and Core email interfaces. The `CoreEmailServiceAdapter` bridges them:
+```bash
+# This is already configured in ServiceCollectionExtensions.cs
+# No action needed - restart the application
+dotnet run
+```
+
+#### **⚠️ "Two parallel pages resolve to same path"**
+**Problem**: Route conflicts in Next.js
+```
+You cannot have two parallel pages that resolve to the same path
+```
+**Solution**: Remove duplicate route files:
+```bash
+# Check for conflicting pages
+cd frontend
+find src/app -name "page.tsx" | grep -E "(dashboard)|analytics"
+
+# Remove duplicates in route groups like (dashboard)
+rm -rf src/app/\(dashboard\)
+```
+
+#### **⚠️ Missing Sidebar/Navbar on New Pages**
+**Problem**: New pages don't show navigation
+**Solution**: Ensure pages are in correct folder structure:
+```
+✅ src/app/maintenance/analytics/page.tsx    (inherits layout)
+❌ src/app/(dashboard)/maintenance/analytics/page.tsx  (no layout)
+```
+
+### **Common Runtime Issues**
+
+#### **⚠️ Database Connection Issues**
+**Problem**: "Cannot connect to database"
+**Solution**: Check User Secrets configuration:
+```bash
+cd src/ErpSystem.Api
+dotnet user-secrets list
+
+# If empty, reconfigure:
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "your-connection-string"
+```
+
+#### **⚠️ JWT Authentication Issues**
+**Problem**: "Invalid token" or "Unauthorized"
+**Solution**: Check JWT configuration:
+```bash
+# Ensure JWT secret is configured
+dotnet user-secrets set "JwtSettings:SecretKey" "your-super-secret-256-bit-key-here-make-it-long-and-random"
+
+# Check token format in API requests
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:5000/api/endpoint
+```
+
+### **Performance Issues**
+
+#### **⚠️ Slow API Responses**
+**Solutions**:
+- Enable response caching
+- Check database query performance
+- Monitor connection pool usage
+- Enable compression middleware
+
+#### **⚠️ Frontend Loading Issues**
+**Solutions**:
+- Clear browser cache
+- Check network tab for failed requests
+- Verify API URL in `.env.local`
+- Check CORS configuration
 
 ## 🤝 **Contributing**
 
