@@ -956,12 +956,26 @@ public class WorkOrderService : IWorkOrderService
     /// <summary>
     /// Gets work order metrics
     /// </summary>
-    public async Task<WorkOrderMetricsDto> GetWorkOrderMetricsAsync(DateTime? startDate = null, DateTime? endDate = null)
+    public async Task<ErpSystem.Core.DTOs.Maintenance.WorkOrderMetricsDto> GetWorkOrderMetricsAsync(DateTime? startDate = null, DateTime? endDate = null)
     {
         try
         {
-            // Stub implementation - would need to implement proper metrics calculation
-            return new WorkOrderMetricsDto();
+            _logger.LogInformation("Getting work order metrics from {StartDate} to {EndDate}", startDate, endDate);
+            
+            // Mock implementation - would calculate actual metrics from database
+            var metrics = new ErpSystem.Core.DTOs.Maintenance.WorkOrderMetricsDto
+            {
+                TotalWorkOrders = 0,
+                CompletedWorkOrders = 0,
+                PendingWorkOrders = 0,
+                OverdueWorkOrders = 0,
+                CompletionRate = 0.0,
+                AverageCompletionTime = 0.0,
+                TotalCost = 0m,
+                TypeBreakdown = new List<ErpSystem.Core.DTOs.Maintenance.WorkOrderTypeMetricDto>()
+            };
+            
+            return metrics;
         }
         catch (Exception ex)
         {

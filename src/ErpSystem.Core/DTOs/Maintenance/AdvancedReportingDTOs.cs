@@ -93,6 +93,9 @@ public class TrendDataPointDto
     public DateTime Date { get; set; }
     public double Value { get; set; }
     public string? Label { get; set; }
+    
+    // Additional property for service compatibility
+    public string MetricType { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -400,6 +403,150 @@ public class ComplianceActionDto
     public DateTime DueDate { get; set; }
     public string ResponsibleParty { get; set; } = string.Empty;
     public double ProgressPercentage { get; set; }
+}
+
+#endregion
+
+#region Missing Report DTOs
+
+/// <summary>
+/// Technician performance report DTO
+/// </summary>
+public class TechnicianPerformanceReportDto
+{
+    public Guid TechnicianId { get; set; }
+    public string TechnicianName { get; set; } = string.Empty;
+    public DateTime ReportPeriodStart { get; set; }
+    public DateTime ReportPeriodEnd { get; set; }
+    public int CompletedWorkOrders { get; set; }
+    public double AverageCompletionTime { get; set; }
+    public double FirstTimeFixRate { get; set; }
+    public double CustomerSatisfactionScore { get; set; }
+    public List<string> Skills { get; set; } = new();
+    public string PerformanceRating { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Safety report DTO
+/// </summary>
+public class SafetyReportDto
+{
+    public DateTime ReportDate { get; set; }
+    public int TotalIncidents { get; set; }
+    public int NearMisses { get; set; }
+    public int SafetyViolations { get; set; }
+    public string OverallSafetyScore { get; set; } = string.Empty;
+    public List<string> SafetyRecommendations { get; set; } = new();
+}
+
+/// <summary>
+/// Work order analysis DTO
+/// </summary>
+public class WorkOrderAnalysisDto
+{
+    public DateTime AnalysisPeriodStart { get; set; }
+    public DateTime AnalysisPeriodEnd { get; set; }
+    public int TotalWorkOrders { get; set; }
+    public int CompletedWorkOrders { get; set; }
+    public double AverageCompletionTime { get; set; }
+    public decimal TotalCost { get; set; }
+    public string AnalysisSummary { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Report execution result DTO
+/// </summary>
+public class ReportExecutionResultDto
+{
+    public Guid ReportId { get; set; }
+    public string ReportName { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public DateTime ExecutionTime { get; set; }
+    public string? FilePath { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
+/// <summary>
+/// Maintenance analytics DTO
+/// </summary>
+public class MaintenanceAnalyticsDto
+{
+    public DateTime AnalysisDate { get; set; }
+    public List<KeyPerformanceIndicatorDto> KPIs { get; set; } = new();
+    public List<TrendDataPointDto> Trends { get; set; } = new();
+    public string AnalyticsSummary { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Custom report request DTO
+/// </summary>
+public class CustomReportRequestDto
+{
+    public string ReportName { get; set; } = string.Empty;
+    public string ReportType { get; set; } = string.Empty;
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public List<string> Parameters { get; set; } = new();
+    public string OutputFormat { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Scheduled report DTO
+/// </summary>
+public class ScheduledReportDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Schedule { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+    public DateTime? LastRun { get; set; }
+    public DateTime? NextRun { get; set; }
+}
+
+/// <summary>
+/// Create scheduled report DTO
+/// </summary>
+public class CreateScheduledReportDto
+{
+    [Required]
+    public string Name { get; set; } = string.Empty;
+    
+    public string? Description { get; set; }
+    
+    [Required]
+    public string Schedule { get; set; } = string.Empty;
+    
+    public string ReportType { get; set; } = string.Empty;
+    public List<string> Parameters { get; set; } = new();
+}
+
+/// <summary>
+/// Create maintenance report template DTO
+/// </summary>
+public class CreateMaintenanceReportTemplateDto
+{
+    [Required]
+    public string Name { get; set; } = string.Empty;
+    
+    public string? Description { get; set; }
+    
+    [Required]
+    public string ReportType { get; set; } = string.Empty;
+    
+    public string Template { get; set; } = string.Empty;
+    public List<string> Parameters { get; set; } = new();
+}
+
+/// <summary>
+/// Execute maintenance report DTO
+/// </summary>
+public class ExecuteMaintenanceReportDto
+{
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public List<string> Parameters { get; set; } = new();
+    public string OutputFormat { get; set; } = "PDF";
 }
 
 #endregion

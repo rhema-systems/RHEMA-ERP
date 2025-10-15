@@ -255,7 +255,8 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ISecurityLogService, SecurityLogService>();
             
             // Communication services
-            services.AddScoped<IEmailService, SimpleEmailService>();
+            services.AddScoped<ErpSystem.Web.Services.IEmailService, SimpleEmailService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Common.IEmailService, CoreEmailServiceAdapter>();
             
             // Security services
             services.AddScoped<ICryptoService, CryptoService>();

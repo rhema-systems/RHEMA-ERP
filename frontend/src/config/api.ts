@@ -48,6 +48,45 @@ export const API_ENDPOINTS = {
     READY: '/health/ready',
     LIVE: '/health/live',
   },
+
+  // Asset Analytics
+  ASSET_ANALYTICS: {
+    // OEE Analytics
+    ASSET_OEE: (assetId: string) => `/api/maintenance/analytics/assets/${assetId}/oee`,
+    FLEET_OEE: '/api/maintenance/analytics/fleet/oee',
+    
+    // Reliability Analytics
+    ASSET_RELIABILITY: (assetId: string) => `/api/maintenance/analytics/assets/${assetId}/reliability`,
+    RELIABILITY_RANKINGS: '/api/maintenance/analytics/fleet/reliability/rankings',
+    
+    // Performance Benchmarking
+    BENCHMARKS: '/api/maintenance/analytics/benchmarks',
+    COMPARISON: '/api/maintenance/analytics/comparison',
+    RANKINGS: '/api/maintenance/analytics/rankings',
+    
+    // Predictive Analytics
+    HEALTH_TRENDS: '/api/maintenance/analytics/health-trends',
+    PREDICTIONS: '/api/maintenance/analytics/predictions',
+    TRENDS: '/api/maintenance/analytics/trends',
+    
+    // KPI Dashboard
+    DASHBOARD: '/api/maintenance/analytics/dashboard',
+    ADVANCED_KPIS: '/api/maintenance/analytics/kpis/advanced',
+    
+    // Advanced Analytics
+    ROOT_CAUSE_ANALYSIS: '/api/maintenance/analytics/root-cause-analysis',
+    CRITICALITY_ANALYSIS: '/api/maintenance/analytics/criticality-analysis',
+    OPTIMIZATION_RECOMMENDATIONS: '/api/maintenance/analytics/optimization-recommendations',
+    
+    // Cost Analytics
+    TOTAL_COST_OWNERSHIP: (assetId: string) => `/api/maintenance/analytics/assets/${assetId}/total-cost-ownership`,
+    COST_EFFICIENCY: (assetId: string) => `/api/maintenance/analytics/assets/${assetId}/cost-efficiency`,
+    MAINTENANCE_ROI: (assetId: string) => `/api/maintenance/analytics/assets/${assetId}/maintenance-roi`,
+    
+    // Energy & Environmental
+    ENERGY_PERFORMANCE: (assetId: string) => `/api/maintenance/analytics/assets/${assetId}/energy-performance`,
+    ENVIRONMENTAL_IMPACT: (assetId: string) => `/api/maintenance/analytics/assets/${assetId}/environmental-impact`,
+  },
 } as const;
 
 export const HTTP_STATUS = {
@@ -79,4 +118,83 @@ export const QUERY_KEYS = {
   // Tenants
   TENANTS: ['tenants'],
   TENANT_BY_ID: (id: string) => ['tenants', id],
+  
+  // Asset Analytics
+  ASSET_ANALYTICS: {
+    // OEE Analytics
+    ASSET_OEE: (assetId: string, startDate?: string, endDate?: string) => [
+      'asset-analytics', 'oee', assetId, startDate, endDate
+    ],
+    FLEET_OEE: (startDate?: string, endDate?: string) => [
+      'asset-analytics', 'fleet-oee', startDate, endDate
+    ],
+    
+    // Reliability Analytics
+    ASSET_RELIABILITY: (assetId: string, startDate?: string, endDate?: string) => [
+      'asset-analytics', 'reliability', assetId, startDate, endDate
+    ],
+    RELIABILITY_RANKINGS: (startDate?: string, endDate?: string) => [
+      'asset-analytics', 'reliability-rankings', startDate, endDate
+    ],
+    
+    // Performance Benchmarking
+    BENCHMARKS: (assetId: string, category?: string) => [
+      'asset-analytics', 'benchmarks', assetId, category
+    ],
+    COMPARISON: (assetId: string, industryType: string) => [
+      'asset-analytics', 'comparison', assetId, industryType
+    ],
+    RANKINGS: (metricType: string) => [
+      'asset-analytics', 'rankings', metricType
+    ],
+    
+    // Predictive Analytics
+    HEALTH_TRENDS: (assetId: string, periodMonths?: number) => [
+      'asset-analytics', 'health-trends', assetId, periodMonths
+    ],
+    PREDICTIONS: (assetId: string, predictionDays?: number) => [
+      'asset-analytics', 'predictions', assetId, predictionDays
+    ],
+    TRENDS: (startDate?: string, endDate?: string, period?: string) => [
+      'asset-analytics', 'trends', startDate, endDate, period
+    ],
+    
+    // KPI Dashboard
+    DASHBOARD: (assetId?: string, startDate?: string, endDate?: string) => [
+      'asset-analytics', 'dashboard', assetId, startDate, endDate
+    ],
+    ADVANCED_KPIS: (startDate?: string, endDate?: string, category?: string) => [
+      'asset-analytics', 'advanced-kpis', startDate, endDate, category
+    ],
+    
+    // Advanced Analytics
+    ROOT_CAUSE_ANALYSIS: (assetId: string, incidentDate: string, issueType: string) => [
+      'asset-analytics', 'root-cause', assetId, incidentDate, issueType
+    ],
+    CRITICALITY_ANALYSIS: (assetId: string) => [
+      'asset-analytics', 'criticality', assetId
+    ],
+    OPTIMIZATION_RECOMMENDATIONS: (assetId?: string) => [
+      'asset-analytics', 'optimization', assetId
+    ],
+    
+    // Cost Analytics
+    TOTAL_COST_OWNERSHIP: (assetId: string, startDate?: string, endDate?: string) => [
+      'asset-analytics', 'tco', assetId, startDate, endDate
+    ],
+    COST_EFFICIENCY: (assetId: string, startDate?: string, endDate?: string) => [
+      'asset-analytics', 'cost-efficiency', assetId, startDate, endDate
+    ],
+    MAINTENANCE_ROI: (assetId: string, startDate?: string, endDate?: string) => [
+      'asset-analytics', 'maintenance-roi', assetId, startDate, endDate
+    ],
+    
+    // Energy & Environmental
+    ENERGY_PERFORMANCE: (assetId: string, startDate?: string, endDate?: string) => [
+      'asset-analytics', 'energy-performance', assetId, startDate, endDate
+    ],
+    ENVIRONMENTAL_IMPACT: (assetId: string, startDate?: string, endDate?: string) => [
+      'asset-analytics', 'environmental-impact', assetId, startDate, endDate
+    ],
+  },
 } as const;

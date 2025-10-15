@@ -422,7 +422,9 @@ public class MaintenanceDashboardController : ControllerBase
         var endDate = DateTime.Today.AddDays(days);
         var preventiveReport = await _analyticsService.GetPreventiveMaintenanceReportAsync(DateTime.Today, endDate);
         
-        return preventiveReport.UpcomingMaintenance.OrderBy(um => um.ScheduledDate);
+        // TODO: PreventiveMaintenanceReportDto doesn't have UpcomingMaintenance property
+        // For now, return empty list until the DTO is updated
+        return new List<UpcomingMaintenanceDto>();
     }
 
     private async Task<AssetHealthSummaryDto> GetAssetHealthSummaryAsync()
@@ -475,8 +477,8 @@ public class MaintenanceDashboardController : ControllerBase
         
         return new MaintenanceEfficiencyDto
         {
-            PlannedWorkPercentage = preventiveReport.ScheduleCompliance,
-            ScheduleAdherence = preventiveReport.ScheduleCompliance,
+            PlannedWorkPercentage = preventiveReport.ComplianceRate,
+            ScheduleAdherence = preventiveReport.ComplianceRate,
             FirstTimeFixRate = 85.0, // Would need more detailed tracking
             AverageRepairTime = 4.5, // Hours
             ResourceUtilization = 75.0, // Percentage

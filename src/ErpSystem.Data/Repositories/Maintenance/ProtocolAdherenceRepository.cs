@@ -24,7 +24,6 @@ public class ProtocolAdherenceRepository : GenericRepository<ProtocolAdherence>,
         return await _context.Set<ProtocolAdherence>()
             .Where(pa => pa.ProtocolId == protocolId && pa.TenantId == _currentUserProvider.TenantId)
             .Include(pa => pa.Protocol)
-            .Include(pa => pa.Employee)
             .OrderByDescending(pa => pa.AdherenceDate)
             .ToListAsync();
     }
@@ -34,7 +33,6 @@ public class ProtocolAdherenceRepository : GenericRepository<ProtocolAdherence>,
         return await _context.Set<ProtocolAdherence>()
             .Where(pa => pa.WorkOrderId == workOrderId && pa.TenantId == _currentUserProvider.TenantId)
             .Include(pa => pa.Protocol)
-            .Include(pa => pa.Employee)
             .OrderByDescending(pa => pa.AdherenceDate)
             .ToListAsync();
     }
@@ -42,9 +40,8 @@ public class ProtocolAdherenceRepository : GenericRepository<ProtocolAdherence>,
     public async Task<IEnumerable<ProtocolAdherence>> GetByTechnicianIdAsync(Guid technicianId)
     {
         return await _context.Set<ProtocolAdherence>()
-            .Where(pa => pa.EmployeeId == technicianId && pa.TenantId == _currentUserProvider.TenantId)
+            .Where(pa => pa.TechnicianId == technicianId && pa.TenantId == _currentUserProvider.TenantId)
             .Include(pa => pa.Protocol)
-            .Include(pa => pa.Employee)
             .OrderByDescending(pa => pa.AdherenceDate)
             .ToListAsync();
     }
@@ -56,7 +53,6 @@ public class ProtocolAdherenceRepository : GenericRepository<ProtocolAdherence>,
                         pa.AdherenceDate <= endDate && 
                         pa.TenantId == _currentUserProvider.TenantId)
             .Include(pa => pa.Protocol)
-            .Include(pa => pa.Employee)
             .OrderByDescending(pa => pa.AdherenceDate)
             .ToListAsync();
     }
@@ -68,7 +64,6 @@ public class ProtocolAdherenceRepository : GenericRepository<ProtocolAdherence>,
                         pa.ComplianceScore <= maxScore && 
                         pa.TenantId == _currentUserProvider.TenantId)
             .Include(pa => pa.Protocol)
-            .Include(pa => pa.Employee)
             .OrderByDescending(pa => pa.ComplianceScore)
             .ToListAsync();
     }
@@ -76,9 +71,8 @@ public class ProtocolAdherenceRepository : GenericRepository<ProtocolAdherence>,
     public async Task<IEnumerable<ProtocolAdherence>> GetVerifiedAdherenceAsync()
     {
         return await _context.Set<ProtocolAdherence>()
-            .Where(pa => pa.IsVerified && pa.TenantId == _currentUserProvider.TenantId)
+            .Where(pa => pa.VerificationDate.HasValue && pa.TenantId == _currentUserProvider.TenantId)
             .Include(pa => pa.Protocol)
-            .Include(pa => pa.Employee)
             .OrderByDescending(pa => pa.AdherenceDate)
             .ToListAsync();
     }
@@ -86,9 +80,8 @@ public class ProtocolAdherenceRepository : GenericRepository<ProtocolAdherence>,
     public async Task<IEnumerable<ProtocolAdherence>> GetUnverifiedAdherenceAsync()
     {
         return await _context.Set<ProtocolAdherence>()
-            .Where(pa => !pa.IsVerified && pa.TenantId == _currentUserProvider.TenantId)
+            .Where(pa => !pa.VerificationDate.HasValue && pa.TenantId == _currentUserProvider.TenantId)
             .Include(pa => pa.Protocol)
-            .Include(pa => pa.Employee)
             .OrderByDescending(pa => pa.AdherenceDate)
             .ToListAsync();
     }
@@ -117,7 +110,7 @@ public class ProtocolAdherenceRepository : GenericRepository<ProtocolAdherence>,
     public async Task<decimal> GetTechnicianComplianceRateAsync(Guid technicianId, DateTime startDate, DateTime endDate)
     {
         var totalRecords = await _context.Set<ProtocolAdherence>()
-            .CountAsync(pa => pa.EmployeeId == technicianId && 
+            .CountAsync(pa => pa.TechnicianId == technicianId && 
                              pa.AdherenceDate >= startDate && 
                              pa.AdherenceDate <= endDate &&
                              pa.TenantId == _currentUserProvider.TenantId);
@@ -126,7 +119,7 @@ public class ProtocolAdherenceRepository : GenericRepository<ProtocolAdherence>,
             return 0m;
 
         var compliantRecords = await _context.Set<ProtocolAdherence>()
-            .CountAsync(pa => pa.EmployeeId == technicianId && 
+            .CountAsync(pa => pa.TechnicianId == technicianId && 
                              pa.AdherenceDate >= startDate && 
                              pa.AdherenceDate <= endDate &&
                              pa.ComplianceScore >= 80 &&

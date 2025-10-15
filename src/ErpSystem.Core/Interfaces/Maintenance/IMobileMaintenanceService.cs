@@ -1,5 +1,4 @@
-using ErpSystem.Core.Services.Maintenance;
-using Microsoft.AspNetCore.Http;
+using ErpSystem.Core.DTOs.Maintenance;
 
 namespace ErpSystem.Core.Interfaces.Maintenance;
 
@@ -33,11 +32,11 @@ public interface IMobileMaintenanceService
     Task<MobileWorkLogResultDto> AddWorkLogMobileAsync(
         Guid workOrderId, MobileWorkLogCreateDto logDto, Guid userId);
 
-    /// <summary>
-    /// Upload work order photos with compression and offline queuing
-    /// </summary>
-    Task<MobilePhotoUploadResultDto> UploadWorkOrderPhotosAsync(
-        Guid workOrderId, List<IFormFile> photos, string? description, Guid userId);
+    // /// <summary>
+    // /// Upload work order photos with compression and offline queuing
+    // /// </summary>
+    // Task<MobilePhotoUploadResultDto> UploadWorkOrderPhotosAsync(
+    //     Guid workOrderId, List<IFormFile> photos, string? description, Guid userId);
 
     #endregion
 

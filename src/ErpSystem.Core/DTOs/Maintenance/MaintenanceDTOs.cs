@@ -8,6 +8,7 @@ namespace ErpSystem.Core.DTOs.Maintenance;
 public class PagedResult<T>
 {
     public IEnumerable<T> Items { get; set; } = new List<T>();
+    public IEnumerable<T> Data => Items; // Alias for backward compatibility
     public int TotalCount { get; set; }
     public int Page { get; set; }
     public int PageSize { get; set; }
@@ -1939,6 +1940,11 @@ public class MaintenanceAssetDto
     // Additional properties
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+    
+    // Additional properties for mobile compatibility
+    public string? AssetTag { get; set; }
+    public string? QrCode { get; set; }
+    public string? AssetType { get; set; }
 }
 
 public class MaintenanceAssetListDto
@@ -2282,6 +2288,10 @@ public class WorkOrderDto
 
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+    
+    // Additional properties for mobile and analytics
+    public DateTime? DueDate { get; set; }
+    public double? EstimatedDuration { get; set; }
 }
 
 public class WorkOrderListDto
@@ -2319,6 +2329,13 @@ public class WorkOrderListDto
     public double CompletionPercentage { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime CreatedDate { get; set; }
+    
+    // Additional properties for mobile and analytics
+    public DateTime? UpdatedAt { get; set; }
+    public DateTime? DueDate { get; set; }
+    public double? EstimatedDuration { get; set; }
+    public string Type { get; set; } = string.Empty;
+    public string? WorkOrderSource { get; set; }
 }
 
 public class CreateWorkOrderDto
@@ -2375,6 +2392,8 @@ public class CreateWorkOrderDto
 
 public class UpdateWorkOrderDto
 {
+    public Guid Id { get; set; }
+    
     [Required]
     [StringLength(200)]
     public string Title { get; set; } = string.Empty;
@@ -2384,6 +2403,7 @@ public class UpdateWorkOrderDto
 
     public string Instructions { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
 
     [Required]
     public Guid WorkOrderTypeId { get; set; }
@@ -2743,6 +2763,17 @@ public class CreateWorkOrderCommentDto
     public bool IsInternal { get; set; } = true;
 }
 
+/// <summary>
+/// Date period DTO
+/// </summary>
+public class DatePeriodDto
+{
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public string Period { get; set; } = string.Empty;
+}
+
+
 #endregion
 
 #region Analytics and Reporting DTOs
@@ -2758,6 +2789,10 @@ public class AssetMetricsDto
     public Dictionary<string, int> AssetsByCategory { get; set; } = new();
     public Dictionary<string, int> AssetsByStatus { get; set; } = new();
     public Dictionary<string, int> AssetsByCriticality { get; set; } = new();
+    
+    // Additional properties for analytics
+    public int CriticalAssets { get; set; }
+    public int AssetsRequiringMaintenance { get; set; }
 }
 
 public class CategoryStatisticsDto
@@ -2772,20 +2807,6 @@ public class CategoryStatisticsDto
     public int OverdueMaintenanceCount { get; set; }
 }
 
-public class WorkOrderMetricsDto
-{
-    public int TotalWorkOrders { get; set; }
-    public int OpenWorkOrders { get; set; }
-    public int InProgressWorkOrders { get; set; }
-    public int CompletedWorkOrders { get; set; }
-    public int OverdueWorkOrders { get; set; }
-    public decimal TotalCost { get; set; }
-    public double TotalHours { get; set; }
-    public double AverageCompletionTime { get; set; }
-    public Dictionary<string, int> WorkOrdersByStatus { get; set; } = new();
-    public Dictionary<string, int> WorkOrdersByPriority { get; set; } = new();
-    public Dictionary<string, int> WorkOrdersByType { get; set; } = new();
-}
 
 public class MaintenanceDashboardDto
 {
@@ -2796,6 +2817,16 @@ public class MaintenanceDashboardDto
     public IEnumerable<MaintenanceAssetListDto> AssetsRequiringMaintenance { get; set; } = new List<MaintenanceAssetListDto>();
     public IEnumerable<AssetDowntimeDto> ActiveDowntime { get; set; } = new List<AssetDowntimeDto>();
     public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
+    
+    // Additional properties for MaintenanceAnalyticsService compatibility
+    public DashboardSummaryDto Summary { get; set; } = new();
+    public Dictionary<string, int> WorkOrdersByStatus { get; set; } = new();
+    public Dictionary<string, int> WorkOrdersByPriority { get; set; } = new();
+    public Dictionary<string, int> AssetsByStatus { get; set; } = new();
+    public MaintenanceKPIsDto MaintenanceKPIs { get; set; } = new();
+    public List<MaintenanceScheduleDto> UpcomingMaintenance { get; set; } = new();
+    public List<MaintenanceAlertDto> RecentAlerts { get; set; } = new();
+    public List<string> TopIssues { get; set; } = new();
 }
 
 public class MaintenanceKPIsDto
@@ -2810,6 +2841,14 @@ public class MaintenanceKPIsDto
     public double WorkOrderCompletionRate { get; set; }
     public double PreventiveMaintenanceCompliance { get; set; }
     public double AssetAvailability { get; set; }
+    
+    // Additional properties for service compatibility
+    public double MTTR { get; set; }
+    public double MTBF { get; set; }
+    public double FirstTimeFixRate { get; set; }
+    public decimal MaintenanceCostPerAsset { get; set; }
+    public double AverageWorkOrderDuration { get; set; }
+    public double PreventiveMaintenanceRatio { get; set; }
 }
 
 public class LaborReportDto
@@ -2826,6 +2865,32 @@ public class LaborReportDto
     public double EmergencyHours { get; set; }
     public double UtilizationPercentage { get; set; }
 }
+
+/// <summary>
+/// Dashboard summary DTO
+/// </summary>
+public class DashboardSummaryDto
+{
+    public int TotalAssets { get; set; }
+    public int TotalWorkOrders { get; set; }
+    public int PendingWorkOrders { get; set; }
+    public int CompletedWorkOrders { get; set; }
+    public int OverdueWorkOrders { get; set; }
+    public decimal TotalMaintenanceCost { get; set; }
+    public double AverageCompletionTime { get; set; }
+    public double SystemAvailability { get; set; }
+    
+    // Additional properties for analytics service
+    public int ActiveAssets { get; set; }
+    public int CriticalAssets { get; set; }
+    public int AssetsRequiringMaintenance { get; set; }
+    public int ActiveWorkOrders { get; set; }
+    public int TotalTechnicians { get; set; }
+    public int AvailableTechnicians { get; set; }
+    public int ActiveProtocols { get; set; }
+    public decimal ComplianceRate { get; set; }
+}
+
 
 #endregion
 

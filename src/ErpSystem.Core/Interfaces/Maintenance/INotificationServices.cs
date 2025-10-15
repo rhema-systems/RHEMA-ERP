@@ -67,6 +67,11 @@ public interface IMaintenanceNotificationService
     /// Deletes old notifications
     /// </summary>
     Task<int> DeleteOldNotificationsAsync(int olderThanDays = 90);
+
+    /// <summary>
+    /// Sends critical asset alert notification
+    /// </summary>
+    Task SendAssetCriticalAlertAsync(Guid assetId, string alertMessage);
 }
 
 /// <summary>

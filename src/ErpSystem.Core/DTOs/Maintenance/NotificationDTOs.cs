@@ -2,6 +2,42 @@ using System.ComponentModel.DataAnnotations;
 
 namespace ErpSystem.Core.DTOs.Maintenance;
 
+#region Enums
+
+/// <summary>
+/// Notification type enumeration
+/// </summary>
+public enum NotificationType
+{
+    ScheduleReminder,
+    OverdueAlert,
+    Assignment,
+    StatusChange,
+    Completion,
+    AssetCritical,
+    WarrantyExpiration,
+    SafetyViolation,
+    ComplianceReminder,
+    MaintenanceDue,
+    InspectionRequired,
+    PartRequest,
+    WorkOrderCreated,
+    SystemAlert
+}
+
+/// <summary>
+/// Notification priority enumeration
+/// </summary>
+public enum NotificationPriority
+{
+    Low,
+    Normal,
+    High,
+    Critical
+}
+
+#endregion
+
 #region Notification DTOs
 
 /// <summary>
@@ -34,6 +70,13 @@ public class MaintenanceNotificationDto
     public bool IsOverdue { get; set; }
     public string RecipientName { get; set; } = string.Empty;
     public string EntityName { get; set; } = string.Empty;
+    
+    // Additional properties for service compatibility
+    public NotificationType Type { get; set; }
+    public string RelatedEntityType { get; set; } = string.Empty;
+    public Guid RelatedEntityId { get; set; }
+    public List<NotificationRecipientDto> Recipients { get; set; } = new();
+    public Dictionary<string, object> Data { get; set; } = new();
 }
 
 /// <summary>
@@ -120,6 +163,18 @@ public class UpdateNotificationStatusDto
     [Required]
     [StringLength(20)]
     public string Status { get; set; } = string.Empty; // Read, Dismissed
+}
+
+/// <summary>
+/// Notification recipient DTO
+/// </summary>
+public class NotificationRecipientDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string Role { get; set; } = string.Empty;
+    public string DeliveryMethod { get; set; } = string.Empty;
 }
 
 #endregion

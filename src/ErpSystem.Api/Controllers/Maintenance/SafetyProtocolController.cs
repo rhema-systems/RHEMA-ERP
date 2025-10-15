@@ -10,11 +10,11 @@ namespace ErpSystem.Api.Controllers.Maintenance
     public class SafetyProtocolController : ControllerBase
     {
         private readonly ILogger<SafetyProtocolController> _logger;
-        private readonly ISafetyProtocolService _safetyProtocolService;
+        private readonly ISafetyProtocolService? _safetyProtocolService;
 
         public SafetyProtocolController(
             ILogger<SafetyProtocolController> logger,
-            ISafetyProtocolService safetyProtocolService = null)
+            ISafetyProtocolService? safetyProtocolService = null)
         {
             _logger = logger;
             _safetyProtocolService = safetyProtocolService;

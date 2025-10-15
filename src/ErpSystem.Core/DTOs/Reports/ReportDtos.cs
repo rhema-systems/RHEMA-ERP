@@ -128,6 +128,10 @@ namespace ErpSystem.Core.DTOs.Reports
 
     public class ReportExportResultDto
     {
+        public Guid ReportId { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public DateTime ExportedAt { get; set; }
+        public string DownloadUrl { get; set; } = string.Empty;
         public byte[] Data { get; set; } = Array.Empty<byte>();
         public string ContentType { get; set; } = string.Empty;
         public string FileName { get; set; } = string.Empty;
