@@ -761,7 +761,7 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<IDevInfoService, DevInfoService>();
             
             // Add database seeding service
-            // services.AddDatabaseSeeding();
+            services.AddDatabaseSeeding();
 
             return services;
         }

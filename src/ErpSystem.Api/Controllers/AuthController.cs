@@ -167,7 +167,7 @@ namespace ErpSystem.Api.Controllers
                             Details = $"User not found in LDAP or local database. LDAP: {ldapResult.ErrorMessage}",
                             FailureReason = "Invalid credentials - user not found",
                             UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
-                            TenantId = tenant?.Id
+                            TenantId = tenant?.Id ?? Guid.Empty
                         };
                         await _securityLogService.CreateSecurityLogAsync(userNotFoundSecurityLog);
                         
@@ -190,7 +190,7 @@ namespace ErpSystem.Api.Controllers
                         Details = "User not found",
                         FailureReason = "Invalid credentials - user not found",
                         UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
-                        TenantId = tenant?.Id
+                        TenantId = tenant?.Id ?? Guid.Empty
                     };
                     await _securityLogService.CreateSecurityLogAsync(userNotFoundSecurityLog);
                     
