@@ -143,9 +143,9 @@ import { PhoneInput } from '@/components/ui/phone-input';
 | Component | Files | Usage Count |
 |-----------|-------|-------------|
 | DataTable | 13 | 16 |
-| Button | 113 | 114 |
-| Input | 78 | 80 |
-| Select | 50 | 50 |
-| Card | 100 | 106 |
-| Badge | 94 | 94 |
+| Button | 118 | 119 |
+| Input | 82 | 84 |
+| Select | 53 | 53 |
+| Card | 105 | 112 |
+| Badge | 98 | 98 |
 | PhoneInput | 2 | 2 |
