@@ -163,6 +163,13 @@ function LoginFormWithSearchParams() {
       }
     },
     onError: (error: any) => {
+      console.error('Login error details:', {
+        message: error.message,
+        status: error.status,
+        statusText: error.statusText,
+        response: error.response
+      });
+      
       const message = error.message || 'Login failed. Please try again.';
       setError('root', { message });
       setFailedAttempts(prev => prev + 1);

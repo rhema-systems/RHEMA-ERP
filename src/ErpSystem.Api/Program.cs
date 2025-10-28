@@ -199,7 +199,7 @@ async Task SeedDatabaseAsync(WebApplication app)
 {
     try
     {
-        // await app.Services.SeedDatabaseAsync();
+        await app.Services.SeedDatabaseAsync();
     }
     catch (Exception ex)
     {
