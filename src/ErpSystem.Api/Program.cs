@@ -9,6 +9,7 @@ using ErpSystem.Web.Middleware;
 using ErpSystem.Api.Middleware;
 using ErpSystem.Data;
 using ErpSystem.Api.Data;
+using ErpSystem.Web.Services;
 
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
