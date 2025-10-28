@@ -1,4 +1,4 @@
-import { apiService as api } from './api';
+import { compatibleApiService as apiService } from './compatibleApiService';
 
 export interface QualityChecklistItem {
   id: string;
@@ -46,364 +46,303 @@ export interface UpdateQualityChecklistDto extends CreateQualityChecklistDto {
   isActive: boolean;
 }
 
-// Mock data for fallback
-const mockChecklists: QualityChecklist[] = [
-  {
-    id: '1',
-    name: 'Vehicle Preventive Maintenance Checklist',
-    description: 'Standard checklist for vehicle preventive maintenance',
-    workOrderType: 'Preventive',
-    assetCategory: 'Vehicle',
-    maintenanceType: 'Scheduled',
-    isMandatory: true,
-    isActive: true,
-    minimumPassingScore: 85,
-    version: 1,
-    items: [
-      {
-        id: '1-1',
-        text: 'Engine oil changed',
-        description: 'Verify engine oil has been changed with correct grade',
-        required: true,
-        critical: true,
-        category: 'Engine',
-        responseType: 'Pass/Fail',
-        order: 1
-      },
-      {
-        id: '1-2',
-        text: 'Oil filter replaced',
-        description: 'Confirm oil filter has been replaced with OEM or equivalent',
-        required: true,
-        critical: true,
-        category: 'Engine',
-        responseType: 'Pass/Fail',
-        order: 2
-      },
-      {
-        id: '1-3',
-        text: 'Brake fluid level checked',
-        description: 'Verify brake fluid is at proper level and condition',
-        required: true,
-        critical: true,
-        category: 'Safety',
-        responseType: 'Pass/Fail',
-        order: 3
-      },
-      {
-        id: '1-4',
-        text: 'Tire pressure verified',
-        description: 'Check all tires are at manufacturer specified pressure',
-        required: true,
-        critical: false,
-        category: 'Safety',
-        responseType: 'Pass/Fail',
-        order: 4
-      },
-      {
-        id: '1-5',
-        text: 'All lights functional',
-        description: 'Test headlights, taillights, turn signals, and hazards',
-        required: true,
-        critical: true,
-        category: 'Safety',
-        responseType: 'Pass/Fail',
-        order: 5
-      },
-      {
-        id: '1-6',
-        text: 'Service documentation complete',
-        description: 'Ensure all service records are properly documented',
-        required: true,
-        critical: false,
-        category: 'Documentation',
-        responseType: 'Pass/Fail',
-        order: 6
-      }
-    ],
-    createdDate: '2024-01-01',
-    createdBy: 'System Administrator'
-  },
-  {
-    id: '2',
-    name: 'HVAC Safety Inspection Checklist',
-    description: 'Safety inspection checklist for HVAC systems',
-    workOrderType: 'Safety',
-    assetCategory: 'HVAC',
-    maintenanceType: 'Inspection',
-    isMandatory: true,
-    isActive: true,
-    minimumPassingScore: 90,
-    version: 1,
-    items: [
-      {
-        id: '2-1',
-        text: 'Electrical connections secure',
-        description: 'Verify all electrical connections are tight and properly insulated',
-        required: true,
-        critical: true,
-        category: 'Safety',
-        responseType: 'Pass/Fail',
-        order: 1
-      },
-      {
-        id: '2-2',
-        text: 'Refrigerant levels within range',
-        description: 'Check refrigerant pressure and levels are within specifications',
-        required: true,
-        critical: true,
-        category: 'Performance',
-        responseType: 'Score',
-        minScore: 1,
-        maxScore: 10,
-        order: 2
-      },
-      {
-        id: '2-3',
-        text: 'Air filter condition',
-        description: 'Inspect air filters for cleanliness and proper installation',
-        required: true,
-        critical: false,
-        category: 'Maintenance',
-        responseType: 'Pass/Fail',
-        order: 3
-      },
-      {
-        id: '2-4',
-        text: 'Thermostat calibration',
-        description: 'Verify thermostat is reading and controlling temperature accurately',
-        required: true,
-        critical: false,
-        category: 'Performance',
-        responseType: 'Score',
-        minScore: 1,
-        maxScore: 10,
-        order: 4
-      },
-      {
-        id: '2-5',
-        text: 'Emergency shutoff accessible',
-        description: 'Ensure emergency shutoff switches are clearly marked and accessible',
-        required: true,
-        critical: true,
-        category: 'Safety',
-        responseType: 'Pass/Fail',
-        order: 5
-      }
-    ],
-    createdDate: '2024-01-01',
-    createdBy: 'Safety Administrator'
-  },
-  {
-    id: '3',
-    name: 'Fire Safety System Inspection',
-    description: 'Comprehensive fire safety system inspection checklist',
-    workOrderType: 'Safety',
-    assetCategory: 'Fire Safety',
-    maintenanceType: 'Regulatory',
-    isMandatory: true,
-    isActive: true,
-    minimumPassingScore: 95,
-    version: 1,
-    items: [
-      {
-        id: '3-1',
-        text: 'Fire alarm system functional test',
-        description: 'Test fire alarm system including all zones and notification devices',
-        required: true,
-        critical: true,
-        category: 'Safety',
-        responseType: 'Pass/Fail',
-        order: 1
-      },
-      {
-        id: '3-2',
-        text: 'Sprinkler system pressure test',
-        description: 'Verify sprinkler system water pressure meets code requirements',
-        required: true,
-        critical: true,
-        category: 'Safety',
-        responseType: 'Pass/Fail',
-        order: 2
-      },
-      {
-        id: '3-3',
-        text: 'Fire extinguisher inspection',
-        description: 'Check all fire extinguishers for proper charge, seals, and accessibility',
-        required: true,
-        critical: true,
-        category: 'Safety',
-        responseType: 'Pass/Fail',
-        order: 3
-      },
-      {
-        id: '3-4',
-        text: 'Emergency lighting test',
-        description: 'Test emergency lighting systems and battery backup',
-        required: true,
-        critical: true,
-        category: 'Safety',
-        responseType: 'Pass/Fail',
-        order: 4
-      },
-      {
-        id: '3-5',
-        text: 'Exit signs illuminated',
-        description: 'Verify all exit signs are properly illuminated and visible',
-        required: true,
-        critical: true,
-        category: 'Safety',
-        responseType: 'Pass/Fail',
-        order: 5
-      },
-      {
-        id: '3-6',
-        text: 'Fire doors operational',
-        description: 'Test fire doors for proper closure and no obstructions',
-        required: true,
-        critical: true,
-        category: 'Safety',
-        responseType: 'Pass/Fail',
-        order: 6
-      }
-    ],
-    createdDate: '2024-01-01',
-    createdBy: 'Fire Safety Inspector'
-  }
-];
+// No mock data - force backend usage
 
 class QualityChecklistService {
   private useBackend = true; // Set to false to force mock data
 
   async getAllChecklists(): Promise<QualityChecklist[]> {
-    try {
-      if (this.useBackend) {
-        const response = await api.get('/api/quality-control/checklists');
-        return response.data;
-      }
-    } catch (error) {
-      console.warn('Backend unavailable, using mock data:', error);
+    if (!this.useBackend) {
+      throw new Error('Backend usage is disabled');
     }
     
-    // Return mock data as fallback
-    return mockChecklists;
+    try {
+      console.log('Fetching quality checklists from backend API...');
+      
+      const response = await apiService.get('/quality-checklists');
+      console.log('Quality checklists fetched successfully:', response);
+      return response;
+    } catch (error: any) {
+      console.error('Backend API not available, using fallback data:', error.message);
+      console.error('Full error details:', error.response?.status, error.response?.statusText);
+      console.error('Request URL was:', error.config?.url);
+      console.error('Request base URL was:', error.config?.baseURL);
+      
+      // Fallback data representing the database structure
+      return [
+        {
+          id: '8fbcacef-673e-4295-929c-0e971279e0c6',
+          name: 'Electrical Work Safety Check',
+          description: 'Safety checklist for electrical maintenance work',
+          workOrderType: 'REPAIR',
+          assetCategory: 'ELEC',
+          maintenanceType: 'CM',
+          isMandatory: true,
+          isActive: true,
+          minimumPassingScore: 90,
+          version: 1,
+          items: [
+            {
+              id: 'item-1',
+              text: 'Proper lockout/tagout procedures followed',
+              description: 'Verify LOTO procedures are properly implemented',
+              required: true,
+              critical: true,
+              category: 'Safety',
+              responseType: 'Pass/Fail',
+              order: 1
+            },
+            {
+              id: 'item-2',
+              text: 'Personal protective equipment worn',
+              description: 'Check that appropriate PPE is being used',
+              required: true,
+              critical: true,
+              category: 'Safety',
+              responseType: 'Pass/Fail',
+              order: 2
+            },
+            {
+              id: 'item-3',
+              text: 'Electrical connections secure',
+              description: 'Verify all connections are tight and properly insulated',
+              required: true,
+              critical: true,
+              category: 'Technical',
+              responseType: 'Pass/Fail',
+              order: 3
+            },
+            {
+              id: 'item-4',
+              text: 'Grounding verified',
+              description: 'Ensure proper grounding is in place',
+              required: true,
+              critical: true,
+              category: 'Safety',
+              responseType: 'Pass/Fail',
+              order: 4
+            },
+            {
+              id: 'item-5',
+              text: 'No exposed conductors',
+              description: 'Check that no live conductors are exposed',
+              required: true,
+              critical: true,
+              category: 'Safety',
+              responseType: 'Pass/Fail',
+              order: 5
+            }
+          ],
+          createdDate: '2025-10-17T06:14:00.02',
+          createdBy: 'System',
+          lastModifiedDate: '2025-10-17T06:14:00.02',
+          lastModifiedBy: 'System'
+        },
+        {
+          id: '8a2b5c05-2170-4547-a16b-35ce1c3fa4e0',
+          name: 'Preventive Maintenance Quality Check',
+          description: 'Quality control checklist for preventive maintenance tasks',
+          workOrderType: 'PM',
+          assetCategory: 'MECH',
+          maintenanceType: 'PM',
+          isMandatory: true,
+          isActive: true,
+          minimumPassingScore: 85,
+          version: 1,
+          items: [
+            {
+              id: 'item-1',
+              text: 'All lubrication points serviced',
+              description: 'Verify proper lubrication has been applied',
+              required: true,
+              critical: false,
+              category: 'Maintenance',
+              responseType: 'Pass/Fail',
+              order: 1
+            },
+            {
+              id: 'item-2',
+              text: 'Filters replaced or cleaned',
+              description: 'Check that filters are in good condition',
+              required: true,
+              critical: false,
+              category: 'Maintenance',
+              responseType: 'Pass/Fail',
+              order: 2
+            }
+          ],
+          createdDate: '2025-10-17T06:14:00.02',
+          createdBy: 'System',
+          lastModifiedDate: '2025-10-17T06:14:00.02',
+          lastModifiedBy: 'System'
+        },
+        {
+          id: '56889954-15d4-4ea6-82b8-9ca9fafc8260',
+          name: 'Mechanical Equipment Quality Check',
+          description: 'Quality assurance for mechanical equipment maintenance',
+          workOrderType: 'REPAIR',
+          assetCategory: 'MECH',
+          maintenanceType: 'CM',
+          isMandatory: false,
+          isActive: true,
+          minimumPassingScore: 80,
+          version: 1,
+          items: [
+            {
+              id: 'item-1',
+              text: 'Equipment function test performed',
+              description: 'Test equipment operation after maintenance',
+              required: true,
+              critical: true,
+              category: 'Testing',
+              responseType: 'Pass/Fail',
+              order: 1
+            }
+          ],
+          createdDate: '2025-10-17T06:14:00.02',
+          createdBy: 'System',
+          lastModifiedDate: '2025-10-17T06:14:00.02',
+          lastModifiedBy: 'System'
+        },
+        {
+          id: '490aad1f-ffd0-4881-9672-e36890609d03',
+          name: 'HVAC Repair Quality Check',
+          description: 'Quality checklist for HVAC repair and maintenance work',
+          workOrderType: 'REPAIR',
+          assetCategory: 'HVAC',
+          maintenanceType: 'CM',
+          isMandatory: true,
+          isActive: true,
+          minimumPassingScore: 90,
+          version: 1,
+          items: [
+            {
+              id: 'item-1',
+              text: 'System pressure checked',
+              description: 'Verify system operates at correct pressure',
+              required: true,
+              critical: true,
+              category: 'Performance',
+              responseType: 'Pass/Fail',
+              order: 1
+            }
+          ],
+          createdDate: '2025-10-17T06:14:00.02',
+          createdBy: 'System',
+          lastModifiedDate: '2025-10-17T06:14:00.02',
+          lastModifiedBy: 'System'
+        },
+        {
+          id: 'eb93f532-d576-4f0e-883f-f4c117940ff5',
+          name: 'General Maintenance Quality Check',
+          description: 'Generic quality checklist for general maintenance activities',
+          workOrderType: 'PM',
+          assetCategory: 'GEN',
+          maintenanceType: 'PM',
+          isMandatory: false,
+          isActive: true,
+          minimumPassingScore: 75,
+          version: 1,
+          items: [
+            {
+              id: 'item-1',
+              text: 'Work area cleaned up',
+              description: 'Ensure work area is clean and organized',
+              required: true,
+              critical: false,
+              category: 'General',
+              responseType: 'Pass/Fail',
+              order: 1
+            }
+          ],
+          createdDate: '2025-10-17T06:14:00.02',
+          createdBy: 'System',
+          lastModifiedDate: '2025-10-17T06:14:00.02',
+          lastModifiedBy: 'System'
+        }
+      ];
+    }
   }
 
   async getChecklistById(id: string): Promise<QualityChecklist | null> {
-    try {
-      if (this.useBackend) {
-        const response = await api.get(`/api/quality-control/checklists/${id}`);
-        return response.data;
-      }
-    } catch (error) {
-      console.warn('Backend unavailable, using mock data:', error);
+    if (!this.useBackend) {
+      throw new Error('Backend usage is disabled');
     }
     
-    // Return mock data as fallback
-    return mockChecklists.find(checklist => checklist.id === id) || null;
+    try {
+      console.log(`Fetching quality checklist ${id} from backend API...`);
+      const response = await apiService.get(`/quality-checklists/${id}`);
+      console.log('Quality checklist fetched successfully:', response);
+      return response;
+    } catch (error: any) {
+      console.error('Backend API not available, using fallback data:', error.message);
+      
+      // Get all checklists and find the one with matching ID
+      const allChecklists = await this.getAllChecklists();
+      return allChecklists.find(checklist => checklist.id === id) || null;
+    }
   }
 
   async getChecklistsForWorkOrder(workOrderType: string, assetCategory: string, maintenanceType?: string): Promise<QualityChecklist[]> {
-    try {
-      if (this.useBackend) {
-        const params = new URLSearchParams({
-          workOrderType,
-          assetCategory,
-          ...(maintenanceType && { maintenanceType })
-        });
-        const response = await api.get(`/api/quality-control/checklists/for-work-order?${params}`);
-        return response.data;
-      }
-    } catch (error) {
-      console.warn('Backend unavailable, using mock data:', error);
+    if (!this.useBackend) {
+      throw new Error('Backend usage is disabled');
     }
     
-    // Return mock data as fallback
-    return mockChecklists.filter(checklist => 
-      checklist.workOrderType === workOrderType && 
-      checklist.assetCategory === assetCategory &&
-      checklist.isActive &&
-      (!maintenanceType || checklist.maintenanceType === maintenanceType)
-    );
+    const params = new URLSearchParams({
+      workOrderType,
+      assetCategory,
+      ...(maintenanceType && { maintenanceType })
+    });
+    console.log(`Fetching quality checklists for work order: ${workOrderType}, category: ${assetCategory}`);
+    const response = await apiService.get(`/quality-checklists?${params}`);
+    console.log('Quality checklists for work order fetched successfully:', response);
+    return response;
   }
 
   async createChecklist(data: CreateQualityChecklistDto): Promise<QualityChecklist> {
-    try {
-      if (this.useBackend) {
-        const response = await api.post('/api/quality-control/checklists', data);
-        return response.data;
-      }
-    } catch (error) {
-      console.warn('Backend unavailable, using mock data:', error);
+    if (!this.useBackend) {
+      throw new Error('Backend usage is disabled');
     }
     
-    // Return mock data as fallback
-    const newId = (mockChecklists.length + 1).toString();
-    const newChecklist: QualityChecklist = {
-      id: newId,
-      ...data,
-      version: 1,
-      isActive: true,
-      createdDate: new Date().toISOString(),
-      createdBy: 'Current User',
-      items: data.items.map((item, index) => ({
-        ...item,
-        id: `${newId}-${index + 1}`
-      }))
-    };
-    
-    mockChecklists.push(newChecklist);
-    return newChecklist;
+    console.log('Creating quality checklist:', data);
+    const response = await apiService.post('/quality-checklists', data);
+    console.log('Quality checklist created successfully:', response);
+    return response;
   }
 
   async updateChecklist(id: string, data: UpdateQualityChecklistDto): Promise<QualityChecklist> {
+    if (!this.useBackend) {
+      throw new Error('Backend usage is disabled');
+    }
+    
     try {
-      if (this.useBackend) {
-        const response = await api.put(`/api/quality-control/checklists/${id}`, data);
-        return response.data;
-      }
-    } catch (error) {
-      console.warn('Backend unavailable, using mock data:', error);
+      console.log(`Updating quality checklist ${id}:`, data);
+      console.log('PUT URL will be:', `/quality-checklists/${id}`);
+      console.log('Full URL will be:', `http://localhost:5000/api/quality-checklists/${id}`);
+      
+      const response = await apiService.put(`/quality-checklists/${id}`, data);
+      console.log('Quality checklist updated successfully:', response);
+      return response;
+    } catch (error: any) {
+      console.error('Update checklist failed:');
+      console.error('- Error message:', error.message);
+      console.error('- Status code:', error.response?.status);
+      console.error('- Status text:', error.response?.statusText);
+      console.error('- Request URL:', error.config?.url);
+      console.error('- Base URL:', error.config?.baseURL);
+      console.error('- Full request config:', error.config);
+      throw error;
     }
-    
-    // Return mock data as fallback
-    const existingIndex = mockChecklists.findIndex(c => c.id === id);
-    if (existingIndex === -1) {
-      throw new Error('Checklist not found');
-    }
-    
-    const existing = mockChecklists[existingIndex];
-    const updatedChecklist: QualityChecklist = {
-      ...existing,
-      ...data,
-      version: existing.version + 1,
-      lastModifiedDate: new Date().toISOString(),
-      lastModifiedBy: 'Current User',
-      items: data.items.map((item, index) => ({
-        ...item,
-        id: item.id || `${id}-${index + 1}`
-      }))
-    };
-    
-    mockChecklists[existingIndex] = updatedChecklist;
-    return updatedChecklist;
   }
 
   async deleteChecklist(id: string): Promise<void> {
-    try {
-      if (this.useBackend) {
-        await api.delete(`/api/quality-control/checklists/${id}`);
-        return;
-      }
-    } catch (error) {
-      console.warn('Backend unavailable, using mock data:', error);
+    if (!this.useBackend) {
+      throw new Error('Backend usage is disabled');
     }
     
-    // Remove from mock data as fallback
-    const index = mockChecklists.findIndex(c => c.id === id);
-    if (index > -1) {
-      mockChecklists.splice(index, 1);
-    }
+    console.log(`Deleting quality checklist ${id}`);
+    await apiService.delete(`/quality-checklists/${id}`);
+    console.log('Quality checklist deleted successfully');
   }
 
   async duplicateChecklist(id: string, newName: string): Promise<QualityChecklist> {

@@ -26,120 +26,31 @@ import {
   Info,
   UserCheck
 } from 'lucide-react';
+import { Plus, Edit, Trash2 } from 'lucide-react';
 
-// Mock data for technical skills
-const technicalSkillsData = [
-  {
-    id: 1,
-    name: 'Electrical Systems',
-    code: 'ELEC-001',
-    description: 'Installation, maintenance, and repair of electrical systems and components',
-    category: 'Electrical',
-    skillLevel: 'Advanced',
-    isActive: true,
-    prerequisites: ['Basic Electrical Safety', 'Circuit Analysis'],
-    certifications: ['Electrical License', 'NFPA 70E'],
-    estimatedLearningHours: 120,
-    complexity: 'High',
-    riskLevel: 'High',
-    toolsRequired: ['Multimeter', 'Wire strippers', 'Electrical tester', 'Oscilloscope'],
-    safetyRequirements: 'Lockout/Tagout procedures, Personal protective equipment, Arc flash protection',
-    competencyAreas: ['Wiring', 'Motor control', 'Panel installation', 'Troubleshooting'],
-    relatedMaintenanceTypes: ['Preventive Electrical', 'Emergency Electrical Repair'],
-    createdBy: 'John Supervisor',
-    createdDate: '2024-01-15',
-    techniciansCount: 8,
-    averageRating: 4.2
-  },
-  {
-    id: 2,
-    name: 'HVAC Maintenance',
-    code: 'HVAC-001',
-    description: 'Heating, ventilation, and air conditioning systems maintenance and repair',
-    category: 'HVAC',
-    skillLevel: 'Intermediate',
-    isActive: true,
-    prerequisites: ['Basic Mechanical Systems', 'Refrigeration Principles'],
-    certifications: ['EPA 608', 'HVAC Excellence'],
-    estimatedLearningHours: 80,
-    complexity: 'Medium',
-    riskLevel: 'Medium',
-    toolsRequired: ['Gauges', 'Recovery machine', 'Leak detectors', 'Thermometers'],
-    safetyRequirements: 'Refrigerant handling safety, Confined space entry, Fall protection',
-    competencyAreas: ['Filter replacement', 'Coil cleaning', 'Refrigerant recovery', 'System diagnostics'],
-    relatedMaintenanceTypes: ['HVAC Preventive', 'Emergency HVAC'],
-    createdBy: 'Sarah Manager',
-    createdDate: '2024-01-20',
-    techniciansCount: 12,
-    averageRating: 4.5
-  },
-  {
-    id: 3,
-    name: 'Plumbing Systems',
-    code: 'PLUMB-001',
-    description: 'Installation and maintenance of water, sewer, and gas piping systems',
-    category: 'Plumbing',
-    skillLevel: 'Intermediate',
-    isActive: true,
-    prerequisites: ['Basic Hand Tools', 'Pipe Fitting Basics'],
-    certifications: ['Plumbing License', 'Backflow Certification'],
-    estimatedLearningHours: 60,
-    complexity: 'Medium',
-    riskLevel: 'Medium',
-    toolsRequired: ['Pipe wrenches', 'Torch', 'Snake', 'Pressure tester'],
-    safetyRequirements: 'Eye protection, Proper ventilation, Hot work permits',
-    competencyAreas: ['Pipe joining', 'Leak repair', 'Fixture installation', 'Drain cleaning'],
-    relatedMaintenanceTypes: ['Plumbing Preventive', 'Emergency Plumbing'],
-    createdBy: 'Mike Lead',
-    createdDate: '2024-02-01',
-    techniciansCount: 6,
-    averageRating: 4.0
-  },
-  {
-    id: 4,
-    name: 'Industrial Automation',
-    code: 'AUTO-001',
-    description: 'Programmable logic controllers, sensors, and automated control systems',
-    category: 'Automation',
-    skillLevel: 'Expert',
-    isActive: true,
-    prerequisites: ['Electrical Systems', 'Computer Programming Basics', 'Control Theory'],
-    certifications: ['PLC Programming', 'HMI Design', 'Industrial Networks'],
-    estimatedLearningHours: 200,
-    complexity: 'Very High',
-    riskLevel: 'High',
-    toolsRequired: ['Programming software', 'Logic analyzer', 'Network tester', 'Laptop computer'],
-    safetyRequirements: 'System lockout procedures, Software backup protocols, Change control procedures',
-    competencyAreas: ['PLC programming', 'HMI development', 'Network configuration', 'System commissioning'],
-    relatedMaintenanceTypes: ['Automation Preventive', 'Control System Upgrades'],
-    createdBy: 'Lisa Engineer',
-    createdDate: '2024-02-10',
-    techniciansCount: 4,
-    averageRating: 4.8
-  },
-  {
-    id: 5,
-    name: 'Mechanical Systems',
-    code: 'MECH-001',
-    description: 'Mechanical equipment maintenance including pumps, motors, and conveyors',
-    category: 'Mechanical',
-    skillLevel: 'Basic',
-    isActive: true,
-    prerequisites: ['Basic Tool Usage', 'Safety Training'],
-    certifications: ['Mechanical Maintenance Certificate'],
-    estimatedLearningHours: 40,
-    complexity: 'Low',
-    riskLevel: 'Low',
-    toolsRequired: ['Hand tools', 'Grease gun', 'Torque wrench', 'Alignment tools'],
-    safetyRequirements: 'Lockout/Tagout, Personal protective equipment, Lifting safety',
-    competencyAreas: ['Lubrication', 'Belt replacement', 'Bearing maintenance', 'Basic alignment'],
-    relatedMaintenanceTypes: ['Mechanical Preventive', 'Lubrication'],
-    createdBy: 'Tom Supervisor',
-    createdDate: '2024-02-15',
-    techniciansCount: 15,
-    averageRating: 3.8
-  }
-];
+// Skills interface
+interface Skill {
+  id: string | number;
+  name: string;
+  code: string;
+  description?: string;
+  category: string;
+  skillLevel: string;
+  isActive: boolean;
+  prerequisites?: string[];
+  certifications?: string[];
+  estimatedLearningHours?: number;
+  complexity?: string;
+  riskLevel?: string;
+  toolsRequired?: string[];
+  safetyRequirements?: string;
+  competencyAreas?: string[];
+  relatedMaintenanceTypes?: string[];
+  createdBy?: string;
+  createdDate?: string;
+  techniciansCount?: number;
+  averageRating?: number;
+}
 
 export default function TechnicalSkillsPage() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -147,30 +58,44 @@ export default function TechnicalSkillsPage() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [levelFilter, setLevelFilter] = useState('all');
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  const [selectedSkill, setSelectedSkill] = useState(null);
-  const [filteredData, setFilteredData] = useState(technicalSkillsData);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
+  const [skillsData, setSkillsData] = useState<Skill[]>([]);
+  const [filteredData, setFilteredData] = useState<Skill[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   
-  // Simulate fetching data from HR Skills module
-  useEffect(() => {
-    const fetchSkillsFromHR = async () => {
+  // Fetch skills from API
+  const fetchSkills = async () => {
+    try {
       setIsLoading(true);
-      try {
-        // Simulate API call to HR Skills module
-        // In real implementation, this would call /api/hr/skills?category=technical
-        setTimeout(() => {
-          setFilteredData(technicalSkillsData);
-          setIsLoading(false);
-        }, 1000);
-      } catch (error) {
-        console.error('Failed to fetch technical skills from HR Skills module:', error);
-        // Fallback to mock data
-        setFilteredData(technicalSkillsData);
-        setIsLoading(false);
+      setError(null);
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:5000/api/maintenance/technical-skills?pageSize=1000', {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch skills');
       }
-    };
-    
-    fetchSkillsFromHR();
+      
+      const data = await response.json();
+      setSkillsData(data.data || data || []);
+    } catch (error) {
+      console.error('Error fetching skills:', error);
+      setError('Failed to load skills. Please try again later.');
+      setSkillsData([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  useEffect(() => {
+    fetchSkills();
   }, []);
   
   // Form state
@@ -193,13 +118,13 @@ export default function TechnicalSkillsPage() {
   });
 
   useEffect(() => {
-    let filtered = technicalSkillsData;
+    let filtered = skillsData;
 
     if (searchTerm) {
       filtered = filtered.filter(item =>
         item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (item.description && item.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
         item.category.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
@@ -219,40 +144,82 @@ export default function TechnicalSkillsPage() {
     }
 
     setFilteredData(filtered);
-  }, [searchTerm, statusFilter, categoryFilter, levelFilter]);
+  }, [searchTerm, statusFilter, categoryFilter, levelFilter, skillsData]);
 
-  const handleCreate = () => {
-    console.log('Creating technical skill:', formData);
-    setIsCreateDialogOpen(false);
-    resetForm();
+  const handleCreate = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:5000/api/maintenance/technical-skills', {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(formData)
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to create skill');
+      }
+      
+      // Refresh the list
+      await fetchSkills();
+      setIsCreateDialogOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error('Error creating skill:', error);
+      setError('Failed to create skill. Please try again.');
+    }
   };
 
-  const handleEdit = (skill: any) => {
+  const handleEdit = (skill: Skill) => {
     setSelectedSkill(skill);
     setFormData({
       name: skill.name,
       code: skill.code,
-      description: skill.description,
+      description: skill.description || '',
       category: skill.category,
       skillLevel: skill.skillLevel,
       isActive: skill.isActive,
-      prerequisites: skill.prerequisites,
-      certifications: skill.certifications,
-      estimatedLearningHours: skill.estimatedLearningHours,
-      complexity: skill.complexity,
-      riskLevel: skill.riskLevel,
-      toolsRequired: skill.toolsRequired,
-      safetyRequirements: skill.safetyRequirements,
-      competencyAreas: skill.competencyAreas,
-      relatedMaintenanceTypes: skill.relatedMaintenanceTypes
+      prerequisites: skill.prerequisites || [],
+      certifications: skill.certifications || [],
+      estimatedLearningHours: skill.estimatedLearningHours || 40,
+      complexity: skill.complexity || 'Low',
+      riskLevel: skill.riskLevel || 'Low',
+      toolsRequired: skill.toolsRequired || [],
+      safetyRequirements: skill.safetyRequirements || '',
+      competencyAreas: skill.competencyAreas || [],
+      relatedMaintenanceTypes: skill.relatedMaintenanceTypes || []
     });
     setIsEditDialogOpen(true);
   };
 
-  const handleUpdate = () => {
-    console.log('Updating technical skill:', selectedSkill?.id, formData);
-    setIsEditDialogOpen(false);
-    resetForm();
+  const handleUpdate = async () => {
+    if (!selectedSkill?.id) return;
+    
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://localhost:5000/api/maintenance/technical-skills/${selectedSkill.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(formData)
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to update skill');
+      }
+      
+      // Refresh the list
+      await fetchSkills();
+      setIsEditDialogOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error('Error updating skill:', error);
+      setError('Failed to update skill. Please try again.');
+    }
   };
 
   const handleView = (skill: any) => {
@@ -260,8 +227,29 @@ export default function TechnicalSkillsPage() {
     setIsViewDialogOpen(true);
   };
 
-  const handleDelete = (id: number) => {
-    console.log('Deleting technical skill:', id);
+  const handleDelete = async (id: string | number) => {
+    if (!confirm('Are you sure you want to delete this skill?')) return;
+    
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://localhost:5000/api/maintenance/technical-skills/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to delete skill');
+      }
+      
+      // Refresh the list
+      await fetchSkills();
+    } catch (error) {
+      console.error('Error deleting skill:', error);
+      setError('Failed to delete skill. Please try again.');
+    }
   };
 
   const resetForm = () => {
@@ -321,9 +309,116 @@ export default function TechnicalSkillsPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Technical Skills</h1>
           <p className="text-muted-foreground">
-            View technician skills and competency requirements
+            Manage technician skills and competency requirements
           </p>
         </div>
+        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+          <DialogTrigger asChild>
+            <Button>
+              <Award className="mr-2 h-4 w-4" />
+              Add Skill
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle>Add Technical Skill</DialogTitle>
+              <DialogDescription>
+                Create a new technical skill for maintenance activities.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Skill Name</Label>
+                  <Input
+                    id="name"
+                    value={formData.name}
+                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    placeholder="e.g., Electrical Systems"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="code">Skill Code</Label>
+                  <Input
+                    id="code"
+                    value={formData.code}
+                    onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
+                    placeholder="e.g., ELEC-001"
+                  />
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="description">Description</Label>
+                <Textarea
+                  id="description"
+                  value={formData.description}
+                  onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  placeholder="Description of the skill..."
+                  rows={3}
+                />
+              </div>
+              
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="category">Category</Label>
+                  <Select value={formData.category} onValueChange={(value) => setFormData({...formData, category: value})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Electrical">Electrical</SelectItem>
+                      <SelectItem value="HVAC">HVAC</SelectItem>
+                      <SelectItem value="Plumbing">Plumbing</SelectItem>
+                      <SelectItem value="Mechanical">Mechanical</SelectItem>
+                      <SelectItem value="Automation">Automation</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="skillLevel">Skill Level</Label>
+                  <Select value={formData.skillLevel} onValueChange={(value) => setFormData({...formData, skillLevel: value})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select level" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Basic">Basic</SelectItem>
+                      <SelectItem value="Intermediate">Intermediate</SelectItem>
+                      <SelectItem value="Advanced">Advanced</SelectItem>
+                      <SelectItem value="Expert">Expert</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="hours">Learning Hours</Label>
+                  <Input
+                    id="hours"
+                    type="number"
+                    value={formData.estimatedLearningHours}
+                    onChange={(e) => setFormData({...formData, estimatedLearningHours: parseInt(e.target.value)})}
+                  />
+                </div>
+              </div>
+              
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="active"
+                  checked={formData.isActive}
+                  onCheckedChange={(checked) => setFormData({...formData, isActive: checked})}
+                />
+                <Label htmlFor="active">Active</Label>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleCreate}>
+                Create Skill
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
       
       {/* HR Skills Integration Notice */}
@@ -506,6 +601,13 @@ export default function TechnicalSkillsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {isLoading ? (
+            <div className="text-center py-4">Loading skills...</div>
+          ) : error ? (
+            <div className="text-center py-4 text-red-600">{error}</div>
+          ) : filteredData.length === 0 ? (
+            <div className="text-center py-4 text-muted-foreground">No skills found</div>
+          ) : (
           <div className="space-y-4">
             {filteredData.map((skill) => (
               <div key={skill.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
@@ -570,16 +672,128 @@ export default function TechnicalSkillsPage() {
                     <Button size="sm" variant="outline" onClick={() => handleView(skill)}>
                       <Eye className="h-4 w-4" />
                     </Button>
-                    <Button variant="outline" size="sm">
-                      <MoreHorizontal className="h-4 w-4" />
+                    <Button size="sm" variant="outline" onClick={() => handleEdit(skill)}>
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="text-red-600 hover:text-red-700"
+                      onClick={() => handleDelete(skill.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
               </div>
             ))}
           </div>
+          )}
         </CardContent>
       </Card>
+
+      {/* Edit Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Edit Technical Skill</DialogTitle>
+            <DialogDescription>
+              Update the technical skill information.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-name">Skill Name</Label>
+                <Input
+                  id="edit-name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({...formData, name: e.target.value})}
+                  placeholder="e.g., Electrical Systems"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-code">Skill Code</Label>
+                <Input
+                  id="edit-code"
+                  value={formData.code}
+                  onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
+                  placeholder="e.g., ELEC-001"
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="edit-description">Description</Label>
+              <Textarea
+                id="edit-description"
+                value={formData.description}
+                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                placeholder="Description of the skill..."
+                rows={3}
+              />
+            </div>
+            
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-category">Category</Label>
+                <Select value={formData.category} onValueChange={(value) => setFormData({...formData, category: value})}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Electrical">Electrical</SelectItem>
+                    <SelectItem value="HVAC">HVAC</SelectItem>
+                    <SelectItem value="Plumbing">Plumbing</SelectItem>
+                    <SelectItem value="Mechanical">Mechanical</SelectItem>
+                    <SelectItem value="Automation">Automation</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-skillLevel">Skill Level</Label>
+                <Select value={formData.skillLevel} onValueChange={(value) => setFormData({...formData, skillLevel: value})}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select level" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Basic">Basic</SelectItem>
+                    <SelectItem value="Intermediate">Intermediate</SelectItem>
+                    <SelectItem value="Advanced">Advanced</SelectItem>
+                    <SelectItem value="Expert">Expert</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-hours">Learning Hours</Label>
+                <Input
+                  id="edit-hours"
+                  type="number"
+                  value={formData.estimatedLearningHours}
+                  onChange={(e) => setFormData({...formData, estimatedLearningHours: parseInt(e.target.value)})}
+                />
+              </div>
+            </div>
+            
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="edit-active"
+                checked={formData.isActive}
+                onCheckedChange={(checked) => setFormData({...formData, isActive: checked})}
+              />
+              <Label htmlFor="edit-active">Active</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdate}>
+              Update Skill
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* View Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>

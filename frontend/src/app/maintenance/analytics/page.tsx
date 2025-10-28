@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -19,6 +19,7 @@ import {
   DollarSign,
   Clock
 } from 'lucide-react';
+import analyticsApiService, { AnalyticsData } from '@/services/analytics-api.service';
 
 // Analytics Components
 import {
@@ -53,6 +54,7 @@ interface DashboardState {
   activeTab: string;
   loading: boolean;
   error: string | null;
+  dataSource: 'backend' | 'mock';
 }
 
 interface MockAsset {
@@ -65,47 +67,13 @@ interface MockAsset {
 
 // #endregion
 
-// #region Mock Data (This would come from your API in real implementation)
-
-const mockAssets: MockAsset[] = [
-  { id: '1', name: 'Production Line A', type: 'Manufacturing', location: 'Factory Floor 1', department: 'Production' },
-  { id: '2', name: 'Packaging Machine B', type: 'Packaging', location: 'Factory Floor 2', department: 'Production' },
-  { id: '3', name: 'Quality Inspector C', type: 'Quality Control', location: 'QC Lab', department: 'Quality' },
-  { id: '4', name: 'Conveyor System D', type: 'Material Handling', location: 'Factory Floor 1', department: 'Logistics' },
-  { id: '5', name: 'HVAC System E', type: 'Environmental', location: 'Building A', department: 'Facilities' },
-];
-
-const mockPerformanceData = [
-  { date: '2024-01-01', oee: 85.2, availability: 92.1, performance: 88.3, quality: 97.8 },
-  { date: '2024-01-02', oee: 78.9, availability: 86.4, performance: 91.2, quality: 94.5 },
-  { date: '2024-01-03', oee: 82.1, availability: 89.7, performance: 87.9, quality: 96.2 },
-  { date: '2024-01-04', oee: 87.3, availability: 94.2, performance: 89.1, quality: 98.1 },
-  { date: '2024-01-05', oee: 83.8, availability: 90.3, performance: 88.7, quality: 95.8 },
-];
-
-const mockReliabilityData = [
-  { assetName: 'Production Line A', mtbf: 245, mttr: 4.2, availability: 92.1 },
-  { assetName: 'Packaging Machine B', mtbf: 189, mttr: 6.8, availability: 86.4 },
-  { assetName: 'Quality Inspector C', mtbf: 312, mttr: 3.1, availability: 97.2 },
-  { assetName: 'Conveyor System D', mtbf: 156, mttr: 8.9, availability: 78.3 },
-];
-
-const mockCostData = [
-  { category: 'Labor', cost: 45000, percentage: 35.2 },
-  { category: 'Parts & Materials', cost: 32000, percentage: 25.0 },
-  { category: 'Contracted Services', cost: 28000, percentage: 21.9 },
-  { category: 'Equipment', cost: 23000, percentage: 18.0 },
-];
-
-const mockEnergyData = [
-  { date: '2024-01-01', consumption: 1245, efficiency: 87.2, cost: 186.75 },
-  { date: '2024-01-02', consumption: 1189, efficiency: 89.1, cost: 178.35 },
-  { date: '2024-01-03', consumption: 1298, efficiency: 85.7, cost: 194.70 },
-  { date: '2024-01-04', consumption: 1156, efficiency: 91.3, cost: 173.40 },
-  { date: '2024-01-05', consumption: 1223, efficiency: 88.9, cost: 183.45 },
-];
-
-// #endregion
+interface AnalyticsData {
+  assets: MockAsset[];
+  performanceData: Array<{ date: string; oee: number; availability: number; performance: number; quality: number }>;
+  reliabilityData: Array<{ assetName: string; mtbf: number; mttr: number; availability: number }>;
+  costData: Array<{ category: string; cost: number; percentage: number }>;
+  energyData: Array<{ date: string; consumption: number; efficiency: number; cost: number }>;
+}
 
 // #region Default Filter State
 
@@ -136,18 +104,51 @@ export default function AssetAnalyticsDashboard() {
     selectedAssetId: '1',
     filters: defaultFilters,
     activeTab: 'overview',
-    loading: false,
+    loading: true,
     error: null,
+    dataSource: 'backend',
   });
 
-  // This would use the real hook in production
-  // const dashboardData = useAssetDashboardData(
-  //   dashboardState.selectedAssetId || '1',
-  //   {
-  //     startDate: dashboardState.filters.dateRange.startDate,
-  //     endDate: dashboardState.filters.dateRange.endDate,
-  //   }
-  // );
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
+
+  // Load analytics data on component mount (same pattern as job-cards page)
+  useEffect(() => {
+    const loadAnalyticsData = async () => {
+      setDashboardState(prev => ({ ...prev, loading: true, error: null }));
+      try {
+        console.log('🔄 Attempting to fetch analytics data from backend API...');
+        const data = await analyticsApiService.getAnalyticsData();
+        console.log('✅ Successfully received backend data:', data);
+        setAnalyticsData(data);
+        setDashboardState(prev => ({ ...prev, dataSource: 'backend' }));
+      } catch (error) {
+        console.error('❌ Analytics API call failed:', error);
+        console.log('⚠️ Using mock data due to API failure');
+        // Use mock data from service when API fails
+        const mockData = analyticsApiService.getMockAnalyticsData();
+        setAnalyticsData(mockData);
+        setDashboardState(prev => ({ ...prev, dataSource: 'mock' }));
+      } finally {
+        setDashboardState(prev => ({ ...prev, loading: false }));
+      }
+    };
+
+    loadAnalyticsData();
+  }, []);
+
+  // Provide fallback if data is still null
+  const displayData = analyticsData || analyticsApiService.getMockAnalyticsData();
+
+  // Dashboard data using React Query results
+  const dashboardData = {
+    assets: displayData.assets,
+    performanceData: displayData.performanceData,
+    reliabilityData: displayData.reliabilityData,
+    costData: displayData.costData,
+    energyData: displayData.energyData,
+    loading: dashboardState.loading,
+    error: dashboardState.error
+  };
 
   const handleFiltersChange = useCallback((newFilters: Partial<AnalyticsFilters>) => {
     setDashboardState(prev => ({
@@ -156,13 +157,20 @@ export default function AssetAnalyticsDashboard() {
     }));
   }, []);
 
-  const handleApplyFilters = useCallback(() => {
+  const handleApplyFilters = useCallback(async () => {
     setDashboardState(prev => ({ ...prev, loading: true }));
-    
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      const data = await analyticsApiService.getAnalyticsData();
+      setAnalyticsData(data);
+      setDashboardState(prev => ({ ...prev, dataSource: 'backend' }));
+    } catch (error) {
+      console.error('Failed to refresh analytics data:', error);
+      const mockData = analyticsApiService.getMockAnalyticsData();
+      setAnalyticsData(mockData);
+      setDashboardState(prev => ({ ...prev, dataSource: 'mock' }));
+    } finally {
       setDashboardState(prev => ({ ...prev, loading: false }));
-    }, 1000);
+    }
   }, []);
 
   const handleResetFilters = useCallback(() => {
@@ -209,6 +217,11 @@ export default function AssetAnalyticsDashboard() {
           <p className="text-muted-foreground">
             Comprehensive analysis of asset performance, reliability, and efficiency metrics
           </p>
+          <div className="mt-2">
+            <Badge variant={dashboardState.dataSource === 'backend' ? 'default' : 'destructive'}>
+              {dashboardState.dataSource === 'backend' ? '🔗 Backend Data' : '⚠️ Mock Data'}
+            </Badge>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm">
@@ -243,7 +256,7 @@ export default function AssetAnalyticsDashboard() {
         <div className="lg:col-span-1">
           <AnalyticsFilterPanel
             filters={dashboardState.filters}
-            availableAssets={mockAssets}
+            availableAssets={displayData.assets}
             onFiltersChange={handleFiltersChange}
             onApplyFilters={handleApplyFilters}
             onResetFilters={handleResetFilters}
@@ -309,7 +322,7 @@ export default function AssetAnalyticsDashboard() {
 
               {/* Performance Trends */}
               <PerformanceTrendChart
-                data={mockPerformanceData}
+                data={displayData.performanceData}
                 loading={dashboardState.loading}
                 error={dashboardState.error}
               />
@@ -363,7 +376,7 @@ export default function AssetAnalyticsDashboard() {
               </div>
               
               <PerformanceTrendChart
-                data={mockPerformanceData}
+                data={displayData.performanceData}
                 loading={dashboardState.loading}
                 error={dashboardState.error}
               />
@@ -393,7 +406,7 @@ export default function AssetAnalyticsDashboard() {
               </div>
 
               <ReliabilityMetricsChart
-                data={mockReliabilityData}
+                data={displayData.reliabilityData}
                 loading={dashboardState.loading}
                 error={dashboardState.error}
               />
@@ -402,7 +415,7 @@ export default function AssetAnalyticsDashboard() {
             {/* Cost Analysis Tab */}
             <TabsContent value="costs" className="space-y-6">
               <CostAnalysisChart
-                data={mockCostData}
+                data={displayData.costData}
                 totalCost={128000}
                 loading={dashboardState.loading}
                 error={dashboardState.error}
@@ -469,7 +482,7 @@ export default function AssetAnalyticsDashboard() {
               </div>
 
               <EnergyPerformanceChart
-                data={mockEnergyData}
+                data={displayData.energyData}
                 loading={dashboardState.loading}
                 error={dashboardState.error}
               />

@@ -26,6 +26,11 @@ public interface ICurrentUserService
     Guid? TenantId { get; }
 
     /// <summary>
+    /// Gets the current user's employee ID (if linked to an employee)
+    /// </summary>
+    Guid? EmployeeId { get; }
+
+    /// <summary>
     /// Checks if the current user is authenticated
     /// </summary>
     bool IsAuthenticated { get; }

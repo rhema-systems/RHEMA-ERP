@@ -1953,7 +1953,9 @@ public class MaintenanceAssetListDto
     public string Name { get; set; } = string.Empty;
     public string AssetNumber { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public Guid AssetCategoryId { get; set; }
     public string CategoryName { get; set; } = string.Empty;
+    public string? AssetType { get; set; }
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
     public string Status { get; set; } = string.Empty;
@@ -1963,6 +1965,10 @@ public class MaintenanceAssetListDto
     public int ActiveWorkOrdersCount { get; set; }
     public DateTime? LastMaintenanceDate { get; set; }
     public DateTime? NextMaintenanceDate { get; set; }
+    public DateTime? PurchaseDate { get; set; }
+    public DateTime? WarrantyEndDate { get; set; }
+    public DateTime? WarrantyStartDate { get; set; }
+    public string? SerialNumber { get; set; }
 }
 
 public class CreateMaintenanceAssetDto
@@ -2078,6 +2084,9 @@ public class MaintenanceAssetCategoryDto
     public bool IsActive { get; set; }
     public int AssetCount { get; set; }
     
+    // Asset Type Classification
+    public string? AssetType { get; set; }
+    
     // Parent-child relationship
     public Guid? ParentCategoryId { get; set; }
     public MaintenanceAssetCategoryDto? ParentCategory { get; set; }
@@ -2121,6 +2130,10 @@ public class CreateMaintenanceAssetCategoryDto
     public string? Icon { get; set; }
 
     public bool IsActive { get; set; } = true;
+    
+    // Asset Type Classification
+    [StringLength(50)]
+    public string? AssetType { get; set; }
     
     // Parent-child relationship
     public Guid? ParentCategoryId { get; set; }
@@ -2174,6 +2187,10 @@ public class UpdateMaintenanceAssetCategoryDto
 
     public bool IsActive { get; set; } = true;
     
+    // Asset Type Classification
+    [StringLength(50)]
+    public string? AssetType { get; set; }
+    
     // Parent-child relationship
     public Guid? ParentCategoryId { get; set; }
     
@@ -2216,6 +2233,7 @@ public class WorkOrderTypeFilterDto
     public string? Category { get; set; }
     public string? Priority { get; set; }
     public bool? IsActive { get; set; }
+    public bool? RequiresApproval { get; set; }
 }
 
 #endregion
@@ -2388,6 +2406,9 @@ public class CreateWorkOrderDto
 
     public Guid? ParentWorkOrderId { get; set; }
     public Guid? MaintenanceScheduleId { get; set; }
+    
+    // Custom field values (JSON serialized)
+    public Dictionary<string, object>? CustomFieldValues { get; set; }
 }
 
 public class UpdateWorkOrderDto
@@ -2429,6 +2450,22 @@ public class UpdateWorkOrderDto
     public bool RequiresPermit { get; set; }
     public bool RequiresLockout { get; set; }
     public bool RequiresConfinedSpaceEntry { get; set; }
+}
+
+public class UpdateWorkOrderStatusRequest
+{
+    [Required]
+    [StringLength(20)]
+    public string Status { get; set; } = string.Empty;
+    
+    [StringLength(1000)]
+    public string? Notes { get; set; }
+}
+
+public class ApproveWorkOrderRequest
+{
+    [StringLength(1000)]
+    public string? Notes { get; set; }
 }
 
 // Duplicate CompleteWorkOrderDto removed - using the more comprehensive version above

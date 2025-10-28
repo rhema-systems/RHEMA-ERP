@@ -31,85 +31,33 @@ import {
 import { cn } from '@/lib/utils';
 import { maintenanceDataService, Employee, Asset } from '@/services/maintenanceDataService';
 
-// Mock data for emergency maintenance
-const emergencyMaintenanceData = [
-  {
-    id: 1,
-    title: 'Power Outage - Building A',
-    assetId: 'ELEC-001',
-    assetName: 'Main Electrical Panel A',
-    location: 'Building A - Basement',
-    severity: 'Critical',
-    status: 'Active',
-    reportedBy: 'Sarah Johnson',
-    reportedAt: '2024-01-15T14:30:00Z',
-    assignedTechnician: 'Mike Wilson',
-    responseTime: '00:15:00',
-    estimatedResolution: '2024-01-15T18:00:00Z',
-    description: 'Complete power failure affecting entire Building A. Emergency generator activated.',
-    impact: 'All operations in Building A affected, 200+ people impacted',
-    priority: 'P1'
-  },
-  {
-    id: 2,
-    title: 'Water Leak - Floor 3',
-    assetId: 'PLUMB-002',
-    assetName: 'Main Water Line 3rd Floor',
-    location: 'Building B - 3rd Floor',
-    severity: 'High',
-    status: 'In Progress',
-    reportedBy: 'John Smith',
-    reportedAt: '2024-01-15T16:45:00Z',
-    assignedTechnician: 'Tom Davis',
-    responseTime: '00:08:00',
-    estimatedResolution: '2024-01-15T19:30:00Z',
-    description: 'Major water leak in ceiling affecting multiple offices',
-    impact: '15 offices affected, potential equipment damage',
-    priority: 'P2'
-  },
-  {
-    id: 3,
-    title: 'HVAC System Failure',
-    assetId: 'HVAC-003',
-    assetName: 'Central Air Unit C',
-    location: 'Building C - Roof',
-    severity: 'Medium',
-    status: 'Resolved',
-    reportedBy: 'Lisa Brown',
-    reportedAt: '2024-01-15T09:15:00Z',
-    assignedTechnician: 'Sarah Davis',
-    responseTime: '00:12:00',
-    estimatedResolution: '2024-01-15T15:00:00Z',
-    actualResolution: '2024-01-15T14:45:00Z',
-    description: 'Complete HVAC failure in Building C, no heating/cooling',
-    impact: '50 people affected, temperature control lost',
-    priority: 'P3'
-  },
-  {
-    id: 4,
-    title: 'Elevator Stuck',
-    assetId: 'ELEV-001',
-    assetName: 'Main Elevator A1',
-    location: 'Building A - Between Floors 5-6',
-    severity: 'High',
-    status: 'Active',
-    reportedBy: 'Emergency Call',
-    reportedAt: '2024-01-15T17:20:00Z',
-    assignedTechnician: 'John Smith',
-    responseTime: '00:03:00',
-    estimatedResolution: '2024-01-15T18:30:00Z',
-    description: 'Elevator stuck between floors with 4 people inside',
-    impact: '4 people trapped, emergency rescue required',
-    priority: 'P1'
-  }
-];
+interface EmergencyMaintenanceItem {
+  id: number;
+  title: string;
+  assetId: string;
+  assetName: string;
+  location: string;
+  severity: string;
+  status: string;
+  reportedBy: string;
+  reportedAt: string;
+  assignedTechnician: string;
+  responseTime: string;
+  estimatedResolution: string;
+  actualResolution?: string;
+  description: string;
+  impact: string;
+  priority: string;
+}
 
 export default function EmergencyMaintenancePage() {
+  const [emergencyMaintenanceData, setEmergencyMaintenanceData] = useState<EmergencyMaintenanceItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [filteredData, setFilteredData] = useState(emergencyMaintenanceData);
+  const [filteredData, setFilteredData] = useState<EmergencyMaintenanceItem[]>([]);
   
   // Data from services
   const [technicians, setTechnicians] = useState<Employee[]>([]);
@@ -132,18 +80,27 @@ export default function EmergencyMaintenancePage() {
   useEffect(() => {
     const loadData = async () => {
       setLoadingData(true);
+      setLoading(true);
       try {
-        const [techniciansList, assetsList] = await Promise.all([
+        const [techniciansList, assetsList, emergencyDataResponse] = await Promise.all([
           maintenanceDataService.getTechnicians(),
-          maintenanceDataService.getAssets()
+          maintenanceDataService.getAssets(),
+          fetch('/api/maintenance/emergency')
         ]);
         
         setTechnicians(techniciansList);
         setAssets(assetsList);
+        
+        if (emergencyDataResponse.ok) {
+          const emergencyData = await emergencyDataResponse.json();
+          setEmergencyMaintenanceData(emergencyData);
+        }
       } catch (error) {
         console.error('Error loading data:', error);
+        setEmergencyMaintenanceData([]);
       } finally {
         setLoadingData(false);
+        setLoading(false);
       }
     };
     

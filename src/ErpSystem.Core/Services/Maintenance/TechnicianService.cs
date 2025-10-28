@@ -74,9 +74,7 @@ public class TechnicianService : ITechnicianService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving all technicians");
-            
-            // Return mock data as fallback
-            return GetMockTechnicians();
+            throw;
         }
     }
 
@@ -133,21 +131,7 @@ public class TechnicianService : ITechnicianService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving paged technicians");
-            
-            // Return mock data as fallback
-            var mockTechnicians = GetMockTechnicians().ToList();
-            var mockItems = mockTechnicians
-                .Skip((filter.Page - 1) * filter.PageSize)
-                .Take(filter.PageSize)
-                .ToList();
-
-            return new PagedResult<TechnicianDto>
-            {
-                Items = mockItems,
-                TotalCount = mockTechnicians.Count,
-                Page = filter.Page,
-                PageSize = filter.PageSize
-            };
+            throw;
         }
     }
 
@@ -172,7 +156,7 @@ public class TechnicianService : ITechnicianService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving active technicians");
-            return GetMockTechnicians().Where(t => t.IsActive);
+            throw;
         }
     }
 
@@ -193,7 +177,7 @@ public class TechnicianService : ITechnicianService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving technicians for department: {Department}", department);
-            return GetMockTechnicians().Where(t => t.Department == department);
+            throw;
         }
     }
 
@@ -214,7 +198,7 @@ public class TechnicianService : ITechnicianService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving technicians for specialization: {Specialization}", specialization);
-            return GetMockTechnicians().Where(t => t.Specialization == specialization);
+            throw;
         }
     }
 
@@ -235,7 +219,7 @@ public class TechnicianService : ITechnicianService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving available technicians");
-            return GetMockTechnicians().Where(t => t.IsActive && t.CurrentWorkload < t.MaxWorkload);
+            throw;
         }
     }
 
@@ -298,7 +282,7 @@ public class TechnicianService : ITechnicianService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error synchronizing technicians from HR module");
-            return GetMockTechnicians();
+            throw;
         }
     }
 
@@ -314,10 +298,7 @@ public class TechnicianService : ITechnicianService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving technician from HR: {EmployeeId}", hrEmployeeId);
-            
-            // Return mock data as fallback
-            var mockTechnicians = GetMockTechnicians();
-            return mockTechnicians.FirstOrDefault(t => t.Id == hrEmployeeId);
+            return null;
         }
     }
 
@@ -386,29 +367,7 @@ public class TechnicianService : ITechnicianService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error generating technician analytics");
-            
-            // Return mock analytics
-            return new TechnicianAnalyticsDto
-            {
-                TotalTechnicians = 25,
-                ActiveTechnicians = 23,
-                TechniciansWithSkills = 20,
-                AverageSkillsPerTechnician = 3.5m,
-                DepartmentBreakdown = new Dictionary<string, int>
-                {
-                    {"Mechanical", 8},
-                    {"Electrical", 7},
-                    {"HVAC", 5},
-                    {"Plumbing", 3},
-                    {"General", 2}
-                },
-                SpecializationBreakdown = new Dictionary<string, int>
-                {
-                    {"Senior", 5},
-                    {"Intermediate", 12},
-                    {"Junior", 8}
-                }
-            };
+            throw;
         }
     }
 
@@ -476,78 +435,6 @@ public class TechnicianService : ITechnicianService
         };
     }
 
-    private IEnumerable<TechnicianDto> GetMockTechnicians()
-    {
-        return new List<TechnicianDto>
-        {
-            new TechnicianDto
-            {
-                Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
-                EmployeeId = Guid.Parse("A1111111-1111-1111-1111-111111111111"),
-                FirstName = "John",
-                LastName = "Smith",
-                FullName = "John Smith",
-                Email = "john.smith@company.com",
-                Phone = "555-0101",
-                Department = "Mechanical",
-                Position = "Senior Technician",
-                Specialization = "Pumps & Motors",
-                CertificationLevel = "Level 3",
-                ExperienceLevel = "Senior",
-                HireDate = DateTime.Parse("2020-01-15"),
-                IsActive = true,
-                CurrentWorkload = 85,
-                MaxWorkload = 100,
-                SkillsCount = 5,
-                AverageRating = 4.8m,
-                CompletedWorkOrders = 245
-            },
-            new TechnicianDto
-            {
-                Id = Guid.Parse("22222222-2222-2222-2222-222222222222"),
-                EmployeeId = Guid.Parse("A2222222-2222-2222-2222-222222222222"),
-                FirstName = "Sarah",
-                LastName = "Johnson",
-                FullName = "Sarah Johnson",
-                Email = "sarah.johnson@company.com",
-                Phone = "555-0102",
-                Department = "Electrical",
-                Position = "Maintenance Technician",
-                Specialization = "Control Systems",
-                CertificationLevel = "Level 2",
-                ExperienceLevel = "Intermediate",
-                HireDate = DateTime.Parse("2021-03-10"),
-                IsActive = true,
-                CurrentWorkload = 65,
-                MaxWorkload = 90,
-                SkillsCount = 3,
-                AverageRating = 4.5m,
-                CompletedWorkOrders = 156
-            },
-            new TechnicianDto
-            {
-                Id = Guid.Parse("33333333-3333-3333-3333-333333333333"),
-                EmployeeId = Guid.Parse("A3333333-3333-3333-3333-333333333333"),
-                FirstName = "Mike",
-                LastName = "Chen",
-                FullName = "Mike Chen",
-                Email = "mike.chen@company.com",
-                Phone = "555-0103",
-                Department = "HVAC",
-                Position = "HVAC Technician",
-                Specialization = "Climate Control",
-                CertificationLevel = "Level 2",
-                ExperienceLevel = "Intermediate",
-                HireDate = DateTime.Parse("2019-07-22"),
-                IsActive = true,
-                CurrentWorkload = 75,
-                MaxWorkload = 90,
-                SkillsCount = 4,
-                AverageRating = 4.3m,
-                CompletedWorkOrders = 189
-            }
-        };
-    }
 
     #endregion
 

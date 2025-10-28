@@ -142,43 +142,10 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
     
     public async Task<IEnumerable<Employee>> GetFromHRModuleAsync()
     {
-        // Mock data for HR module integration
-        var mockEmployees = new List<Employee>
-        {
-            new Employee
-            {
-                Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
-                FirstName = "John",
-                LastName = "Smith",
-                EmailAddress = "john.smith@company.com",
-                MobileNumber = "555-0101",
-                DepartmentId = Guid.Parse("33333333-3333-3333-3333-333333333333"), // Mock Department ID
-                PositionId = Guid.Parse("44444444-4444-4444-4444-444444444444"), // Mock Position ID
-                Specialization = "Pumps & Motors",
-                DateEmployed = DateOnly.Parse("2020-01-15"),
-                IsActive = true,
-                TenantId = Guid.Parse("00000000-0000-0000-0000-000000000001"),
-                CreatedAt = DateTime.UtcNow
-            },
-            new Employee
-            {
-                Id = Guid.Parse("22222222-2222-2222-2222-222222222222"),
-                FirstName = "Sarah",
-                LastName = "Johnson",
-                EmailAddress = "sarah.johnson@company.com",
-                MobileNumber = "555-0102",
-                DepartmentId = Guid.Parse("33333333-3333-3333-3333-333333333333"), // Mock Department ID
-                PositionId = Guid.Parse("55555555-5555-5555-5555-555555555555"), // Mock Position ID
-                Specialization = "Control Systems",
-                DateEmployed = DateOnly.Parse("2021-03-10"),
-                IsActive = true,
-                TenantId = Guid.Parse("00000000-0000-0000-0000-000000000001"),
-                CreatedAt = DateTime.UtcNow
-            }
-        };
-
-        await Task.Delay(100); // Simulate API call delay
-        return mockEmployees;
+        // TODO: Implement actual HR module integration
+        // For now, return empty collection until HR integration is implemented
+        await Task.CompletedTask;
+        return new List<Employee>();
     }
     
     public async Task<IEnumerable<Employee>> SyncFromHRAsync()

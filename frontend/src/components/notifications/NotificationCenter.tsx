@@ -30,7 +30,10 @@ import {
   DollarSign,
   Package,
   Settings,
-  RefreshCw
+  RefreshCw,
+  Wrench,
+  FileText,
+  Shield
 } from 'lucide-react'
 import { 
   DropdownMenu,
@@ -39,182 +42,89 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '../ui/dropdown-menu'
-
-interface Notification {
-  id: string
-  title: string
-  message: string
-  type: 'info' | 'success' | 'warning' | 'error'
-  category: 'system' | 'user' | 'tenant' | 'financial' | 'inventory'
-  priority: 'low' | 'medium' | 'high' | 'critical'
-  isRead: boolean
-  isStarred: boolean
-  timestamp: Date
-  actionUrl?: string
-  metadata?: {
-    userId?: string
-    tenantId?: string
-    relatedId?: string
-    [key: string]: any
-  }
-}
+import { 
+  Notification as NotificationModel,
+  notificationService
+} from '../../services/notificationService'
 
 const NotificationCenter: React.FC = () => {
-  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [notifications, setNotifications] = useState<NotificationModel[]>([])
+  const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedFilter, setSelectedFilter] = useState('all')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [showUnreadOnly, setShowUnreadOnly] = useState(false)
   const [isRealTimeEnabled, setIsRealTimeEnabled] = useState(true)
 
-  // Mock notifications data
+  // Load notifications from API
   useEffect(() => {
-    const mockNotifications: Notification[] = [
-      {
-        id: '1',
-        title: 'New User Registration',
-        message: 'John Smith has registered a new account and is awaiting approval.',
-        type: 'info',
-        category: 'user',
-        priority: 'medium',
-        isRead: false,
-        isStarred: true,
-        timestamp: new Date(Date.now() - 5 * 60 * 1000), // 5 minutes ago
-        actionUrl: '/administration/identity-management/users',
-        metadata: { userId: 'user_123' }
-      },
-      {
-        id: '2',
-        title: 'Payment Processed Successfully',
-        message: 'Payment of $2,500 from TechCorp Inc has been processed successfully.',
-        type: 'success',
-        category: 'financial',
-        priority: 'low',
-        isRead: false,
-        isStarred: false,
-        timestamp: new Date(Date.now() - 15 * 60 * 1000), // 15 minutes ago
-        metadata: { tenantId: 'tenant_456', amount: 2500 }
-      },
-      {
-        id: '3',
-        title: 'Low Inventory Alert',
-        message: 'Product "Premium Widget" is running low on stock (5 units remaining).',
-        type: 'warning',
-        category: 'inventory',
-        priority: 'high',
-        isRead: true,
-        isStarred: false,
-        timestamp: new Date(Date.now() - 30 * 60 * 1000), // 30 minutes ago
-        actionUrl: '/inventory/products',
-        metadata: { productId: 'product_789', stockLevel: 5 }
-      },
-      {
-        id: '4',
-        title: 'System Maintenance Completed',
-        message: 'Scheduled system maintenance has been completed successfully. All services are now operational.',
-        type: 'success',
-        category: 'system',
-        priority: 'low',
-        isRead: true,
-        isStarred: false,
-        timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-      },
-      {
-        id: '5',
-        title: 'Failed Login Attempts',
-        message: 'Multiple failed login attempts detected from IP 192.168.1.100.',
-        type: 'error',
-        category: 'system',
-        priority: 'critical',
-        isRead: false,
-        isStarred: true,
-        timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000), // 3 hours ago
-        metadata: { ipAddress: '192.168.1.100', attemptCount: 5 }
-      },
-      {
-        id: '6',
-        title: 'New Tenant Created',
-        message: 'Tenant "StartupXYZ" has been successfully created and activated.',
-        type: 'info',
-        category: 'tenant',
-        priority: 'medium',
-        isRead: true,
-        isStarred: false,
-        timestamp: new Date(Date.now() - 4 * 60 * 60 * 1000), // 4 hours ago
-        actionUrl: '/administration/tenant-management',
-        metadata: { tenantId: 'tenant_999' }
-      }
-    ]
-    
-    setNotifications(mockNotifications)
+    loadNotifications()
   }, [])
 
-  // Simulated real-time updates
+  // Setup real-time notifications
   useEffect(() => {
-    if (!isRealTimeEnabled) return
+    if (!isRealTimeEnabled) {
+      notificationService.disconnectFromRealTimeNotifications()
+      return
+    }
 
-    const interval = setInterval(() => {
-      // Simulate receiving new notifications
-      if (Math.random() < 0.3) { // 30% chance every 10 seconds
-        const newNotification: Notification = {
-          id: `notification_${Date.now()}`,
-          title: 'Real-time Update',
-          message: 'This is a simulated real-time notification.',
-          type: ['info', 'success', 'warning'][Math.floor(Math.random() * 3)] as any,
-          category: ['system', 'user', 'tenant'][Math.floor(Math.random() * 3)] as any,
-          priority: 'medium',
-          isRead: false,
-          isStarred: false,
-          timestamp: new Date()
-        }
-        
-        setNotifications(prev => [newNotification, ...prev])
+    notificationService.connectToRealTimeNotifications()
+    
+    const unsubscribe = notificationService.onNotification((notification) => {
+      setNotifications(prev => [notification, ...prev])
+      
+      // Show browser notification if permission granted
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new window.Notification(notification.title, {
+          body: notification.message,
+          icon: '/favicon.ico'
+        })
       }
-    }, 10000) // Every 10 seconds
+    })
 
-    return () => clearInterval(interval)
+    return () => {
+      unsubscribe()
+      notificationService.disconnectFromRealTimeNotifications()
+    }
   }, [isRealTimeEnabled])
+
+  const loadNotifications = async () => {
+    setLoading(true)
+    try {
+      const result = await notificationService.getNotifications({
+        page: 1,
+        pageSize: 50
+      })
+      setNotifications(result.items)
+    } catch (error) {
+      console.error('Failed to load notifications:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const getTypeIcon = (type: string) => {
     switch (type) {
-      case 'success': return <CheckCircle className="h-4 w-4 text-green-600" />
-      case 'warning': return <AlertCircle className="h-4 w-4 text-yellow-600" />
-      case 'error': return <XCircle className="h-4 w-4 text-red-600" />
+      case 'Success': return <CheckCircle className="h-4 w-4 text-green-600" />
+      case 'Warning': return <AlertCircle className="h-4 w-4 text-yellow-600" />
+      case 'Error': return <XCircle className="h-4 w-4 text-red-600" />
       default: return <Info className="h-4 w-4 text-blue-600" />
     }
   }
 
   const getCategoryIcon = (category: string) => {
     switch (category) {
-      case 'user': return <Users className="h-4 w-4" />
-      case 'tenant': return <Building className="h-4 w-4" />
-      case 'financial': return <DollarSign className="h-4 w-4" />
-      case 'inventory': return <Package className="h-4 w-4" />
+      case 'JobCard': return <FileText className="h-4 w-4" />
+      case 'WorkOrder': return <Wrench className="h-4 w-4" />
+      case 'Quality': return <Shield className="h-4 w-4" />
+      case 'Asset': return <Package className="h-4 w-4" />
+      case 'System': return <Settings className="h-4 w-4" />
       default: return <Settings className="h-4 w-4" />
     }
   }
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'critical': return 'bg-red-100 text-red-800'
-      case 'high': return 'bg-orange-100 text-orange-800'
-      case 'medium': return 'bg-yellow-100 text-yellow-800'
-      default: return 'bg-gray-100 text-gray-800'
-    }
-  }
-
-  const formatTimeAgo = (date: Date) => {
-    const now = new Date()
-    const diff = now.getTime() - date.getTime()
-    
-    const minutes = Math.floor(diff / (1000 * 60))
-    const hours = Math.floor(diff / (1000 * 60 * 60))
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-    
-    if (days > 0) return `${days}d ago`
-    if (hours > 0) return `${hours}h ago`
-    if (minutes > 0) return `${minutes}m ago`
-    return 'Just now'
+  const formatTimeAgo = (dateString: string) => {
+    return notificationService.formatNotificationTime(dateString)
   }
 
   const filteredNotifications = notifications.filter(notification => {
@@ -228,34 +138,41 @@ const NotificationCenter: React.FC = () => {
     return matchesSearch && matchesFilter && matchesCategory && matchesUnread
   })
 
-  const markAsRead = (id: string) => {
-    setNotifications(prev => prev.map(n => 
-      n.id === id ? { ...n, isRead: true } : n
-    ))
+  const markAsRead = async (id: string) => {
+    try {
+      await notificationService.markAsRead(id)
+      setNotifications(prev => prev.map(n => 
+        n.id === id ? { ...n, isRead: true } : n
+      ))
+    } catch (error) {
+      console.error('Failed to mark as read:', error)
+    }
   }
 
-  const markAsUnread = (id: string) => {
-    setNotifications(prev => prev.map(n => 
-      n.id === id ? { ...n, isRead: false } : n
-    ))
+  const deleteNotification = async (id: string) => {
+    try {
+      await notificationService.deleteNotification(id)
+      setNotifications(prev => prev.filter(n => n.id !== id))
+    } catch (error) {
+      console.error('Failed to delete notification:', error)
+    }
   }
 
-  const toggleStar = (id: string) => {
-    setNotifications(prev => prev.map(n => 
-      n.id === id ? { ...n, isStarred: !n.isStarred } : n
-    ))
-  }
-
-  const deleteNotification = (id: string) => {
-    setNotifications(prev => prev.filter(n => n.id !== id))
-  }
-
-  const markAllAsRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })))
+  const markAllAsRead = async () => {
+    try {
+      await notificationService.markAllAsRead()
+      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })))
+    } catch (error) {
+      console.error('Failed to mark all as read:', error)
+    }
   }
 
   const clearAllRead = () => {
     setNotifications(prev => prev.filter(n => !n.isRead))
+  }
+
+  const refreshNotifications = () => {
+    loadNotifications()
   }
 
   const unreadCount = notifications.filter(n => !n.isRead).length
@@ -299,7 +216,7 @@ const NotificationCenter: React.FC = () => {
                 Clear Read
               </Button>
               
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={refreshNotifications}>
                 <RefreshCw className="h-4 w-4" />
               </Button>
             </div>
@@ -326,10 +243,10 @@ const NotificationCenter: React.FC = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="info">Info</SelectItem>
-                <SelectItem value="success">Success</SelectItem>
-                <SelectItem value="warning">Warning</SelectItem>
-                <SelectItem value="error">Error</SelectItem>
+                <SelectItem value="Info">Info</SelectItem>
+                <SelectItem value="Success">Success</SelectItem>
+                <SelectItem value="Warning">Warning</SelectItem>
+                <SelectItem value="Error">Error</SelectItem>
               </SelectContent>
             </Select>
             
@@ -340,11 +257,11 @@ const NotificationCenter: React.FC = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
-                <SelectItem value="system">System</SelectItem>
-                <SelectItem value="user">User</SelectItem>
-                <SelectItem value="tenant">Tenant</SelectItem>
-                <SelectItem value="financial">Financial</SelectItem>
-                <SelectItem value="inventory">Inventory</SelectItem>
+                <SelectItem value="JobCard">Job Cards</SelectItem>
+                <SelectItem value="WorkOrder">Work Orders</SelectItem>
+                <SelectItem value="Quality">Quality Control</SelectItem>
+                <SelectItem value="Asset">Assets</SelectItem>
+                <SelectItem value="System">System</SelectItem>
               </SelectContent>
             </Select>
             
@@ -363,7 +280,14 @@ const NotificationCenter: React.FC = () => {
 
       {/* Notifications List */}
       <div className="space-y-3">
-        {filteredNotifications.length === 0 ? (
+        {loading ? (
+          <Card>
+            <CardContent className="p-8 text-center">
+              <RefreshCw className="h-8 w-8 text-muted-foreground mx-auto mb-4 animate-spin" />
+              <p className="text-muted-foreground">Loading notifications...</p>
+            </CardContent>
+          </Card>
+        ) : filteredNotifications.length === 0 ? (
           <Card>
             <CardContent className="p-8 text-center">
               <Bell className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -399,14 +323,14 @@ const NotificationCenter: React.FC = () => {
                             {notification.title}
                           </h4>
                           
-                          {/* Badges */}
-                          <Badge variant="outline" className={getPriorityColor(notification.priority)}>
-                            {notification.priority}
+                          {/* Type Badge */}
+                          <Badge variant="outline" className={`${notificationService.getNotificationColor(notification.type)}`}>
+                            {notification.type}
                           </Badge>
                           
                           <div className="flex items-center gap-1 text-muted-foreground">
                             {getCategoryIcon(notification.category)}
-                            <span className="text-xs capitalize">{notification.category}</span>
+                            <span className="text-xs">{notification.category}</span>
                           </div>
                         </div>
                         
@@ -417,7 +341,7 @@ const NotificationCenter: React.FC = () => {
                         <div className="flex items-center gap-4 text-xs text-muted-foreground">
                           <div className="flex items-center gap-1">
                             <Clock className="h-3 w-3" />
-                            {formatTimeAgo(notification.timestamp)}
+                            {formatTimeAgo(notification.createdAt)}
                           </div>
                           
                           {notification.actionUrl && (
@@ -427,8 +351,7 @@ const NotificationCenter: React.FC = () => {
                               className="h-auto p-0 text-xs"
                               onClick={() => {
                                 markAsRead(notification.id)
-                                // TODO: Navigate to action URL
-                                console.log('Navigate to:', notification.actionUrl)
+                                window.location.href = notification.actionUrl || ''
                               }}
                             >
                               View Details →
@@ -439,63 +362,28 @@ const NotificationCenter: React.FC = () => {
                       
                       {/* Actions */}
                       <div className="flex items-center gap-2">
-                        {/* Star */}
+                        {/* Mark as Read */}
+                        {!notification.isRead && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => markAsRead(notification.id)}
+                            title="Mark as read"
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                        )}
+                        
+                        {/* Delete */}
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => toggleStar(notification.id)}
+                          onClick={() => deleteNotification(notification.id)}
+                          className="text-red-600 hover:text-red-800"
+                          title="Delete notification"
                         >
-                          {notification.isStarred ? (
-                            <Star className="h-4 w-4 fill-current text-yellow-500" />
-                          ) : (
-                            <StarOff className="h-4 w-4" />
-                          )}
+                          <X className="h-4 w-4" />
                         </Button>
-                        
-                        {/* Read/Unread */}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => notification.isRead 
-                            ? markAsUnread(notification.id) 
-                            : markAsRead(notification.id)
-                          }
-                        >
-                          {notification.isRead ? (
-                            <EyeOff className="h-4 w-4" />
-                          ) : (
-                            <Eye className="h-4 w-4" />
-                          )}
-                        </Button>
-                        
-                        {/* More Actions */}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => notification.isRead 
-                                ? markAsUnread(notification.id) 
-                                : markAsRead(notification.id)
-                              }
-                            >
-                              {notification.isRead ? 'Mark as Unread' : 'Mark as Read'}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => toggleStar(notification.id)}>
-                              {notification.isStarred ? 'Remove Star' : 'Add Star'}
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem 
-                              onClick={() => deleteNotification(notification.id)}
-                              className="text-red-600"
-                            >
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
                       </div>
                     </div>
                   </div>

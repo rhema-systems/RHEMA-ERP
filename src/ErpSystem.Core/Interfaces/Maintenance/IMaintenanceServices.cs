@@ -63,6 +63,201 @@ public interface IAssetTypeService
 
 #endregion
 
+#region Task Template Management Service
+
+public interface ITaskTemplateService
+{
+    // Get task templates for work order generation
+    Task<IEnumerable<WorkOrderTaskDto>> GetTaskTemplatesForWorkOrderAsync(Guid assetId, Guid maintenanceTypeId);
+    
+    // Manage asset-specific task templates
+    Task<IEnumerable<AssetTaskTemplateDto>> GetAssetTaskTemplatesAsync(Guid assetId);
+    Task<AssetTaskTemplateDto> CreateAssetTaskTemplateAsync(CreateAssetTaskTemplateDto createDto);
+    Task<AssetTaskTemplateDto> UpdateAssetTaskTemplateAsync(Guid id, UpdateAssetTaskTemplateDto updateDto);
+    Task DeleteAssetTaskTemplateAsync(Guid id);
+    
+    // Manage asset type task templates
+    Task<IEnumerable<AssetTypeTaskTemplateDto>> GetAssetTypeTaskTemplatesAsync(Guid assetTypeId);
+    Task<AssetTypeTaskTemplateDto> CreateAssetTypeTaskTemplateAsync(CreateAssetTypeTaskTemplateDto createDto);
+    Task<AssetTypeTaskTemplateDto> UpdateAssetTypeTaskTemplateAsync(Guid id, UpdateAssetTypeTaskTemplateDto updateDto);
+    Task DeleteAssetTypeTaskTemplateAsync(Guid id);
+    
+    // Manage maintenance type task templates (system defaults)
+    Task<IEnumerable<MaintenanceTaskTemplateDto>> GetMaintenanceTaskTemplatesAsync(Guid maintenanceTypeId);
+    Task<MaintenanceTaskTemplateDto> CreateMaintenanceTaskTemplateAsync(CreateMaintenanceTaskTemplateDto createDto);
+    Task<MaintenanceTaskTemplateDto> UpdateMaintenanceTaskTemplateAsync(Guid id, UpdateMaintenanceTaskTemplateDto updateDto);
+    Task DeleteMaintenanceTaskTemplateAsync(Guid id);
+}
+
+// DTOs for task templates
+public class AssetTaskTemplateDto
+{
+    public Guid Id { get; set; }
+    public Guid AssetId { get; set; }
+    public string AssetName { get; set; } = string.Empty;
+    public Guid MaintenanceTypeId { get; set; }
+    public string MaintenanceTypeName { get; set; } = string.Empty;
+    public string TaskName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int Sequence { get; set; }
+    public double EstimatedHours { get; set; }
+    public bool IsRequired { get; set; }
+    public string? Instructions { get; set; }
+    public string? SafetyRequirements { get; set; }
+    public string? RequiredTools { get; set; }
+    public string? RequiredParts { get; set; }
+    public bool IsActive { get; set; }
+    public Guid? AssignedTechnicianId { get; set; }
+    public string? AssignedTechnicianName { get; set; }
+}
+
+public class CreateAssetTaskTemplateDto
+{
+    public Guid AssetId { get; set; }
+    public Guid MaintenanceTypeId { get; set; }
+    public string TaskName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int Sequence { get; set; }
+    public double EstimatedHours { get; set; }
+    public bool IsRequired { get; set; } = true;
+    public string? Instructions { get; set; }
+    public string? SafetyRequirements { get; set; }
+    public string? RequiredTools { get; set; }
+    public string? RequiredParts { get; set; }
+    public bool IsActive { get; set; } = true;
+    public Guid? AssignedTechnicianId { get; set; }
+}
+
+public class UpdateAssetTaskTemplateDto
+{
+    public string TaskName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int Sequence { get; set; }
+    public double EstimatedHours { get; set; }
+    public bool IsRequired { get; set; }
+    public string? Instructions { get; set; }
+    public string? SafetyRequirements { get; set; }
+    public string? RequiredTools { get; set; }
+    public string? RequiredParts { get; set; }
+    public bool IsActive { get; set; }
+    public Guid? AssignedTechnicianId { get; set; }
+}
+
+public class AssetTypeTaskTemplateDto
+{
+    public Guid Id { get; set; }
+    public Guid AssetTypeId { get; set; }
+    public string AssetTypeName { get; set; } = string.Empty;
+    public Guid MaintenanceTypeId { get; set; }
+    public string MaintenanceTypeName { get; set; } = string.Empty;
+    public string TaskName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int Sequence { get; set; }
+    public double EstimatedHours { get; set; }
+    public bool IsRequired { get; set; }
+    public string? Instructions { get; set; }
+    public string? SafetyRequirements { get; set; }
+    public string? RequiredTools { get; set; }
+    public string? RequiredParts { get; set; }
+    public bool IsActive { get; set; }
+    public Guid? AssignedTechnicianId { get; set; }
+    public string? AssignedTechnicianName { get; set; }
+}
+
+public class CreateAssetTypeTaskTemplateDto
+{
+    public Guid AssetTypeId { get; set; }
+    public Guid MaintenanceTypeId { get; set; }
+    public string TaskName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int Sequence { get; set; }
+    public double EstimatedHours { get; set; }
+    public bool IsRequired { get; set; } = true;
+    public string? Instructions { get; set; }
+    public string? SafetyRequirements { get; set; }
+    public string? RequiredTools { get; set; }
+    public string? RequiredParts { get; set; }
+    public bool IsActive { get; set; } = true;
+    public Guid? AssignedTechnicianId { get; set; }
+}
+
+public class UpdateAssetTypeTaskTemplateDto
+{
+    public string TaskName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int Sequence { get; set; }
+    public double EstimatedHours { get; set; }
+    public bool IsRequired { get; set; }
+    public string? Instructions { get; set; }
+    public string? SafetyRequirements { get; set; }
+    public string? RequiredTools { get; set; }
+    public string? RequiredParts { get; set; }
+    public bool IsActive { get; set; }
+    public Guid? AssignedTechnicianId { get; set; }
+}
+
+public class MaintenanceTaskTemplateDto
+{
+    public Guid Id { get; set; }
+    public Guid MaintenanceTypeId { get; set; }
+    public string MaintenanceTypeName { get; set; } = string.Empty;
+    public string TaskName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int Sequence { get; set; }
+    public double EstimatedHours { get; set; }
+    public bool IsRequired { get; set; }
+    public string? Instructions { get; set; }
+    public string? SafetyRequirements { get; set; }
+    public bool IsActive { get; set; }
+    public Guid? AssignedTechnicianId { get; set; }
+    public string? AssignedTechnicianName { get; set; }
+}
+
+public class CreateMaintenanceTaskTemplateDto
+{
+    public Guid MaintenanceTypeId { get; set; }
+    public string TaskName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int Sequence { get; set; }
+    public double EstimatedHours { get; set; }
+    public bool IsRequired { get; set; } = true;
+    public string? Instructions { get; set; }
+    public string? SafetyRequirements { get; set; }
+    public bool IsActive { get; set; } = true;
+    public Guid? AssignedTechnicianId { get; set; }
+}
+
+public class UpdateMaintenanceTaskTemplateDto
+{
+    public string TaskName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int Sequence { get; set; }
+    public double EstimatedHours { get; set; }
+    public bool IsRequired { get; set; }
+    public string? Instructions { get; set; }
+    public string? SafetyRequirements { get; set; }
+    public bool IsActive { get; set; }
+    public Guid? AssignedTechnicianId { get; set; }
+}
+
+// DTO to represent tasks for work order generation
+public class WorkOrderTaskDto
+{
+    public string TaskName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int Sequence { get; set; }
+    public double EstimatedHours { get; set; }
+    public bool IsRequired { get; set; }
+    public string? Instructions { get; set; }
+    public string? SafetyRequirements { get; set; }
+    public string? RequiredTools { get; set; }
+    public string? RequiredParts { get; set; }
+    public string Source { get; set; } = string.Empty; // "Asset", "AssetType", or "MaintenanceType"
+    public Guid? AssignedTechnicianId { get; set; } // Technician assigned to this task from template
+}
+
+#endregion
+
 #region Priority Level Services
 
 public interface IPriorityLevelService

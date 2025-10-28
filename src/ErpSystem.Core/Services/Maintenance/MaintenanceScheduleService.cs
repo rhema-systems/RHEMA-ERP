@@ -2,6 +2,8 @@ using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
@@ -15,24 +17,39 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
     private readonly IMaintenanceScheduleRepository _scheduleRepository;
     private readonly IWorkOrderService _workOrderService;
     private readonly IMaintenanceTypeRepository _maintenanceTypeRepository;
+    private readonly IWorkOrderTypeRepository _workOrderTypeRepository;
+    private readonly IPriorityLevelRepository _priorityLevelRepository;
     private readonly IMaintenanceAssetService _assetService;
+    private readonly IEmployeeService _employeeService;
+    private readonly IAuditLogService _auditLogService;
     private readonly ILogger<MaintenanceScheduleService> _logger;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IUnitOfWork _unitOfWork;
 
     public MaintenanceScheduleService(
         IMaintenanceScheduleRepository scheduleRepository,
         IWorkOrderService workOrderService,
         IMaintenanceTypeRepository maintenanceTypeRepository,
+        IWorkOrderTypeRepository workOrderTypeRepository,
+        IPriorityLevelRepository priorityLevelRepository,
         IMaintenanceAssetService assetService,
+        IEmployeeService employeeService,
+        IAuditLogService auditLogService,
         ILogger<MaintenanceScheduleService> logger,
-        ICurrentUserProvider currentUserProvider)
+        ICurrentUserProvider currentUserProvider,
+        IUnitOfWork unitOfWork)
     {
         _scheduleRepository = scheduleRepository;
         _workOrderService = workOrderService;
         _maintenanceTypeRepository = maintenanceTypeRepository;
+        _workOrderTypeRepository = workOrderTypeRepository;
+        _priorityLevelRepository = priorityLevelRepository;
         _assetService = assetService;
+        _employeeService = employeeService;
+        _auditLogService = auditLogService;
         _logger = logger;
         _currentUserProvider = currentUserProvider;
+        _unitOfWork = unitOfWork;
     }
 
     #region CRUD Operations
@@ -44,7 +61,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             _logger.LogInformation("Creating maintenance schedule: {ScheduleName}", createDto.Name);
 
             // Validate code uniqueness
-            if (await _scheduleRepository.IsCodeUniqueAsync(createDto.Code))
+            if (!await _scheduleRepository.IsCodeUniqueAsync(createDto.Code))
                 throw new ArgumentException($"Schedule code '{createDto.Code}' already exists");
 
             // Validate asset and maintenance type exist
@@ -87,6 +104,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             };
 
             await _scheduleRepository.AddAsync(schedule);
+            await _unitOfWork.SaveChangesAsync(); // Commit to database
             
             _logger.LogInformation("Created maintenance schedule {ScheduleId} successfully", schedule.Id);
             
@@ -135,6 +153,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             schedule.LastModifiedById = _currentUserProvider.UserId;
 
             await _scheduleRepository.UpdateAsync(schedule);
+            await _unitOfWork.SaveChangesAsync();
             
             _logger.LogInformation("Updated maintenance schedule {ScheduleId} successfully", id);
             
@@ -158,6 +177,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
                 throw new ArgumentException($"Schedule with ID {id} not found");
 
             await _scheduleRepository.DeleteAsync(id);
+            await _unitOfWork.SaveChangesAsync();
             
             _logger.LogInformation("Deleted maintenance schedule {ScheduleId} successfully", id);
         }
@@ -347,6 +367,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
         schedule.LastModifiedById = _currentUserProvider.UserId;
         
         await _scheduleRepository.UpdateAsync(schedule);
+        await _unitOfWork.SaveChangesAsync();
         
         return await MapToDto(schedule);
     }
@@ -398,13 +419,28 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
         if (schedule == null)
             throw new ArgumentException($"Schedule with ID {scheduleId} not found");
 
+        // Get or create a default "Scheduled" work order type
+        var workOrderTypes = await _workOrderTypeRepository.GetAllAsync();
+        var scheduledWorkOrderType = workOrderTypes.FirstOrDefault(wot => wot.Name.Contains("Scheduled") || wot.Code == "SCH")
+            ?? workOrderTypes.FirstOrDefault(wot => wot.IsActive)
+            ?? throw new InvalidOperationException("No active work order types found");
+
+        // Get priority level based on priority string
+        var priorityLevels = await _priorityLevelRepository.GetAllAsync();
+        var priorityLevel = priorityLevels.FirstOrDefault(p => p.Name.Equals(schedule.Priority, StringComparison.OrdinalIgnoreCase))
+            ?? priorityLevels.FirstOrDefault(p => p.Name.Equals("Medium", StringComparison.OrdinalIgnoreCase))
+            ?? priorityLevels.FirstOrDefault(p => p.IsActive)
+            ?? throw new InvalidOperationException("No active priority levels found");
+
         // Create work order from schedule
         var createWorkOrder = new CreateWorkOrderDto
         {
             Title = $"{schedule.Name} - Scheduled Maintenance",
             Description = schedule.Description,
             AssetId = schedule.AssetId,
+            WorkOrderTypeId = scheduledWorkOrderType.Id,
             MaintenanceTypeId = schedule.MaintenanceTypeId,
+            PriorityLevelId = priorityLevel.Id,
             Priority = schedule.Priority,
             EstimatedHours = (double)schedule.EstimatedHours,
             AssignedTechnicianId = schedule.AssignedTechnicianId,
@@ -418,7 +454,75 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
 
         var workOrder = await _workOrderService.CreateWorkOrderAsync(createWorkOrder);
         
-        _logger.LogInformation("Generated work order {WorkOrderId} from schedule {ScheduleId}", 
+        // Update the schedule's next due date based on frequency
+        await UpdateNextDueDateAsync(scheduleId);
+        
+        // Update tracking fields to record that work order was generated
+        var updatedSchedule = await _scheduleRepository.GetByIdAsync(scheduleId);
+        if (updatedSchedule != null)
+        {
+            updatedSchedule.LastGeneratedDate = DateTime.UtcNow;
+            updatedSchedule.LastProcessedDate = DateTime.UtcNow;
+            await _scheduleRepository.UpdateAsync(updatedSchedule);
+            await _unitOfWork.SaveChangesAsync();
+        }
+        
+        // Create maintenance schedule history record
+        try 
+        {
+            var scheduleHistory = new MaintenanceScheduleHistory
+            {
+                Id = Guid.NewGuid(),
+                ScheduleId = scheduleId,
+                ChangeType = "WorkOrderGenerated",
+                PreviousValues = JsonSerializer.Serialize(new { 
+                    NextDueDate = schedule.NextDueDate, 
+                    LastGeneratedDate = schedule.LastGeneratedDate 
+                }),
+                NewValues = JsonSerializer.Serialize(new { 
+                    WorkOrderId = workOrder.Id,
+                    WorkOrderTitle = workOrder.Title,
+                    NextDueDate = updatedSchedule?.NextDueDate,
+                    LastGeneratedDate = DateTime.UtcNow
+                }),
+                ChangeReason = $"Work order {workOrder.Id} generated from scheduled maintenance",
+                ChangedById = _currentUserProvider.IsAuthenticated ? _currentUserProvider.UserId : Guid.Empty,
+                TenantId = _currentUserProvider.IsAuthenticated ? _currentUserProvider.TenantId : Guid.Empty,
+                CreatedAt = DateTime.UtcNow
+            };
+            
+            await _unitOfWork.Repository<MaintenanceScheduleHistory>().AddAsync(scheduleHistory);
+            await _unitOfWork.SaveChangesAsync();
+        }
+        catch (Exception historyEx)
+        {
+            _logger.LogWarning(historyEx, "Failed to create schedule history record for work order generation from schedule {ScheduleId}", scheduleId);
+        }
+        
+        // Create audit log entry
+        try 
+        {
+            await _auditLogService.LogUserActionAsync(
+                userId: _currentUserProvider.IsAuthenticated ? _currentUserProvider.UserId : Guid.Empty,
+                username: _currentUserProvider.Username ?? "System",
+                action: "Generate Work Order",
+                resource: "Maintenance Schedule",
+                resourceId: scheduleId.ToString(),
+                oldValues: new { NextDueDate = schedule.NextDueDate, LastGeneratedDate = schedule.LastGeneratedDate },
+                newValues: new { 
+                    WorkOrderId = workOrder.Id,
+                    WorkOrderTitle = workOrder.Title,
+                    NextDueDate = updatedSchedule?.NextDueDate,
+                    LastGeneratedDate = DateTime.UtcNow
+                }
+            );
+        }
+        catch (Exception auditEx)
+        {
+            _logger.LogWarning(auditEx, "Failed to create audit log for work order generation from schedule {ScheduleId}", scheduleId);
+        }
+        
+        _logger.LogInformation("Generated work order {WorkOrderId} from schedule {ScheduleId} and updated next due date", 
             workOrder.Id, scheduleId);
 
         return workOrder;
@@ -432,6 +536,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
 
         var nextDueDate = await CalculateNextDueDateAsync(await MapToDto(schedule));
         await _scheduleRepository.UpdateNextDueDateAsync(scheduleId, nextDueDate);
+        await _unitOfWork.SaveChangesAsync();
     }
 
     public async Task<DateTime> CalculateNextDueDateAsync(MaintenanceScheduleDto schedule)
@@ -514,6 +619,41 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
 
     private async Task<MaintenanceScheduleDto> MapToDto(MaintenanceSchedule schedule)
     {
+        // Resolve maintenance type name
+        var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(schedule.MaintenanceTypeId);
+        var maintenanceTypeName = maintenanceType?.Name ?? "Unknown Type";
+        
+        // Resolve asset name
+        var asset = await _assetService.GetAssetByIdAsync(schedule.AssetId);
+        var assetName = asset?.Name ?? "Unknown Asset";
+        
+        // Resolve technician name if assigned
+        var technicianName = "Unassigned";
+        if (schedule.AssignedTechnicianId.HasValue)
+        {
+            try
+            {
+                var technician = await _employeeService.GetTechnicianByIdAsync(schedule.AssignedTechnicianId.Value);
+                if (technician != null)
+                {
+                    technicianName = technician.FullName ?? technician.DisplayName;
+                    if (string.IsNullOrWhiteSpace(technicianName))
+                    {
+                        technicianName = technician.EmployeeNumber ?? "Unknown Technician";
+                    }
+                }
+                else
+                {
+                    technicianName = "Unknown Technician";
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to resolve technician name for ID {TechnicianId}", schedule.AssignedTechnicianId.Value);
+                technicianName = "Unknown Technician";
+            }
+        }
+        
         return new MaintenanceScheduleDto
         {
             Id = schedule.Id,
@@ -521,9 +661,10 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             Code = schedule.Code,
             Description = schedule.Description,
             AssetId = schedule.AssetId,
-            AssetName = "Asset Name", // Would be resolved from asset service
+            AssetName = assetName,
             MaintenanceTypeId = schedule.MaintenanceTypeId,
-            MaintenanceTypeName = "Maintenance Type Name", // Would be resolved
+            MaintenanceTypeName = maintenanceTypeName,
+            MaintenanceType = maintenanceTypeName, // Also set this field
             Frequency = schedule.Frequency,
             FrequencyValue = schedule.FrequencyValue,
             FrequencyUnit = schedule.FrequencyUnit,
@@ -534,7 +675,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             EstimatedHours = schedule.EstimatedHours,
             EstimatedCost = schedule.EstimatedCost,
             AssignedTechnicianId = schedule.AssignedTechnicianId,
-            AssignedTechnicianName = "Technician Name", // Would be resolved
+            AssignedTechnicianName = technicianName,
             AssignedTeamId = schedule.AssignedTeamId,
             AssignedTeamName = "Team Name", // Would be resolved
             Instructions = schedule.Instructions,

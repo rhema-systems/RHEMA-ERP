@@ -47,7 +47,7 @@ public class MaintenanceSchedule : TenantEntity
     /// </summary>
     [Required]
     [MaxLength(20)]
-    public string Frequency { get; set; } = string.Empty; // Daily, Weekly, Monthly, Quarterly, Yearly, Custom
+    public string Frequency { get; set; } = string.Empty; // Daily, Weekly, Monthly, Quarterly, Yearly, Custom, Usage, Condition
 
     /// <summary>
     /// Frequency value (e.g., every 2 weeks, every 3 months)
@@ -60,6 +60,77 @@ public class MaintenanceSchedule : TenantEntity
     [Required]
     [MaxLength(20)]
     public string FrequencyUnit { get; set; } = string.Empty; // Days, Weeks, Months, Hours, Miles, etc.
+
+    // Multi-criteria scheduling enhancements
+    /// <summary>
+    /// Primary trigger type for scheduling
+    /// </summary>
+    [MaxLength(20)]
+    public string PrimaryTriggerType { get; set; } = "Time"; // Time, Usage, Condition, Combined
+
+    /// <summary>
+    /// Secondary trigger type (for combined schedules)
+    /// </summary>
+    [MaxLength(20)]
+    public string? SecondaryTriggerType { get; set; }
+
+    /// <summary>
+    /// Trigger logic for combined criteria
+    /// </summary>
+    [MaxLength(10)]
+    public string TriggerLogic { get; set; } = "OR"; // OR, AND (how to combine multiple triggers)
+
+    // Usage-based triggers
+    /// <summary>
+    /// Mileage/distance trigger threshold
+    /// </summary>
+    public decimal? MileageTrigger { get; set; }
+
+    /// <summary>
+    /// Operating hours trigger threshold
+    /// </summary>
+    public decimal? OperatingHoursTrigger { get; set; }
+
+    /// <summary>
+    /// Cycle count trigger threshold
+    /// </summary>
+    public decimal? CycleTrigger { get; set; }
+
+    /// <summary>
+    /// Usage unit for measurement (km, miles, hours, cycles, etc.)
+    /// </summary>
+    [MaxLength(20)]
+    public string? UsageUnit { get; set; }
+
+    /// <summary>
+    /// Last recorded usage value when schedule was calculated
+    /// </summary>
+    public decimal? LastUsageValue { get; set; }
+
+    // Condition-based triggers (JSON for flexibility)
+    /// <summary>
+    /// Condition monitoring criteria (JSON)
+    /// Example: [{"parameter":"temperature","operator":">","value":80}, {"parameter":"vibration","operator":">","value":5}]
+    /// </summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? ConditionCriteria { get; set; }
+
+    /// <summary>
+    /// Condition monitoring data sources (JSON)
+    /// Example: [{"source":"sensor","id":"temp_001"}, {"source":"api","endpoint":"/vibration"}]
+    /// </summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? ConditionDataSources { get; set; }
+
+    /// <summary>
+    /// Last condition check result
+    /// </summary>
+    public bool? LastConditionCheckResult { get; set; }
+
+    /// <summary>
+    /// Last condition check date
+    /// </summary>
+    public DateTime? LastConditionCheckDate { get; set; }
 
     /// <summary>
     /// Schedule start date

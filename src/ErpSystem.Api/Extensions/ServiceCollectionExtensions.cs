@@ -146,8 +146,10 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.HR.ISectionRepository, ErpSystem.Data.Repositories.SectionRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeSkillRepository, ErpSystem.Data.Repositories.EmployeeSkillRepository>();
             
+            // Additional HR repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeePositionRepository, ErpSystem.Data.Repositories.EmployeePositionRepository>();
+            
             // TODO: Additional HR repositories to be implemented as needed:
-            // - EmployeePositionRepository: needs implementation
             // - SkillRepository: needs implementation
             // - CountryRepository: needs implementation
             // - ShiftRepository: needs implementation
@@ -200,6 +202,12 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IProtocolViolationRepository, ErpSystem.Data.Repositories.Maintenance.ProtocolViolationRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IProtocolTrainingRepository, ErpSystem.Data.Repositories.Maintenance.ProtocolTrainingRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianRepository, ErpSystem.Data.Repositories.Maintenance.TechnicianRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IJobCardRepository, ErpSystem.Data.Repositories.Maintenance.JobCardRepository>();
+            
+            // Task template repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetTaskTemplateRepository, ErpSystem.Data.Repositories.Maintenance.AssetTaskTemplateRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetTypeTaskTemplateRepository, ErpSystem.Data.Repositories.Maintenance.AssetTypeTaskTemplateRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceTaskTemplateRepository, ErpSystem.Data.Repositories.Maintenance.MaintenanceTaskTemplateRepository>();
             
             // TODO: Additional maintenance repositories to be implemented as needed:
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianTeamRepository, ErpSystem.Data.Repositories.Maintenance.TechnicianTeamRepository>();
@@ -231,6 +239,9 @@ namespace ErpSystem.Api.Extensions
         public static IServiceCollection AddErpSystemServices(this IServiceCollection services)
         {
             // Core services
+            services.AddScoped<ErpSystem.Core.Interfaces.IFileUploadService, ErpSystem.Api.Services.SimpleFileUploadService>();
+            services.AddScoped<ErpSystem.Core.Services.INotificationService, ErpSystem.Api.Services.SimpleNotificationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowService, ErpSystem.Api.Services.SimpleWorkflowService>();
             services.AddScoped<ITenantService, TenantService>();
             services.AddScoped<IUserTenantService, UserTenantService>();
             services.AddScoped<ILdapAuthenticationService, LdapAuthenticationService>();
@@ -379,9 +390,16 @@ namespace ErpSystem.Api.Extensions
             // Phase 3 Asset Performance Analytics - NOW ENABLED
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetPerformanceAnalyticsService, ErpSystem.Core.Services.Maintenance.AssetPerformanceAnalyticsService>();
             
+            // Missing maintenance services that controllers require - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IPriorityLevelService, ErpSystem.Api.Services.Maintenance.PriorityLevelService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderTypeService, ErpSystem.Api.Services.Maintenance.WorkOrderTypeService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceTypeService, ErpSystem.Api.Services.Maintenance.MaintenanceTypeService>();
+            
+            // Additional maintenance services - ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetCategoryService, ErpSystem.Api.Services.Maintenance.MaintenanceAssetCategoryService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IJobCardService, ErpSystem.Core.Services.Maintenance.JobCardService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITaskTemplateService, ErpSystem.Core.Services.Maintenance.TaskTemplateService>();
             // TODO: Additional maintenance services to be implemented as needed:
-            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetCategoryService, ErpSystem.Core.Services.Maintenance.MaintenanceAssetCategoryService>();
-            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IInspectionTemplateService, ErpSystem.Core.Services.Maintenance.InspectionTemplateService>();
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetInspectionService, ErpSystem.Core.Services.Maintenance.AssetInspectionService>();
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianTeamService, ErpSystem.Core.Services.Maintenance.TechnicianTeamService>();
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetDowntimeService, ErpSystem.Core.Services.Maintenance.AssetDowntimeService>();
@@ -844,7 +862,11 @@ namespace ErpSystem.Api.Extensions
                     "http://localhost:3000",
                     "https://localhost:3000",
                     "http://localhost:3001",
-                    "https://localhost:3001"
+                    "https://localhost:3001",
+                    "http://localhost:4200",
+                    "https://localhost:4200",
+                    "http://127.0.0.1:3000",
+                    "https://127.0.0.1:3000"
                 });
             }
 
@@ -852,11 +874,26 @@ namespace ErpSystem.Api.Extensions
             {
                 options.AddPolicy("ErpSystemCorsPolicy", policy =>
                 {
-                    policy.WithOrigins(allowedOrigins.ToArray())
-                          .AllowAnyMethod()
-                          .AllowAnyHeader()
-                          .AllowCredentials()
-                          .SetIsOriginAllowedToAllowWildcardSubdomains();
+                    // Check if we're in development mode for more permissive CORS
+                    var isDevelopment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development";
+                    
+                    if (isDevelopment)
+                    {
+                        // More permissive CORS for development
+                        policy.SetIsOriginAllowed(_ => true) // Allow any origin in development
+                              .AllowAnyMethod()
+                              .AllowAnyHeader()
+                              .AllowCredentials();
+                    }
+                    else
+                    {
+                        // Strict CORS for production
+                        policy.WithOrigins(allowedOrigins.ToArray())
+                              .AllowAnyMethod()
+                              .AllowAnyHeader()
+                              .AllowCredentials()
+                              .SetIsOriginAllowedToAllowWildcardSubdomains();
+                    }
                 });
             });
 

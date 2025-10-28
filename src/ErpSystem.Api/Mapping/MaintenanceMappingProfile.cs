@@ -15,16 +15,21 @@ public class MaintenanceMappingProfile : Profile
         CreateMap<MaintenanceAsset, MaintenanceAssetDto>()
             .ForMember(dest => dest.AssetCategory, opt => opt.MapFrom(src => src.AssetCategory))
             .ForMember(dest => dest.ParentAsset, opt => opt.MapFrom(src => src.ParentAsset))
-            .ForMember(dest => dest.ChildAssets, opt => opt.MapFrom(src => src.ChildAssets));
+            .ForMember(dest => dest.ChildAssets, opt => opt.MapFrom(src => src.ChildAssets))
+            .ForMember(dest => dest.PurchaseDate, opt => opt.MapFrom(src => src.PurchaseDate))
+            .ForMember(dest => dest.WarrantyEndDate, opt => opt.MapFrom(src => src.WarrantyEndDate))
+            .ForMember(dest => dest.WarrantyStartDate, opt => opt.MapFrom(src => src.WarrantyStartDate));
 
         CreateMap<CreateMaintenanceAssetDto, MaintenanceAsset>()
             .ForMember(dest => dest.Id, opt => opt.Ignore())
             .ForMember(dest => dest.TenantId, opt => opt.Ignore())
+            .ForMember(dest => dest.EmployeeId, opt => opt.Ignore()) // Will be set manually or left null
             .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())
             .ForMember(dest => dest.UpdatedAt, opt => opt.Ignore())
             .ForMember(dest => dest.IsDeleted, opt => opt.Ignore())
             .ForMember(dest => dest.DeletedAt, opt => opt.Ignore())
             .ForMember(dest => dest.AssetCategory, opt => opt.Ignore())
+            .ForMember(dest => dest.Employee, opt => opt.Ignore())
             .ForMember(dest => dest.ParentAsset, opt => opt.Ignore())
             .ForMember(dest => dest.ChildAssets, opt => opt.Ignore())
             .ForMember(dest => dest.WorkOrders, opt => opt.Ignore())
@@ -214,7 +219,16 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.DeletedAt, opt => opt.Ignore())
             .ForMember(dest => dest.WorkOrders, opt => opt.Ignore());
 
-        CreateMap<PriorityLevel, PriorityLevelDto>();
+        CreateMap<PriorityLevel, PriorityLevelDto>()
+            .ForMember(dest => dest.Code, opt => opt.MapFrom(src => $"P{src.Level:D2}")) // Generate code from level
+            .ForMember(dest => dest.ResponseTime, opt => opt.MapFrom(src => src.ResponseTimeHours * 60)) // Convert hours to minutes
+            .ForMember(dest => dest.EscalationTime, opt => opt.MapFrom(src => src.ResponseTimeHours * 120)) // Default escalation time
+            .ForMember(dest => dest.Icon, opt => opt.MapFrom(src => "alert-triangle")) // Default icon
+            .ForMember(dest => dest.RequiresApproval, opt => opt.MapFrom(src => false)) // Default value
+            .ForMember(dest => dest.NotificationRules, opt => opt.MapFrom(src => "")) // Default value
+            .ForMember(dest => dest.SlaHours, opt => opt.MapFrom(src => src.ResponseTimeHours)) // Use response time
+            .ForMember(dest => dest.AutoAssign, opt => opt.MapFrom(src => false)); // Default value
+            
         CreateMap<CreatePriorityLevelDto, PriorityLevel>()
             .ForMember(dest => dest.Id, opt => opt.Ignore())
             .ForMember(dest => dest.TenantId, opt => opt.Ignore())

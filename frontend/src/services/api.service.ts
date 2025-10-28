@@ -546,6 +546,39 @@ class ApiService {
 
     return true;
   }
+
+  // Standard HTTP methods
+  public async get<T>(endpoint: string): Promise<T> {
+    return this.privateRequest<T>(endpoint, { method: 'GET' });
+  }
+
+  public async post<T>(endpoint: string, data?: any): Promise<T> {
+    const options: RequestInit = { method: 'POST' };
+    if (data) {
+      options.body = JSON.stringify(data);
+    }
+    return this.privateRequest<T>(endpoint, options);
+  }
+
+  public async put<T>(endpoint: string, data?: any): Promise<T> {
+    const options: RequestInit = { method: 'PUT' };
+    if (data) {
+      options.body = JSON.stringify(data);
+    }
+    return this.privateRequest<T>(endpoint, options);
+  }
+
+  public async delete<T>(endpoint: string): Promise<T> {
+    return this.privateRequest<T>(endpoint, { method: 'DELETE' });
+  }
+
+  public async patch<T>(endpoint: string, data?: any): Promise<T> {
+    const options: RequestInit = { method: 'PATCH' };
+    if (data) {
+      options.body = JSON.stringify(data);
+    }
+    return this.privateRequest<T>(endpoint, options);
+  }
 }
 
 export const apiService = new ApiService();

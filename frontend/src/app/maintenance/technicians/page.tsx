@@ -58,114 +58,11 @@ interface Assignment {
   status: 'Scheduled' | 'In Progress' | 'Completed' | 'Cancelled';
 }
 
-const mockTechnicians: Technician[] = [
-  {
-    id: '1',
-    name: 'John Smith',
-    email: 'john.smith@company.com',
-    phone: '+1 (555) 123-4567',
-    specialization: 'HVAC',
-    certifications: ['EPA 608', 'NATE Certified', 'OSHA 10'],
-    status: 'Available',
-    skillLevel: 'Senior',
-    rating: 4.8,
-    totalWorkOrders: 156,
-    completedThisMonth: 12,
-    location: 'Building A',
-    shiftStart: '08:00',
-    shiftEnd: '17:00',
-  },
-  {
-    id: '2',
-    name: 'Mike Johnson',
-    email: 'mike.johnson@company.com',
-    phone: '+1 (555) 234-5678',
-    specialization: 'Electrical',
-    certifications: ['Licensed Electrician', 'OSHA 30', 'Arc Flash Safety'],
-    status: 'Busy',
-    currentAssignment: 'Emergency Generator Repair',
-    skillLevel: 'Expert',
-    rating: 4.9,
-    totalWorkOrders: 203,
-    completedThisMonth: 18,
-    location: 'Building B',
-    shiftStart: '07:00',
-    shiftEnd: '16:00',
-  },
-  {
-    id: '3',
-    name: 'Sarah Davis',
-    email: 'sarah.davis@company.com',
-    phone: '+1 (555) 345-6789',
-    specialization: 'Plumbing',
-    certifications: ['Master Plumber', 'Backflow Prevention', 'Water Quality'],
-    status: 'Available',
-    skillLevel: 'Lead',
-    rating: 4.7,
-    totalWorkOrders: 134,
-    completedThisMonth: 9,
-    location: 'Building C',
-    shiftStart: '09:00',
-    shiftEnd: '18:00',
-  },
-  {
-    id: '4',
-    name: 'Tom Wilson',
-    email: 'tom.wilson@company.com',
-    phone: '+1 (555) 456-7890',
-    specialization: 'General Maintenance',
-    certifications: ['OSHA 10', 'First Aid/CPR'],
-    status: 'On Break',
-    skillLevel: 'Junior',
-    rating: 4.3,
-    totalWorkOrders: 67,
-    completedThisMonth: 8,
-    location: 'Building A',
-    shiftStart: '08:30',
-    shiftEnd: '17:30',
-  },
-];
-
-const mockAssignments: Assignment[] = [
-  {
-    id: '1',
-    technicianId: '2',
-    workOrderId: 'WO-2024-001',
-    workOrderTitle: 'Emergency Generator Repair',
-    assetName: 'Backup Generator 1',
-    priority: 'Critical',
-    scheduledDate: '2024-01-19',
-    estimatedHours: 6,
-    status: 'In Progress',
-  },
-  {
-    id: '2',
-    technicianId: '1',
-    workOrderId: 'WO-2024-002',
-    workOrderTitle: 'HVAC Filter Replacement',
-    assetName: 'Building A - HVAC Unit 1',
-    priority: 'Medium',
-    scheduledDate: '2024-01-20',
-    estimatedHours: 2,
-    status: 'Scheduled',
-  },
-  {
-    id: '3',
-    technicianId: '3',
-    workOrderId: 'WO-2024-003',
-    workOrderTitle: 'Water Pump Inspection',
-    assetName: 'Main Water Pump',
-    priority: 'Medium',
-    scheduledDate: '2024-01-21',
-    estimatedHours: 4,
-    status: 'Scheduled',
-  },
-];
 
 export default function TechniciansPage() {
-  const [technicians, setTechnicians] = useState<Technician[]>(mockTechnicians);
-  const [filteredTechnicians, setFilteredTechnicians] = useState<Technician[]>(mockTechnicians);
-  const [assignments] = useState<Assignment[]>(mockAssignments);
+  const [technicians, setTechnicians] = useState<Technician[]>([]);
+  const [filteredTechnicians, setFilteredTechnicians] = useState<Technician[]>([]);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [specializationFilter, setSpecializationFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -173,21 +70,41 @@ export default function TechniciansPage() {
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   
-  // Simulate fetching data from HR module
+  // Load technicians from API
   useEffect(() => {
     const fetchTechniciansFromHR = async () => {
       setIsLoading(true);
       try {
-        // Simulate API call to HR module
-        // In real implementation, this would call /api/hr/employees?role=technician
-        setTimeout(() => {
-          setTechnicians(mockTechnicians);
-          setIsLoading(false);
-        }, 1000);
+        const token = localStorage.getItem('token');
+        const [techniciansResponse, assignmentsResponse] = await Promise.all([
+          fetch('http://localhost:5000/api/maintenance/technicians', {
+            headers: {
+              'Authorization': token ? `Bearer ${token}` : '',
+              'Content-Type': 'application/json'
+            }
+          }),
+          fetch('http://localhost:5000/api/maintenance/assignments', {
+            headers: {
+              'Authorization': token ? `Bearer ${token}` : '',
+              'Content-Type': 'application/json'
+            }
+          })
+        ]);
+        
+        if (techniciansResponse.ok) {
+          const techniciansData = await techniciansResponse.json();
+          setTechnicians(techniciansData.data || techniciansData.items || techniciansData || []);
+        }
+        
+        if (assignmentsResponse.ok) {
+          const assignmentsData = await assignmentsResponse.json();
+          setAssignments(assignmentsData.data || assignmentsData.items || assignmentsData || []);
+        }
       } catch (error) {
         console.error('Failed to fetch technicians from HR module:', error);
-        // Fallback to mock data
-        setTechnicians(mockTechnicians);
+        setTechnicians([]);
+        setAssignments([]);
+      } finally {
         setIsLoading(false);
       }
     };

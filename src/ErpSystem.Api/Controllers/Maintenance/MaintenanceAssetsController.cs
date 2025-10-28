@@ -1,7 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Maintenance;
+using System.Collections.Generic;
+using System;
+using System.Threading.Tasks;
+using System.Linq;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -10,14 +15,14 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 [Authorize]
 public class MaintenanceAssetsController : ControllerBase
 {
-    private readonly IMaintenanceAssetService _assetService;
+    private readonly IMaintenanceAssetService _maintenanceAssetService;
     private readonly ILogger<MaintenanceAssetsController> _logger;
 
     public MaintenanceAssetsController(
-        IMaintenanceAssetService assetService,
+        IMaintenanceAssetService maintenanceAssetService,
         ILogger<MaintenanceAssetsController> logger)
     {
-        _assetService = assetService;
+        _maintenanceAssetService = maintenanceAssetService;
         _logger = logger;
     }
 
@@ -36,7 +41,7 @@ public class MaintenanceAssetsController : ControllerBase
             if (pageSize > 100)
                 pageSize = 100;
 
-            var result = await _assetService.GetAssetsPagedAsync(page, pageSize, searchTerm, categoryId);
+            var result = await _maintenanceAssetService.GetAssetsPagedAsync(page, pageSize, searchTerm, categoryId);
             return Ok(result);
         }
         catch (Exception ex)
@@ -54,7 +59,7 @@ public class MaintenanceAssetsController : ControllerBase
     {
         try
         {
-            var asset = await _assetService.GetAssetByIdAsync(id);
+            var asset = await _maintenanceAssetService.GetAssetByIdAsync(id);
             if (asset == null)
                 return NotFound($"Asset with ID {id} not found");
 
@@ -78,8 +83,8 @@ public class MaintenanceAssetsController : ControllerBase
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var asset = await _assetService.CreateAssetAsync(createDto);
-            return CreatedAtAction(nameof(GetAsset), new { id = asset.Id }, asset);
+            var newAsset = await _maintenanceAssetService.CreateAssetAsync(createDto);
+            return CreatedAtAction(nameof(GetAsset), new { id = newAsset.Id }, newAsset);
         }
         catch (ArgumentException ex)
         {
@@ -103,12 +108,12 @@ public class MaintenanceAssetsController : ControllerBase
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var asset = await _assetService.UpdateAssetAsync(id, updateDto);
-            return Ok(asset);
+            var updatedAsset = await _maintenanceAssetService.UpdateAssetAsync(id, updateDto);
+            return Ok(updatedAsset);
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(ex.Message);
+            return NotFound(ex.Message);
         }
         catch (Exception ex)
         {
@@ -125,12 +130,12 @@ public class MaintenanceAssetsController : ControllerBase
     {
         try
         {
-            await _assetService.DeleteAssetAsync(id);
+            await _maintenanceAssetService.DeleteAssetAsync(id);
             return NoContent();
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(ex.Message);
+            return NotFound(ex.Message);
         }
         catch (InvalidOperationException ex)
         {
@@ -151,12 +156,12 @@ public class MaintenanceAssetsController : ControllerBase
     {
         try
         {
-            var assets = await _assetService.GetAssetsByStatusAsync(status);
+            var assets = await _maintenanceAssetService.GetAssetsByStatusAsync(status);
             return Ok(assets);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving assets by status {Status}", status);
+            _logger.LogError(ex, "Error retrieving assets by status: {Status}", status);
             return StatusCode(500, "An error occurred while retrieving assets");
         }
     }
@@ -169,12 +174,12 @@ public class MaintenanceAssetsController : ControllerBase
     {
         try
         {
-            var assets = await _assetService.GetAssetsByCategoryAsync(categoryId);
+            var assets = await _maintenanceAssetService.GetAssetsByCategoryAsync(categoryId);
             return Ok(assets);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving assets by category {CategoryId}", categoryId);
+            _logger.LogError(ex, "Error retrieving assets by category: {CategoryId}", categoryId);
             return StatusCode(500, "An error occurred while retrieving assets");
         }
     }
@@ -187,7 +192,7 @@ public class MaintenanceAssetsController : ControllerBase
     {
         try
         {
-            var assets = await _assetService.GetAssetsWithActiveWorkOrdersAsync();
+            var assets = await _maintenanceAssetService.GetAssetsWithActiveWorkOrdersAsync();
             return Ok(assets);
         }
         catch (Exception ex)
@@ -205,7 +210,7 @@ public class MaintenanceAssetsController : ControllerBase
     {
         try
         {
-            var assets = await _assetService.GetAssetsRequiringMaintenanceAsync();
+            var assets = await _maintenanceAssetService.GetAssetsRequiringMaintenanceAsync();
             return Ok(assets);
         }
         catch (Exception ex)
@@ -223,12 +228,12 @@ public class MaintenanceAssetsController : ControllerBase
     {
         try
         {
-            var assets = await _assetService.GetAssetHierarchyAsync(rootAssetId);
+            var assets = await _maintenanceAssetService.GetAssetHierarchyAsync(rootAssetId);
             return Ok(assets);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving asset hierarchy for {RootAssetId}", rootAssetId);
+            _logger.LogError(ex, "Error retrieving asset hierarchy for: {RootAssetId}", rootAssetId);
             return StatusCode(500, "An error occurred while retrieving asset hierarchy");
         }
     }
@@ -241,7 +246,7 @@ public class MaintenanceAssetsController : ControllerBase
     {
         try
         {
-            var metrics = await _assetService.GetAssetMetricsAsync();
+            var metrics = await _maintenanceAssetService.GetAssetMetricsAsync();
             return Ok(metrics);
         }
         catch (Exception ex)
@@ -262,12 +267,12 @@ public class MaintenanceAssetsController : ControllerBase
             if (operatingHours < 0)
                 return BadRequest("Operating hours cannot be negative");
 
-            await _assetService.UpdateAssetOperatingHoursAsync(assetId, operatingHours);
+            await _maintenanceAssetService.UpdateAssetOperatingHoursAsync(assetId, operatingHours);
             return NoContent();
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(ex.Message);
+            return NotFound(ex.Message);
         }
         catch (Exception ex)
         {
@@ -287,12 +292,12 @@ public class MaintenanceAssetsController : ControllerBase
             if (mileage < 0)
                 return BadRequest("Mileage cannot be negative");
 
-            await _assetService.UpdateAssetMileageAsync(assetId, mileage);
+            await _maintenanceAssetService.UpdateAssetMileageAsync(assetId, mileage);
             return NoContent();
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(ex.Message);
+            return NotFound(ex.Message);
         }
         catch (Exception ex)
         {
@@ -309,7 +314,7 @@ public class MaintenanceAssetsController : ControllerBase
     {
         try
         {
-            var assetNumber = await _assetService.GenerateAssetNumberAsync(categoryId);
+            var assetNumber = await _maintenanceAssetService.GenerateAssetNumberAsync(categoryId);
             return Ok(new { assetNumber });
         }
         catch (Exception ex)
@@ -330,12 +335,12 @@ public class MaintenanceAssetsController : ControllerBase
             if (string.IsNullOrEmpty(assetNumber))
                 return BadRequest("Asset number is required");
 
-            var isUnique = await _assetService.IsAssetNumberUniqueAsync(assetNumber, excludeId);
+            var isUnique = await _maintenanceAssetService.IsAssetNumberUniqueAsync(assetNumber, excludeId);
             return Ok(new { isUnique });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error validating asset number {AssetNumber}", assetNumber);
+            _logger.LogError(ex, "Error validating asset number uniqueness: {AssetNumber}", assetNumber);
             return StatusCode(500, "An error occurred while validating asset number");
         }
     }

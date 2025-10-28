@@ -224,15 +224,8 @@ public class AssetTypeService : IAssetTypeService
                 return false;
             }
 
-            // Check if asset type is being used by any assets
-            var assetCount = await _context.MaintenanceAssets
-                .Where(ma => ma.AssetTypeId == id)
-                .CountAsync();
-
-            if (assetCount > 0)
-            {
-                throw new InvalidOperationException($"Cannot delete asset type. It is being used by {assetCount} asset(s).");
-            }
+            // Note: AssetType checking removed as we now use MaintenanceAssetCategory for classification
+            // AssetTypes are now decoupled from MaintenanceAssets
 
             _context.AssetTypes.Remove(assetType);
             await _context.SaveChangesAsync();

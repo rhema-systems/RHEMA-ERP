@@ -68,10 +68,7 @@ public class MaintenanceSchedulesController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving maintenance schedules");
-            
-            // Fallback to mock data if service is unavailable
-            var fallbackResult = GetMockSchedules(page, pageSize, searchTerm, frequency, priority, isActive);
-            return Ok(fallbackResult);
+            return StatusCode(500, "An error occurred while retrieving maintenance schedules");
         }
     }
 
@@ -89,10 +86,7 @@ public class MaintenanceSchedulesController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving active maintenance schedules");
-            
-            // Fallback to mock data
-            var fallbackResult = GetMockActiveSchedules();
-            return Ok(fallbackResult);
+            return StatusCode(500, "An error occurred while retrieving active maintenance schedules");
         }
     }
 
@@ -110,10 +104,7 @@ public class MaintenanceSchedulesController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving schedules due in {Days} days", days);
-            
-            // Fallback to filtered mock data
-            var fallbackResult = GetMockSchedulesDueInDays(days);
-            return Ok(fallbackResult);
+            return StatusCode(500, $"An error occurred while retrieving schedules due in {days} days");
         }
     }
 
@@ -131,10 +122,7 @@ public class MaintenanceSchedulesController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving overdue maintenance schedules");
-            
-            // Fallback to mock data
-            var fallbackResult = GetMockOverdueSchedules();
-            return Ok(fallbackResult);
+            return StatusCode(500, "An error occurred while retrieving overdue maintenance schedules");
         }
     }
 
@@ -155,13 +143,7 @@ public class MaintenanceSchedulesController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving maintenance schedule {ScheduleId}", id);
-            
-            // Fallback to mock data
-            var fallbackResult = GetMockScheduleById(id);
-            if (fallbackResult == null)
-                return NotFound($"Maintenance schedule with ID {id} not found");
-            
-            return Ok(fallbackResult);
+            return StatusCode(500, $"An error occurred while retrieving maintenance schedule {id}");
         }
     }
 
@@ -305,198 +287,8 @@ public class MaintenanceSchedulesController : ControllerBase
         {
             _logger.LogError(ex, "Error generating schedule compliance report");
             
-            // Fallback to mock report
-            var fallbackReport = GetMockComplianceReport();
-            return Ok(fallbackReport);
+            return StatusCode(500, "An error occurred while generating the schedule compliance report");
         }
     }
 
-    #region Fallback Methods
-
-    private PagedResult<MaintenanceScheduleListDto> GetMockSchedules(
-        int page, int pageSize, string? searchTerm, string? frequency, string? priority, bool? isActive)
-    {
-        var mockData = new List<MaintenanceScheduleListDto>
-        {
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "HVAC System Quarterly Check",
-                Code = "MS-001",
-                AssetName = "Main Building HVAC Unit #1",
-                MaintenanceTypeName = "Preventive Maintenance",
-                Frequency = "Quarterly",
-                NextDueDate = DateTime.UtcNow.AddDays(10),
-                Priority = "Medium",
-                IsActive = true,
-                IsOverdue = false,
-                DaysUntilDue = 10,
-                AssignedTechnicianName = "John Smith",
-                CompliancePercentage = 95.2m
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Generator Monthly Inspection",
-                Code = "MS-002", 
-                AssetName = "Emergency Generator #1",
-                MaintenanceTypeName = "Inspection",
-                Frequency = "Monthly",
-                NextDueDate = DateTime.UtcNow.AddDays(-5),
-                Priority = "High",
-                IsActive = true,
-                IsOverdue = true,
-                DaysUntilDue = -5,
-                AssignedTechnicianName = "Sarah Johnson",
-                CompliancePercentage = 88.7m
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Elevator Annual Safety Check",
-                Code = "MS-003",
-                AssetName = "Passenger Elevator A",
-                MaintenanceTypeName = "Safety Inspection",
-                Frequency = "Yearly",
-                NextDueDate = DateTime.UtcNow.AddDays(45),
-                Priority = "High",
-                IsActive = true,
-                IsOverdue = false,
-                DaysUntilDue = 45,
-                AssignedTechnicianName = "Mike Wilson",
-                CompliancePercentage = 100.0m
-            }
-        };
-
-        // Apply filters
-        var filtered = mockData.AsQueryable();
-
-        if (!string.IsNullOrEmpty(searchTerm))
-        {
-            filtered = filtered.Where(x => x.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
-                                          x.Code.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
-                                          x.AssetName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase));
-        }
-
-        if (!string.IsNullOrEmpty(frequency))
-        {
-            filtered = filtered.Where(x => x.Frequency == frequency);
-        }
-
-        if (!string.IsNullOrEmpty(priority))
-        {
-            filtered = filtered.Where(x => x.Priority == priority);
-        }
-
-        if (isActive.HasValue)
-        {
-            filtered = filtered.Where(x => x.IsActive == isActive.Value);
-        }
-
-        var totalCount = filtered.Count();
-        var items = filtered.Skip((page - 1) * pageSize).Take(pageSize).ToList();
-
-        return new PagedResult<MaintenanceScheduleListDto>
-        {
-            Items = items,
-            TotalCount = totalCount,
-            Page = page,
-            PageSize = pageSize
-        };
-    }
-
-    private IEnumerable<MaintenanceScheduleDto> GetMockActiveSchedules()
-    {
-        return GetMockSchedules(1, 100, null, null, null, true).Items.Select(s => new MaintenanceScheduleDto
-        {
-            Id = s.Id,
-            Name = s.Name,
-            Code = s.Code,
-            AssetName = s.AssetName,
-            MaintenanceTypeName = s.MaintenanceTypeName,
-            Frequency = s.Frequency,
-            NextDueDate = s.NextDueDate,
-            Priority = s.Priority,
-            IsActive = s.IsActive,
-            IsOverdue = s.IsOverdue,
-            DaysUntilDue = s.DaysUntilDue,
-            AssignedTechnicianName = s.AssignedTechnicianName,
-            CompliancePercentage = s.CompliancePercentage,
-            Description = "Mock maintenance schedule description",
-            EstimatedHours = 2.5m,
-            EstimatedCost = 350.00m,
-            AutoGenerateWorkOrders = true,
-            Instructions = "Follow standard maintenance procedures",
-            SafetyNotes = "Ensure proper PPE and lockout procedures",
-            RequiredSkills = new List<string> { "HVAC", "Electrical Safety" },
-            RequiredTools = new List<string> { "Multimeter", "Torque wrench" },
-            RequiredParts = new List<string> { "Air filter", "Lubricant" },
-            CreatedDate = DateTime.UtcNow.AddMonths(-2),
-            CreatedBy = "System Admin"
-        });
-    }
-
-    private IEnumerable<MaintenanceScheduleDto> GetMockSchedulesDueInDays(int days)
-    {
-        return GetMockActiveSchedules().Where(s => s.DaysUntilDue <= days && s.DaysUntilDue >= 0);
-    }
-
-    private IEnumerable<MaintenanceScheduleDto> GetMockOverdueSchedules()
-    {
-        return GetMockActiveSchedules().Where(s => s.IsOverdue);
-    }
-
-    private MaintenanceScheduleDto? GetMockScheduleById(Guid id)
-    {
-        return GetMockActiveSchedules().FirstOrDefault();
-    }
-
-    private ScheduleComplianceReportDto GetMockComplianceReport()
-    {
-        return new ScheduleComplianceReportDto
-        {
-            TotalSchedules = 15,
-            ActiveSchedules = 12,
-            CompletedOnTime = 45,
-            OverdueSchedules = 3,
-            SchedulesDueToday = 2,
-            SchedulesDueThisWeek = 7,
-            OverallCompliancePercentage = 91.2m,
-            OnTimeCompletionRate = 88.5m,
-            TotalWorkOrdersGenerated = 124,
-            ReportPeriodStart = DateTime.UtcNow.AddMonths(-3),
-            ReportPeriodEnd = DateTime.UtcNow,
-            ReportGeneratedDate = DateTime.UtcNow,
-            ScheduleCompliance = new List<ScheduleComplianceDetail>
-            {
-                new()
-                {
-                    ScheduleId = Guid.NewGuid(),
-                    ScheduleName = "HVAC Quarterly Check",
-                    AssetName = "Main HVAC Unit",
-                    Frequency = "Quarterly",
-                    WorkOrdersGenerated = 12,
-                    CompletedOnTime = 10,
-                    CompliancePercentage = 83.3m,
-                    DaysOverdue = 0,
-                    NextDueDate = DateTime.UtcNow.AddDays(15)
-                }
-            },
-            AssetCompliance = new List<AssetComplianceDto>
-            {
-                new()
-                {
-                    AssetId = Guid.NewGuid(),
-                    AssetName = "Main HVAC Unit",
-                    AssetType = "HVAC System",
-                    ScheduleCount = 4,
-                    AverageCompliance = 89.2m,
-                    OverdueSchedules = 1,
-                    LastMaintenanceDate = DateTime.UtcNow.AddDays(-10)
-                }
-            }
-        };
-    }
-
-    #endregion
 }

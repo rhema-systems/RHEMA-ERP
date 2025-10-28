@@ -45,6 +45,12 @@ namespace ErpSystem.Api.Services
                 new System.Security.Claims.Claim("jti", Guid.NewGuid().ToString())
             };
             
+            // Add EmployeeId claim if user is linked to an employee
+            if (user.EmployeeId.HasValue)
+            {
+                claims.Add(new System.Security.Claims.Claim("employee_id", user.EmployeeId.ToString()!));
+            }
+            
             // Add session ID claim if provided
             if (!string.IsNullOrEmpty(sessionId))
             {

@@ -33,100 +33,46 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Mock data for inspections
-const inspectionsData = [
-  {
-    id: 1,
-    title: 'Fire Safety Inspection - Building A',
-    type: 'Safety',
-    assetId: 'FIRE-001',
-    assetName: 'Fire Safety System A',
-    location: 'Building A - All Floors',
-    inspector: 'Sarah Davis',
-    scheduledDate: '2024-01-20',
-    completedDate: '2024-01-20',
-    status: 'Completed',
-    result: 'Pass',
-    score: 95,
-    findings: [
-      { item: 'Fire extinguisher placement', status: 'Pass', notes: 'All extinguishers properly mounted' },
-      { item: 'Emergency exit signs', status: 'Pass', notes: 'All signs illuminated and visible' },
-      { item: 'Smoke detector functionality', status: 'Pass', notes: 'All detectors tested and working' }
-    ],
-    recommendations: ['Replace fire extinguisher in Room 205 (expired)', 'Update evacuation plan poster in lobby'],
-    nextInspection: '2024-07-20'
-  },
-  {
-    id: 2,
-    title: 'Elevator Safety Inspection',
-    type: 'Safety',
-    assetId: 'ELEV-001',
-    assetName: 'Main Elevator A1',
-    location: 'Building A - All Floors',
-    inspector: 'Mike Johnson',
-    scheduledDate: '2024-01-25',
-    completedDate: null,
-    status: 'Scheduled',
-    result: null,
-    score: null,
-    findings: [],
-    recommendations: [],
-    nextInspection: '2024-04-25'
-  },
-  {
-    id: 3,
-    title: 'HVAC System Performance Check',
-    type: 'Performance',
-    assetId: 'HVAC-001',
-    assetName: 'Central HVAC Unit',
-    location: 'Building B - Roof',
-    inspector: 'Tom Wilson',
-    scheduledDate: '2024-01-18',
-    completedDate: '2024-01-18',
-    status: 'Completed',
-    result: 'Conditional',
-    score: 75,
-    findings: [
-      { item: 'Air filter condition', status: 'Fail', notes: 'Filters severely clogged, need immediate replacement' },
-      { item: 'Temperature control accuracy', status: 'Pass', notes: 'Within acceptable range' },
-      { item: 'Energy efficiency', status: 'Pass', notes: 'Operating at expected efficiency levels' }
-    ],
-    recommendations: ['Replace air filters immediately', 'Schedule quarterly filter replacement'],
-    nextInspection: '2024-04-18'
-  },
-  {
-    id: 4,
-    title: 'Electrical System Compliance',
-    type: 'Compliance',
-    assetId: 'ELEC-001',
-    assetName: 'Main Electrical Panel',
-    location: 'Building A - Basement',
-    inspector: 'John Smith',
-    scheduledDate: '2024-01-30',
-    completedDate: null,
-    status: 'In Progress',
-    result: null,
-    score: null,
-    findings: [],
-    recommendations: [],
-    nextInspection: '2024-07-30'
-  }
-];
+interface InspectionItem {
+  id: number;
+  title: string;
+  type: string;
+  assetId: string;
+  assetName: string;
+  location: string;
+  inspector: string;
+  scheduledDate: string;
+  completedDate: string | null;
+  status: string;
+  result: string | null;
+  score: number | null;
+  findings: Array<{
+    item: string;
+    status: string;
+    notes: string;
+  }>;
+  recommendations: string[];
+  nextInspection: string;
+}
 
-const inspectionTemplates = [
-  { id: 1, name: 'Fire Safety Inspection', type: 'Safety', items: 15 },
-  { id: 2, name: 'Elevator Safety Check', type: 'Safety', items: 12 },
-  { id: 3, name: 'HVAC Performance', type: 'Performance', items: 8 },
-  { id: 4, name: 'Electrical Compliance', type: 'Compliance', items: 20 }
-];
+interface InspectionTemplate {
+  id: number;
+  name: string;
+  type: string;
+  items: number;
+}
+
 
 export default function InspectionsPage() {
+  const [inspectionsData, setInspectionsData] = useState<InspectionItem[]>([]);
+  const [inspectionTemplates, setInspectionTemplates] = useState<InspectionTemplate[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [resultFilter, setResultFilter] = useState('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [filteredData, setFilteredData] = useState(inspectionsData);
+  const [filteredData, setFilteredData] = useState<InspectionItem[]>([]);
   const [selectedInspection, setSelectedInspection] = useState(null);
   
   // Form state for creating new inspection
@@ -140,6 +86,38 @@ export default function InspectionsPage() {
     notes: ''
   });
 
+  // Load inspections and templates from API
+  useEffect(() => {
+    const loadInspectionsData = async () => {
+      setLoading(true);
+      try {
+        const [inspectionsResponse, templatesResponse] = await Promise.all([
+          fetch('/api/maintenance/inspections'),
+          fetch('/api/maintenance/inspections/templates')
+        ]);
+        
+        if (inspectionsResponse.ok) {
+          const inspectionsDataResult = await inspectionsResponse.json();
+          setInspectionsData(inspectionsDataResult);
+        }
+        
+        if (templatesResponse.ok) {
+          const templatesData = await templatesResponse.json();
+          setInspectionTemplates(templatesData);
+        }
+      } catch (error) {
+        console.error('Failed to load inspections data:', error);
+        setInspectionsData([]);
+        setInspectionTemplates([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadInspectionsData();
+  }, []);
+
+  // Filter inspections
   useEffect(() => {
     let filtered = inspectionsData;
 

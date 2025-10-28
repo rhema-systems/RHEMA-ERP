@@ -60,10 +60,7 @@ public class TechnicalSkillsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving technical skills");
-            
-            // Fallback to mock data if service is unavailable
-            var fallbackResult = GetMockSkills(page, pageSize, searchTerm, category, skillLevel, isActive);
-            return Ok(fallbackResult);
+            return StatusCode(500, "An error occurred while retrieving technical skills");
         }
     }
 
@@ -81,10 +78,7 @@ public class TechnicalSkillsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving active technical skills");
-            
-            // Fallback to mock data
-            var fallbackResult = GetMockActiveSkills();
-            return Ok(fallbackResult);
+            return StatusCode(500, "An error occurred while retrieving active technical skills");
         }
     }
 
@@ -102,10 +96,7 @@ public class TechnicalSkillsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving skills for category {Category}", category);
-            
-            // Fallback to filtered mock data
-            var fallbackResult = GetMockSkillsByCategory(category);
-            return Ok(fallbackResult);
+            return StatusCode(500, $"An error occurred while retrieving skills for category {category}");
         }
     }
 
@@ -126,13 +117,7 @@ public class TechnicalSkillsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving technical skill {SkillId}", id);
-            
-            // Fallback to mock data
-            var fallbackResult = GetMockSkillById(id);
-            if (fallbackResult == null)
-                return NotFound($"Technical skill with ID {id} not found");
-            
-            return Ok(fallbackResult);
+            return StatusCode(500, $"An error occurred while retrieving technical skill {id}");
         }
     }
 
@@ -150,10 +135,7 @@ public class TechnicalSkillsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error synchronizing skills from HR module");
-            
-            // Return mock synchronized skills
-            var fallbackResult = GetMockHRSkills();
-            return Ok(fallbackResult);
+            return StatusCode(500, "An error occurred while synchronizing skills from HR module");
         }
     }
 
@@ -171,10 +153,7 @@ public class TechnicalSkillsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving skill gap analysis");
-            
-            // Fallback to mock analysis
-            var fallbackResult = GetMockSkillGapAnalysis();
-            return Ok(fallbackResult);
+            return StatusCode(500, "An error occurred while retrieving skill gap analysis");
         }
     }
 
@@ -192,10 +171,7 @@ public class TechnicalSkillsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving technicians with skill {SkillId}", id);
-            
-            // Fallback to mock technicians
-            var fallbackResult = GetMockTechniciansWithSkill();
-            return Ok(fallbackResult);
+            return StatusCode(500, $"An error occurred while retrieving technicians with skill {id}");
         }
     }
 
@@ -211,7 +187,7 @@ public class TechnicalSkillsController : ControllerBase
                 return BadRequest(ModelState);
 
             var assignment = await _skillService.AssignSkillToTechnicianAsync(createDto);
-            return CreatedAtAction(nameof(GetSkillAssignment), new { id = assignment.Id }, assignment);
+            return CreatedAtAction(nameof(GetTechnicianSkills), new { technicianId = createDto.TechnicianId }, assignment);
         }
         catch (ArgumentException ex)
         {
@@ -224,25 +200,6 @@ public class TechnicalSkillsController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// Gets skill assignment by ID
-    /// </summary>
-    [HttpGet("assignments/{id:guid}")]
-    public async Task<ActionResult<TechnicianSkillAssignmentDto>> GetSkillAssignment(Guid id)
-    {
-        try
-        {
-            // This would need to be implemented in the service
-            // For now, return mock data
-            var fallbackResult = GetMockSkillAssignment(id);
-            return Ok(fallbackResult);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving skill assignment {AssignmentId}", id);
-            return StatusCode(500, "An error occurred while retrieving the skill assignment");
-        }
-    }
 
     /// <summary>
     /// Gets technician skill assignments
@@ -258,293 +215,8 @@ public class TechnicalSkillsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving skills for technician {TechnicianId}", technicianId);
-            
-            // Fallback to mock data
-            var fallbackResult = GetMockTechnicianSkills(technicianId);
-            return Ok(fallbackResult);
+            return StatusCode(500, $"An error occurred while retrieving skills for technician {technicianId}");
         }
     }
 
-    #region Fallback Methods
-
-    private PagedResult<TechnicalSkillListDto> GetMockSkills(
-        int page, int pageSize, string? searchTerm, string? category, string? skillLevel, bool? isActive)
-    {
-        var mockData = new List<TechnicalSkillListDto>
-        {
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Electrical Systems",
-                Code = "ELEC-001",
-                Category = "Electrical",
-                SkillLevel = "Advanced",
-                Complexity = "High",
-                RiskLevel = "High",
-                EstimatedLearningHours = 120,
-                IsActive = true,
-                TechniciansCount = 8,
-                AverageRating = 4.2m,
-                IsFromHRModule = true
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "HVAC Maintenance",
-                Code = "HVAC-001",
-                Category = "HVAC",
-                SkillLevel = "Intermediate",
-                Complexity = "Medium",
-                RiskLevel = "Medium",
-                EstimatedLearningHours = 80,
-                IsActive = true,
-                TechniciansCount = 12,
-                AverageRating = 4.5m,
-                IsFromHRModule = true
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Plumbing Systems",
-                Code = "PLUMB-001",
-                Category = "Plumbing",
-                SkillLevel = "Intermediate",
-                Complexity = "Medium",
-                RiskLevel = "Medium",
-                EstimatedLearningHours = 60,
-                IsActive = true,
-                TechniciansCount = 6,
-                AverageRating = 4.0m,
-                IsFromHRModule = true
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Industrial Automation",
-                Code = "AUTO-001",
-                Category = "Automation",
-                SkillLevel = "Expert",
-                Complexity = "Very High",
-                RiskLevel = "High",
-                EstimatedLearningHours = 200,
-                IsActive = true,
-                TechniciansCount = 4,
-                AverageRating = 4.8m,
-                IsFromHRModule = true
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Mechanical Systems",
-                Code = "MECH-001",
-                Category = "Mechanical",
-                SkillLevel = "Basic",
-                Complexity = "Low",
-                RiskLevel = "Low",
-                EstimatedLearningHours = 40,
-                IsActive = true,
-                TechniciansCount = 15,
-                AverageRating = 3.8m,
-                IsFromHRModule = true
-            }
-        };
-
-        // Apply filters
-        var filtered = mockData.AsQueryable();
-
-        if (!string.IsNullOrEmpty(searchTerm))
-        {
-            filtered = filtered.Where(x => x.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
-                                          x.Code.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
-                                          x.Category.Contains(searchTerm, StringComparison.OrdinalIgnoreCase));
-        }
-
-        if (!string.IsNullOrEmpty(category))
-        {
-            filtered = filtered.Where(x => x.Category == category);
-        }
-
-        if (!string.IsNullOrEmpty(skillLevel))
-        {
-            filtered = filtered.Where(x => x.SkillLevel == skillLevel);
-        }
-
-        if (isActive.HasValue)
-        {
-            filtered = filtered.Where(x => x.IsActive == isActive.Value);
-        }
-
-        var totalCount = filtered.Count();
-        var items = filtered.Skip((page - 1) * pageSize).Take(pageSize).ToList();
-
-        return new PagedResult<TechnicalSkillListDto>
-        {
-            Items = items,
-            TotalCount = totalCount,
-            Page = page,
-            PageSize = pageSize
-        };
-    }
-
-    private IEnumerable<TechnicalSkillDto> GetMockActiveSkills()
-    {
-        return GetMockSkills(1, 100, null, null, null, true).Items.Select(s => new TechnicalSkillDto
-        {
-            Id = s.Id,
-            Name = s.Name,
-            Code = s.Code,
-            Category = s.Category,
-            SkillLevel = s.SkillLevel,
-            Complexity = s.Complexity,
-            RiskLevel = s.RiskLevel,
-            EstimatedLearningHours = s.EstimatedLearningHours,
-            IsActive = s.IsActive,
-            TechniciansCount = s.TechniciansCount,
-            AverageRating = s.AverageRating,
-            IsFromHRModule = s.IsFromHRModule,
-            Description = "Comprehensive skill for maintenance technicians",
-            Prerequisites = new List<string> { "Basic Safety Training", "Tool Usage" },
-            Certifications = new List<string> { "Industry Certification", "Safety Compliance" },
-            ToolsRequired = new List<string> { "Multimeter", "Hand Tools", "Safety Equipment" },
-            SafetyRequirements = "Follow all safety protocols and use appropriate PPE",
-            CompetencyAreas = new List<string> { "Installation", "Maintenance", "Troubleshooting", "Repair" },
-            RelatedMaintenanceTypes = new List<string> { "Preventive", "Corrective", "Emergency" },
-            CreatedDate = DateTime.UtcNow.AddMonths(-6),
-            CreatedBy = "HR System",
-            LastSyncDate = DateTime.UtcNow.AddHours(-2)
-        });
-    }
-
-    private IEnumerable<TechnicalSkillDto> GetMockSkillsByCategory(string category)
-    {
-        return GetMockActiveSkills().Where(s => s.Category.Equals(category, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private TechnicalSkillDto? GetMockSkillById(Guid id)
-    {
-        return GetMockActiveSkills().FirstOrDefault();
-    }
-
-    private IEnumerable<TechnicalSkillDto> GetMockHRSkills()
-    {
-        var skills = GetMockActiveSkills().ToList();
-        foreach (var skill in skills)
-        {
-            skill.LastSyncDate = DateTime.UtcNow;
-            skill.IsFromHRModule = true;
-        }
-        return skills;
-    }
-
-    private SkillGapAnalysisDto GetMockSkillGapAnalysis()
-    {
-        return new SkillGapAnalysisDto
-        {
-            SkillDeficits = new List<SkillDeficitDto>
-            {
-                new()
-                {
-                    SkillId = Guid.NewGuid(),
-                    SkillName = "Industrial Automation",
-                    RequiredTechnicians = 8,
-                    CurrentTechnicians = 4,
-                    Deficit = 4,
-                    Priority = "High"
-                },
-                new()
-                {
-                    SkillId = Guid.NewGuid(),
-                    SkillName = "Advanced Electrical",
-                    RequiredTechnicians = 10,
-                    CurrentTechnicians = 6,
-                    Deficit = 4,
-                    Priority = "Medium"
-                }
-            },
-            OverstaffedSkills = new List<OverstaffedSkillDto>
-            {
-                new()
-                {
-                    SkillId = Guid.NewGuid(),
-                    SkillName = "Basic Mechanical",
-                    RequiredTechnicians = 10,
-                    CurrentTechnicians = 15,
-                    Excess = 5
-                }
-            },
-            CriticalSkills = new List<CriticalSkillDto>
-            {
-                new()
-                {
-                    SkillId = Guid.NewGuid(),
-                    SkillName = "Electrical Systems",
-                    TechnicianCount = 8,
-                    RiskLevel = "High",
-                    MitegationActions = "Cross-train technicians; Hire additional specialists; Partner with contractors"
-                }
-            },
-            TotalSkillsAnalyzed = 25,
-            AnalysisDate = DateTime.UtcNow
-        };
-    }
-
-    private IEnumerable<string> GetMockTechniciansWithSkill()
-    {
-        return new List<string>
-        {
-            "John Smith - Senior Technician",
-            "Sarah Johnson - Lead Technician", 
-            "Mike Wilson - Maintenance Specialist",
-            "Lisa Brown - Technical Expert"
-        };
-    }
-
-    private TechnicianSkillAssignmentDto GetMockSkillAssignment(Guid id)
-    {
-        return new TechnicianSkillAssignmentDto
-        {
-            Id = id,
-            TechnicianId = Guid.NewGuid(),
-            SkillId = Guid.NewGuid(),
-            SkillName = "Electrical Systems",
-            Category = "Electrical",
-            ProficiencyLevel = 4,
-            ProficiencyDescription = "Advanced",
-            AcquiredDate = DateTime.UtcNow.AddMonths(-6),
-            ExpirationDate = DateTime.UtcNow.AddYears(2),
-            IsVerified = true,
-            VerifiedBy = "Technical Supervisor",
-            LastAssessmentDate = DateTime.UtcNow.AddMonths(-3),
-            Notes = "Excellent performance in field applications",
-            IsExpired = false,
-            DaysUntilExpiration = 730
-        };
-    }
-
-    private IEnumerable<TechnicianSkillAssignmentDto> GetMockTechnicianSkills(Guid technicianId)
-    {
-        return new List<TechnicianSkillAssignmentDto>
-        {
-            GetMockSkillAssignment(Guid.NewGuid()),
-            new()
-            {
-                Id = Guid.NewGuid(),
-                TechnicianId = technicianId,
-                SkillId = Guid.NewGuid(),
-                SkillName = "HVAC Maintenance",
-                Category = "HVAC",
-                ProficiencyLevel = 3,
-                ProficiencyDescription = "Intermediate",
-                AcquiredDate = DateTime.UtcNow.AddMonths(-12),
-                IsVerified = true,
-                VerifiedBy = "HVAC Specialist",
-                LastAssessmentDate = DateTime.UtcNow.AddMonths(-6),
-                Notes = "Solid understanding of HVAC systems",
-                IsExpired = false,
-                DaysUntilExpiration = -1
-            }
-        };
-    }
-
-    #endregion
 }

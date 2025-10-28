@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,79 +23,21 @@ import {
   Clock
 } from 'lucide-react';
 
-// Mock data for work order types
-const workOrderTypesData = [
-  {
-    id: 1,
-    name: 'Preventive Maintenance',
-    code: 'PM',
-    description: 'Scheduled preventive maintenance activities',
-    priority: 'Medium',
-    color: '#3b82f6',
-    estimatedHours: 2,
-    isActive: true,
-    requiresApproval: false,
-    category: 'Maintenance',
-    autoAssign: true,
-    slaHours: 48
-  },
-  {
-    id: 2,
-    name: 'Emergency Repair',
-    code: 'EM',
-    description: 'Urgent repairs requiring immediate attention',
-    priority: 'Critical',
-    color: '#ef4444',
-    estimatedHours: 4,
-    isActive: true,
-    requiresApproval: true,
-    category: 'Repair',
-    autoAssign: true,
-    slaHours: 2
-  },
-  {
-    id: 3,
-    name: 'Corrective Maintenance',
-    code: 'CM',
-    description: 'Repair work to restore normal operation',
-    priority: 'High',
-    color: '#f59e0b',
-    estimatedHours: 3,
-    isActive: true,
-    requiresApproval: false,
-    category: 'Repair',
-    autoAssign: false,
-    slaHours: 24
-  },
-  {
-    id: 4,
-    name: 'Inspection',
-    code: 'INS',
-    description: 'Safety and compliance inspections',
-    priority: 'Medium',
-    color: '#8b5cf6',
-    estimatedHours: 1.5,
-    isActive: true,
-    requiresApproval: false,
-    category: 'Inspection',
-    autoAssign: true,
-    slaHours: 72
-  },
-  {
-    id: 5,
-    name: 'Installation',
-    code: 'INST',
-    description: 'Installation of new equipment or components',
-    priority: 'Medium',
-    color: '#10b981',
-    estimatedHours: 6,
-    isActive: true,
-    requiresApproval: true,
-    category: 'Installation',
-    autoAssign: false,
-    slaHours: 168
-  }
-];
+// Work order type interface
+interface WorkOrderType {
+  id: string | number;
+  name: string;
+  code: string;
+  description?: string;
+  priority?: string;
+  color?: string;
+  estimatedHours?: number;
+  isActive: boolean;
+  requiresApproval?: boolean;
+  category?: string;
+  autoAssign?: boolean;
+  slaHours?: number;
+}
 
 export default function WorkOrderTypesPage() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -104,8 +46,11 @@ export default function WorkOrderTypesPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [selectedType, setSelectedType] = useState(null);
-  const [filteredData, setFilteredData] = useState(workOrderTypesData);
+  const [selectedType, setSelectedType] = useState<WorkOrderType | null>(null);
+  const [workOrderTypesData, setWorkOrderTypesData] = useState<WorkOrderType[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -122,24 +67,89 @@ export default function WorkOrderTypesPage() {
     slaHours: 24
   });
 
+  // Fetch work order types from API
+  const fetchWorkOrderTypes = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to access this page.');
+        setWorkOrderTypesData([]);
+        return;
+      }
+      
+      console.log('Fetching work order types with token present:', !!token);
+      
+      const response = await fetch('http://localhost:5000/api/maintenance/work-order-types?pageSize=1000', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      console.log('API Response Status:', response.status, response.statusText);
+      
+      if (!response.ok) {
+        if (response.status === 401) {
+          setError('Authentication failed. Please log in again or check your credentials.');
+        } else if (response.status === 403) {
+          setError('Access denied. You do not have permission to view work order types.');
+        } else {
+          const errorText = await response.text();
+          console.error('Error details:', errorText);
+          setError(`Failed to load work order types: ${errorText}`);
+        }
+        setWorkOrderTypesData([]);
+        return;
+      }
+      
+      const data = await response.json();
+      console.log('API Response:', data);
+      setWorkOrderTypesData(data.data || data.items || data || []);
+      
+    } catch (error) {
+      console.error('Error fetching work order types:', error);
+      setError('Network error occurred while fetching work order types.');
+      setWorkOrderTypesData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
+    fetchWorkOrderTypes();
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Memoized filtered data
+  const filteredData = useMemo(() => {
     let filtered = workOrderTypesData;
 
     if (searchTerm) {
       filtered = filtered.filter(item =>
-        item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.description.toLowerCase().includes(searchTerm.toLowerCase())
+        item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.description?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
     if (priorityFilter !== 'all') {
-      filtered = filtered.filter(item => item.priority.toLowerCase() === priorityFilter);
+      filtered = filtered.filter(item => {
+        const priorityString = getPriorityString(item.defaultPriority);
+        return priorityString.toLowerCase() === priorityFilter;
+      });
     }
 
-    if (categoryFilter !== 'all') {
-      filtered = filtered.filter(item => item.category.toLowerCase() === categoryFilter);
-    }
+    // Category filter removed since it doesn't exist in backend DTO
+    // if (categoryFilter !== 'all') {
+    //   filtered = filtered.filter(item => item.category?.toLowerCase() === categoryFilter);
+    // }
 
     if (statusFilter !== 'all') {
       filtered = filtered.filter(item => 
@@ -147,8 +157,8 @@ export default function WorkOrderTypesPage() {
       );
     }
 
-    setFilteredData(filtered);
-  }, [searchTerm, priorityFilter, categoryFilter, statusFilter]);
+    return filtered;
+  }, [workOrderTypesData, searchTerm, priorityFilter, categoryFilter, statusFilter]);
 
   const getPriorityBadge = (priority: string) => {
     const colors = {
@@ -165,22 +175,176 @@ export default function WorkOrderTypesPage() {
     );
   };
 
-  const handleCreate = () => {
-    console.log('Creating work order type:', formData);
-    setIsCreateDialogOpen(false);
-    resetForm();
+  const getPriorityNumber = (priority: string) => {
+    const priorityMap = {
+      'Low': 1,
+      'Medium': 2, 
+      'High': 3,
+      'Critical': 4
+    } as any;
+    return priorityMap[priority] || 2;
+  };
+
+  const getPriorityString = (priority: number) => {
+    const priorityMap = {
+      1: 'Low',
+      2: 'Medium',
+      3: 'High', 
+      4: 'Critical'
+    } as any;
+    return priorityMap[priority] || 'Medium';
+  };
+
+  const handleCreate = async () => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to create work order types.');
+        return;
+      }
+      
+      // Map form data to CreateWorkOrderTypeDto structure
+      const createDto = {
+        name: formData.name,
+        code: formData.code,
+        description: formData.description,
+        color: formData.color,
+        icon: 'wrench', // Default icon since backend expects this
+        isActive: formData.isActive,
+        requiresApproval: formData.requiresApproval,
+        defaultPriority: getPriorityNumber(formData.priority)
+      };
+
+      console.log('Sending create request:', createDto);
+
+      const response = await fetch('http://localhost:5000/api/maintenance/work-order-types', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(createDto)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Create failed:', response.status, response.statusText, errorText);
+        setError(`Failed to create work order type: ${response.status} ${response.statusText} - ${errorText}`);
+        return;
+      }
+      
+      // Refresh the list
+      await fetchWorkOrderTypes();
+      setIsCreateDialogOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error('Error creating work order type:', error);
+      setError('Failed to create work order type. Please try again.');
+    }
   };
 
   const handleEdit = (type: any) => {
     setSelectedType(type);
-    setFormData({ ...type });
+    setFormData({
+      name: type.name || '',
+      code: type.code || '',
+      description: type.description || '',
+      priority: getPriorityString(type.defaultPriority) || 'Medium',
+      color: type.color || '#3b82f6',
+      estimatedHours: 2, // This field doesn't exist in backend DTO
+      isActive: type.isActive ?? true,
+      requiresApproval: type.requiresApproval ?? false,
+      category: 'Maintenance', // This field doesn't exist in backend DTO
+      autoAssign: false, // This field doesn't exist in backend DTO
+      slaHours: 24 // This field doesn't exist in backend DTO
+    });
     setIsEditDialogOpen(true);
   };
 
-  const handleUpdate = () => {
-    console.log('Updating work order type:', selectedType?.id, formData);
-    setIsEditDialogOpen(false);
-    resetForm();
+  const handleUpdate = async () => {
+    if (!selectedType?.id) return;
+    
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to update work order types.');
+        return;
+      }
+      
+      // Map form data to UpdateWorkOrderTypeDto structure
+      const updateDto = {
+        name: formData.name,
+        code: formData.code,
+        description: formData.description,
+        color: formData.color,
+        icon: 'wrench', // Default icon since backend expects this
+        isActive: formData.isActive,
+        requiresApproval: formData.requiresApproval,
+        defaultPriority: getPriorityNumber(formData.priority)
+      };
+
+      console.log('Sending update request for ID:', selectedType.id, 'DTO:', updateDto);
+
+      const response = await fetch(`http://localhost:5000/api/maintenance/work-order-types/${selectedType.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updateDto)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Update failed:', response.status, response.statusText, errorText);
+        setError(`Failed to update work order type: ${response.status} ${response.statusText} - ${errorText}`);
+        return;
+      }
+      
+      const updatedWorkOrderType = await response.json();
+      console.log('Update response received:', updatedWorkOrderType);
+      
+      // Refresh the list
+      await fetchWorkOrderTypes();
+      setIsEditDialogOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error('Error updating work order type:', error);
+      setError('Failed to update work order type. Please try again.');
+    }
+  };
+
+  const handleDelete = async (id: string | number) => {
+    if (!confirm('Are you sure you want to delete this work order type?')) return;
+    
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to delete work order types.');
+        return;
+      }
+      
+      const response = await fetch(`http://localhost:5000/api/maintenance/work-order-types/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to delete work order type');
+      }
+      
+      // Refresh the list
+      await fetchWorkOrderTypes();
+    } catch (error) {
+      console.error('Error deleting work order type:', error);
+      setError('Failed to delete work order type. Please try again.');
+    }
   };
 
   const resetForm = () => {
@@ -190,9 +354,10 @@ export default function WorkOrderTypesPage() {
       description: '',
       priority: 'Medium',
       color: '#3b82f6',
-      estimatedHours: 2,
       isActive: true,
       requiresApproval: false,
+      // Legacy fields kept for form compatibility
+      estimatedHours: 2,
       category: 'Maintenance',
       autoAssign: false,
       slaHours: 24
@@ -210,7 +375,7 @@ export default function WorkOrderTypesPage() {
             Define and manage different types of maintenance work orders
           </p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        {mounted && <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
@@ -273,42 +438,6 @@ export default function WorkOrderTypesPage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="category">Category</Label>
-                  <Select value={formData.category} onValueChange={(value) => setFormData({...formData, category: value})}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Maintenance">Maintenance</SelectItem>
-                      <SelectItem value="Repair">Repair</SelectItem>
-                      <SelectItem value="Inspection">Inspection</SelectItem>
-                      <SelectItem value="Installation">Installation</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="hours">Estimated Hours</Label>
-                  <Input
-                    id="hours"
-                    type="number"
-                    step="0.5"
-                    value={formData.estimatedHours}
-                    onChange={(e) => setFormData({...formData, estimatedHours: parseFloat(e.target.value)})}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="sla">SLA Hours</Label>
-                  <Input
-                    id="sla"
-                    type="number"
-                    value={formData.slaHours}
-                    onChange={(e) => setFormData({...formData, slaHours: parseInt(e.target.value)})}
-                  />
-                </div>
-                <div className="space-y-2">
                   <Label htmlFor="color">Color</Label>
                   <Input
                     id="color"
@@ -337,15 +466,6 @@ export default function WorkOrderTypesPage() {
                   />
                   <Label htmlFor="approval">Requires Approval</Label>
                 </div>
-                
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="autoAssign"
-                    checked={formData.autoAssign}
-                    onCheckedChange={(checked) => setFormData({...formData, autoAssign: checked})}
-                  />
-                  <Label htmlFor="autoAssign">Auto-assign Technicians</Label>
-                </div>
               </div>
             </div>
             <DialogFooter>
@@ -357,7 +477,7 @@ export default function WorkOrderTypesPage() {
               </Button>
             </DialogFooter>
           </DialogContent>
-        </Dialog>
+        </Dialog>}
       </div>
 
       {/* Breadcrumbs */}
@@ -381,13 +501,25 @@ export default function WorkOrderTypesPage() {
         </BreadcrumbList>
       </Breadcrumb>
 
+      {/* Error Display */}
+      {error && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="pt-6">
+            <div className="flex items-center space-x-2 text-red-700">
+              <AlertTriangle className="h-5 w-5" />
+              <p className="font-medium">{error}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Filters */}
       <Card>
         <CardHeader>
           <CardTitle>Filters</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="relative">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -398,42 +530,39 @@ export default function WorkOrderTypesPage() {
               />
             </div>
             
-            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Priority" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Priorities</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="critical">Critical</SelectItem>
-              </SelectContent>
-            </Select>
+            {mounted && (
+              <>
+                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Priority" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Priorities</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="critical">Critical</SelectItem>
+                  </SelectContent>
+                </Select>
 
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                <SelectItem value="maintenance">Maintenance</SelectItem>
-                <SelectItem value="repair">Repair</SelectItem>
-                <SelectItem value="inspection">Inspection</SelectItem>
-                <SelectItem value="installation">Installation</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="inactive">Inactive</SelectItem>
-              </SelectContent>
-            </Select>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </>
+            )}
+            {!mounted && (
+              <>
+                <div className="h-10 bg-gray-100 rounded-md animate-pulse" />
+                <div className="h-10 bg-gray-100 rounded-md animate-pulse" />
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -447,6 +576,13 @@ export default function WorkOrderTypesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {loading ? (
+            <div className="text-center py-4">Loading work order types...</div>
+          ) : error ? (
+            <div className="text-center py-4 text-red-600">{error}</div>
+          ) : filteredData.length === 0 ? (
+            <div className="text-center py-4 text-muted-foreground">No work order types found</div>
+          ) : (
           <div className="space-y-4">
             {filteredData.map((type) => (
               <div key={type.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
@@ -459,7 +595,7 @@ export default function WorkOrderTypesPage() {
                       />
                       <h3 className="font-semibold">{type.name}</h3>
                       <Badge variant="outline">{type.code}</Badge>
-                      {getPriorityBadge(type.priority)}
+                      {getPriorityBadge(getPriorityString(type.defaultPriority))}
                       <Badge className={type.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
                         {type.isActive ? 'Active' : 'Inactive'}
                       </Badge>
@@ -471,21 +607,18 @@ export default function WorkOrderTypesPage() {
                       )}
                     </div>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-muted-foreground">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-muted-foreground">
                       <div className="flex items-center space-x-2">
                         <Wrench className="h-4 w-4" />
-                        <span>{type.category}</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Clock className="h-4 w-4" />
-                        <span>{type.estimatedHours}h estimated</span>
+                        <span>Code: {type.code}</span>
                       </div>
                       <div className="flex items-center space-x-2">
                         <AlertTriangle className="h-4 w-4" />
-                        <span>SLA: {type.slaHours}h</span>
+                        <span>Priority: {getPriorityString(type.defaultPriority)}</span>
                       </div>
-                      <div>
-                        <span className="font-medium">Auto-assign:</span> {type.autoAssign ? 'Yes' : 'No'}
+                      <div className="flex items-center space-x-2">
+                        <Clock className="h-4 w-4" />
+                        <span>Status: {type.isActive ? 'Active' : 'Inactive'}</span>
                       </div>
                     </div>
                     
@@ -500,6 +633,7 @@ export default function WorkOrderTypesPage() {
                       size="sm" 
                       variant="outline" 
                       className="text-red-600 hover:text-red-700"
+                      onClick={() => handleDelete(type.id)}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -508,11 +642,12 @@ export default function WorkOrderTypesPage() {
               </div>
             ))}
           </div>
+          )}
         </CardContent>
       </Card>
 
       {/* Edit Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+      {mounted && <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
             <DialogTitle>Edit Work Order Type</DialogTitle>
@@ -568,51 +703,16 @@ export default function WorkOrderTypesPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-category">Category</Label>
-                <Select value={formData.category} onValueChange={(value) => setFormData({...formData, category: value})}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Maintenance">Maintenance</SelectItem>
-                    <SelectItem value="Repair">Repair</SelectItem>
-                    <SelectItem value="Inspection">Inspection</SelectItem>
-                    <SelectItem value="Installation">Installation</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
             
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-hours">Estimated Hours</Label>
-                <Input
-                  id="edit-hours"
-                  type="number"
-                  step="0.5"
-                  value={formData.estimatedHours}
-                  onChange={(e) => setFormData({...formData, estimatedHours: parseFloat(e.target.value)})}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-sla">SLA Hours</Label>
-                <Input
-                  id="edit-sla"
-                  type="number"
-                  value={formData.slaHours}
-                  onChange={(e) => setFormData({...formData, slaHours: parseInt(e.target.value)})}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-color">Color</Label>
-                <Input
-                  id="edit-color"
-                  type="color"
-                  value={formData.color}
-                  onChange={(e) => setFormData({...formData, color: e.target.value})}
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-color">Color</Label>
+              <Input
+                id="edit-color"
+                type="color"
+                value={formData.color}
+                onChange={(e) => setFormData({...formData, color: e.target.value})}
+              />
             </div>
             
             <div className="space-y-4">
@@ -633,15 +733,6 @@ export default function WorkOrderTypesPage() {
                 />
                 <Label htmlFor="edit-approval">Requires Approval</Label>
               </div>
-              
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="edit-autoAssign"
-                  checked={formData.autoAssign}
-                  onCheckedChange={(checked) => setFormData({...formData, autoAssign: checked})}
-                />
-                <Label htmlFor="edit-autoAssign">Auto-assign Technicians</Label>
-              </div>
             </div>
           </div>
           <DialogFooter>
@@ -653,7 +744,7 @@ export default function WorkOrderTypesPage() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog>}
     </div>
   );
 }

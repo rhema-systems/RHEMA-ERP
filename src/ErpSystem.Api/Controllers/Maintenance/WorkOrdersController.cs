@@ -1,7 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Maintenance;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -40,19 +45,21 @@ public class WorkOrdersController : ControllerBase
         {
             if (pageSize > 100)
                 pageSize = 100;
-
+            
+            // Create filter DTO
             var filter = new WorkOrderFilterDto
             {
-                Page = page,
-                PageSize = pageSize,
                 SearchTerm = searchTerm,
-                Status = status,
+                Status = string.IsNullOrEmpty(status) ? null : status,
                 AssetId = assetId,
                 AssignedTechnicianId = technicianId,
                 StartDate = scheduledFrom,
-                EndDate = scheduledTo
+                EndDate = scheduledTo,
+                Page = page,
+                PageSize = pageSize
             };
-            
+
+            // Get work orders from service
             var result = await _workOrderService.GetWorkOrdersPagedAsync(filter);
             return Ok(result);
         }
@@ -79,8 +86,8 @@ public class WorkOrdersController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving work order {WorkOrderId}", id);
-            return StatusCode(500, "An error occurred while retrieving the work order");
+            _logger.LogError(ex, $"Error retrieving work order with ID {id}");
+            return StatusCode(500, $"An error occurred while retrieving work order with ID {id}");
         }
     }
 
@@ -95,12 +102,8 @@ public class WorkOrdersController : ControllerBase
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var workOrder = await _workOrderService.CreateWorkOrderAsync(createDto);
-            return CreatedAtAction(nameof(GetWorkOrder), new { id = workOrder.Id }, workOrder);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
+            var newWorkOrder = await _workOrderService.CreateWorkOrderAsync(createDto);
+            return CreatedAtAction(nameof(GetWorkOrder), new { id = newWorkOrder.Id }, newWorkOrder);
         }
         catch (Exception ex)
         {
@@ -120,17 +123,17 @@ public class WorkOrdersController : ControllerBase
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var workOrder = await _workOrderService.UpdateWorkOrderAsync(id, updateDto);
-            return Ok(workOrder);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
+            var existingWorkOrder = await _workOrderService.GetWorkOrderByIdAsync(id);
+            if (existingWorkOrder == null)
+                return NotFound($"Work order with ID {id} not found");
+
+            var updatedWorkOrder = await _workOrderService.UpdateWorkOrderAsync(id, updateDto);
+            return Ok(updatedWorkOrder);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating work order {WorkOrderId}", id);
-            return StatusCode(500, "An error occurred while updating the work order");
+            _logger.LogError(ex, $"Error updating work order with ID {id}");
+            return StatusCode(500, $"An error occurred while updating work order with ID {id}");
         }
     }
 
@@ -142,257 +145,69 @@ public class WorkOrdersController : ControllerBase
     {
         try
         {
+            var workOrder = await _workOrderService.GetWorkOrderByIdAsync(id);
+            if (workOrder == null)
+                return NotFound($"Work order with ID {id} not found");
+
             await _workOrderService.DeleteWorkOrderAsync(id);
             return NoContent();
         }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error deleting work order {WorkOrderId}", id);
-            return StatusCode(500, "An error occurred while deleting the work order");
+            _logger.LogError(ex, $"Error deleting work order with ID {id}");
+            return StatusCode(500, $"An error occurred while deleting work order with ID {id}");
         }
     }
 
     /// <summary>
-    /// Starts a work order
+    /// Updates work order status
     /// </summary>
-    [HttpPut("{id:guid}/start")]
-    public async Task<ActionResult<WorkOrderDto>> StartWorkOrder(Guid id)
-    {
-        try
-        {
-            var workOrder = await _workOrderService.StartWorkOrderAsync(id);
-            return Ok(workOrder);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error starting work order {WorkOrderId}", id);
-            return StatusCode(500, "An error occurred while starting the work order");
-        }
-    }
-
-    /// <summary>
-    /// Completes a work order
-    /// </summary>
-    [HttpPut("{id:guid}/complete")]
-    public async Task<ActionResult<WorkOrderDto>> CompleteWorkOrder(Guid id, [FromBody] CompleteWorkOrderDto completeDto)
+    [HttpPut("{id:guid}/status")]
+    public async Task<ActionResult<WorkOrderDto>> UpdateWorkOrderStatus(Guid id, [FromBody] UpdateWorkOrderStatusRequest request)
     {
         try
         {
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
+                
+            var workOrder = await _workOrderService.GetWorkOrderByIdAsync(id);
+            if (workOrder == null)
+                return NotFound($"Work order with ID {id} not found");
 
-            var workOrder = await _workOrderService.CompleteWorkOrderAsync(id, completeDto);
-            return Ok(workOrder);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
+            var updatedWorkOrder = await _workOrderService.UpdateWorkOrderStatusAsync(id, request.Status, request.Notes);
+            return Ok(updatedWorkOrder);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error completing work order {WorkOrderId}", id);
-            return StatusCode(500, "An error occurred while completing the work order");
+            _logger.LogError(ex, $"Error updating status for work order with ID {id}");
+            return StatusCode(500, $"An error occurred while updating status for work order with ID {id}");
         }
     }
 
     /// <summary>
-    /// Cancels a work order
+    /// Approves a work order
     /// </summary>
-    [HttpPut("{id:guid}/cancel")]
-    public async Task<ActionResult<WorkOrderDto>> CancelWorkOrder(Guid id, [FromBody] CancelWorkOrderDto cancelDto)
+    [HttpPost("{id:guid}/approve")]
+    public async Task<ActionResult<WorkOrderDto>> ApproveWorkOrder(Guid id, [FromBody] ApproveWorkOrderRequest? request = null)
     {
         try
         {
-            if (!ModelState.IsValid)
-                return BadRequest(ModelState);
+            var workOrder = await _workOrderService.GetWorkOrderByIdAsync(id);
+            if (workOrder == null)
+                return NotFound($"Work order with ID {id} not found");
 
-            var workOrder = await _workOrderService.CancelWorkOrderAsync(id, cancelDto.Reason);
-            return Ok(workOrder);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
+            var approvedWorkOrder = await _workOrderService.ApproveWorkOrderAsync(id, request?.Notes);
+            return Ok(approvedWorkOrder);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error canceling work order {WorkOrderId}", id);
-            return StatusCode(500, "An error occurred while canceling the work order");
+            _logger.LogError(ex, $"Error approving work order with ID {id}");
+            return StatusCode(500, $"An error occurred while approving work order with ID {id}");
         }
     }
 
     /// <summary>
-    /// Assigns a technician to a work order
-    /// </summary>
-    [HttpPut("{id:guid}/assign")]
-    public async Task<ActionResult<WorkOrderDto>> AssignTechnician(Guid id, [FromBody] AssignTechnicianDto assignDto)
-    {
-        try
-        {
-            if (!ModelState.IsValid)
-                return BadRequest(ModelState);
-
-            var workOrder = await _workOrderService.AssignTechnicianAsync(id, assignDto.TechnicianId);
-            return Ok(workOrder);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error assigning technician to work order {WorkOrderId}", id);
-            return StatusCode(500, "An error occurred while assigning the technician");
-        }
-    }
-
-    /// <summary>
-    /// Updates work order priority
-    /// </summary>
-    [HttpPut("{id:guid}/priority")]
-    public async Task<ActionResult<WorkOrderDto>> UpdatePriority(Guid id, [FromBody] UpdatePriorityDto priorityDto)
-    {
-        try
-        {
-            if (!ModelState.IsValid)
-                return BadRequest(ModelState);
-
-            var workOrder = await _workOrderService.UpdatePriorityAsync(id, priorityDto.Priority);
-            return Ok(workOrder);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating work order priority {WorkOrderId}", id);
-            return StatusCode(500, "An error occurred while updating priority");
-        }
-    }
-
-    /// <summary>
-    /// Reschedules a work order
-    /// </summary>
-    [HttpPut("{id:guid}/reschedule")]
-    public async Task<ActionResult<WorkOrderDto>> RescheduleWorkOrder(Guid id, [FromBody] RescheduleWorkOrderDto rescheduleDto)
-    {
-        try
-        {
-            if (!ModelState.IsValid)
-                return BadRequest(ModelState);
-
-            var workOrder = await _workOrderService.RescheduleWorkOrderAsync(id, rescheduleDto.NewScheduledStart);
-            return Ok(workOrder);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error rescheduling work order {WorkOrderId}", id);
-            return StatusCode(500, "An error occurred while rescheduling the work order");
-        }
-    }
-
-    /// <summary>
-    /// Gets work orders by status
-    /// </summary>
-    [HttpGet("by-status/{status}")]
-    public async Task<ActionResult<IEnumerable<WorkOrderListDto>>> GetWorkOrdersByStatus(string status)
-    {
-        try
-        {
-            var workOrders = await _workOrderService.GetWorkOrdersByStatusAsync(status);
-            return Ok(workOrders);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving work orders by status {Status}", status);
-            return StatusCode(500, "An error occurred while retrieving work orders");
-        }
-    }
-
-    /// <summary>
-    /// Gets work orders assigned to a specific technician
-    /// </summary>
-    [HttpGet("by-technician/{technicianId:guid}")]
-    public async Task<ActionResult<IEnumerable<WorkOrderListDto>>> GetWorkOrdersByTechnician(Guid technicianId)
-    {
-        try
-        {
-            var workOrders = await _workOrderService.GetWorkOrdersByTechnicianAsync(technicianId);
-            return Ok(workOrders);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving work orders for technician {TechnicianId}", technicianId);
-            return StatusCode(500, "An error occurred while retrieving work orders");
-        }
-    }
-
-    /// <summary>
-    /// Gets overdue work orders
-    /// </summary>
-    [HttpGet("overdue")]
-    public async Task<ActionResult<IEnumerable<WorkOrderListDto>>> GetOverdueWorkOrders()
-    {
-        try
-        {
-            var workOrders = await _workOrderService.GetOverdueWorkOrdersAsync();
-            return Ok(workOrders);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving overdue work orders");
-            return StatusCode(500, "An error occurred while retrieving overdue work orders");
-        }
-    }
-
-    /// <summary>
-    /// Gets work orders scheduled for today
-    /// </summary>
-    [HttpGet("scheduled-today")]
-    public async Task<ActionResult<IEnumerable<WorkOrderListDto>>> GetWorkOrdersScheduledToday()
-    {
-        try
-        {
-            var workOrders = await _workOrderService.GetWorkOrdersScheduledTodayAsync();
-            return Ok(workOrders);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving work orders scheduled for today");
-            return StatusCode(500, "An error occurred while retrieving today's work orders");
-        }
-    }
-
-    /// <summary>
-    /// Gets work order statistics and metrics
+    /// Gets work order metrics
     /// </summary>
     [HttpGet("metrics")]
     public async Task<ActionResult<WorkOrderMetricsDto>> GetWorkOrderMetrics()
@@ -408,65 +223,4 @@ public class WorkOrdersController : ControllerBase
             return StatusCode(500, "An error occurred while retrieving work order metrics");
         }
     }
-
-    /// <summary>
-    /// Generates a unique work order number
-    /// </summary>
-    [HttpGet("generate-number")]
-    public async Task<ActionResult<string>> GenerateWorkOrderNumber()
-    {
-        try
-        {
-            var workOrderNumber = await _workOrderService.GenerateWorkOrderNumberAsync();
-            return Ok(new { workOrderNumber });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error generating work order number");
-            return StatusCode(500, "An error occurred while generating work order number");
-        }
-    }
-
-    /// <summary>
-    /// Creates recurring work orders from a maintenance schedule
-    /// </summary>
-    [HttpPost("create-from-schedule/{scheduleId:guid}")]
-    public async Task<ActionResult<IEnumerable<WorkOrderDto>>> CreateWorkOrdersFromSchedule(Guid scheduleId)
-    {
-        try
-        {
-            var workOrders = await _workOrderService.CreateWorkOrdersFromScheduleAsync(scheduleId);
-            return Ok(workOrders);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating work orders from schedule {ScheduleId}", scheduleId);
-            return StatusCode(500, "An error occurred while creating work orders from schedule");
-        }
-    }
-}
-
-public class CancelWorkOrderDto
-{
-    public string Reason { get; set; } = string.Empty;
-}
-
-public class AssignTechnicianDto
-{
-    public Guid TechnicianId { get; set; }
-}
-
-public class UpdatePriorityDto
-{
-    public string Priority { get; set; } = string.Empty;
-}
-
-public class RescheduleWorkOrderDto
-{
-    public DateTime NewScheduledStart { get; set; }
-    public DateTime NewScheduledEnd { get; set; }
 }

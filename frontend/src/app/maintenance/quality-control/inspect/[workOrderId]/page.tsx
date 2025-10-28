@@ -38,6 +38,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 
 // Services
 import { 
@@ -57,6 +58,7 @@ interface FileUploadProgress {
 }
 
 export default function InspectionPage() {
+  const { toast } = useToast();
   const params = useParams();
   const router = useRouter();
   const workOrderId = params.workOrderId as string;
@@ -108,7 +110,11 @@ export default function InspectionPage() {
       const workOrderData = await inspectionExecutionService.getWorkOrderById(workOrderId);
       
       if (!workOrderData) {
-        alert('Work order not found');
+        toast({
+          title: "Error",
+          description: "Work order not found",
+          variant: "destructive"
+        });
         router.back();
         return;
       }
@@ -144,7 +150,11 @@ export default function InspectionPage() {
       }
     } catch (error) {
       console.error('Error loading work order:', error);
-      alert('Error loading work order. Please try again.');
+      toast({
+        title: "Error",
+        description: "Error loading work order. Please try again.",
+        variant: "destructive"
+      });
     } finally {
       setLoading(false);
     }
@@ -152,7 +162,11 @@ export default function InspectionPage() {
 
   const startInspection = async () => {
     if (!selectedChecklistId) {
-      alert('Please select a checklist');
+      toast({
+        title: "Validation Error",
+        description: "Please select a checklist",
+        variant: "destructive"
+      });
       return;
     }
 
@@ -190,7 +204,11 @@ export default function InspectionPage() {
       }
     } catch (error) {
       console.error('Error starting inspection:', error);
-      alert('Error starting inspection. Please try again.');
+      toast({
+        title: "Error",
+        description: "Error starting inspection. Please try again.",
+        variant: "destructive"
+      });
     }
   };
 
@@ -250,7 +268,11 @@ export default function InspectionPage() {
       setUploadProgress({});
     } catch (error) {
       console.error('Error uploading files:', error);
-      alert('Error uploading files. Please try again.');
+      toast({
+        title: "Upload Error",
+        description: "Error uploading files. Please try again.",
+        variant: "destructive"
+      });
     }
   };
 
@@ -346,7 +368,11 @@ export default function InspectionPage() {
       router.push('/maintenance/quality-control');
     } catch (error) {
       console.error('Error completing inspection:', error);
-      alert('Error completing inspection. Please try again.');
+      toast({
+        title: "Error",
+        description: "Error completing inspection. Please try again.",
+        variant: "destructive"
+      });
     } finally {
       setSaving(false);
     }

@@ -61,10 +61,7 @@ public class AssetTypeConfiguration : IEntityTypeConfiguration<AssetType>
             .HasForeignKey(atf => atf.AssetTypeId)
             .OnDelete(DeleteBehavior.Cascade);
             
-        builder.HasMany(at => at.Assets)
-            .WithOne()
-            .HasForeignKey(ma => ma.AssetTypeId)
-            .OnDelete(DeleteBehavior.Restrict);
+        // Removed relationship to MaintenanceAsset.AssetTypeId since we're using AssetCategoryId instead
     }
 }
 

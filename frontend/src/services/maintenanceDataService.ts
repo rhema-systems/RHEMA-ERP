@@ -25,7 +25,19 @@ export interface Asset {
   assetName: string;
   assetCode: string;
   category?: string;
+  categoryId?: string;
+  assetType?: string;
   location?: string;
+  isActive: boolean;
+}
+
+export interface AssetCategory {
+  id: string;
+  name: string;
+  code: string;
+  description?: string;
+  maintenanceType?: string;
+  maintenanceFrequency?: string;
   isActive: boolean;
 }
 
@@ -55,52 +67,183 @@ class MaintenanceDataService {
   // Fetch all active employees
   async getEmployees(): Promise<Employee[]> {
     try {
-      const response = await apiService.get('/employees?isActive=true');
-      return response.data.data || [];
+      console.log('👥 Using /api/employees endpoint (confirmed to exist in backend)');
+      
+      const response = await apiService.get('/employees?pageSize=1000&isActive=true');
+      console.log('👥 SUCCESS! Response from /api/employees:', response);
+      
+      // The backend controller returns an array of EmployeeDto directly in the response body
+      // but also sets headers for pagination info (X-Total-Count, X-Page, X-Page-Size)
+      const employees = Array.isArray(response) ? response : [];
+      
+      console.log(`👥 Found ${employees.length} employees from /api/employees`);
+      
+      if (employees.length > 0) {
+        console.log('👥 Sample employee data from /api/employees:', employees[0]);
+        
+        const mappedEmployees = employees.map((emp: any) => {
+          const mapped = {
+            id: emp.id,
+            firstName: emp.firstName,
+            lastName: emp.lastName,
+            email: emp.emailAddress, // EmployeeDto uses emailAddress
+            department: emp.departmentName, // EmployeeDto uses departmentName
+            position: emp.positionTitle, // EmployeeDto uses positionTitle
+            isActive: emp.isActive
+          };
+          console.log('👥 Mapped employee:', mapped);
+          return mapped;
+        });
+        
+        console.log(`✅ Successfully loaded ${mappedEmployees.length} employees from /api/employees`);
+        return mappedEmployees;
+      } else {
+        console.warn('⚠️ No employees found in response');
+        return [];
+      }
+      
     } catch (error) {
-      console.error('Error fetching employees:', error);
-      // Return mock data as fallback
-      return this.getMockEmployees();
+      console.error('❌ Error calling /api/employees:', error);
+      console.error('❌ Error type:', typeof error);
+      console.error('❌ Error constructor:', error?.constructor?.name);
+      console.error('❌ Full error object keys:', Object.keys(error || {}));
+      
+      // Try to extract more detailed error information
+      const errorDetails = {
+        name: (error as any)?.name,
+        message: (error as any)?.message,
+        status: (error as any)?.status || (error as any)?.response?.status,
+        statusText: (error as any)?.statusText || (error as any)?.response?.statusText,
+        data: (error as any)?.data || (error as any)?.response?.data,
+        response: (error as any)?.response,
+        stack: (error as any)?.stack?.split('\n')[0] // Just first line of stack
+      };
+      console.error('❌ Detailed error info:', errorDetails);
+      
+      // Let's also test if the endpoint is reachable at all
+      console.log('🗺 Testing basic endpoint accessibility...');
+      try {
+        const testResponse = await fetch('/api/employees', {
+          method: 'HEAD', // Just test if endpoint exists
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        console.log('🗺 Basic HEAD test - Status:', testResponse.status, 'OK:', testResponse.ok);
+        console.log('🗺 Response headers:', Array.from(testResponse.headers.entries()));
+      } catch (headError) {
+        console.error('🗺 HEAD test also failed:', headError);
+      }
+      
+      // Test if other endpoints work
+      console.log('⚙️ Testing other working endpoints for comparison...');
+      try {
+        const userTest = await apiService.get('/user');
+        console.log('⚙️ /user endpoint works, response length:', Array.isArray(userTest) ? userTest.length : 'not array');
+      } catch (userError) {
+        console.log('⚙️ /user endpoint also fails:', (userError as any)?.message);
+      }
+      
+      // Test the maintenance/assets endpoint we know works
+      try {
+        const assetTest = await apiService.get('/maintenance/assets?page=1&pageSize=5');
+        console.log('⚙️ /maintenance/assets endpoint works, has data:', !!assetTest?.data);
+      } catch (assetError) {
+        console.log('⚙️ /maintenance/assets also fails:', (assetError as any)?.message);
+      }
+      
+      throw new Error(`Failed to fetch employees: ${errorDetails.message || errorDetails.name || 'Unknown error'}`);
     }
   }
 
-  // Fetch technicians (employees in maintenance department or with technical roles)
+  // Fetch technicians (employees available for maintenance assignments)
   async getTechnicians(): Promise<Employee[]> {
     try {
+      console.log('🔧 Fetching maintenance technicians from /api/employees/maintenance-available...');
+      
+      // Try the specific maintenance technician endpoint first
+      try {
+        const response = await apiService.get('/employees/maintenance-available');
+        console.log('🔧 SUCCESS! Maintenance technicians response:', response);
+        
+        const technicians = Array.isArray(response) ? response : [];
+        
+        if (technicians.length > 0) {
+          const mappedTechnicians = technicians.map((emp: any) => ({
+            id: emp.id,
+            firstName: emp.firstName,
+            lastName: emp.lastName,
+            email: emp.emailAddress,
+            department: emp.departmentName,
+            position: emp.positionTitle,
+            isActive: emp.isActive
+          }));
+          
+          console.log(`✅ Successfully loaded ${mappedTechnicians.length} maintenance technicians`);
+          return mappedTechnicians;
+        }
+      } catch (maintenanceError) {
+        console.warn('⚠️ Maintenance-available endpoint failed, falling back to all employees:', maintenanceError);
+      }
+      
+      // Fallback to all employees and filter active ones
+      console.log('🔧 Falling back to all employees...');
       const employees = await this.getEmployees();
-      // Filter for maintenance department or technical positions
-      return employees.filter(emp => 
-        emp.department?.toLowerCase().includes('maintenance') ||
-        emp.department?.toLowerCase().includes('technical') ||
-        emp.position?.toLowerCase().includes('technician') ||
-        emp.position?.toLowerCase().includes('engineer') ||
-        emp.position?.toLowerCase().includes('mechanic')
-      );
+      const activeTechnicians = employees.filter(emp => emp.isActive);
+      
+      console.log(`🔧 Using ${activeTechnicians.length} active employees as technicians`);
+      return activeTechnicians;
+      
     } catch (error) {
-      console.error('Error fetching technicians:', error);
-      return this.getMockTechnicians();
+      console.error('❌ Error fetching technicians:', error);
+      throw error; // Re-throw so the UI can handle it
     }
   }
 
   // Fetch all active inventory items
   async getInventoryItems(): Promise<InventoryItem[]> {
     try {
-      const response = await apiService.get('/inventory?isActive=true');
-      return response.data.data || [];
+      const response = await apiService.get('/inventoryitems');
+      // Map the InventoryItemDto to InventoryItem interface
+      const items = response.data || [];
+      return items.map((item: any) => ({
+        id: item.id,
+        itemName: item.name || item.itemName,
+        itemCode: item.itemCode,
+        category: item.categoryName || item.category,
+        location: item.locationName || item.location,
+        isActive: item.isActive ?? true
+      }));
     } catch (error) {
       console.error('Error fetching inventory items:', error);
-      return this.getMockInventoryItems();
+      return [];
     }
   }
 
   // Fetch all active assets
   async getAssets(): Promise<Asset[]> {
     try {
-      const response = await apiService.get('/assets?isActive=true');
-      return response.data.data || [];
+      const response = await apiService.get('/maintenance/assets?page=1&pageSize=1000');
+      // Map the MaintenanceAssetListDto to Asset interface
+      const assets = response.data.items || response.data.data || response.data || [];
+      console.log('🏢 Assets array before mapping:', assets);
+      
+      const mappedAssets = assets.map((asset: any) => ({
+        id: asset.id,
+        assetName: asset.name || asset.assetName, // Backend sends 'name', not 'assetName'
+        assetCode: asset.assetNumber || asset.assetCode || asset.code, // Backend sends 'assetNumber', not 'assetCode'
+        category: asset.categoryName || asset.category,
+        categoryId: asset.assetCategoryId, // Backend now includes AssetCategoryId
+        assetType: asset.assetType, // Backend now includes AssetType from category
+        location: asset.location,
+        isActive: asset.isActive ?? true
+      }));
+      
+      return mappedAssets;
     } catch (error) {
       console.error('Error fetching assets:', error);
-      return this.getMockAssets();
+      return [];
     }
   }
 
@@ -111,18 +254,25 @@ class MaintenanceDataService {
       return response.data.data || [];
     } catch (error) {
       console.error('Error fetching work order types:', error);
-      return this.getMockWorkOrderTypes();
+      return [];
     }
   }
 
   // Fetch maintenance types
   async getMaintenanceTypes(): Promise<MaintenanceType[]> {
     try {
-      const response = await apiService.get('/maintenance/maintenance-types?isActive=true');
-      return response.data.data || [];
+      console.log('🔧 Fetching maintenance types...');
+      const response = await apiService.get('/maintenance/maintenance-types/active');
+      console.log('🔧 Maintenance types response:', response);
+      
+      // The active endpoint returns the data directly, not wrapped in pagination
+      const types = response || [];
+      console.log('🔧 Parsed maintenance types:', types);
+      
+      return types;
     } catch (error) {
       console.error('Error fetching maintenance types:', error);
-      return this.getMockMaintenanceTypes();
+      return [];
     }
   }
 
@@ -133,84 +283,70 @@ class MaintenanceDataService {
       return response.data.data || [];
     } catch (error) {
       console.error('Error fetching priority levels:', error);
-      return this.getMockPriorityLevels();
+      return [];
     }
   }
 
-  // Mock data fallbacks
-  private getMockEmployees(): Employee[] {
-    return [
-      { id: '1', firstName: 'John', lastName: 'Smith', email: 'john.smith@company.com', department: 'Maintenance', position: 'Senior Technician', isActive: true },
-      { id: '2', firstName: 'Mike', lastName: 'Johnson', email: 'mike.johnson@company.com', department: 'Maintenance', position: 'Maintenance Technician', isActive: true },
-      { id: '3', firstName: 'Sarah', lastName: 'Davis', email: 'sarah.davis@company.com', department: 'Technical', position: 'Systems Engineer', isActive: true },
-      { id: '4', firstName: 'Tom', lastName: 'Wilson', email: 'tom.wilson@company.com', department: 'Maintenance', position: 'Electrical Technician', isActive: true },
-      { id: '5', firstName: 'Lisa', lastName: 'Brown', email: 'lisa.brown@company.com', department: 'Operations', position: 'Operations Manager', isActive: true },
-      { id: '6', firstName: 'David', lastName: 'Garcia', email: 'david.garcia@company.com', department: 'Maintenance', position: 'HVAC Specialist', isActive: true },
-    ];
+  // Fetch asset categories
+  async getAssetCategories(): Promise<AssetCategory[]> {
+    try {
+      const response = await apiService.get('/maintenance/asset-categories?pageSize=1000');
+      
+      // The controller returns data directly, not wrapped in data object
+      const categories = response || [];
+      console.log('🏷️ Categories array:', categories);
+      
+      const mappedCategories = categories.map((category: any) => {
+        const mapped = {
+          id: category.id,
+          name: category.name,
+          code: category.code,
+          description: category.description,
+          maintenanceType: category.maintenanceType,
+          maintenanceFrequency: category.maintenanceFrequency,
+          isActive: category.isActive ?? true
+        };
+        console.log('🏷️ Mapped category:', mapped);
+        return mapped;
+      });
+      
+      console.log('🏷️ Final mapped categories:', mappedCategories);
+      return mappedCategories;
+    } catch (error) {
+      console.error('Error fetching asset categories:', error);
+      return [];
+    }
   }
 
-  private getMockTechnicians(): Employee[] {
-    return this.getMockEmployees().filter(emp => 
-      emp.department?.toLowerCase().includes('maintenance') ||
-      emp.department?.toLowerCase().includes('technical') ||
-      emp.position?.toLowerCase().includes('technician') ||
-      emp.position?.toLowerCase().includes('engineer') ||
-      emp.position?.toLowerCase().includes('specialist')
-    );
+  // Get asset type for an asset (now included directly in asset response)
+  async getAssetTypeForAsset(assetId: string): Promise<string | null> {
+    try {
+      console.log('=== Getting asset type for asset:', assetId);
+      
+      const assets = await this.getAssets();
+      const asset = assets.find(a => a.id === assetId);
+      console.log('Found asset:', asset);
+      
+      if (!asset) {
+        console.log('Asset not found');
+        return null;
+      }
+      
+      const assetType = asset.assetType;
+      console.log('Asset type from asset:', assetType);
+      
+      return assetType || null;
+    } catch (error) {
+      console.error('Error getting asset type for asset:', error);
+      return null;
+    }
   }
 
-  private getMockInventoryItems(): InventoryItem[] {
-    return [
-      { id: '1', itemName: 'Engine Oil - 5W30', itemCode: 'OIL-5W30-001', category: 'Lubricants', location: 'Warehouse A-1', isActive: true },
-      { id: '2', itemName: 'Air Filter - Standard', itemCode: 'FILTER-AIR-001', category: 'Filters', location: 'Warehouse A-2', isActive: true },
-      { id: '3', itemName: 'Hydraulic Fluid', itemCode: 'HYD-FLUID-001', category: 'Hydraulics', location: 'Warehouse B-1', isActive: true },
-      { id: '4', itemName: 'Bearing Set - 6203', itemCode: 'BEARING-6203', category: 'Mechanical Parts', location: 'Warehouse C-1', isActive: true },
-      { id: '5', itemName: 'V-Belt - A38', itemCode: 'BELT-A38-001', category: 'Belts', location: 'Warehouse A-3', isActive: true },
-      { id: '6', itemName: 'Electrical Wire 12AWG', itemCode: 'WIRE-12AWG-001', category: 'Electrical', location: 'Warehouse D-1', isActive: true },
-    ];
+  // Keep the old method name for backward compatibility, but redirect to assetType
+  async getMaintenanceTypeForAsset(assetId: string): Promise<string | null> {
+    return this.getAssetTypeForAsset(assetId);
   }
 
-  private getMockAssets(): Asset[] {
-    return [
-      { id: '1', assetName: 'Main Building HVAC Unit A', assetCode: 'HVAC-001', category: 'HVAC Systems', location: 'Main Building - Roof', isActive: true },
-      { id: '2', assetName: 'Backup Generator B2', assetCode: 'GEN-002', category: 'Power Generation', location: 'Generator Room', isActive: true },
-      { id: '3', assetName: 'Main Elevator C1', assetCode: 'ELEV-001', category: 'Vertical Transportation', location: 'Main Building - Lobby', isActive: true },
-      { id: '4', assetName: 'Building Fire System', assetCode: 'FIRE-001', category: 'Safety Systems', location: 'Throughout Building', isActive: true },
-      { id: '5', assetName: 'Chiller Unit #1', assetCode: 'CHILL-001', category: 'HVAC Systems', location: 'Mechanical Room', isActive: true },
-      { id: '6', assetName: 'Air Compressor #3', assetCode: 'COMP-003', category: 'Compressed Air', location: 'Workshop', isActive: true },
-    ];
-  }
-
-  private getMockWorkOrderTypes(): WorkOrderType[] {
-    return [
-      { id: '1', name: 'Preventive Maintenance', description: 'Scheduled preventive maintenance tasks', isActive: true },
-      { id: '2', name: 'Corrective Maintenance', description: 'Repair and corrective maintenance', isActive: true },
-      { id: '3', name: 'Emergency Repair', description: 'Emergency maintenance and repairs', isActive: true },
-      { id: '4', name: 'Safety Inspection', description: 'Safety and compliance inspections', isActive: true },
-      { id: '5', name: 'Calibration', description: 'Equipment calibration and testing', isActive: true },
-      { id: '6', name: 'Installation', description: 'New equipment installation', isActive: true },
-    ];
-  }
-
-  private getMockMaintenanceTypes(): MaintenanceType[] {
-    return [
-      { id: '1', name: 'Preventive', description: 'Scheduled preventive maintenance', isActive: true },
-      { id: '2', name: 'Corrective', description: 'Corrective maintenance and repairs', isActive: true },
-      { id: '3', name: 'Predictive', description: 'Predictive maintenance based on monitoring', isActive: true },
-      { id: '4', name: 'Emergency', description: 'Emergency maintenance', isActive: true },
-      { id: '5', name: 'Safety', description: 'Safety-related maintenance', isActive: true },
-      { id: '6', name: 'Inspection', description: 'Inspection and testing', isActive: true },
-    ];
-  }
-
-  private getMockPriorityLevels(): PriorityLevel[] {
-    return [
-      { id: '1', name: 'Low', level: 1, color: 'green', isActive: true },
-      { id: '2', name: 'Medium', level: 2, color: 'blue', isActive: true },
-      { id: '3', name: 'High', level: 3, color: 'orange', isActive: true },
-      { id: '4', name: 'Critical', level: 4, color: 'red', isActive: true },
-    ];
-  }
 }
 
 export const maintenanceDataService = new MaintenanceDataService();

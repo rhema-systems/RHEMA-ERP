@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
+using ErpSystem.Core.Enums;
 using ErpSystem.Data.Configuration;
 
 namespace ErpSystem.Data;
@@ -86,6 +87,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<WorkOrderLabor> WorkOrderLabor { get; set; }
     public DbSet<WorkOrderDocument> WorkOrderDocuments { get; set; }
     public DbSet<WorkOrderComment> WorkOrderComments { get; set; }
+    
+    // Task Template entities
+    public DbSet<AssetTaskTemplate> AssetTaskTemplates { get; set; }
+    public DbSet<AssetTypeTaskTemplate> AssetTypeTaskTemplates { get; set; }
+    public DbSet<MaintenanceTaskTemplate> MaintenanceTaskTemplates { get; set; }
+    
     public DbSet<MaintenanceSchedule> MaintenanceSchedules { get; set; }
     public DbSet<InspectionTemplate> InspectionTemplates { get; set; }
     public DbSet<AssetInspection> AssetInspections { get; set; }
@@ -97,10 +104,31 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<AssetDowntime> AssetDowntimes { get; set; }
     public DbSet<MaintenanceAttachment> MaintenanceAttachments { get; set; }
     
+    // Quality Control entities
+    public DbSet<QualityControlChecklist> QualityControlChecklists { get; set; }
+    public DbSet<WorkOrderQualityCheck> WorkOrderQualityChecks { get; set; }
+    public DbSet<WorkOrderQualitySignOff> WorkOrderQualitySignOffs { get; set; }
+    public DbSet<QualitySignOffChecklist> QualitySignOffChecklists { get; set; }
+    public DbSet<WorkOrderRework> WorkOrderReworks { get; set; }
+    public DbSet<WorkOrderReworkTask> WorkOrderReworkTasks { get; set; }
+    public DbSet<InspectionApproval> InspectionApprovals { get; set; }
+    public DbSet<WorkOrderRejection> WorkOrderRejections { get; set; }
+    public DbSet<RejectionFollowUp> RejectionFollowUps { get; set; }
+    public DbSet<InspectionChecklistTemplate> InspectionChecklistTemplates { get; set; }
+    public DbSet<InspectionChecklistItem> InspectionChecklistItems { get; set; }
+    public DbSet<QualityMetrics> QualityMetrics { get; set; }
+    
     // Technician Scheduling entities
     public DbSet<TechnicianSchedule> TechnicianSchedules { get; set; }
     public DbSet<TechnicianAvailability> TechnicianAvailabilities { get; set; }
     public DbSet<TechnicianShift> TechnicianShifts { get; set; }
+    
+    // Job Card Management entities
+    public DbSet<JobCard> JobCards { get; set; }
+    public DbSet<JobCardComment> JobCardComments { get; set; }
+    public DbSet<JobCardDocument> JobCardDocuments { get; set; }
+    public DbSet<JobCardApprovalStep> JobCardApprovalSteps { get; set; }
+    public DbSet<JobCardCertificate> JobCardCertificates { get; set; }
     
     // New Maintenance Management entities
     public DbSet<TechnicalSkill> TechnicalSkills { get; set; }
@@ -809,7 +837,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
                 
             entity.HasOne(wo => wo.AssignedTechnician)
-                .WithMany()
+                .WithMany(e => e.AssignedWorkOrders)
                 .HasForeignKey(wo => wo.AssignedTechnicianId)
                 .OnDelete(DeleteBehavior.NoAction);
                 
@@ -826,6 +854,21 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasOne(wo => wo.ApprovedBy)
                 .WithMany()
                 .HasForeignKey(wo => wo.ApprovedById)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(wo => wo.Supervisor)
+                .WithMany()
+                .HasForeignKey(wo => wo.SupervisorId)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(wo => wo.CompletedBy)
+                .WithMany()
+                .HasForeignKey(wo => wo.CompletedById)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(wo => wo.QualityCheckedBy)
+                .WithMany()
+                .HasForeignKey(wo => wo.QualityCheckedById)
                 .OnDelete(DeleteBehavior.NoAction);
                 
             entity.HasOne(wo => wo.ParentWorkOrder)
@@ -1268,8 +1311,379 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.NoAction);
         });
         
+        // Configure JobCard entity
+        builder.Entity<JobCard>(entity =>
+        {
+            entity.ToTable("JobCard"); // Explicitly set table name to singular
+            entity.HasIndex(jc => jc.JobCardNumber).IsUnique();
+            entity.HasIndex(jc => jc.AssetId);
+            entity.HasIndex(jc => jc.MaintenanceTypeId);
+            entity.HasIndex(jc => jc.PriorityLevelId);
+            entity.HasIndex(jc => jc.RequestedById);
+            entity.HasIndex(jc => jc.JobCardStatus);
+            entity.HasIndex(jc => jc.ApprovalStatus);
+            entity.HasIndex(jc => jc.RequestedDate);
+            entity.HasIndex(jc => jc.RequiredCompletionDate);
+            
+            entity.HasOne(jc => jc.Asset)
+                .WithMany()
+                .HasForeignKey(jc => jc.AssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+                
+            entity.HasOne(jc => jc.MaintenanceType)
+                .WithMany(mt => mt.JobCards)
+                .HasForeignKey(jc => jc.MaintenanceTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+                
+            entity.HasOne(jc => jc.PriorityLevel)
+                .WithMany()
+                .HasForeignKey(jc => jc.PriorityLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+                
+            entity.HasOne(jc => jc.RequestedBy)
+                .WithMany()
+                .HasForeignKey(jc => jc.RequestedById)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(jc => jc.PreferredTechnician)
+                .WithMany()
+                .HasForeignKey(jc => jc.PreferredTechnicianId)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(jc => jc.AssignedTechnician)
+                .WithMany()
+                .HasForeignKey(jc => jc.AssignedTechnicianId)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(jc => jc.GeneratedWorkOrder)
+                .WithMany()
+                .HasForeignKey(jc => jc.GeneratedWorkOrderId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+        
+        // Configure JobCardComment entity
+        builder.Entity<JobCardComment>(entity =>
+        {
+            entity.ToTable("JobCardComment"); // Explicitly set table name to singular
+            entity.HasIndex(jcc => jcc.JobCardId);
+            entity.HasIndex(jcc => jcc.CommentById);
+            entity.HasIndex(jcc => jcc.CommentDate);
+            entity.HasIndex(jcc => jcc.CommentType);
+            
+            entity.HasOne(jcc => jcc.JobCard)
+                .WithMany(jc => jc.Comments)
+                .HasForeignKey(jcc => jcc.JobCardId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasOne(jcc => jcc.CommentBy)
+                .WithMany()
+                .HasForeignKey(jcc => jcc.CommentById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+        
+        // Configure JobCardDocument entity
+        builder.Entity<JobCardDocument>(entity =>
+        {
+            entity.ToTable("JobCardDocument"); // Explicitly set table name to singular
+            entity.HasIndex(jcd => jcd.JobCardId);
+            entity.HasIndex(jcd => jcd.DocumentType);
+            entity.HasIndex(jcd => jcd.UploadedById);
+            entity.HasIndex(jcd => jcd.UploadedDate);
+            
+            entity.HasOne(jcd => jcd.JobCard)
+                .WithMany(jc => jc.Documents)
+                .HasForeignKey(jcd => jcd.JobCardId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasOne(jcd => jcd.UploadedBy)
+                .WithMany()
+                .HasForeignKey(jcd => jcd.UploadedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+        
+        // Configure JobCardApprovalStep entity
+        builder.Entity<JobCardApprovalStep>(entity =>
+        {
+            entity.ToTable("JobCardApprovalStep"); // Explicitly set table name to singular
+            entity.HasIndex(jcas => jcas.JobCardId);
+            entity.HasIndex(jcas => jcas.ApproverId);
+            entity.HasIndex(jcas => jcas.StepOrder);
+            entity.HasIndex(jcas => jcas.Status);
+            
+            entity.HasOne(jcas => jcas.JobCard)
+                .WithMany(jc => jc.ApprovalSteps)
+                .HasForeignKey(jcas => jcas.JobCardId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasOne(jcas => jcas.Approver)
+                .WithMany()
+                .HasForeignKey(jcas => jcas.ApproverId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+        
+        // Configure Quality Control entities
+        ConfigureQualityControlEntities(builder);
+        
         // Configure Technician entity (now using Employee entity directly)
         // Technician-specific configurations are handled in the Employee entity configuration
+    }
+    
+    private void ConfigureQualityControlEntities(ModelBuilder builder)
+    {
+        // Configure QualityControlChecklist entity
+        builder.Entity<QualityControlChecklist>(entity =>
+        {
+            entity.HasIndex(qcc => qcc.Name);
+            entity.HasIndex(qcc => qcc.WorkOrderType);
+            entity.HasIndex(qcc => qcc.AssetCategory);
+            entity.HasIndex(qcc => qcc.MaintenanceType);
+            entity.HasIndex(qcc => qcc.IsActive);
+            entity.HasIndex(qcc => qcc.IsMandatory);
+            entity.HasIndex(qcc => qcc.Version);
+            
+            entity.HasMany(qcc => qcc.QualityChecks)
+                .WithOne(wqc => wqc.Checklist)
+                .HasForeignKey(wqc => wqc.ChecklistId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        
+        // Configure WorkOrderQualityCheck entity
+        builder.Entity<WorkOrderQualityCheck>(entity =>
+        {
+            entity.HasIndex(wqc => wqc.WorkOrderId);
+            entity.HasIndex(wqc => wqc.ChecklistId);
+            entity.HasIndex(wqc => wqc.InspectorId);
+            entity.HasIndex(wqc => wqc.InspectionDate);
+            entity.HasIndex(wqc => wqc.OverallResult);
+            entity.HasIndex(wqc => wqc.Score);
+            entity.HasIndex(wqc => wqc.RequiresFollowUp);
+            
+            entity.HasMany(wqc => wqc.RelatedRework)
+                .WithOne()
+                .HasForeignKey("WorkOrderQualityCheckId")
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+        
+        // Configure WorkOrderQualitySignOff entity
+        builder.Entity<WorkOrderQualitySignOff>(entity =>
+        {
+            entity.HasIndex(wqso => wqso.WorkOrderId);
+            entity.HasIndex(wqso => wqso.SignOffLevel);
+            entity.HasIndex(wqso => wqso.SignOffRole);
+            entity.HasIndex(wqso => wqso.SignOffById);
+            entity.HasIndex(wqso => wqso.Status);
+            entity.HasIndex(wqso => wqso.SignOffDate);
+            entity.HasIndex(wqso => wqso.IsRequired);
+            entity.HasIndex(wqso => wqso.SortOrder);
+            
+            entity.HasOne(wqso => wqso.WorkOrder)
+                .WithMany()
+                .HasForeignKey(wqso => wqso.WorkOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasOne(wqso => wqso.SignOffBy)
+                .WithMany()
+                .HasForeignKey(wqso => wqso.SignOffById)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(wqso => wqso.DelegatedTo)
+                .WithMany()
+                .HasForeignKey(wqso => wqso.DelegatedToId)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasMany(wqso => wqso.ChecklistItems)
+                .WithOne(qscl => qscl.SignOff)
+                .HasForeignKey(qscl => qscl.SignOffId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        
+        // Configure QualitySignOffChecklist entity
+        builder.Entity<QualitySignOffChecklist>(entity =>
+        {
+            entity.HasIndex(qscl => qscl.SignOffId);
+            entity.HasIndex(qscl => qscl.Category);
+            entity.HasIndex(qscl => qscl.CheckType);
+            entity.HasIndex(qscl => qscl.IsRequired);
+            entity.HasIndex(qscl => qscl.SortOrder);
+            entity.HasIndex(qscl => qscl.CheckedDate);
+            entity.HasIndex(qscl => qscl.CheckedById);
+            
+            entity.HasOne(qscl => qscl.CheckedBy)
+                .WithMany()
+                .HasForeignKey(qscl => qscl.CheckedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+        
+        // Configure WorkOrderRework entity
+        builder.Entity<WorkOrderRework>(entity =>
+        {
+            entity.HasIndex(wor => wor.WorkOrderId);
+            entity.HasIndex(wor => wor.InspectorId);
+            entity.HasIndex(wor => wor.ReworkReason);
+            entity.HasIndex(wor => wor.Severity);
+            entity.HasIndex(wor => wor.Status);
+            entity.HasIndex(wor => wor.AssignedTechnicianId);
+            entity.HasIndex(wor => wor.IdentifiedDate);
+            entity.HasIndex(wor => wor.TargetCompletionDate);
+            
+            entity.HasOne(wor => wor.WorkOrder)
+                .WithMany()
+                .HasForeignKey(wor => wor.WorkOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasMany(wor => wor.ReworkTasks)
+                .WithOne(wort => wort.WorkOrderRework)
+                .HasForeignKey(wort => wort.WorkOrderReworkId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        
+        // Configure WorkOrderReworkTask entity
+        builder.Entity<WorkOrderReworkTask>(entity =>
+        {
+            entity.HasIndex(wort => wort.WorkOrderReworkId);
+            entity.HasIndex(wort => wort.Sequence);
+            entity.HasIndex(wort => wort.Status);
+            entity.HasIndex(wort => wort.CompletedDate);
+            entity.HasIndex(wort => wort.CompletedById);
+        });
+        
+        // Configure InspectionApproval entity
+        builder.Entity<InspectionApproval>(entity =>
+        {
+            entity.HasIndex(ia => ia.InspectionId);
+            entity.HasIndex(ia => ia.ApprovalLevel);
+            entity.HasIndex(ia => ia.ApproverId);
+            entity.HasIndex(ia => ia.Status);
+            entity.HasIndex(ia => ia.RequestedDate);
+            entity.HasIndex(ia => ia.DueDate);
+            entity.HasIndex(ia => ia.ApprovedDate);
+            entity.HasIndex(ia => ia.Priority);
+            entity.HasIndex(ia => ia.DelegatedToId);
+            
+            entity.HasOne(ia => ia.Inspection)
+                .WithMany()
+                .HasForeignKey(ia => ia.InspectionId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasOne(ia => ia.Approver)
+                .WithMany()
+                .HasForeignKey(ia => ia.ApproverId)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(ia => ia.DelegatedTo)
+                .WithMany()
+                .HasForeignKey(ia => ia.DelegatedToId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+        
+        // Configure WorkOrderRejection entity
+        builder.Entity<WorkOrderRejection>(entity =>
+        {
+            entity.HasIndex(wor => wor.WorkOrderId);
+            entity.HasIndex(wor => wor.RejectedById);
+            entity.HasIndex(wor => wor.RejectedDate);
+            entity.HasIndex(wor => wor.RejectionType);
+            entity.HasIndex(wor => wor.Severity);
+            entity.HasIndex(wor => wor.Status);
+            entity.HasIndex(wor => wor.ReworkAssignedToId);
+            entity.HasIndex(wor => wor.RequiresReinspection);
+            entity.HasIndex(wor => wor.IsEscalated);
+            
+            entity.HasOne(wor => wor.WorkOrder)
+                .WithMany()
+                .HasForeignKey(wor => wor.WorkOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            entity.HasOne(wor => wor.RejectedBy)
+                .WithMany()
+                .HasForeignKey(wor => wor.RejectedById)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(wor => wor.ReworkAssignedTo)
+                .WithMany()
+                .HasForeignKey(wor => wor.ReworkAssignedToId)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(wor => wor.ResolvedBy)
+                .WithMany()
+                .HasForeignKey(wor => wor.ResolvedById)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(wor => wor.ReinspectedBy)
+                .WithMany()
+                .HasForeignKey(wor => wor.ReinspectedById)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(wor => wor.EscalatedTo)
+                .WithMany()
+                .HasForeignKey(wor => wor.EscalatedToId)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasMany(wor => wor.FollowUps)
+                .WithOne(rfu => rfu.Rejection)
+                .HasForeignKey(rfu => rfu.RejectionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        
+        // Configure RejectionFollowUp entity
+        builder.Entity<RejectionFollowUp>(entity =>
+        {
+            entity.HasIndex(rfu => rfu.RejectionId);
+            entity.HasIndex(rfu => rfu.AssignedToId);
+            entity.HasIndex(rfu => rfu.DueDate);
+            entity.HasIndex(rfu => rfu.Status);
+            entity.HasIndex(rfu => rfu.CompletedDate);
+            entity.HasIndex(rfu => rfu.CompletedById);
+            entity.HasIndex(rfu => rfu.Priority);
+            
+            entity.HasOne(rfu => rfu.AssignedTo)
+                .WithMany()
+                .HasForeignKey(rfu => rfu.AssignedToId)
+                .OnDelete(DeleteBehavior.NoAction);
+                
+            entity.HasOne(rfu => rfu.CompletedBy)
+                .WithMany()
+                .HasForeignKey(rfu => rfu.CompletedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+        
+        // Configure InspectionChecklistTemplate entity
+        builder.Entity<InspectionChecklistTemplate>(entity =>
+        {
+            entity.HasIndex(ict => ict.Name);
+            entity.HasIndex(ict => ict.Category);
+            entity.HasIndex(ict => ict.IsActive);
+            entity.HasIndex(ict => ict.IsDefault);
+            entity.HasIndex(ict => ict.SortOrder);
+            entity.HasIndex(ict => ict.Version);
+            
+            entity.HasMany(ict => ict.ChecklistItems)
+                .WithOne(ici => ici.Template)
+                .HasForeignKey(ici => ici.TemplateId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        
+        // Configure InspectionChecklistItem entity
+        builder.Entity<InspectionChecklistItem>(entity =>
+        {
+            entity.HasIndex(ici => ici.TemplateId);
+            entity.HasIndex(ici => ici.Category);
+            entity.HasIndex(ici => ici.ItemType);
+            entity.HasIndex(ici => ici.IsRequired);
+            entity.HasIndex(ici => ici.IsCritical);
+            entity.HasIndex(ici => ici.SortOrder);
+            entity.HasIndex(ici => ici.RequiresPhoto);
+        });
+        
+        // Configure QualityMetrics entity
+        builder.Entity<QualityMetrics>(entity =>
+        {
+            entity.HasIndex(qm => qm.MetricsDate);
+            entity.HasIndex(qm => qm.TechnicianId);
+            entity.HasIndex(qm => qm.TeamId);
+            entity.HasIndex(qm => qm.AssetCategory);
+            entity.HasIndex(qm => qm.CalculatedDate);
+        });
     }
     
     private void ConfigureHREntities(ModelBuilder builder)
@@ -1965,5 +2379,638 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .HasForeignKey(sai => sai.LocationId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
+    }
+    
+    private void SeedMaintenanceData(ModelBuilder builder, Guid tenantId)
+    {
+        var now = DateTime.UtcNow;
+        var baseDate = new DateTime(2025, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        
+        // Seed Employees (Maintenance Team)
+        var maintenanceManagerId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var technicianId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var qualityCheckerId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var supervisorId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        
+        // Note: Employees would typically be seeded in HR module, but adding minimal data here for maintenance workflow
+        
+        // Seed Asset Categories
+        var vehicleCategoryId = Guid.Parse("aaaa1111-1111-1111-1111-111111111111");
+        var equipmentCategoryId = Guid.Parse("aaaa2222-2222-2222-2222-222222222222");
+        
+        builder.Entity<MaintenanceAssetCategory>().HasData(
+            new MaintenanceAssetCategory
+            {
+                Id = vehicleCategoryId,
+                Name = "Vehicles",
+                Code = "VEH",
+                Description = "Motor vehicles and transportation equipment",
+                AssetType = "Vehicle",
+                IsActive = true,
+                TenantId = tenantId,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new MaintenanceAssetCategory
+            {
+                Id = equipmentCategoryId,
+                Name = "Heavy Equipment",
+                Code = "HEQ",
+                Description = "Heavy machinery and equipment",
+                AssetType = "Equipment",
+                IsActive = true,
+                TenantId = tenantId,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            }
+        );
+        
+        // Seed Maintenance Assets
+        var forkliftId = Guid.Parse("bbbb1111-1111-1111-1111-111111111111");
+        var truckId = Guid.Parse("bbbb2222-2222-2222-2222-222222222222");
+        var generatorId = Guid.Parse("bbbb3333-3333-3333-3333-333333333333");
+        
+        builder.Entity<MaintenanceAsset>().HasData(
+            new MaintenanceAsset
+            {
+                Id = forkliftId,
+                AssetNumber = "FL-001",
+                Name = "Forklift Toyota 8FG25",
+                AssetCategoryId = equipmentCategoryId,
+                Description = "3-ton capacity forklift",
+                SerialNumber = "TOY-8FG25-2020-001",
+                Manufacturer = "Toyota",
+                Model = "8FG25",
+                PurchaseDate = new DateTime(2020, 6, 15),
+                PurchasePrice = 35000.00m,
+                CurrentValue = 28000.00m,
+                Status = AssetStatus.Active,
+                Criticality = AssetCriticality.High,
+                Location = "Warehouse A",
+                TenantId = tenantId,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new MaintenanceAsset
+            {
+                Id = truckId,
+                AssetNumber = "TRK-001",
+                Name = "Delivery Truck Isuzu NPR",
+                AssetCategoryId = vehicleCategoryId,
+                Description = "5-ton delivery truck",
+                SerialNumber = "ISU-NPR-2019-045",
+                Manufacturer = "Isuzu",
+                Model = "NPR 75",
+                PurchaseDate = new DateTime(2019, 3, 10),
+                PurchasePrice = 45000.00m,
+                CurrentValue = 32000.00m,
+                Status = AssetStatus.Active,
+                Criticality = AssetCriticality.High,
+                Location = "Fleet Parking",
+                TenantId = tenantId,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new MaintenanceAsset
+            {
+                Id = generatorId,
+                AssetNumber = "GEN-001",
+                Name = "Backup Generator Caterpillar",
+                AssetCategoryId = equipmentCategoryId,
+                Description = "500 KVA backup generator",
+                SerialNumber = "CAT-C15-2021-089",
+                Manufacturer = "Caterpillar",
+                Model = "C15",
+                PurchaseDate = new DateTime(2021, 8, 20),
+                PurchasePrice = 85000.00m,
+                CurrentValue = 75000.00m,
+                Status = AssetStatus.Active,
+                Criticality = AssetCriticality.Critical,
+                Location = "Power House",
+                TenantId = tenantId,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            }
+        );
+        
+        // Seed Maintenance Types
+        var preventiveId = Guid.Parse("cccc1111-1111-1111-1111-111111111111");
+        var correctiveId = Guid.Parse("cccc2222-2222-2222-2222-222222222222");
+        var inspectionId = Guid.Parse("cccc3333-3333-3333-3333-333333333333");
+        
+        builder.Entity<MaintenanceType>().HasData(
+            new MaintenanceType
+            {
+                Id = preventiveId,
+                Name = "Preventive Maintenance",
+                Code = "PM",
+                Description = "Scheduled preventive maintenance",
+                Category = "Scheduled",
+                MaintenanceClass = "Preventive",
+                IsTimeBased = true,
+                RequiresApproval = false,
+                RequiresQualityCheck = true,
+                RequiresCertification = true,
+                EstimatedHours = 4,
+                EstimatedCost = 500.00m,
+                DefaultPriority = 2,
+                Color = "#4CAF50",
+                IsActive = true,
+                TenantId = tenantId,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new MaintenanceType
+            {
+                Id = correctiveId,
+                Name = "Corrective Maintenance",
+                Code = "CM",
+                Description = "Repair and corrective maintenance",
+                Category = "Emergency",
+                MaintenanceClass = "Corrective",
+                IsTimeBased = false,
+                RequiresApproval = true,
+                RequiresQualityCheck = true,
+                RequiresCertification = false,
+                EstimatedHours = 6,
+                EstimatedCost = 800.00m,
+                DefaultPriority = 1,
+                Color = "#FF9800",
+                IsActive = true,
+                TenantId = tenantId,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new MaintenanceType
+            {
+                Id = inspectionId,
+                Name = "Safety Inspection",
+                Code = "SI",
+                Description = "Regular safety inspection",
+                Category = "Inspection",
+                MaintenanceClass = "Routine",
+                IsTimeBased = true,
+                RequiresApproval = false,
+                RequiresQualityCheck = true,
+                RequiresCertification = true,
+                EstimatedHours = 2,
+                EstimatedCost = 200.00m,
+                DefaultPriority = 3,
+                Color = "#2196F3",
+                IsActive = true,
+                TenantId = tenantId,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            }
+        );
+        
+        // Seed Priority Levels
+        var criticalPriorityId = Guid.Parse("dddd1111-1111-1111-1111-111111111111");
+        var highPriorityId = Guid.Parse("dddd2222-2222-2222-2222-222222222222");
+        var mediumPriorityId = Guid.Parse("dddd3333-3333-3333-3333-333333333333");
+        
+        builder.Entity<PriorityLevel>().HasData(
+            new PriorityLevel
+            {
+                Id = criticalPriorityId,
+                Name = "Critical",
+                Level = 1,
+                Description = "Critical priority - immediate action required",
+                Color = "#F44336",
+                ResponseTimeHours = 2,
+                IsActive = true,
+                TenantId = tenantId,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new PriorityLevel
+            {
+                Id = highPriorityId,
+                Name = "High",
+                Level = 2,
+                Description = "High priority - action required within 24 hours",
+                Color = "#FF9800",
+                ResponseTimeHours = 24,
+                IsActive = true,
+                TenantId = tenantId,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new PriorityLevel
+            {
+                Id = mediumPriorityId,
+                Name = "Medium",
+                Level = 3,
+                Description = "Medium priority - action required within 72 hours",
+                Color = "#2196F3",
+                ResponseTimeHours = 72,
+                IsActive = true,
+                TenantId = tenantId,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            }
+        );
+        
+        // Seed Job Cards with Complete Workflow
+        
+        // Job Card 1: Completed workflow with certificate (CLOSED)
+        var jobCard1Id = Guid.Parse("eeee1111-1111-1111-1111-111111111111");
+        builder.Entity<JobCard>().HasData(
+            new JobCard
+            {
+                Id = jobCard1Id,
+                JobCardNumber = "JC-2025-0001",
+                AssetId = forkliftId,
+                MaintenanceTypeId = preventiveId,
+                PriorityLevelId = highPriorityId,
+                Title = "3-Month Preventive Maintenance - Forklift FL-001",
+                Description = "Scheduled 3-month preventive maintenance service",
+                ProblemDescription = "Routine maintenance due. Oil change, filter replacement, general inspection required.",
+                MaintenanceLocation = "Internal",
+                RequestedById = maintenanceManagerId,
+                RequestedDate = baseDate.AddDays(-30),
+                RequiredCompletionDate = baseDate.AddDays(-15),
+                EstimatedHours = 4.0,
+                EstimatedCost = 500.00m,
+                JobCardStatus = "Closed",
+                ApprovalStatus = "Approved",
+                ApprovedById = supervisorId,
+                ApprovedDate = baseDate.AddDays(-28),
+                // Admission details
+                AssetConditionOnAdmission = "Good",
+                MileageReadingOnAdmission = 5420.5m,
+                HoursReadingOnAdmission = 1250.0m,
+                FuelLevelOnAdmission = 45.0m,
+                AdmissionNotes = "Asset received in good working condition. Minor oil leak noted.",
+                BayOrStation = "Bay 3",
+                // Completion details
+                CompletedDate = baseDate.AddDays(-8),
+                CompletionNotes = "All maintenance tasks completed successfully. Oil changed, filters replaced, brakes serviced.",
+                AssetConditionOnCompletion = "Excellent",
+                MileageReadingOnCompletion = 5425.0m,
+                HoursReadingOnCompletion = 1252.5m,
+                FuelLevelOnCompletion = 95.0m,
+                WorkCompletedSummary = "Engine oil changed, oil filter replaced, air filter cleaned, brake system serviced, hydraulic fluid topped up, general safety inspection completed.",
+                RemainingIssues = "None",
+                WarrantyDays = 90,
+                WarrantyTerms = "90-day warranty on parts and labor",
+                WarrantyExpiration = baseDate.AddDays(-8).AddDays(90),
+                RequiresFollowUp = true,
+                FollowUpDate = baseDate.AddDays(52),
+                FollowUpInstructions = "Schedule next preventive maintenance in 3 months",
+                // Quality Check
+                QualityCheckPassed = true,
+                QualityCheckedById = qualityCheckerId,
+                QualityCheckDate = baseDate.AddDays(-6),
+                QualityCheckNotes = "All work meets quality standards. Asset tested and performing excellently. No defects found.",
+                // Acceptance
+                CustomerAcceptance = true,
+                AcceptedById = maintenanceManagerId,
+                AcceptedDate = baseDate.AddDays(-4),
+                AcceptanceNotes = "Asset accepted. Forklift is running smoothly. Very satisfied with the maintenance work.",
+                // Certificate
+                CertificateGenerated = true,
+                CertificateGeneratedDate = baseDate.AddDays(-3),
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-30),
+                CreatedById = maintenanceManagerId,
+                CreatedBy = "System"
+            }
+        );
+        
+        // Job Card 2: Accepted but no certificate yet
+        var jobCard2Id = Guid.Parse("eeee2222-2222-2222-2222-222222222222");
+        builder.Entity<JobCard>().HasData(
+            new JobCard
+            {
+                Id = jobCard2Id,
+                JobCardNumber = "JC-2025-0002",
+                AssetId = truckId,
+                MaintenanceTypeId = correctiveId,
+                PriorityLevelId = criticalPriorityId,
+                Title = "Brake System Repair - Truck TRK-001",
+                Description = "Emergency brake system repair",
+                ProblemDescription = "Brake pedal feels spongy. Possible air in brake lines or worn brake pads.",
+                MaintenanceLocation = "Internal",
+                RequestedById = maintenanceManagerId,
+                RequestedDate = baseDate.AddDays(-20),
+                RequiredCompletionDate = baseDate.AddDays(-18),
+                EstimatedHours = 6.0,
+                EstimatedCost = 1200.00m,
+                JobCardStatus = "Accepted",
+                ApprovalStatus = "Approved",
+                ApprovedById = supervisorId,
+                ApprovedDate = baseDate.AddDays(-19),
+                // Admission
+                AssetConditionOnAdmission = "Fair",
+                MileageReadingOnAdmission = 85420.0m,
+                FuelLevelOnAdmission = 60.0m,
+                AdmissionNotes = "Truck admitted with brake system issues. Safety concern - high priority.",
+                BayOrStation = "Bay 1",
+                // Completion
+                CompletedDate = baseDate.AddDays(-12),
+                CompletionNotes = "Brake system completely overhauled. All brake pads replaced, brake fluid flushed and replaced, brake lines inspected.",
+                AssetConditionOnCompletion = "Good",
+                MileageReadingOnCompletion = 85425.0m,
+                FuelLevelOnCompletion = 55.0m,
+                WorkCompletedSummary = "Front and rear brake pads replaced, brake rotors resurfaced, brake fluid completely flushed, brake lines pressure tested, handbrake adjusted.",
+                WarrantyDays = 180,
+                WarrantyTerms = "180-day warranty on brake system parts and labor",
+                WarrantyExpiration = baseDate.AddDays(-12).AddDays(180),
+                // Quality Check
+                QualityCheckPassed = true,
+                QualityCheckedById = qualityCheckerId,
+                QualityCheckDate = baseDate.AddDays(-10),
+                QualityCheckNotes = "Brake system tested thoroughly. Stopping distance improved significantly. All safety checks passed.",
+                // Acceptance
+                CustomerAcceptance = true,
+                AcceptedById = maintenanceManagerId,
+                AcceptedDate = baseDate.AddDays(-8),
+                AcceptanceNotes = "Brakes are working perfectly now. Test drive completed successfully.",
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-20),
+                CreatedById = maintenanceManagerId,
+                CreatedBy = "System"
+            }
+        );
+        
+        // Job Card 3: Quality checked, awaiting acceptance
+        var jobCard3Id = Guid.Parse("eeee3333-3333-3333-3333-333333333333");
+        builder.Entity<JobCard>().HasData(
+            new JobCard
+            {
+                Id = jobCard3Id,
+                JobCardNumber = "JC-2025-0003",
+                AssetId = generatorId,
+                MaintenanceTypeId = inspectionId,
+                PriorityLevelId = mediumPriorityId,
+                Title = "Annual Safety Inspection - Generator GEN-001",
+                Description = "Mandatory annual safety inspection",
+                ProblemDescription = "Annual safety inspection due for compliance with safety regulations.",
+                MaintenanceLocation = "Internal",
+                RequestedById = maintenanceManagerId,
+                RequestedDate = baseDate.AddDays(-15),
+                RequiredCompletionDate = baseDate.AddDays(-5),
+                EstimatedHours = 3.0,
+                EstimatedCost = 350.00m,
+                JobCardStatus = "Quality Checked",
+                ApprovalStatus = "Approved",
+                ApprovedById = supervisorId,
+                ApprovedDate = baseDate.AddDays(-14),
+                // Admission
+                AssetConditionOnAdmission = "Good",
+                HoursReadingOnAdmission = 4580.0m,
+                FuelLevelOnAdmission = 75.0m,
+                AdmissionNotes = "Generator admitted for annual safety inspection. Last inspection was 12 months ago.",
+                BayOrStation = "Power House",
+                // Completion
+                CompletedDate = baseDate.AddDays(-7),
+                CompletionNotes = "Comprehensive safety inspection completed. All systems checked and tested.",
+                AssetConditionOnCompletion = "Good",
+                HoursReadingOnCompletion = 4585.0m,
+                FuelLevelOnCompletion = 70.0m,
+                WorkCompletedSummary = "Electrical system tested, cooling system inspected, fuel system checked, emissions tested, safety features verified, load testing completed.",
+                // Quality Check
+                QualityCheckPassed = true,
+                QualityCheckedById = qualityCheckerId,
+                QualityCheckDate = baseDate.AddDays(-5),
+                QualityCheckNotes = "Generator passed all safety inspection criteria. Ready for certification.",
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-15),
+                CreatedById = maintenanceManagerId,
+                CreatedBy = "System"
+            }
+        );
+        
+        // Job Card 4: Just completed, awaiting quality check
+        var jobCard4Id = Guid.Parse("eeee4444-4444-4444-4444-444444444444");
+        builder.Entity<JobCard>().HasData(
+            new JobCard
+            {
+                Id = jobCard4Id,
+                JobCardNumber = "JC-2025-0004",
+                AssetId = forkliftId,
+                MaintenanceTypeId = correctiveId,
+                PriorityLevelId = highPriorityId,
+                Title = "Hydraulic System Repair - Forklift FL-001",
+                Description = "Hydraulic cylinder leak repair",
+                ProblemDescription = "Hydraulic fluid leaking from lift cylinder. Reduced lifting capacity observed.",
+                MaintenanceLocation = "Internal",
+                RequestedById = maintenanceManagerId,
+                RequestedDate = baseDate.AddDays(-10),
+                RequiredCompletionDate = baseDate.AddDays(-2),
+                EstimatedHours = 5.0,
+                EstimatedCost = 850.00m,
+                JobCardStatus = "Completed",
+                ApprovalStatus = "Approved",
+                ApprovedById = supervisorId,
+                ApprovedDate = baseDate.AddDays(-9),
+                // Admission
+                AssetConditionOnAdmission = "Fair",
+                HoursReadingOnAdmission = 1260.0m,
+                FuelLevelOnAdmission = 40.0m,
+                AdmissionNotes = "Forklift showing hydraulic leak. Lifting performance degraded.",
+                BayOrStation = "Bay 2",
+                // Completion
+                CompletedDate = baseDate.AddDays(-2),
+                CompletionNotes = "Hydraulic cylinder seals replaced. System pressure tested and leak resolved.",
+                AssetConditionOnCompletion = "Good",
+                HoursReadingOnCompletion = 1262.0m,
+                FuelLevelOnCompletion = 38.0m,
+                WorkCompletedSummary = "Hydraulic cylinder disassembled, seals and O-rings replaced, cylinder reassembled, hydraulic system flushed, pressure tested to specification.",
+                WarrantyDays = 90,
+                WarrantyTerms = "90-day warranty on hydraulic repairs",
+                WarrantyExpiration = baseDate.AddDays(-2).AddDays(90),
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-10),
+                CreatedById = maintenanceManagerId,
+                CreatedBy = "System"
+            }
+        );
+        
+        // Job Card 5: In progress (no completion yet)
+        var jobCard5Id = Guid.Parse("eeee5555-5555-5555-5555-555555555555");
+        builder.Entity<JobCard>().HasData(
+            new JobCard
+            {
+                Id = jobCard5Id,
+                JobCardNumber = "JC-2025-0005",
+                AssetId = truckId,
+                MaintenanceTypeId = preventiveId,
+                PriorityLevelId = mediumPriorityId,
+                Title = "6-Month Service - Truck TRK-001",
+                Description = "Scheduled 6-month preventive maintenance",
+                ProblemDescription = "Routine 6-month service due. Engine oil change, filters, and general inspection.",
+                MaintenanceLocation = "Internal",
+                RequestedById = maintenanceManagerId,
+                RequestedDate = baseDate.AddDays(-5),
+                RequiredCompletionDate = baseDate.AddDays(5),
+                EstimatedHours = 4.0,
+                EstimatedCost = 600.00m,
+                JobCardStatus = "Approved",
+                ApprovalStatus = "Approved",
+                ApprovedById = supervisorId,
+                ApprovedDate = baseDate.AddDays(-4),
+                AssignedTechnicianId = technicianId,
+                PlannedStartDate = baseDate.AddDays(-3),
+                PlannedEndDate = baseDate.AddDays(2),
+                // Admission only
+                AssetConditionOnAdmission = "Good",
+                MileageReadingOnAdmission = 86250.0m,
+                FuelLevelOnAdmission = 50.0m,
+                AdmissionNotes = "Truck admitted for routine 6-month service. Currently in Bay 4.",
+                BayOrStation = "Bay 4",
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-5),
+                CreatedById = maintenanceManagerId,
+                CreatedBy = "System"
+            }
+        );
+        
+        // Seed Certificate for Job Card 1 (completed workflow)
+        var certificate1Id = Guid.Parse("ffff1111-1111-1111-1111-111111111111");
+        builder.Entity<JobCardCertificate>().HasData(
+            new JobCardCertificate
+            {
+                Id = certificate1Id,
+                JobCardId = jobCard1Id,
+                AssetId = forkliftId,
+                CertificateNumber = "CERT-2025-0001",
+                CertificateType = "Preventive Maintenance Completion",
+                IssuedDate = baseDate.AddDays(-3),
+                ValidUntil = baseDate.AddDays(-3).AddMonths(3),
+                IssuedById = supervisorId,
+                Description = "This certificate confirms that preventive maintenance was completed in accordance with manufacturer specifications and industry standards. All safety checks passed.",
+                CertificateData = "{\"inspectorName\":\"John Smith\",\"inspectorLicense\":\"MECH-12345\",\"complianceStandards\":[\"ISO 9001\",\"OEM Standards\"]}",
+                FileFormat = "PDF",
+                IsActive = true,
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-3),
+                CreatedBy = "System"
+            }
+        );
+        
+        // Seed Comments for Job Cards (Audit Trail)
+        builder.Entity<JobCardComment>().HasData(
+            // Job Card 1 Comments
+            new JobCardComment
+            {
+                Id = Guid.Parse("99991111-0000-0000-0000-000000000001"),
+                JobCardId = jobCard1Id,
+                CommentById = maintenanceManagerId,
+                Comment = "Job card created for scheduled preventive maintenance.",
+                CommentType = "General",
+                IsInternal = false,
+                CommentDate = baseDate.AddDays(-30),
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-30),
+                CreatedBy = "System"
+            },
+            new JobCardComment
+            {
+                Id = Guid.Parse("99991111-0000-0000-0000-000000000002"),
+                JobCardId = jobCard1Id,
+                CommentById = technicianId,
+                Comment = $"Job card completed by {technicianId}. All maintenance tasks completed successfully. Oil changed, filters replaced, brakes serviced.",
+                CommentType = "Completion",
+                IsInternal = false,
+                CommentDate = baseDate.AddDays(-8),
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-8),
+                CreatedBy = "System"
+            },
+            new JobCardComment
+            {
+                Id = Guid.Parse("99991111-0000-0000-0000-000000000003"),
+                JobCardId = jobCard1Id,
+                CommentById = qualityCheckerId,
+                Comment = $"Quality check passed by employee {qualityCheckerId}. All work meets quality standards. Asset tested and performing excellently. No defects found.",
+                CommentType = "QualityCheck",
+                IsInternal = false,
+                CommentDate = baseDate.AddDays(-6),
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-6),
+                CreatedBy = "System"
+            },
+            new JobCardComment
+            {
+                Id = Guid.Parse("99991111-0000-0000-0000-000000000004"),
+                JobCardId = jobCard1Id,
+                CommentById = maintenanceManagerId,
+                Comment = $"Job card accepted by employee {maintenanceManagerId}. Asset accepted. Forklift is running smoothly. Very satisfied with the maintenance work.",
+                CommentType = "Acceptance",
+                IsInternal = false,
+                CommentDate = baseDate.AddDays(-4),
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-4),
+                CreatedBy = "System"
+            },
+            new JobCardComment
+            {
+                Id = Guid.Parse("99991111-0000-0000-0000-000000000005"),
+                JobCardId = jobCard1Id,
+                CommentById = supervisorId,
+                Comment = "Certificate CERT-2025-0001 generated for job card. Type: Preventive Maintenance Completion",
+                CommentType = "Certificate",
+                IsInternal = false,
+                CommentDate = baseDate.AddDays(-3),
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-3),
+                CreatedBy = "System"
+            },
+            // Job Card 2 Comments
+            new JobCardComment
+            {
+                Id = Guid.Parse("99992222-0000-0000-0000-000000000001"),
+                JobCardId = jobCard2Id,
+                CommentById = maintenanceManagerId,
+                Comment = "Emergency brake system repair requested. High priority due to safety concerns.",
+                CommentType = "General",
+                IsInternal = false,
+                CommentDate = baseDate.AddDays(-20),
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-20),
+                CreatedBy = "System"
+            },
+            new JobCardComment
+            {
+                Id = Guid.Parse("99992222-0000-0000-0000-000000000002"),
+                JobCardId = jobCard2Id,
+                CommentById = technicianId,
+                Comment = $"Job card completed by {technicianId}. Brake system completely overhauled. All brake pads replaced, brake fluid flushed and replaced, brake lines inspected.",
+                CommentType = "Completion",
+                IsInternal = false,
+                CommentDate = baseDate.AddDays(-12),
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-12),
+                CreatedBy = "System"
+            },
+            new JobCardComment
+            {
+                Id = Guid.Parse("99992222-0000-0000-0000-000000000003"),
+                JobCardId = jobCard2Id,
+                CommentById = qualityCheckerId,
+                Comment = $"Quality check passed by employee {qualityCheckerId}. Brake system tested thoroughly. Stopping distance improved significantly. All safety checks passed.",
+                CommentType = "QualityCheck",
+                IsInternal = false,
+                CommentDate = baseDate.AddDays(-10),
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-10),
+                CreatedBy = "System"
+            },
+            new JobCardComment
+            {
+                Id = Guid.Parse("99992222-0000-0000-0000-000000000004"),
+                JobCardId = jobCard2Id,
+                CommentById = maintenanceManagerId,
+                Comment = $"Job card accepted by employee {maintenanceManagerId}. Brakes are working perfectly now. Test drive completed successfully.",
+                CommentType = "Acceptance",
+                IsInternal = false,
+                CommentDate = baseDate.AddDays(-8),
+                TenantId = tenantId,
+                CreatedAt = baseDate.AddDays(-8),
+                CreatedBy = "System"
+            }
+        );
     }
 }

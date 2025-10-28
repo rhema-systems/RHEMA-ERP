@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -45,90 +45,67 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 
-// Mock data for reports
-const workOrdersByMonth = [
-  { month: 'Jan', preventive: 15, corrective: 8, emergency: 2 },
-  { month: 'Feb', preventive: 18, corrective: 6, emergency: 1 },
-  { month: 'Mar', preventive: 12, corrective: 10, emergency: 4 },
-  { month: 'Apr', preventive: 20, corrective: 7, emergency: 3 },
-  { month: 'May', preventive: 16, corrective: 9, emergency: 2 },
-  { month: 'Jun', preventive: 22, corrective: 5, emergency: 1 }
-];
-
-const maintenanceCostTrend = [
-  { month: 'Jan', cost: 12500 },
-  { month: 'Feb', cost: 8900 },
-  { month: 'Mar', cost: 15200 },
-  { month: 'Apr', cost: 11800 },
-  { month: 'May', cost: 13600 },
-  { month: 'Jun', cost: 9400 }
-];
-
-const workOrdersByType = [
-  { name: 'Preventive', value: 103, color: '#3b82f6' },
-  { name: 'Corrective', value: 45, color: '#f59e0b' },
-  { name: 'Emergency', value: 13, color: '#ef4444' },
-  { name: 'Inspection', value: 28, color: '#8b5cf6' }
-];
-
-const assetReliability = [
-  { asset: 'HVAC Systems', uptime: 98.5, downtime: 1.5 },
-  { asset: 'Elevators', uptime: 99.2, downtime: 0.8 },
-  { asset: 'Electrical', uptime: 97.8, downtime: 2.2 },
-  { asset: 'Plumbing', uptime: 96.5, downtime: 3.5 },
-  { asset: 'Fire Safety', uptime: 99.8, downtime: 0.2 }
-];
-
-const technicianPerformance = [
-  { technician: 'John Smith', completed: 45, avgTime: 3.2, rating: 4.8 },
-  { technician: 'Mike Johnson', completed: 38, avgTime: 2.9, rating: 4.6 },
-  { technician: 'Sarah Davis', completed: 42, avgTime: 3.5, rating: 4.9 },
-  { technician: 'Tom Wilson', completed: 35, avgTime: 3.1, rating: 4.7 },
-  { technician: 'Lisa Brown', completed: 28, avgTime: 2.8, rating: 4.5 }
-];
-
-const reportTemplates = [
-  {
-    id: 1,
-    name: 'Monthly Maintenance Summary',
-    description: 'Comprehensive monthly report with KPIs and trends',
-    category: 'Summary',
-    frequency: 'Monthly'
-  },
-  {
-    id: 2,
-    name: 'Asset Performance Report',
-    description: 'Detailed analysis of asset reliability and performance',
-    category: 'Asset',
-    frequency: 'Quarterly'
-  },
-  {
-    id: 3,
-    name: 'Cost Analysis Report',
-    description: 'Maintenance costs breakdown and budget analysis',
-    category: 'Financial',
-    frequency: 'Monthly'
-  },
-  {
-    id: 4,
-    name: 'Technician Performance',
-    description: 'Individual technician performance metrics',
-    category: 'HR',
-    frequency: 'Monthly'
-  },
-  {
-    id: 5,
-    name: 'Compliance Report',
-    description: 'Safety and regulatory compliance status',
-    category: 'Compliance',
-    frequency: 'Quarterly'
-  }
-];
+interface ReportsData {
+  workOrdersByMonth: Array<{ month: string; preventive: number; corrective: number; emergency: number }>;
+  maintenanceCostTrend: Array<{ month: string; cost: number }>;
+  workOrdersByType: Array<{ name: string; value: number; color: string }>;
+  assetReliability: Array<{ asset: string; uptime: number; downtime: number }>;
+  technicianPerformance: Array<{ technician: string; completed: number; avgTime: number; rating: number }>;
+  reportTemplates: Array<{
+    id: number;
+    name: string;
+    description: string;
+    category: string;
+    frequency: string;
+  }>;
+}
 
 export default function MaintenanceReportsPage() {
+  const [loading, setLoading] = useState(true);
+  const [reportsData, setReportsData] = useState<ReportsData>({
+    workOrdersByMonth: [],
+    maintenanceCostTrend: [],
+    workOrdersByType: [],
+    assetReliability: [],
+    technicianPerformance: [],
+    reportTemplates: []
+  });
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [selectedReportType, setSelectedReportType] = useState('summary');
   const [selectedAsset, setSelectedAsset] = useState('all');
+
+  // Load reports data from API
+  useEffect(() => {
+    const loadReportsData = async () => {
+      setLoading(true);
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('http://localhost:5000/api/maintenance/reports/data', {
+          headers: {
+            'Authorization': token ? `Bearer ${token}` : '',
+            'Content-Type': 'application/json'
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setReportsData(data.data || data || {
+            workOrdersByMonth: [],
+            maintenanceCostTrend: [],
+            workOrdersByType: [],
+            assetReliability: [],
+            technicianPerformance: [],
+            reportTemplates: []
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load reports data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadReportsData();
+  }, []);
 
   const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
     const RADIAN = Math.PI / 180;
@@ -332,7 +309,7 @@ export default function MaintenanceReportsPage() {
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={workOrdersByMonth}>
+                  <AreaChart data={reportsData.workOrdersByMonth}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="month" />
                     <YAxis />
@@ -355,7 +332,7 @@ export default function MaintenanceReportsPage() {
                 <ResponsiveContainer width="100%" height={300}>
                   <PieChart>
                     <Pie
-                      data={workOrdersByType}
+                      data={reportsData.workOrdersByType}
                       cx="50%"
                       cy="50%"
                       labelLine={false}
@@ -364,7 +341,7 @@ export default function MaintenanceReportsPage() {
                       fill="#8884d8"
                       dataKey="value"
                     >
-                      {workOrdersByType.map((entry, index) => (
+                      {reportsData.workOrdersByType.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
@@ -372,7 +349,7 @@ export default function MaintenanceReportsPage() {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="flex flex-wrap justify-center gap-4 mt-4">
-                  {workOrdersByType.map((item) => (
+                  {reportsData.workOrdersByType.map((item) => (
                     <div key={item.name} className="flex items-center space-x-2">
                       <div
                         className="w-3 h-3 rounded-full"
@@ -393,7 +370,7 @@ export default function MaintenanceReportsPage() {
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={maintenanceCostTrend}>
+                  <LineChart data={reportsData.maintenanceCostTrend}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="month" />
                     <YAxis />
@@ -412,7 +389,7 @@ export default function MaintenanceReportsPage() {
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={assetReliability} layout="horizontal">
+                  <BarChart data={reportsData.assetReliability} layout="horizontal">
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis type="number" domain={[90, 100]} />
                     <YAxis dataKey="asset" type="category" width={80} />
@@ -443,7 +420,7 @@ export default function MaintenanceReportsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {technicianPerformance.map((tech, index) => (
+                    {reportsData.technicianPerformance.map((tech, index) => (
                       <tr key={index} className="border-b">
                         <td className="py-3">{tech.technician}</td>
                         <td className="text-right py-3">{tech.completed}</td>
@@ -479,7 +456,7 @@ export default function MaintenanceReportsPage() {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {reportTemplates.map((template) => (
+                {reportsData.reportTemplates.map((template) => (
                   <Card key={template.id} className="cursor-pointer hover:shadow-md transition-shadow">
                     <CardContent className="pt-6">
                       <div className="space-y-4">

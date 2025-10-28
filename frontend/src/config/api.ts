@@ -51,6 +51,9 @@ export const API_ENDPOINTS = {
 
   // Asset Analytics
   ASSET_ANALYTICS: {
+    // General Analytics Data
+    DATA: '/api/maintenance/analytics/data',
+    
     // OEE Analytics
     ASSET_OEE: (assetId: string) => `/api/maintenance/analytics/assets/${assetId}/oee`,
     FLEET_OEE: '/api/maintenance/analytics/fleet/oee',

@@ -27,8 +27,36 @@ import {
   Download
 } from 'lucide-react';
 
-// Mock data for safety protocols
-const safetyProtocolsData = [
+// Safety protocols interface
+interface SafetyProtocol {
+  id: string | number;
+  name: string;
+  code: string;
+  description: string;
+  category: string;
+  riskLevel: string;
+  isActive: boolean;
+  isMandatory: boolean;
+  version: string;
+  lastUpdated: string;
+  createdBy?: string;
+  approvedBy?: string;
+  approvalDate?: string;
+  reviewFrequency: string;
+  nextReviewDate: string;
+  applicableAreas: string[];
+  requiredTraining: string[];
+  estimatedTime: number;
+  steps: string[];
+  requiredPPE: string[];
+  emergencyContacts: string[];
+  documents: string[];
+  trainingRecords: number;
+  complianceRate: number;
+  incidentsLastYear: number;
+}
+
+const mockSafetyProtocolsData = [
   {
     id: 1,
     name: 'Lockout/Tagout (LOTO) Procedure',
@@ -209,8 +237,11 @@ export default function SafetyProtocolsPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  const [selectedProtocol, setSelectedProtocol] = useState(null);
-  const [filteredData, setFilteredData] = useState(safetyProtocolsData);
+  const [selectedProtocol, setSelectedProtocol] = useState<SafetyProtocol | null>(null);
+  const [safetyProtocolsData, setSafetyProtocolsData] = useState<SafetyProtocol[]>([]);
+  const [filteredData, setFilteredData] = useState<SafetyProtocol[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -231,6 +262,56 @@ export default function SafetyProtocolsPage() {
     emergencyContacts: [],
     documents: []
   });
+
+  // Fetch safety protocols from API
+  const fetchSafetyProtocols = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to access this page.');
+        setSafetyProtocolsData([]);
+        return;
+      }
+      
+      const response = await fetch('http://localhost:5000/api/maintenance/safety-protocols?pageSize=1000', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        if (response.status === 401) {
+          setError('Authentication failed. Please log in again.');
+        } else if (response.status === 403) {
+          setError('Access denied. You do not have permission to view safety protocols.');
+        } else {
+          const errorText = await response.text();
+          setError(`Failed to load safety protocols: ${errorText}`);
+        }
+        setSafetyProtocolsData([]);
+        return;
+      }
+      
+      const result = await response.json();
+      console.log('Safety protocols API response:', result);
+      const protocols = result.data || result.items || result || [];
+      setSafetyProtocolsData(protocols);
+    } catch (error) {
+      console.error('Error fetching safety protocols:', error);
+      setError('Network error occurred while fetching safety protocols.');
+      setSafetyProtocolsData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSafetyProtocols();
+  }, []);
 
   useEffect(() => {
     let filtered = safetyProtocolsData;
@@ -261,13 +342,63 @@ export default function SafetyProtocolsPage() {
     setFilteredData(filtered);
   }, [searchTerm, statusFilter, categoryFilter, riskFilter]);
 
-  const handleCreate = () => {
-    console.log('Creating safety protocol:', formData);
-    setIsCreateDialogOpen(false);
-    resetForm();
+  const handleCreate = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to create safety protocols.');
+        return;
+      }
+      
+      // Map form data to CreateSafetyProtocolDto structure
+      const createDto = {
+        name: formData.name,
+        code: formData.code,
+        description: formData.description || '',
+        category: formData.category,
+        riskLevel: formData.riskLevel,
+        isActive: formData.isActive,
+        isMandatory: formData.isMandatory,
+        version: formData.version,
+        reviewFrequency: formData.reviewFrequency,
+        applicableAreas: formData.applicableAreas,
+        requiredTraining: formData.requiredTraining,
+        estimatedTime: formData.estimatedTime,
+        steps: formData.steps,
+        requiredPPE: formData.requiredPPE,
+        emergencyContacts: formData.emergencyContacts,
+        documents: formData.documents
+      };
+
+      console.log('Sending create request:', createDto);
+      
+      const response = await fetch('http://localhost:5000/api/maintenance/safety-protocols', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(createDto)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        setError(`Failed to create safety protocol: ${errorText}`);
+        return;
+      }
+      
+      // Refresh the list
+      await fetchSafetyProtocols();
+      setIsCreateDialogOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error('Error creating safety protocol:', error);
+      setError('Failed to create safety protocol. Please try again.');
+    }
   };
 
-  const handleEdit = (protocol: any) => {
+  const handleEdit = (protocol: SafetyProtocol) => {
     setSelectedProtocol(protocol);
     setFormData({
       name: protocol.name,
@@ -295,14 +426,95 @@ export default function SafetyProtocolsPage() {
     setIsViewDialogOpen(true);
   };
 
-  const handleUpdate = () => {
-    console.log('Updating safety protocol:', selectedProtocol?.id, formData);
-    setIsEditDialogOpen(false);
-    resetForm();
+  const handleUpdate = async () => {
+    if (!selectedProtocol?.id) return;
+    
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to update safety protocols.');
+        return;
+      }
+      
+      // Map form data to UpdateSafetyProtocolDto structure
+      const updateDto = {
+        name: formData.name,
+        code: formData.code,
+        description: formData.description || '',
+        category: formData.category,
+        riskLevel: formData.riskLevel,
+        isActive: formData.isActive,
+        isMandatory: formData.isMandatory,
+        version: formData.version,
+        reviewFrequency: formData.reviewFrequency,
+        applicableAreas: formData.applicableAreas,
+        requiredTraining: formData.requiredTraining,
+        estimatedTime: formData.estimatedTime,
+        steps: formData.steps,
+        requiredPPE: formData.requiredPPE,
+        emergencyContacts: formData.emergencyContacts,
+        documents: formData.documents
+      };
+
+      console.log('Sending update request:', updateDto);
+      
+      const response = await fetch(`http://localhost:5000/api/maintenance/safety-protocols/${selectedProtocol.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updateDto)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        setError(`Failed to update safety protocol: ${errorText}`);
+        return;
+      }
+      
+      // Refresh the list
+      await fetchSafetyProtocols();
+      setIsEditDialogOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error('Error updating safety protocol:', error);
+      setError('Failed to update safety protocol. Please try again.');
+    }
   };
 
-  const handleDelete = (id: number) => {
-    console.log('Deleting safety protocol:', id);
+  const handleDelete = async (id: string | number) => {
+    if (!confirm('Are you sure you want to delete this safety protocol?')) return;
+    
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to delete safety protocols.');
+        return;
+      }
+      
+      const response = await fetch(`http://localhost:5000/api/maintenance/safety-protocols/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        setError(`Failed to delete safety protocol: ${errorText}`);
+        return;
+      }
+      
+      // Refresh the list
+      await fetchSafetyProtocols();
+    } catch (error) {
+      console.error('Error deleting safety protocol:', error);
+      setError('Failed to delete safety protocol. Please try again.');
+    }
   };
 
   const resetForm = () => {
@@ -496,6 +708,18 @@ export default function SafetyProtocolsPage() {
         </Dialog>
       </div>
 
+      {/* Error Display */}
+      {error && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="pt-6">
+            <div className="flex items-center space-x-2 text-red-700">
+              <AlertTriangle className="h-5 w-5" />
+              <p className="font-medium">{error}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Breadcrumbs */}
       <Breadcrumb>
         <BreadcrumbList>
@@ -641,6 +865,15 @@ export default function SafetyProtocolsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="text-muted-foreground">Loading safety protocols...</div>
+            </div>
+          ) : error ? (
+            <div className="text-center py-8 text-red-600">{error}</div>
+          ) : filteredData.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">No safety protocols found</div>
+          ) : (
           <div className="space-y-4">
             {filteredData.map((protocol) => (
               <div key={protocol.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
@@ -731,6 +964,7 @@ export default function SafetyProtocolsPage() {
               </div>
             ))}
           </div>
+          )}
         </CardContent>
       </Card>
 

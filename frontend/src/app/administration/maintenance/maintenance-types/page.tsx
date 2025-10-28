@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -26,99 +26,22 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Mock data for maintenance types
-const maintenanceTypesData = [
-  {
-    id: 1,
-    name: 'Preventive Maintenance',
-    code: 'PM',
-    description: 'Scheduled maintenance performed to prevent failures',
-    category: 'Preventive',
-    isActive: true,
-    priority: 'Medium',
-    color: '#10b981',
-    icon: 'calendar',
-    estimatedDuration: 120,
-    requiresDowntime: true,
-    skillLevel: 'Intermediate',
-    frequency: 'Monthly'
-  },
-  {
-    id: 2,
-    name: 'Corrective Maintenance',
-    code: 'CM',
-    description: 'Maintenance performed to restore equipment to working condition',
-    category: 'Corrective',
-    isActive: true,
-    priority: 'High',
-    color: '#f59e0b',
-    icon: 'wrench',
-    estimatedDuration: 240,
-    requiresDowntime: true,
-    skillLevel: 'Advanced',
-    frequency: 'As Required'
-  },
-  {
-    id: 3,
-    name: 'Predictive Maintenance',
-    code: 'PDM',
-    description: 'Maintenance based on condition monitoring and analysis',
-    category: 'Predictive',
-    isActive: true,
-    priority: 'Medium',
-    color: '#8b5cf6',
-    icon: 'clock',
-    estimatedDuration: 180,
-    requiresDowntime: false,
-    skillLevel: 'Expert',
-    frequency: 'Quarterly'
-  },
-  {
-    id: 4,
-    name: 'Emergency Maintenance',
-    code: 'EM',
-    description: 'Urgent repairs to address critical failures',
-    category: 'Emergency',
-    isActive: true,
-    priority: 'Critical',
-    color: '#ef4444',
-    icon: 'alert-triangle',
-    estimatedDuration: 480,
-    requiresDowntime: true,
-    skillLevel: 'Expert',
-    frequency: 'As Required'
-  },
-  {
-    id: 5,
-    name: 'Routine Inspection',
-    code: 'RI',
-    description: 'Regular visual inspection and basic checks',
-    category: 'Preventive',
-    isActive: true,
-    priority: 'Low',
-    color: '#3b82f6',
-    icon: 'settings',
-    estimatedDuration: 60,
-    requiresDowntime: false,
-    skillLevel: 'Basic',
-    frequency: 'Weekly'
-  },
-  {
-    id: 6,
-    name: 'Calibration',
-    code: 'CAL',
-    description: 'Precision adjustment and calibration of instruments',
-    category: 'Preventive',
-    isActive: true,
-    priority: 'Medium',
-    color: '#06b6d4',
-    icon: 'settings',
-    estimatedDuration: 90,
-    requiresDowntime: true,
-    skillLevel: 'Expert',
-    frequency: 'Annually'
-  }
-];
+// Maintenance types interface
+interface MaintenanceType {
+  id: string | number;
+  name: string;
+  code: string;
+  description?: string;
+  category?: string;
+  isActive: boolean;
+  priority?: string;
+  color?: string;
+  icon?: string;
+  estimatedDuration?: number;
+  requiresDowntime?: boolean;
+  skillLevel?: string;
+  frequency?: string;
+}
 
 const categories = ['All', 'Preventive', 'Corrective', 'Predictive', 'Emergency'];
 const priorities = ['Low', 'Medium', 'High', 'Critical'];
@@ -131,8 +54,11 @@ export default function MaintenanceTypesPage() {
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [selectedType, setSelectedType] = useState(null);
-  const [filteredData, setFilteredData] = useState(maintenanceTypesData);
+  const [selectedType, setSelectedType] = useState<MaintenanceType | null>(null);
+  const [maintenanceTypesData, setMaintenanceTypesData] = useState<MaintenanceType[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -153,14 +79,77 @@ export default function MaintenanceTypesPage() {
     notes: ''
   });
 
+  // Fetch maintenance types from API
+  const fetchMaintenanceTypes = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to access this page.');
+        setMaintenanceTypesData([]);
+        return;
+      }
+      
+      console.log('Fetching maintenance types with token present:', !!token);
+      
+      const response = await fetch('http://localhost:5000/api/maintenance/maintenance-types?pageSize=1000', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      console.log('API Response Status:', response.status, response.statusText);
+      
+      if (!response.ok) {
+        if (response.status === 401) {
+          setError('Authentication failed. Please log in again or check your credentials.');
+        } else if (response.status === 403) {
+          setError('Access denied. You do not have permission to view maintenance types.');
+        } else {
+          const errorText = await response.text();
+          console.error('Error details:', errorText);
+          setError(`Failed to load maintenance types: ${errorText}`);
+        }
+        setMaintenanceTypesData([]);
+        return;
+      }
+      
+      const result = await response.json();
+      console.log('API Response:', result);
+      // Handle paginated response
+      const data = result.data || result.items || result || [];
+      setMaintenanceTypesData(data);
+      
+    } catch (error) {
+      console.error('Error fetching maintenance types:', error);
+      setError('Network error occurred while fetching maintenance types.');
+      setMaintenanceTypesData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
+    fetchMaintenanceTypes();
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Memoized filtered data
+  const filteredData = useMemo(() => {
     let filtered = maintenanceTypesData;
 
     if (searchTerm) {
       filtered = filtered.filter(item =>
-        item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.description.toLowerCase().includes(searchTerm.toLowerCase())
+        item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.description?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
@@ -178,30 +167,81 @@ export default function MaintenanceTypesPage() {
       filtered = filtered.filter(item => item.priority === priorityFilter);
     }
 
-    setFilteredData(filtered);
-  }, [searchTerm, statusFilter, categoryFilter, priorityFilter]);
+    return filtered;
+  }, [maintenanceTypesData, searchTerm, statusFilter, categoryFilter, priorityFilter]);
 
-  const handleCreate = () => {
-    console.log('Creating maintenance type:', formData);
-    setIsCreateDialogOpen(false);
-    resetForm();
+  const handleCreate = async () => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to create maintenance types.');
+        return;
+      }
+      // Map form data to CreateMaintenanceTypeDto structure
+      const createDto = {
+        name: formData.name,
+        code: formData.code,
+        description: formData.description || '',
+        category: formData.category,
+        priority: formData.priority,
+        estimatedDuration: formData.estimatedDuration / 60, // Convert minutes to hours
+        isActive: formData.isActive,
+        requiresDowntime: formData.requiresDowntime,
+        color: formData.color,
+        icon: formData.icon,
+        frequency: formData.frequency,
+        skillLevel: formData.skillLevel,
+        safetyRequirements: formData.safetyRequirements || '',
+        toolsRequired: formData.toolsRequired || '',
+        notes: formData.notes || ''
+      };
+
+      console.log('Sending create request:', createDto);
+
+      const response = await fetch('http://localhost:5000/api/maintenance/maintenance-types', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(createDto)
+      });
+
+      if (response.ok) {
+        const newMaintenanceType = await response.json();
+        // Add to local state
+        setMaintenanceTypesData(prev => [...prev, newMaintenanceType]);
+        setIsCreateDialogOpen(false);
+        resetForm();
+        // Show success message (you can use a toast library)
+        console.log('Maintenance type created successfully');
+      } else {
+        const error = await response.text();
+        console.error('Failed to create maintenance type:', error);
+        // Show error message
+      }
+    } catch (error) {
+      console.error('Error creating maintenance type:', error);
+      // Show error message
+    }
   };
 
   const handleEdit = (type: any) => {
     setSelectedType(type);
     setFormData({
-      name: type.name,
-      code: type.code,
-      description: type.description,
-      category: type.category,
-      isActive: type.isActive,
-      priority: type.priority,
-      color: type.color,
-      icon: type.icon,
-      estimatedDuration: type.estimatedDuration,
-      requiresDowntime: type.requiresDowntime,
-      skillLevel: type.skillLevel,
-      frequency: type.frequency,
+      name: type.name || '',
+      code: type.code || '',
+      description: type.description || '',
+      category: type.category || 'Preventive',
+      isActive: type.isActive ?? true,
+      priority: type.priority || 'Medium',
+      color: type.color || '#10b981',
+      icon: type.icon || 'wrench',
+      estimatedDuration: (type.estimatedDuration || 2) * 60, // Convert hours to minutes for form
+      requiresDowntime: type.requiresDowntime ?? false,
+      skillLevel: type.skillLevel || 'Intermediate',
+      frequency: type.frequency || 'Monthly',
       safetyRequirements: type.safetyRequirements || '',
       toolsRequired: type.toolsRequired || '',
       notes: type.notes || ''
@@ -209,14 +249,95 @@ export default function MaintenanceTypesPage() {
     setIsEditDialogOpen(true);
   };
 
-  const handleUpdate = () => {
-    console.log('Updating maintenance type:', selectedType?.id, formData);
-    setIsEditDialogOpen(false);
-    resetForm();
+  const handleUpdate = async () => {
+    if (!selectedType?.id) return;
+
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to update maintenance types.');
+        return;
+      }
+      // Map form data to UpdateMaintenanceTypeDto structure
+      const updateDto = {
+        name: formData.name,
+        code: formData.code,
+        description: formData.description || '',
+        category: formData.category,
+        priority: formData.priority,
+        estimatedDuration: formData.estimatedDuration / 60, // Convert minutes to hours
+        isActive: formData.isActive,
+        requiresDowntime: formData.requiresDowntime,
+        color: formData.color,
+        icon: formData.icon,
+        frequency: formData.frequency,
+        skillLevel: formData.skillLevel,
+        safetyRequirements: formData.safetyRequirements || '',
+        toolsRequired: formData.toolsRequired || '',
+        notes: formData.notes || ''
+      };
+
+      console.log('Sending update request:', updateDto);
+
+      const response = await fetch(`http://localhost:5000/api/maintenance/maintenance-types/${selectedType.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updateDto)
+      });
+
+      if (response.ok) {
+        const updatedMaintenanceType = await response.json();
+        // Update local state
+        setMaintenanceTypesData(prev => 
+          prev.map(item => item.id === selectedType.id ? updatedMaintenanceType : item)
+        );
+        setIsEditDialogOpen(false);
+        resetForm();
+        console.log('Maintenance type updated successfully');
+      } else {
+        const error = await response.text();
+        console.error('Failed to update maintenance type:', error);
+      }
+    } catch (error) {
+      console.error('Error updating maintenance type:', error);
+    }
   };
 
-  const handleDelete = (id: number) => {
-    console.log('Deleting maintenance type:', id);
+  const handleDelete = async (id: string | number) => {
+    if (!confirm('Are you sure you want to delete this maintenance type?')) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to delete maintenance types.');
+        return;
+      }
+      const response = await fetch(`http://localhost:5000/api/maintenance/maintenance-types/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        // Remove from local state
+        setMaintenanceTypesData(prev => prev.filter(item => item.id !== id));
+        console.log('Maintenance type deleted successfully');
+      } else {
+        const error = await response.text();
+        console.error('Failed to delete maintenance type:', error);
+      }
+    } catch (error) {
+      console.error('Error deleting maintenance type:', error);
+    }
   };
 
   const resetForm = () => {
@@ -260,7 +381,7 @@ export default function MaintenanceTypesPage() {
             Manage different types of maintenance activities and their configurations
           </p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        {mounted && <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
@@ -463,7 +584,7 @@ export default function MaintenanceTypesPage() {
               </Button>
             </DialogFooter>
           </DialogContent>
-        </Dialog>
+        </Dialog>}
       </div>
 
       {/* Breadcrumbs */}
@@ -534,15 +655,30 @@ export default function MaintenanceTypesPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-2xl font-bold">
-                  {Math.round(filteredData.reduce((sum, type) => sum + type.estimatedDuration, 0) / filteredData.length)}
+                  {filteredData.length > 0 
+                    ? Math.round(filteredData.reduce((sum, type) => sum + (type.estimatedDuration || 0), 0) / filteredData.length)
+                    : 0
+                  }
                 </p>
-                <p className="text-sm text-muted-foreground">Avg Duration (min)</p>
+                <p className="text-sm text-muted-foreground">Avg Duration (hrs)</p>
               </div>
               <Clock className="h-8 w-8 text-purple-500" />
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Error Display */}
+      {error && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="pt-6">
+            <div className="flex items-center space-x-2 text-red-700">
+              <AlertTriangle className="h-5 w-5" />
+              <p className="font-medium">{error}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Filters */}
       <Card>
@@ -561,40 +697,51 @@ export default function MaintenanceTypesPage() {
               />
             </div>
             
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="inactive">Inactive</SelectItem>
-              </SelectContent>
-            </Select>
+            {mounted && (
+              <>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
 
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                {categories.slice(1).map(category => (
-                  <SelectItem key={category} value={category}>{category}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    {categories.slice(1).map(category => (
+                      <SelectItem key={category} value={category}>{category}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
 
-            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Priority" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Priorities</SelectItem>
-                {priorities.map(priority => (
-                  <SelectItem key={priority} value={priority}>{priority}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Priority" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Priorities</SelectItem>
+                    {priorities.map(priority => (
+                      <SelectItem key={priority} value={priority}>{priority}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </>
+            )}
+            {!mounted && (
+              <>
+                <div className="h-10 bg-gray-100 rounded-md animate-pulse" />
+                <div className="h-10 bg-gray-100 rounded-md animate-pulse" />
+                <div className="h-10 bg-gray-100 rounded-md animate-pulse" />
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -608,8 +755,49 @@ export default function MaintenanceTypesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {filteredData.map((type) => (
+          {loading ? (
+            <div className="space-y-4">
+              {[...Array(3)].map((_, index) => (
+                <div key={index} className="border rounded-lg p-4 animate-pulse">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-3 flex-1">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-4 h-4 rounded-full bg-gray-200" />
+                        <div className="h-4 bg-gray-200 rounded w-32" />
+                        <div className="h-6 bg-gray-200 rounded w-16" />
+                        <div className="h-6 bg-gray-200 rounded w-20" />
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {[...Array(4)].map((_, i) => (
+                          <div key={i} className="h-4 bg-gray-200 rounded w-24" />
+                        ))}
+                      </div>
+                      <div className="h-4 bg-gray-200 rounded w-full" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : filteredData.length === 0 ? (
+            <div className="text-center py-12">
+              <Wrench className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No maintenance types found</h3>
+              <p className="text-muted-foreground mb-4">
+                {error ? 'There was an error loading maintenance types.' : 
+                 searchTerm || statusFilter !== 'all' || categoryFilter !== 'all' || priorityFilter !== 'all'
+                   ? 'No maintenance types match your current filters.'
+                   : 'Get started by creating your first maintenance type.'}
+              </p>
+              {!error && (
+                <Button onClick={() => setIsCreateDialogOpen(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add First Maintenance Type
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {filteredData.map((type) => (
               <div key={type.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
                 <div className="flex items-start justify-between">
                   <div className="space-y-3 flex-1">
@@ -631,7 +819,7 @@ export default function MaintenanceTypesPage() {
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-muted-foreground">
                       <div>
-                        <span className="font-medium">Duration:</span> {type.estimatedDuration} min
+                        <span className="font-medium">Duration:</span> {type.estimatedDuration} hrs
                       </div>
                       <div>
                         <span className="font-medium">Skill Level:</span> {type.skillLevel}
@@ -665,13 +853,14 @@ export default function MaintenanceTypesPage() {
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
       {/* Edit Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+      {mounted && <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="sm:max-w-[700px]">
           <DialogHeader>
             <DialogTitle>Edit Maintenance Type</DialogTitle>
@@ -886,8 +1075,7 @@ export default function MaintenanceTypesPage() {
             <Button onClick={handleUpdate}>Update Maintenance Type</Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
-      </Dialog>
+      </Dialog>}
     </div>
   );
 }

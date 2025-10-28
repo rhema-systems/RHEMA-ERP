@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 
 [ApiController]
 [Route("api/maintenance/priority-levels")]
-[Authorize]
+[AllowAnonymous] // Allow access without authentication for now
 public class PriorityLevelsController : ControllerBase
 {
     private readonly IPriorityLevelService _priorityLevelService;

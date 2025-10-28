@@ -27,8 +27,35 @@ import {
   Settings
 } from 'lucide-react';
 
-// Mock data for maintenance schedules
-const maintenanceSchedulesData = [
+// Maintenance schedule interface
+interface MaintenanceSchedule {
+  id: string | number;
+  name: string;
+  code: string;
+  description: string;
+  maintenanceType: string;
+  priority: string;
+  frequency: string;
+  frequencyInterval: number;
+  startDate: string;
+  nextDue: string;
+  lastCompleted?: string | null;
+  estimatedDuration: number;
+  assignedTeam: string;
+  assetCategory: string;
+  isActive: boolean;
+  autoCreate: boolean;
+  leadTime: number;
+  maxDelayDays: number;
+  completedCount: number;
+  overdueCount: number;
+  status: string;
+  notes: string;
+  createdBy?: string;
+  createdDate: string;
+}
+
+const mockMaintenanceSchedulesData = [
   {
     id: 1,
     name: 'HVAC Monthly Filter Change',
@@ -168,8 +195,11 @@ export default function MaintenanceSchedulesPage() {
   const [frequencyFilter, setFrequencyFilter] = useState('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [selectedSchedule, setSelectedSchedule] = useState(null);
-  const [filteredData, setFilteredData] = useState(maintenanceSchedulesData);
+  const [selectedSchedule, setSelectedSchedule] = useState<MaintenanceSchedule | null>(null);
+  const [maintenanceSchedulesData, setMaintenanceSchedulesData] = useState<MaintenanceSchedule[]>([]);
+  const [filteredData, setFilteredData] = useState<MaintenanceSchedule[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -190,6 +220,56 @@ export default function MaintenanceSchedulesPage() {
     maxDelayDays: 3,
     notes: ''
   });
+
+  // Fetch maintenance schedules from API
+  const fetchMaintenanceSchedules = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to access this page.');
+        setMaintenanceSchedulesData([]);
+        return;
+      }
+      
+      const response = await fetch('http://localhost:5000/api/maintenance/schedules?pageSize=1000', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        if (response.status === 401) {
+          setError('Authentication failed. Please log in again.');
+        } else if (response.status === 403) {
+          setError('Access denied. You do not have permission to view maintenance schedules.');
+        } else {
+          const errorText = await response.text();
+          setError(`Failed to load maintenance schedules: ${errorText}`);
+        }
+        setMaintenanceSchedulesData([]);
+        return;
+      }
+      
+      const result = await response.json();
+      console.log('Maintenance schedules API response:', result);
+      const schedules = result.data || result.items || result || [];
+      setMaintenanceSchedulesData(schedules);
+    } catch (error) {
+      console.error('Error fetching maintenance schedules:', error);
+      setError('Network error occurred while fetching maintenance schedules.');
+      setMaintenanceSchedulesData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMaintenanceSchedules();
+  }, []);
 
   useEffect(() => {
     let filtered = maintenanceSchedulesData;
@@ -220,13 +300,79 @@ export default function MaintenanceSchedulesPage() {
     setFilteredData(filtered);
   }, [searchTerm, statusFilter, priorityFilter, frequencyFilter]);
 
-  const handleCreate = () => {
-    console.log('Creating maintenance schedule:', formData);
-    setIsCreateDialogOpen(false);
-    resetForm();
+  const handleCreate = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to create maintenance schedules.');
+        return;
+      }
+      
+      // Note: Backend requires AssetId and MaintenanceTypeId which are not in form
+      // This is a simplified implementation - in production you'd need asset and type selectors
+      const createDto = {
+        name: formData.name,
+        code: formData.code,
+        description: formData.description || '',
+        // These would need to be selected from dropdowns in a real implementation
+        assetId: '00000000-0000-0000-0000-000000000000', // Placeholder - needs real asset selection
+        maintenanceTypeId: '00000000-0000-0000-0000-000000000000', // Placeholder - needs real type selection
+        maintenanceType: formData.maintenanceType,
+        priority: formData.priority,
+        frequency: formData.frequency,
+        frequencyValue: 1,
+        frequencyUnit: 'days',
+        frequencyInterval: formData.frequencyInterval,
+        startDate: formData.startDate,
+        nextDueDate: new Date(formData.startDate).toISOString(),
+        estimatedDuration: formData.estimatedDuration,
+        estimatedHours: formData.estimatedDuration / 60,
+        estimatedCost: 0,
+        assignedTeam: formData.assignedTeam,
+        assetCategory: formData.assetCategory,
+        instructions: '',
+        safetyNotes: '',
+        requiredSkills: [],
+        requiredTools: [],
+        requiredParts: [],
+        isActive: formData.isActive,
+        autoCreate: formData.autoCreate,
+        autoGenerateWorkOrders: formData.autoCreate,
+        leadTime: formData.leadTime,
+        advanceNotificationDays: 7,
+        maxDelayDays: formData.maxDelayDays,
+        notes: formData.notes
+      };
+
+      console.log('Sending create request:', createDto);
+      
+      const response = await fetch('http://localhost:5000/api/maintenance/schedules', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(createDto)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        setError(`Failed to create maintenance schedule: ${errorText}`);
+        return;
+      }
+      
+      // Refresh the list
+      await fetchMaintenanceSchedules();
+      setIsCreateDialogOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error('Error creating maintenance schedule:', error);
+      setError('Failed to create maintenance schedule. Please try again.');
+    }
   };
 
-  const handleEdit = (schedule: any) => {
+  const handleEdit = (schedule: MaintenanceSchedule) => {
     setSelectedSchedule(schedule);
     setFormData({
       name: schedule.name,
@@ -249,22 +395,165 @@ export default function MaintenanceSchedulesPage() {
     setIsEditDialogOpen(true);
   };
 
-  const handleUpdate = () => {
-    console.log('Updating maintenance schedule:', selectedSchedule?.id, formData);
-    setIsEditDialogOpen(false);
-    resetForm();
+  const handleUpdate = async () => {
+    if (!selectedSchedule?.id) return;
+    
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to update maintenance schedules.');
+        return;
+      }
+      
+      // Simplified update DTO - same structure as create
+      const updateDto = {
+        name: formData.name,
+        code: formData.code,
+        description: formData.description || '',
+        assetId: '00000000-0000-0000-0000-000000000000',
+        maintenanceTypeId: '00000000-0000-0000-0000-000000000000',
+        maintenanceType: formData.maintenanceType,
+        priority: formData.priority,
+        frequency: formData.frequency,
+        frequencyValue: 1,
+        frequencyUnit: 'days',
+        frequencyInterval: formData.frequencyInterval,
+        startDate: formData.startDate,
+        nextDueDate: new Date(formData.startDate).toISOString(),
+        estimatedDuration: formData.estimatedDuration,
+        estimatedHours: formData.estimatedDuration / 60,
+        estimatedCost: 0,
+        assignedTeam: formData.assignedTeam,
+        assetCategory: formData.assetCategory,
+        instructions: '',
+        safetyNotes: '',
+        requiredSkills: [],
+        requiredTools: [],
+        requiredParts: [],
+        isActive: formData.isActive,
+        autoCreate: formData.autoCreate,
+        autoGenerateWorkOrders: formData.autoCreate,
+        leadTime: formData.leadTime,
+        advanceNotificationDays: 7,
+        maxDelayDays: formData.maxDelayDays,
+        notes: formData.notes
+      };
+
+      console.log('Sending update request:', updateDto);
+      
+      const response = await fetch(`http://localhost:5000/api/maintenance/schedules/${selectedSchedule.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updateDto)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        setError(`Failed to update maintenance schedule: ${errorText}`);
+        return;
+      }
+      
+      // Refresh the list
+      await fetchMaintenanceSchedules();
+      setIsEditDialogOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error('Error updating maintenance schedule:', error);
+      setError('Failed to update maintenance schedule. Please try again.');
+    }
   };
 
-  const handleDelete = (id: number) => {
-    console.log('Deleting maintenance schedule:', id);
+  const handleDelete = async (id: string | number) => {
+    if (!confirm('Are you sure you want to delete this maintenance schedule?')) return;
+    
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        setError('Authentication required. Please log in to delete maintenance schedules.');
+        return;
+      }
+      
+      const response = await fetch(`http://localhost:5000/api/maintenance/schedules/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        setError(`Failed to delete maintenance schedule: ${errorText}`);
+        return;
+      }
+      
+      // Refresh the list
+      await fetchMaintenanceSchedules();
+    } catch (error) {
+      console.error('Error deleting maintenance schedule:', error);
+      setError('Failed to delete maintenance schedule. Please try again.');
+    }
   };
 
-  const handlePause = (id: number) => {
-    console.log('Pausing maintenance schedule:', id);
+  const handlePause = async (id: string | number) => {
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        setError('Authentication required.');
+        return;
+      }
+      
+      const response = await fetch(`http://localhost:5000/api/maintenance/schedules/${id}/toggle-status`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        await fetchMaintenanceSchedules();
+      } else {
+        setError('Failed to pause schedule.');
+      }
+    } catch (error) {
+      console.error('Error pausing schedule:', error);
+      setError('Failed to pause schedule.');
+    }
   };
 
-  const handleResume = (id: number) => {
-    console.log('Resuming maintenance schedule:', id);
+  const handleResume = async (id: string | number) => {
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        setError('Authentication required.');
+        return;
+      }
+      
+      const response = await fetch(`http://localhost:5000/api/maintenance/schedules/${id}/toggle-status`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        await fetchMaintenanceSchedules();
+      } else {
+        setError('Failed to resume schedule.');
+      }
+    } catch (error) {
+      console.error('Error resuming schedule:', error);
+      setError('Failed to resume schedule.');
+    }
   };
 
   const resetForm = () => {
@@ -540,6 +829,18 @@ export default function MaintenanceSchedulesPage() {
         </Dialog>
       </div>
 
+      {/* Error Display */}
+      {error && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="pt-6">
+            <div className="flex items-center space-x-2 text-red-700">
+              <AlertCircle className="h-5 w-5" />
+              <p className="font-medium">{error}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Breadcrumbs */}
       <Breadcrumb>
         <BreadcrumbList>
@@ -685,6 +986,15 @@ export default function MaintenanceSchedulesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="text-muted-foreground">Loading maintenance schedules...</div>
+            </div>
+          ) : error ? (
+            <div className="text-center py-8 text-red-600">{error}</div>
+          ) : filteredData.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">No maintenance schedules found</div>
+          ) : (
           <div className="space-y-4">
             {filteredData.map((schedule) => (
               <div key={schedule.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
@@ -769,6 +1079,7 @@ export default function MaintenanceSchedulesPage() {
               </div>
             ))}
           </div>
+          )}
         </CardContent>
       </Card>
 

@@ -34,6 +34,9 @@ public class ApplicationUser : IdentityUser<Guid>, IAuditable
     public DateTime? LastLoginDate { get; set; }
     public string? ProfilePictureUrl { get; set; }
     
+    // Employee Link - Links this user account to an Employee record
+    public Guid? EmployeeId { get; set; }
+    
     // Two-Factor Authentication
     [StringLength(32)]
     public string? AuthenticatorKey { get; set; }

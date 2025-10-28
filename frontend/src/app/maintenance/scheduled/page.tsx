@@ -30,79 +30,41 @@ import {
 } from 'lucide-react';
 import { format, addDays } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
+import { ClientOnly } from '@/components/ClientOnly';
 
-// Mock data for scheduled maintenance
-const scheduledMaintenanceData = [
-  {
-    id: 1,
-    title: 'HVAC System Quarterly Inspection',
-    assetId: 'HVAC-001',
-    assetName: 'Main Building HVAC Unit A',
-    type: 'Preventive',
-    frequency: 'Quarterly',
-    nextDue: '2024-02-15',
-    lastCompleted: '2023-11-15',
-    assignedTechnician: 'John Smith',
-    priority: 'Medium',
-    status: 'Scheduled',
-    estimatedHours: 4,
-    description: 'Complete inspection of HVAC system including filters, coils, and electrical components'
-  },
-  {
-    id: 2,
-    title: 'Generator Load Test',
-    assetId: 'GEN-002',
-    assetName: 'Backup Generator B2',
-    type: 'Safety',
-    frequency: 'Monthly',
-    nextDue: '2024-02-10',
-    lastCompleted: '2024-01-10',
-    assignedTechnician: 'Mike Johnson',
-    priority: 'High',
-    status: 'Overdue',
-    estimatedHours: 2,
-    description: 'Monthly load test to ensure generator operates at full capacity'
-  },
-  {
-    id: 3,
-    title: 'Elevator Safety Inspection',
-    assetId: 'ELEV-001',
-    assetName: 'Main Elevator C1',
-    type: 'Safety',
-    frequency: 'Bi-Annual',
-    nextDue: '2024-03-01',
-    lastCompleted: '2023-09-01',
-    assignedTechnician: 'Sarah Davis',
-    priority: 'Critical',
-    status: 'Scheduled',
-    estimatedHours: 6,
-    description: 'Comprehensive safety inspection of elevator systems and components'
-  },
-  {
-    id: 4,
-    title: 'Fire Suppression System Check',
-    assetId: 'FIRE-001',
-    assetName: 'Building Fire System',
-    type: 'Safety',
-    frequency: 'Monthly',
-    nextDue: '2024-02-20',
-    lastCompleted: '2024-01-20',
-    assignedTechnician: 'Tom Wilson',
-    priority: 'High',
-    status: 'In Progress',
-    estimatedHours: 3,
-    description: 'Test fire suppression systems, check pressure levels, and inspect control panels'
-  }
-];
+interface ScheduledMaintenanceItem {
+  id: string;
+  title: string;
+  assetId: string;
+  assetName: string;
+  type: string;
+  frequency: string;
+  nextDue: string;
+  lastCompleted: string;
+  assignedTechnician: string; // Technician name for display
+  assignedTechnicianId: string; // Technician ID for API calls
+  priority: string;
+  status: string;
+  estimatedHours: number;
+  description: string;
+}
 
 export default function ScheduledMaintenancePage() {
+  const { toast } = useToast();
+  const [scheduledMaintenanceData, setScheduledMaintenanceData] = useState<ScheduledMaintenanceItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [filteredData, setFilteredData] = useState(scheduledMaintenanceData);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState<ScheduledMaintenanceItem | null>(null);
+  const [scheduleToGenerate, setScheduleToGenerate] = useState<ScheduledMaintenanceItem | null>(null);
+  const [filteredData, setFilteredData] = useState<ScheduledMaintenanceItem[]>([]);
   
   // Data from services
   const [technicians, setTechnicians] = useState<Employee[]>([]);
@@ -127,20 +89,83 @@ export default function ScheduledMaintenancePage() {
   useEffect(() => {
     const loadData = async () => {
       setLoadingData(true);
+      setLoading(true);
       try {
-        const [techniciansList, assetsList, maintenanceTypesList] = await Promise.all([
+        const token = localStorage.getItem('authToken');
+        console.log('=== LOADING MAINTENANCE DATA ===');
+        const [techniciansList, assetsList, maintenanceTypesList, scheduledDataResponse] = await Promise.all([
           maintenanceDataService.getTechnicians(),
           maintenanceDataService.getAssets(),
-          maintenanceDataService.getMaintenanceTypes()
+          maintenanceDataService.getMaintenanceTypes(),
+          fetch('http://localhost:5000/api/maintenance/schedules', {
+            headers: {
+              'Authorization': token ? `Bearer ${token}` : '',
+              'Content-Type': 'application/json'
+            }
+          })
         ]);
+        
+        console.log('=== TECHNICIANS DEBUG ===');
+        console.log('Technicians loaded:', techniciansList.length, techniciansList);
+        console.log('Technicians type:', typeof techniciansList, Array.isArray(techniciansList));
+        
+        console.log('=== OTHER DATA DEBUG ===');
+        console.log('Assets loaded:', assetsList.length, assetsList);
+        console.log('Maintenance types loaded:', maintenanceTypesList.length, maintenanceTypesList);
+        
+        if (techniciansList.length === 0) {
+          console.warn('⚠️ No technicians loaded - this may indicate an API endpoint issue');
+          toast({
+            title: "Employee API Not Available",
+            description: "Unable to load employee data. The technician dropdown will be empty. Please check the console for endpoint details and contact your system administrator.",
+            variant: "destructive",
+            duration: 8000
+          });
+        }
         
         setTechnicians(techniciansList);
         setAssets(assetsList);
         setMaintenanceTypes(maintenanceTypesList);
+        
+        console.log('Scheduled data response status:', scheduledDataResponse.status);
+        if (scheduledDataResponse.ok) {
+          const scheduledData = await scheduledDataResponse.json();
+          console.log('Raw scheduled data response:', scheduledData);
+          
+          // The controller returns PagedResult<MaintenanceScheduleDto>
+          // Structure: { items: [...], totalCount: X, page: Y, pageSize: Z }
+          const schedules = scheduledData.items || scheduledData.data || scheduledData || [];
+          console.log('Extracted schedules:', schedules);
+          
+          // Map MaintenanceScheduleDto to ScheduledMaintenanceItem interface
+          const mappedSchedules = schedules.map((schedule: any) => ({
+            id: schedule.id,
+            title: schedule.name || schedule.title,
+            assetId: schedule.assetId,
+            assetName: schedule.assetName || 'Unknown Asset',
+            type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
+            frequency: schedule.frequency,
+            nextDue: schedule.nextDueDate || schedule.nextDue,
+            lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
+            assignedTechnician: schedule.AssignedTechnicianName || schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
+            assignedTechnicianId: schedule.AssignedTechnicianId || schedule.assignedTechnicianId || '',
+            priority: schedule.priority,
+            status: schedule.isActive ? 'Scheduled' : 'Inactive',
+            estimatedHours: schedule.estimatedHours || 0,
+            description: schedule.description || ''
+          }));
+          
+          console.log('Mapped scheduled maintenance items:', mappedSchedules);
+          setScheduledMaintenanceData(mappedSchedules);
+        } else {
+          console.error('Failed to fetch scheduled data:', scheduledDataResponse.status, scheduledDataResponse.statusText);
+        }
       } catch (error) {
         console.error('Error loading data:', error);
+        setScheduledMaintenanceData([]);
       } finally {
         setLoadingData(false);
+        setLoading(false);
       }
     };
     
@@ -148,30 +173,35 @@ export default function ScheduledMaintenancePage() {
   }, []);
 
   useEffect(() => {
+    console.log('🔍 Filtering data...');
+    console.log('scheduledMaintenanceData:', scheduledMaintenanceData.length, scheduledMaintenanceData);
+    console.log('Filters:', { searchTerm, statusFilter, priorityFilter, typeFilter });
+    
     let filtered = scheduledMaintenanceData;
 
     if (searchTerm) {
       filtered = filtered.filter(item =>
-        item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.assetName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.assignedTechnician.toLowerCase().includes(searchTerm.toLowerCase())
+        item.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.assetName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.assignedTechnician?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(item => item.status.toLowerCase() === statusFilter);
+      filtered = filtered.filter(item => item.status?.toLowerCase() === statusFilter.toLowerCase());
     }
 
     if (priorityFilter !== 'all') {
-      filtered = filtered.filter(item => item.priority.toLowerCase() === priorityFilter);
+      filtered = filtered.filter(item => item.priority?.toLowerCase() === priorityFilter.toLowerCase());
     }
 
     if (typeFilter !== 'all') {
-      filtered = filtered.filter(item => item.type.toLowerCase() === typeFilter);
+      filtered = filtered.filter(item => item.type?.toLowerCase() === typeFilter.toLowerCase());
     }
 
+    console.log('🔍 Filtered result:', filtered.length, filtered);
     setFilteredData(filtered);
-  }, [searchTerm, statusFilter, priorityFilter, typeFilter]);
+  }, [scheduledMaintenanceData, searchTerm, statusFilter, priorityFilter, typeFilter]);
 
   const getStatusBadge = (status: string) => {
     const colors = {
@@ -203,31 +233,534 @@ export default function ScheduledMaintenancePage() {
     );
   };
 
-  const handleCreateSchedule = () => {
-    // Implementation for creating new scheduled maintenance
-    console.log('Creating new scheduled maintenance:', formData);
-    setIsCreateDialogOpen(false);
-    // Reset form
-    setFormData({
-      title: '',
-      assetId: '',
-      type: '',
-      frequency: '',
-      nextDue: '',
-      assignedTechnician: '',
-      priority: 'Medium',
-      estimatedHours: '',
-      description: ''
-    });
+  const handleCreateSchedule = async () => {
+    try {
+      console.log('=== FORM VALIDATION START ===');
+      console.log('Form data:', formData);
+      console.log('Available maintenance types:', maintenanceTypes.length, maintenanceTypes);
+      console.log('Available assets:', assets.length);
+      
+      // Validate required fields before sending
+      if (!formData.title) {
+        console.log('❌ Validation failed: No title');
+        toast({
+          title: "Validation Error",
+          description: "Please enter a title for the scheduled maintenance.",
+          variant: "destructive"
+        });
+        return;
+      }
+      console.log('✅ Title validation passed:', formData.title);
+      
+      if (!formData.assetId) {
+        console.log('❌ Validation failed: No assetId');
+        toast({
+          title: "Validation Error",
+          description: "Please select an asset.",
+          variant: "destructive"
+        });
+        return;
+      }
+      console.log('✅ AssetId validation passed:', formData.assetId);
+      
+      if (!formData.type) {
+        console.log('❌ Validation failed: No type');
+        toast({
+          title: "Validation Error",
+          description: "Please specify the maintenance type.",
+          variant: "destructive"
+        });
+        return;
+      }
+      console.log('✅ Type validation passed:', formData.type);
+      
+      if (!formData.frequency) {
+        console.log('❌ Validation failed: No frequency');
+        toast({
+          title: "Validation Error",
+          description: "Please select a frequency.",
+          variant: "destructive"
+        });
+        return;
+      }
+      console.log('✅ Frequency validation passed:', formData.frequency);
+      
+      if (maintenanceTypes.length === 0) {
+        console.log('❌ Validation failed: No maintenance types available');
+        toast({
+          title: "Configuration Error",
+          description: "No maintenance types available. Please contact your administrator.",
+          variant: "destructive"
+        });
+        return;
+      }
+      console.log('✅ Maintenance types available:', maintenanceTypes.length);
+      
+      console.log('=== ALL VALIDATIONS PASSED, PROCEEDING WITH API CALL ===');
+      
+      const token = localStorage.getItem('authToken');
+      
+      // Transform frontend data to match CreateMaintenanceScheduleDto
+      const createDto = {
+        name: formData.title,
+        code: `SCH-${Date.now().toString().slice(-8)}${Math.random().toString(36).substr(2, 3)}`, // Generate a unique code under 20 chars
+        description: formData.description,
+        assetId: formData.assetId || '00000000-0000-0000-0000-000000000000',
+        maintenanceTypeId: (() => {
+          // First try exact match
+          let foundType = maintenanceTypes.find(type => type.name === formData.type);
+          
+          // If not found, try case-insensitive match
+          if (!foundType) {
+            foundType = maintenanceTypes.find(type => type.name.toLowerCase() === formData.type.toLowerCase());
+          }
+          
+          // If still not found, try partial match
+          if (!foundType) {
+            foundType = maintenanceTypes.find(type => type.name.toLowerCase().includes(formData.type.toLowerCase()) || formData.type.toLowerCase().includes(type.name.toLowerCase()));
+          }
+          
+          if (foundType) {
+            console.log('Found maintenance type:', foundType);
+            return foundType.id;
+          }
+          
+          console.warn('No maintenance type found for:', formData.type);
+          console.warn('Available maintenance types:', maintenanceTypes.map(t => ({ id: t.id, name: t.name })));
+          
+          // Use first available type as fallback, but only if one exists
+          if (maintenanceTypes.length > 0) {
+            console.warn('Using first available maintenance type as fallback:', maintenanceTypes[0]);
+            return maintenanceTypes[0].id;
+          }
+          
+          // If no maintenance types available, this will cause validation error - which is correct
+          console.error('NO MAINTENANCE TYPES AVAILABLE - This will cause a validation error');
+          return '00000000-0000-0000-0000-000000000000'; // Return empty GUID instead of null
+        })(),
+        maintenanceType: formData.type,
+        priority: formData.priority,
+        frequency: formData.frequency,
+        frequencyValue: 1, // Default value
+        frequencyUnit: 'Days', // Default unit
+        frequencyInterval: formData.frequency === 'Daily' ? 1 : 
+                          formData.frequency === 'Weekly' ? 7 : 
+                          formData.frequency === 'Monthly' ? 30 : 
+                          formData.frequency === 'Quarterly' ? 90 : 
+                          formData.frequency === 'Semi-Annual' ? 180 : 
+                          formData.frequency === 'Annual' ? 365 : 30,
+        startDate: new Date().toISOString(),
+        nextDueDate: formData.nextDue ? new Date(formData.nextDue).toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        estimatedDuration: 60, // Default to 60 minutes
+        estimatedHours: parseFloat(formData.estimatedHours) || 1,
+        estimatedCost: 0,
+        assignedTechnicianId: formData.assignedTechnician && formData.assignedTechnician.trim() !== '' && formData.assignedTechnician !== '__UNASSIGNED__' ? formData.assignedTechnician : null,
+        assignedTeamId: null,
+        assignedTeam: '',
+        assetCategory: assets.find(asset => asset.id === formData.assetId)?.categoryName || '',
+        instructions: formData.description,
+        safetyNotes: '',
+        requiredSkills: [],
+        requiredTools: [],
+        requiredParts: [],
+        isActive: true,
+        autoCreate: true,
+        autoGenerateWorkOrders: true,
+        leadTime: 5,
+        advanceNotificationDays: 7,
+        notificationRecipients: null,
+        maxDelayDays: 3,
+        notes: formData.description
+      };
+      
+      console.log('Sending createDto:', createDto);
+      console.log('maintenanceTypeId type:', typeof createDto.maintenanceTypeId);
+      console.log('maintenanceTypeId value:', createDto.maintenanceTypeId);
+      console.log('JSON stringified payload:', JSON.stringify(createDto, null, 2));
+      
+      console.log('=== MAKING API CALL ===');
+      console.log('URL: http://localhost:5000/api/maintenance/schedules');
+      console.log('Method: POST');
+      
+      const response = await fetch('http://localhost:5000/api/maintenance/schedules', {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(createDto)
+      });
+      
+      console.log('=== API RESPONSE RECEIVED ===');
+      console.log('Response status:', response.status);
+      console.log('Response ok:', response.ok);
+      console.log('Response headers:', response.headers);
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        console.error('API Error:', errorData);
+        
+        if (errorData?.errors) {
+          const errorMessages = [];
+          
+          // Handle validation errors
+          for (const [field, messages] of Object.entries(errorData.errors)) {
+            if (Array.isArray(messages)) {
+              errorMessages.push(`${field}: ${messages.join(', ')}`);
+            }
+          }
+          
+          toast({
+            title: "Validation Errors",
+            description: errorMessages.join(', '),
+            variant: "destructive"
+          });
+        } else {
+          toast({
+            title: "Error",
+            description: `Failed to create scheduled maintenance: ${response.status} ${response.statusText}`,
+            variant: "destructive"
+          });
+        }
+        
+        return;
+      }
+      
+      console.log('=== API CALL SUCCESSFUL ===');
+      const responseData = await response.json();
+      console.log('Response data:', responseData);
+      
+      // Refresh the data
+      const refreshResponse = await fetch('http://localhost:5000/api/maintenance/schedules', {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (refreshResponse.ok) {
+        const scheduledData = await refreshResponse.json();
+        console.log('Refresh - Raw scheduled data:', scheduledData);
+        
+        const schedules = scheduledData.items || scheduledData.data || scheduledData || [];
+        const mappedSchedules = schedules.map((schedule: any) => ({
+          id: schedule.id,
+          title: schedule.name || schedule.title,
+          assetId: schedule.assetId,
+          assetName: schedule.assetName || 'Unknown Asset',
+          type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
+          frequency: schedule.frequency,
+          nextDue: schedule.nextDueDate || schedule.nextDue,
+          lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
+          assignedTechnician: schedule.AssignedTechnicianName || schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
+          assignedTechnicianId: schedule.AssignedTechnicianId || schedule.assignedTechnicianId || '',
+          priority: schedule.priority,
+          status: schedule.isActive ? 'Scheduled' : 'Inactive',
+          estimatedHours: schedule.estimatedHours || 0,
+          description: schedule.description || ''
+        }));
+        
+        setScheduledMaintenanceData(mappedSchedules);
+      }
+      
+      setIsCreateDialogOpen(false);
+      // Reset form
+      setFormData({
+        title: '',
+        assetId: '',
+        type: '',
+        frequency: '',
+        nextDue: '',
+        assignedTechnician: '',
+        priority: 'Medium',
+        estimatedHours: '',
+        description: ''
+      });
+    } catch (error) {
+      console.error('Error creating scheduled maintenance:', error);
+    }
   };
 
-  const handleCompleteSchedule = (id: number) => {
-    console.log('Completing scheduled maintenance:', id);
-    // Implementation for completing scheduled maintenance
+  // Handle asset selection and auto-populate type
+  const handleAssetSelection = async (value: string) => {
+    console.log('=== Asset selected:', value);
+    setFormData({...formData, assetId: value});
+    
+    try {
+      const assetType = await maintenanceDataService.getMaintenanceTypeForAsset(value);
+      console.log('Got asset type from service:', assetType);
+      
+      if (assetType) {
+        console.log('Setting asset type:', assetType);
+        setFormData(prev => ({...prev, assetId: value, type: assetType}));
+      } else {
+        console.log('No asset type found, just setting asset');
+        setFormData(prev => ({...prev, assetId: value}));
+      }
+    } catch (error) {
+      console.error('Error getting maintenance type for asset:', error);
+      setFormData(prev => ({...prev, assetId: value}));
+    }
+  };
+
+  const handleCompleteSchedule = (id: string) => {
+    // Find the schedule to show in confirmation dialog
+    const schedule = scheduledMaintenanceData.find(s => s.id === id);
+    if (schedule) {
+      setScheduleToGenerate(schedule);
+      setIsConfirmDialogOpen(true);
+    }
+  };
+
+  const handleConfirmGenerateWorkOrder = async () => {
+    if (!scheduleToGenerate) return;
+    
+    try {
+      const token = localStorage.getItem('authToken');
+      console.log('Generating work order for schedule:', scheduleToGenerate.id);
+      
+      // Generate a work order from the scheduled maintenance
+      const response = await fetch(`http://localhost:5000/api/maintenance/schedules/${scheduleToGenerate.id}/generate-work-orders?count=1`, {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        console.error('Failed to generate work order:', response.status, errorText);
+        toast({
+          title: "Error",
+          description: `Failed to generate work order: ${response.status} ${response.statusText}`,
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      const workOrders = await response.json();
+      console.log('Work orders generated:', workOrders);
+      
+      // Close confirmation dialog and reset state
+      setIsConfirmDialogOpen(false);
+      setScheduleToGenerate(null);
+      
+      toast({
+        title: "Success!",
+        description: `Work order(s) generated successfully! ${Array.isArray(workOrders) ? workOrders.length : 1} work order(s) created.`,
+        variant: "success"
+      });
+      
+      // Refresh the data
+      const refreshResponse = await fetch('http://localhost:5000/api/maintenance/schedules', {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (refreshResponse.ok) {
+        const scheduledData = await refreshResponse.json();
+        const schedules = scheduledData.items || scheduledData.data || scheduledData || [];
+        const mappedSchedules = schedules.map((schedule: any) => ({
+          id: schedule.id,
+          title: schedule.name || schedule.title,
+          assetId: schedule.assetId,
+          assetName: schedule.assetName || 'Unknown Asset',
+          type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
+          frequency: schedule.frequency,
+          nextDue: schedule.nextDueDate || schedule.nextDue,
+          lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
+          assignedTechnician: schedule.AssignedTechnicianName || schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
+          assignedTechnicianId: schedule.AssignedTechnicianId || schedule.assignedTechnicianId || '',
+          priority: schedule.priority,
+          status: schedule.isActive ? 'Scheduled' : 'Inactive',
+          estimatedHours: schedule.estimatedHours || 0,
+          description: schedule.description || ''
+        }));
+        setScheduledMaintenanceData(mappedSchedules);
+      }
+    } catch (error) {
+      console.error('Error completing scheduled maintenance:', error);
+      // Close confirmation dialog and reset state on error too
+      setIsConfirmDialogOpen(false);
+      setScheduleToGenerate(null);
+    }
+  };
+
+  const handleEditSchedule = (schedule: ScheduledMaintenanceItem) => {
+    setEditingSchedule(schedule);
+    setFormData({
+      title: schedule.title,
+      assetId: schedule.assetId,
+      type: schedule.type,
+      frequency: schedule.frequency,
+      nextDue: schedule.nextDue ? schedule.nextDue.split('T')[0] : '', // Convert to YYYY-MM-DD format
+      assignedTechnician: schedule.assignedTechnicianId || '__UNASSIGNED__', // Use the ID, or placeholder if unassigned
+      priority: schedule.priority,
+      estimatedHours: schedule.estimatedHours.toString(),
+      description: schedule.description
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdateSchedule = async () => {
+    if (!editingSchedule) return;
+    
+    try {
+      console.log('=== UPDATING SCHEDULE ===');
+      console.log('Editing schedule:', editingSchedule);
+      console.log('Form data:', formData);
+      
+      const token = localStorage.getItem('authToken');
+      
+      // Validate assignedTechnician value and convert empty string or placeholder to null
+      const assignedTechnicianId = formData.assignedTechnician && 
+                                   formData.assignedTechnician.trim() !== '' && 
+                                   formData.assignedTechnician !== '__UNASSIGNED__'
+        ? formData.assignedTechnician 
+        : null;
+      
+      console.log('assignedTechnician form value:', formData.assignedTechnician);
+      console.log('processed assignedTechnicianId:', assignedTechnicianId);
+      
+      // Transform form data to match UpdateMaintenanceScheduleDto
+      const updateDto = {
+        // Required fields from CreateMaintenanceScheduleDto
+        name: formData.title, // Maps to Name field
+        code: editingSchedule.code || `SCHED-${Date.now()}`, // Generate code if missing
+        description: formData.description,
+        assetId: formData.assetId || '00000000-0000-0000-0000-000000000000',
+        maintenanceTypeId: (() => {
+          const foundType = maintenanceTypes.find(type => 
+            type.name === formData.type || 
+            type.name.toLowerCase() === formData.type.toLowerCase()
+          );
+          return foundType?.id || maintenanceTypes[0]?.id || '00000000-0000-0000-0000-000000000000';
+        })(),
+        maintenanceType: formData.type, // Maps to MaintenanceType field
+        priority: formData.priority, // Maps to Priority field
+        frequency: formData.frequency, // Maps to Frequency field
+        frequencyValue: 1,
+        frequencyUnit: 'Days', // Maps to FrequencyUnit field (required)
+        frequencyInterval: formData.frequency === 'Daily' ? 1 : 
+                          formData.frequency === 'Weekly' ? 7 : 
+                          formData.frequency === 'Monthly' ? 30 : 
+                          formData.frequency === 'Quarterly' ? 90 : 
+                          formData.frequency === 'Bi-Annual' ? 180 : 
+                          formData.frequency === 'Annual' ? 365 : 30,
+        startDate: new Date().toISOString(),
+        nextDueDate: formData.nextDue ? new Date(formData.nextDue).toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        estimatedDuration: 60,
+        estimatedHours: parseFloat(formData.estimatedHours) || 1,
+        estimatedCost: 0,
+        assignedTechnicianId: assignedTechnicianId,
+        assignedTeamId: null,
+        assignedTeam: '',
+        assetCategory: assets.find(asset => asset.id === formData.assetId)?.categoryName || '',
+        instructions: formData.description,
+        safetyNotes: '',
+        requiredSkills: [],
+        requiredTools: [],
+        requiredParts: [],
+        isActive: true,
+        autoCreate: true,
+        autoGenerateWorkOrders: true,
+        leadTime: 5,
+        advanceNotificationDays: 7,
+        notificationRecipients: null,
+        maxDelayDays: 3,
+        notes: formData.description
+      };
+      
+      // Send DTO directly, not wrapped in { updateDto: ... }
+      const requestBody = updateDto;
+      
+      console.log('Final request payload:', JSON.stringify(requestBody, null, 2));
+      
+      const response = await fetch(`http://localhost:5000/api/maintenance/schedules/${editingSchedule.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        console.error('Update API Error:', errorData);
+        toast({
+          title: "Error",
+          description: `Failed to update scheduled maintenance: ${response.status} ${response.statusText}`,
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      toast({
+        title: "Success!",
+        description: "Scheduled maintenance updated successfully.",
+        variant: "success"
+      });
+      
+      // Refresh the data
+      const refreshResponse = await fetch('http://localhost:5000/api/maintenance/schedules', {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (refreshResponse.ok) {
+        const scheduledData = await refreshResponse.json();
+        const schedules = scheduledData.items || scheduledData.data || scheduledData || [];
+        const mappedSchedules = schedules.map((schedule: any) => ({
+          id: schedule.id,
+          title: schedule.name || schedule.title,
+          assetId: schedule.assetId,
+          assetName: schedule.assetName || 'Unknown Asset',
+          type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
+          frequency: schedule.frequency,
+          nextDue: schedule.nextDueDate || schedule.nextDue,
+          lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
+          assignedTechnician: schedule.assignedTechnicianName || schedule.assignedTechnician || '',
+          assignedTechnicianId: schedule.assignedTechnicianId || '',
+          priority: schedule.priority,
+          status: schedule.isActive ? 'Scheduled' : 'Inactive',
+          estimatedHours: schedule.estimatedHours || 0,
+          description: schedule.description || ''
+        }));
+        setScheduledMaintenanceData(mappedSchedules);
+      }
+      
+      setIsEditDialogOpen(false);
+      setEditingSchedule(null);
+      // Reset form
+      setFormData({
+        title: '',
+        assetId: '',
+        type: '',
+        frequency: '',
+        nextDue: '',
+        assignedTechnician: '',
+        priority: 'Medium',
+        estimatedHours: '',
+        description: ''
+      });
+    } catch (error) {
+      console.error('Error updating scheduled maintenance:', error);
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred while updating the scheduled maintenance.",
+        variant: "destructive"
+      });
+    }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" suppressHydrationWarning>
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -236,13 +769,14 @@ export default function ScheduledMaintenancePage() {
             Manage preventive and scheduled maintenance tasks
           </p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              Schedule Maintenance
-            </Button>
-          </DialogTrigger>
+        <ClientOnly>
+          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="mr-2 h-4 w-4" />
+                Schedule Maintenance
+              </Button>
+            </DialogTrigger>
           <DialogContent className="sm:max-w-[600px]">
             <DialogHeader>
               <DialogTitle>Schedule New Maintenance</DialogTitle>
@@ -263,7 +797,7 @@ export default function ScheduledMaintenancePage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="assetId">Asset</Label>
-                  <Select value={formData.assetId} onValueChange={(value) => setFormData({...formData, assetId: value})} disabled={loadingData}>
+                  <Select value={formData.assetId} onValueChange={handleAssetSelection} disabled={loadingData}>
                     <SelectTrigger>
                       <SelectValue placeholder={loadingData ? "Loading assets..." : "Select asset"} />
                     </SelectTrigger>
@@ -280,19 +814,40 @@ export default function ScheduledMaintenancePage() {
               
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="type">Type</Label>
-                  <Select value={formData.type} onValueChange={(value) => setFormData({...formData, type: value})} disabled={loadingData}>
-                    <SelectTrigger>
-                      <SelectValue placeholder={loadingData ? "Loading types..." : "Select type"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {maintenanceTypes.map((type) => (
-                        <SelectItem key={type.id} value={type.name}>
-                          {type.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label htmlFor="type">Maintenance Type</Label>
+                  {formData.type ? (
+                    <div className="flex space-x-2">
+                      <Input
+                        id="type"
+                        value={formData.type}
+                        readOnly
+                        className="bg-muted"
+                        placeholder="Maintenance type will be auto-populated"
+                      />
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        type="button"
+                        onClick={() => setFormData({...formData, type: ''})}
+                        title="Clear to select manually"
+                      >
+                        ✕
+                      </Button>
+                    </div>
+                  ) : (
+                    <Select value={formData.type} onValueChange={(value) => setFormData({...formData, type: value})} disabled={loadingData}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={loadingData ? "Loading types..." : "Select maintenance type"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {maintenanceTypes.map((type) => (
+                          <SelectItem key={type.id} value={type.name}>
+                            {type.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="frequency">Frequency</Label>
@@ -343,8 +898,9 @@ export default function ScheduledMaintenancePage() {
                       <SelectValue placeholder={loadingData ? "Loading technicians..." : "Select technician"} />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="__UNASSIGNED__">None (Unassigned)</SelectItem>
                       {technicians.map((technician) => (
-                        <SelectItem key={technician.id} value={`${technician.firstName} ${technician.lastName}`}>
+                        <SelectItem key={technician.id} value={technician.id}>
                           {technician.firstName} {technician.lastName} - {technician.position}
                         </SelectItem>
                       ))}
@@ -382,6 +938,188 @@ export default function ScheduledMaintenancePage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </ClientOnly>
+        
+        {/* Edit Scheduled Maintenance Dialog */}
+        <ClientOnly>
+          <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle>Edit Scheduled Maintenance</DialogTitle>
+              <DialogDescription>
+                Update the scheduled maintenance task details.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-title">Title</Label>
+                  <Input
+                    id="edit-title"
+                    value={formData.title}
+                    onChange={(e) => setFormData({...formData, title: e.target.value})}
+                    placeholder="Maintenance task title"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-assetId">Asset</Label>
+                  <Select value={formData.assetId} onValueChange={handleAssetSelection} disabled={loadingData}>
+                    <SelectTrigger>
+                      <SelectValue placeholder={loadingData ? "Loading assets..." : "Select asset"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assets.map((asset) => (
+                        <SelectItem key={asset.id} value={asset.id}>
+                          {asset.assetName} ({asset.assetCode})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-type">Maintenance Type</Label>
+                  {formData.type ? (
+                    <div className="flex space-x-2">
+                      <Input
+                        id="edit-type"
+                        value={formData.type}
+                        readOnly
+                        className="bg-muted"
+                        placeholder="Maintenance type will be auto-populated"
+                      />
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        type="button"
+                        onClick={() => setFormData({...formData, type: ''})}
+                        title="Clear to select manually"
+                      >
+                        ✕
+                      </Button>
+                    </div>
+                  ) : (
+                    <Select value={formData.type} onValueChange={(value) => setFormData({...formData, type: value})} disabled={loadingData}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={loadingData ? "Loading types..." : "Select maintenance type"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {maintenanceTypes.map((type) => (
+                          <SelectItem key={type.id} value={type.name}>
+                            {type.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-frequency">Frequency</Label>
+                  <Select value={formData.frequency} onValueChange={(value) => setFormData({...formData, frequency: value})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select frequency" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Daily">Daily</SelectItem>
+                      <SelectItem value="Weekly">Weekly</SelectItem>
+                      <SelectItem value="Monthly">Monthly</SelectItem>
+                      <SelectItem value="Quarterly">Quarterly</SelectItem>
+                      <SelectItem value="Bi-Annual">Bi-Annual</SelectItem>
+                      <SelectItem value="Annual">Annual</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-priority">Priority</Label>
+                  <Select value={formData.priority} onValueChange={(value) => setFormData({...formData, priority: value})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select priority" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Low">Low</SelectItem>
+                      <SelectItem value="Medium">Medium</SelectItem>
+                      <SelectItem value="High">High</SelectItem>
+                      <SelectItem value="Critical">Critical</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-nextDue">Next Due Date</Label>
+                  <Input
+                    id="edit-nextDue"
+                    type="date"
+                    value={formData.nextDue}
+                    onChange={(e) => setFormData({...formData, nextDue: e.target.value})}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-technician">Assigned Technician</Label>
+                  <Select value={formData.assignedTechnician} onValueChange={(value) => setFormData({...formData, assignedTechnician: value})} disabled={loadingData}>
+                    <SelectTrigger>
+                      <SelectValue placeholder={loadingData ? "Loading technicians..." : "Select technician"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__UNASSIGNED__">None (Unassigned)</SelectItem>
+                      {technicians.map((technician) => (
+                        <SelectItem key={technician.id} value={technician.id}>
+                          {technician.firstName} {technician.lastName} - {technician.position}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-estimatedHours">Estimated Hours</Label>
+                  <Input
+                    id="edit-estimatedHours"
+                    type="number"
+                    value={formData.estimatedHours}
+                    onChange={(e) => setFormData({...formData, estimatedHours: e.target.value})}
+                    placeholder="Hours"
+                  />
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit-description">Description</Label>
+                <Textarea
+                  id="edit-description"
+                  value={formData.description}
+                  onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  placeholder="Detailed description of the maintenance task..."
+                  rows={3}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => {
+                setIsEditDialogOpen(false);
+                setEditingSchedule(null);
+                // Reset form
+                setFormData({
+                  title: '',
+                  assetId: '',
+                  type: '',
+                  frequency: '',
+                  nextDue: '',
+                  assignedTechnician: '',
+                  priority: 'Medium',
+                  estimatedHours: '',
+                  description: ''
+                });
+              }}>
+                Cancel
+              </Button>
+              <Button onClick={handleUpdateSchedule}>Update Schedule</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        </ClientOnly>
       </div>
 
       {/* Breadcrumbs */}
@@ -407,7 +1145,8 @@ export default function ScheduledMaintenancePage() {
           <CardTitle>Filters</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          <ClientOnly>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="relative">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -486,7 +1225,8 @@ export default function ScheduledMaintenancePage() {
                 />
               </PopoverContent>
             </Popover>
-          </div>
+            </div>
+          </ClientOnly>
         </CardContent>
       </Card>
 
@@ -500,6 +1240,18 @@ export default function ScheduledMaintenancePage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
+            {console.log('📊 RENDERING GRID - filteredData length:', filteredData.length)}
+            {console.log('📊 RENDERING GRID - filteredData:', filteredData)}
+            {filteredData.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground">
+                No scheduled maintenance tasks found.
+                {scheduledMaintenanceData.length > 0 && (
+                  <div className="mt-2 text-sm">
+                    ({scheduledMaintenanceData.length} total tasks, but filtered out by current filters)
+                  </div>
+                )}
+              </div>
+            )}
             {filteredData.map((item) => (
               <div key={item.id} className="border rounded-lg p-4">
                 <div className="flex items-start justify-between">
@@ -542,10 +1294,10 @@ export default function ScheduledMaintenancePage() {
                     {item.status === 'Scheduled' && (
                       <Button size="sm" onClick={() => handleCompleteSchedule(item.id)}>
                         <CheckCircle className="mr-2 h-4 w-4" />
-                        Start
+                        Generate Work Order
                       </Button>
                     )}
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={() => handleEditSchedule(item)}>
                       <Edit className="h-4 w-4" />
                     </Button>
                     <Button variant="outline" size="sm">
@@ -558,6 +1310,54 @@ export default function ScheduledMaintenancePage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Confirmation Dialog for Work Order Generation */}
+      <Dialog open={isConfirmDialogOpen} onOpenChange={setIsConfirmDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Generate Work Order</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to generate a work order for this scheduled maintenance task?
+            </DialogDescription>
+          </DialogHeader>
+          
+          {scheduleToGenerate && (
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <p><strong>Task:</strong> {scheduleToGenerate.title}</p>
+                <p><strong>Asset:</strong> {scheduleToGenerate.assetName}</p>
+                <p><strong>Type:</strong> {scheduleToGenerate.type}</p>
+                <p><strong>Priority:</strong> {scheduleToGenerate.priority}</p>
+                <p><strong>Due Date:</strong> {new Date(scheduleToGenerate.nextDue).toLocaleDateString('en-GB', { 
+                  day: '2-digit', 
+                  month: 'short', 
+                  year: 'numeric' 
+                }).replace(/ /g, '-')}</p>
+                {scheduleToGenerate.assignedTechnician && scheduleToGenerate.assignedTechnician !== 'Unassigned' ? (
+                  <p><strong>Assigned to:</strong> {scheduleToGenerate.assignedTechnician}</p>
+                ) : (
+                  <p><strong>Assigned to:</strong> <em>No technician assigned</em></p>
+                )}
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setIsConfirmDialogOpen(false);
+                setScheduleToGenerate(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmGenerateWorkOrder}>
+              Generate Work Order
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

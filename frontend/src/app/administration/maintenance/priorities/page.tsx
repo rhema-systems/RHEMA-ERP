@@ -27,98 +27,36 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Mock data for priority levels
-const priorityLevelsData = [
-  {
-    id: 1,
-    name: 'Critical',
-    code: 'CRIT',
-    description: 'System down or safety risk - immediate attention required',
-    level: 1,
-    isActive: true,
-    color: '#dc2626',
-    icon: 'zap',
-    responseTime: 15,
-    escalationTime: 30,
-    requiresApproval: true,
-    notificationRules: 'Immediate SMS + Email + Phone call',
-    slaHours: 1,
-    autoAssign: true
-  },
-  {
-    id: 2,
-    name: 'High',
-    code: 'HIGH',
-    description: 'Significant impact on operations - urgent attention needed',
-    level: 2,
-    isActive: true,
-    color: '#ea580c',
-    icon: 'arrow-up',
-    responseTime: 60,
-    escalationTime: 120,
-    requiresApproval: false,
-    notificationRules: 'Email + Dashboard notification',
-    slaHours: 4,
-    autoAssign: true
-  },
-  {
-    id: 3,
-    name: 'Medium',
-    code: 'MED',
-    description: 'Normal maintenance priority - scheduled within timeframe',
-    level: 3,
-    isActive: true,
-    color: '#ca8a04',
-    icon: 'minus',
-    responseTime: 240,
-    escalationTime: 480,
-    requiresApproval: false,
-    notificationRules: 'Email notification',
-    slaHours: 24,
-    autoAssign: false
-  },
-  {
-    id: 4,
-    name: 'Low',
-    code: 'LOW',
-    description: 'Non-urgent maintenance - can be deferred if needed',
-    level: 4,
-    isActive: true,
-    color: '#16a34a',
-    icon: 'arrow-down',
-    responseTime: 1440,
-    escalationTime: 2880,
-    requiresApproval: false,
-    notificationRules: 'Dashboard notification only',
-    slaHours: 72,
-    autoAssign: false
-  },
-  {
-    id: 5,
-    name: 'Routine',
-    code: 'ROUT',
-    description: 'Scheduled maintenance activities - no urgency',
-    level: 5,
-    isActive: true,
-    color: '#64748b',
-    icon: 'settings',
-    responseTime: 10080,
-    escalationTime: 20160,
-    requiresApproval: false,
-    notificationRules: 'Email notification',
-    slaHours: 168,
-    autoAssign: false
-  }
-];
+// Priority level interface
+interface PriorityLevel {
+  id: string | number;
+  name: string;
+  code: string;
+  description?: string;
+  level: number;
+  isActive: boolean;
+  color?: string;
+  icon?: string;
+  responseTime?: number;
+  escalationTime?: number;
+  requiresApproval?: boolean;
+  notificationRules?: string;
+  slaHours?: number;
+  autoAssign?: boolean;
+  emailTemplate?: string;
+  smsTemplate?: string;
+}
 
 export default function PriorityLevelsPage() {
+  const [priorities, setPriorities] = useState<PriorityLevel[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [levelFilter, setLevelFilter] = useState('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [selectedPriority, setSelectedPriority] = useState(null);
-  const [filteredData, setFilteredData] = useState(priorityLevelsData);
+  const [selectedPriority, setSelectedPriority] = useState<PriorityLevel | null>(null);
+  const [filteredData, setFilteredData] = useState<PriorityLevel[]>([]);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -139,14 +77,46 @@ export default function PriorityLevelsPage() {
     smsTemplate: ''
   });
 
+  // Load priorities from API
   useEffect(() => {
-    let filtered = priorityLevelsData;
+    const loadPriorities = async () => {
+      try {
+        setLoading(true);
+        const token = localStorage.getItem('token');
+        const response = await fetch('http://localhost:5000/api/maintenance/priority-levels?pageSize=1000', {
+          headers: {
+            'Authorization': token ? `Bearer ${token}` : '',
+            'Content-Type': 'application/json'
+          }
+        });
+        if (response.ok) {
+          const result = await response.json();
+          console.log('Priority Levels API Response:', result);
+          setPriorities(result.data || result.items || result || []);
+        } else {
+          console.error('Failed to fetch priorities:', response.status, response.statusText);
+          setPriorities([]);
+        }
+      } catch (error) {
+        console.error('Failed to load priorities:', error);
+        setPriorities([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadPriorities();
+  }, []);
+
+  // Filter and sort priorities
+  useEffect(() => {
+    let filtered = priorities;
 
     if (searchTerm) {
       filtered = filtered.filter(item =>
         item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.description.toLowerCase().includes(searchTerm.toLowerCase())
+        (item.description && item.description.toLowerCase().includes(searchTerm.toLowerCase()))
       );
     }
 
@@ -164,44 +134,151 @@ export default function PriorityLevelsPage() {
     filtered.sort((a, b) => a.level - b.level);
 
     setFilteredData(filtered);
-  }, [searchTerm, statusFilter, levelFilter]);
+  }, [priorities, searchTerm, statusFilter, levelFilter]);
 
-  const handleCreate = () => {
-    console.log('Creating priority level:', formData);
-    setIsCreateDialogOpen(false);
-    resetForm();
+  const handleCreate = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      // Map form data to CreatePriorityLevelDto structure
+      const createDto = {
+        name: formData.name,
+        code: formData.code,
+        description: formData.description || '',
+        level: formData.level,
+        isActive: formData.isActive,
+        color: formData.color,
+        icon: formData.icon,
+        responseTime: formData.responseTime,
+        escalationTime: formData.escalationTime,
+        requiresApproval: formData.requiresApproval,
+        notificationRules: formData.notificationRules || '',
+        slaHours: formData.slaHours,
+        autoAssign: formData.autoAssign
+      };
+
+      console.log('Sending create request:', createDto);
+
+      const response = await fetch('http://localhost:5000/api/maintenance/priority-levels', {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(createDto)
+      });
+
+      if (response.ok) {
+        const newPriority = await response.json();
+        setPriorities(prev => [...prev, newPriority]);
+        setIsCreateDialogOpen(false);
+        resetForm();
+        console.log('Priority level created successfully');
+      } else {
+        const error = await response.text();
+        console.error('Failed to create priority level:', error);
+      }
+    } catch (error) {
+      console.error('Error creating priority level:', error);
+    }
   };
 
-  const handleEdit = (priority: any) => {
+  const handleEdit = (priority: PriorityLevel) => {
     setSelectedPriority(priority);
     setFormData({
       name: priority.name,
       code: priority.code,
-      description: priority.description,
+      description: priority.description || '',
       level: priority.level,
       isActive: priority.isActive,
-      color: priority.color,
-      icon: priority.icon,
-      responseTime: priority.responseTime,
-      escalationTime: priority.escalationTime,
-      requiresApproval: priority.requiresApproval,
-      notificationRules: priority.notificationRules,
-      slaHours: priority.slaHours,
-      autoAssign: priority.autoAssign,
+      color: priority.color || '#dc2626',
+      icon: priority.icon || 'alert-triangle',
+      responseTime: priority.responseTime || 60,
+      escalationTime: priority.escalationTime || 120,
+      requiresApproval: priority.requiresApproval || false,
+      notificationRules: priority.notificationRules || '',
+      slaHours: priority.slaHours || 24,
+      autoAssign: priority.autoAssign || false,
       emailTemplate: priority.emailTemplate || '',
       smsTemplate: priority.smsTemplate || ''
     });
     setIsEditDialogOpen(true);
   };
 
-  const handleUpdate = () => {
-    console.log('Updating priority level:', selectedPriority?.id, formData);
-    setIsEditDialogOpen(false);
-    resetForm();
+  const handleUpdate = async () => {
+    if (!selectedPriority?.id) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      // Map form data to UpdatePriorityLevelDto structure
+      const updateDto = {
+        name: formData.name,
+        code: formData.code,
+        description: formData.description || '',
+        level: formData.level,
+        isActive: formData.isActive,
+        color: formData.color,
+        icon: formData.icon,
+        responseTime: formData.responseTime,
+        escalationTime: formData.escalationTime,
+        requiresApproval: formData.requiresApproval,
+        notificationRules: formData.notificationRules || '',
+        slaHours: formData.slaHours,
+        autoAssign: formData.autoAssign
+      };
+
+      console.log('Sending update request:', updateDto);
+
+      const response = await fetch(`http://localhost:5000/api/maintenance/priority-levels/${selectedPriority.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updateDto)
+      });
+
+      if (response.ok) {
+        const updatedPriority = await response.json();
+        setPriorities(prev => 
+          prev.map(item => item.id === selectedPriority.id ? updatedPriority : item)
+        );
+        setIsEditDialogOpen(false);
+        resetForm();
+        console.log('Priority level updated successfully');
+      } else {
+        const error = await response.text();
+        console.error('Failed to update priority level:', error);
+      }
+    } catch (error) {
+      console.error('Error updating priority level:', error);
+    }
   };
 
-  const handleDelete = (id: number) => {
-    console.log('Deleting priority level:', id);
+  const handleDelete = async (id: string | number) => {
+    if (!confirm('Are you sure you want to delete this priority level?')) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://localhost:5000/api/maintenance/priority-levels/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        setPriorities(prev => prev.filter(item => item.id !== id));
+        console.log('Priority level deleted successfully');
+      } else {
+        const error = await response.text();
+        console.error('Failed to delete priority level:', error);
+      }
+    } catch (error) {
+      console.error('Error deleting priority level:', error);
+    }
   };
 
   const resetForm = () => {
@@ -566,7 +643,16 @@ export default function PriorityLevelsPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {filteredData.map((priority) => (
+            {loading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="text-muted-foreground">Loading priority levels...</div>
+              </div>
+            ) : filteredData.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                No priority levels found.
+              </div>
+            ) : (
+              filteredData.map((priority) => (
               <div key={priority.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
                 <div className="flex items-start justify-between">
                   <div className="space-y-3 flex-1">
@@ -576,7 +662,7 @@ export default function PriorityLevelsPage() {
                           className="w-4 h-4 rounded-full" 
                           style={{ backgroundColor: priority.color }}
                         />
-                        {getPriorityIcon(priority.icon)}
+                        {getPriorityIcon(priority.icon || 'alert-triangle')}
                       </div>
                       <h3 className="font-semibold">Level {priority.level}: {priority.name}</h3>
                       <Badge variant="outline">{priority.code}</Badge>
@@ -593,13 +679,13 @@ export default function PriorityLevelsPage() {
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-muted-foreground">
                       <div>
-                        <span className="font-medium">Response:</span> {formatTime(priority.responseTime)}
+                        <span className="font-medium">Response:</span> {priority.responseTime ? formatTime(priority.responseTime) : 'N/A'}
                       </div>
                       <div>
-                        <span className="font-medium">Escalation:</span> {formatTime(priority.escalationTime)}
+                        <span className="font-medium">Escalation:</span> {priority.escalationTime ? formatTime(priority.escalationTime) : 'N/A'}
                       </div>
                       <div>
-                        <span className="font-medium">SLA:</span> {priority.slaHours}h
+                        <span className="font-medium">SLA:</span> {priority.slaHours ? `${priority.slaHours}h` : 'N/A'}
                       </div>
                       <div>
                         <span className="font-medium">Notifications:</span> {priority.notificationRules || 'Not configured'}
@@ -627,7 +713,8 @@ export default function PriorityLevelsPage() {
                   </div>
                 </div>
               </div>
-            ))}
+            ))
+            )}
           </div>
         </CardContent>
       </Card>

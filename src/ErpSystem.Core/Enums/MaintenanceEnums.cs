@@ -89,3 +89,19 @@ public enum AssetStatus
     Retired = 4,
     Disposed = 5
 }
+
+/// <summary>
+/// Asset type classification for categories
+/// </summary>
+public enum AssetTypeClassification
+{
+    Equipment = 0,
+    Vehicle = 1,
+    Building = 2,
+    Infrastructure = 3,
+    ITAsset = 4,
+    Furniture = 5,
+    Tool = 6,
+    Safety = 7,
+    Other = 99
+}

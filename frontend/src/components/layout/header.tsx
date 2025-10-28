@@ -25,6 +25,7 @@ import { useOptionalSessionTimeoutContext } from '../../contexts/session-timeout
 import { ClientOnly } from '../ClientOnly';
 import { AnimatedThemeToggle } from '../ui/ThemeToggle';
 import { useTheme } from '../../contexts/ThemeContext';
+import HeaderNotificationBell from '../notifications/HeaderNotificationBell';
 
 interface HeaderProps {
   className?: string;
@@ -200,14 +201,7 @@ export function Header({ className }: HeaderProps) {
           <AnimatedThemeToggle size="sm" showLabel={false} />
 
           {/* Notifications */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="relative h-9 w-9 p-0 rounded-xl"
-          >
-            <Bell className="h-4 w-4 text-slate-600 dark:text-slate-400" />
-            <span className="absolute -top-1 -right-1 h-3 w-3 bg-red-500 rounded-full border-2 border-white dark:border-slate-900" />
-          </Button>
+          <HeaderNotificationBell />
 
           {/* Session Status */}
           <ClientOnly>

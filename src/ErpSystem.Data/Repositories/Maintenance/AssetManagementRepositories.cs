@@ -200,8 +200,9 @@ public class MaintenanceAssetCategoryRepository : GenericRepository<MaintenanceA
 
     public async Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null)
     {
+        // Allow empty/null codes - multiple categories can have empty codes
         if (string.IsNullOrWhiteSpace(code))
-            return false;
+            return true;
             
         var query = _dbSet.Where(c => c.Code == code && !c.IsDeleted);
         if (excludeId.HasValue)

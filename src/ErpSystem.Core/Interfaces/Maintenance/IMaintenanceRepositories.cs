@@ -182,6 +182,35 @@ public interface IInspectionDocumentRepository : IGenericRepository<InspectionDo
 
 #endregion
 
+#region Task Template Management Repositories
+
+public interface IAssetTaskTemplateRepository : IGenericRepository<AssetTaskTemplate>
+{
+    Task<IEnumerable<AssetTaskTemplate>> GetByAssetIdAsync(Guid assetId);
+    Task<IEnumerable<AssetTaskTemplate>> GetByAssetIdAndMaintenanceTypeAsync(Guid assetId, Guid maintenanceTypeId);
+    Task<IEnumerable<AssetTaskTemplate>> GetByMaintenanceTypeIdAsync(Guid maintenanceTypeId);
+    Task<IEnumerable<AssetTaskTemplate>> GetActiveByAssetIdAsync(Guid assetId);
+    Task<IEnumerable<AssetTaskTemplate>> GetOrderedBySequenceAsync(Guid assetId, Guid maintenanceTypeId);
+}
+
+public interface IAssetTypeTaskTemplateRepository : IGenericRepository<AssetTypeTaskTemplate>
+{
+    Task<IEnumerable<AssetTypeTaskTemplate>> GetByAssetTypeIdAsync(Guid assetTypeId);
+    Task<IEnumerable<AssetTypeTaskTemplate>> GetByAssetTypeIdAndMaintenanceTypeAsync(Guid assetTypeId, Guid maintenanceTypeId);
+    Task<IEnumerable<AssetTypeTaskTemplate>> GetByMaintenanceTypeIdAsync(Guid maintenanceTypeId);
+    Task<IEnumerable<AssetTypeTaskTemplate>> GetActiveByAssetTypeIdAsync(Guid assetTypeId);
+    Task<IEnumerable<AssetTypeTaskTemplate>> GetOrderedBySequenceAsync(Guid assetTypeId, Guid maintenanceTypeId);
+}
+
+public interface IMaintenanceTaskTemplateRepository : IGenericRepository<MaintenanceTaskTemplate>
+{
+    Task<IEnumerable<MaintenanceTaskTemplate>> GetByMaintenanceTypeIdAsync(Guid maintenanceTypeId);
+    Task<IEnumerable<MaintenanceTaskTemplate>> GetActiveByMaintenanceTypeIdAsync(Guid maintenanceTypeId);
+    Task<IEnumerable<MaintenanceTaskTemplate>> GetOrderedBySequenceAsync(Guid maintenanceTypeId);
+}
+
+#endregion
+
 #region Resource Management Repositories
 
 public interface ITechnicianTeamRepository : IGenericRepository<TechnicianTeam>

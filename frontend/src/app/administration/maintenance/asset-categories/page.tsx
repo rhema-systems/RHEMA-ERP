@@ -23,93 +23,28 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Mock data for asset categories
-const assetCategoriesData = [
-  {
-    id: 1,
-    name: 'HVAC Systems',
-    code: 'HVAC',
-    description: 'Heating, Ventilation, and Air Conditioning systems',
-    parentCategory: null,
-    isActive: true,
-    maintenanceFrequency: 'Monthly',
-    assetCount: 25,
-    color: '#3b82f6',
-    icon: 'hvac'
-  },
-  {
-    id: 2,
-    name: 'Electrical Equipment',
-    code: 'ELEC',
-    description: 'Electrical panels, generators, and power distribution',
-    parentCategory: null,
-    isActive: true,
-    maintenanceFrequency: 'Quarterly',
-    assetCount: 18,
-    color: '#f59e0b',
-    icon: 'electrical'
-  },
-  {
-    id: 3,
-    name: 'Plumbing Systems',
-    code: 'PLUMB',
-    description: 'Water supply, drainage, and plumbing fixtures',
-    parentCategory: null,
-    isActive: true,
-    maintenanceFrequency: 'Bi-Annual',
-    assetCount: 32,
-    color: '#10b981',
-    icon: 'plumbing'
-  },
-  {
-    id: 4,
-    name: 'Elevator Systems',
-    code: 'ELEV',
-    description: 'Elevators, escalators, and vertical transportation',
-    parentCategory: null,
-    isActive: true,
-    maintenanceFrequency: 'Monthly',
-    assetCount: 8,
-    color: '#8b5cf6',
-    icon: 'elevator'
-  },
-  {
-    id: 5,
-    name: 'Fire Safety Systems',
-    code: 'FIRE',
-    description: 'Fire suppression, detection, and safety equipment',
-    parentCategory: null,
-    isActive: true,
-    maintenanceFrequency: 'Quarterly',
-    assetCount: 15,
-    color: '#ef4444',
-    icon: 'fire'
-  },
-  {
-    id: 6,
-    name: 'HVAC Filters',
-    code: 'HVAC-FILT',
-    description: 'Air filters for HVAC systems',
-    parentCategory: 1,
-    isActive: true,
-    maintenanceFrequency: 'Monthly',
-    assetCount: 45,
-    color: '#3b82f6',
-    icon: 'filter'
-  },
-  {
-    id: 7,
-    name: 'Backup Generators',
-    code: 'GEN',
-    description: 'Emergency power generation equipment',
-    parentCategory: 2,
-    isActive: true,
-    maintenanceFrequency: 'Monthly',
-    assetCount: 3,
-    color: '#f59e0b',
-    icon: 'generator'
-  }
-];
+// Asset categories interface
+interface AssetCategory {
+  id: string | number;
+  name: string;
+  code: string;
+  description?: string;
+  parentCategory?: string | number | null;
+  isActive: boolean;
+  maintenanceFrequency?: string;
+  assetCount?: number;
+  color?: string;
+  icon?: string;
+  assetType?: string; // Asset type classification (Building, Vehicle, Equipment, etc.)
+  maintenanceScheduleType?: string;
+  maintenanceType?: string;
+  maintenanceValue?: string;
+  maintenanceUnit?: string;
+  secondaryMaintenanceType?: string;
+  secondaryMaintenanceFrequency?: string;
+  secondaryMaintenanceValue?: string;
+  secondaryMaintenanceUnit?: string;
+}
 
 export default function AssetCategoriesPage() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -117,8 +52,11 @@ export default function AssetCategoriesPage() {
   const [parentFilter, setParentFilter] = useState('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState(null);
-  const [filteredData, setFilteredData] = useState(assetCategoriesData);
+  const [selectedCategory, setSelectedCategory] = useState<AssetCategory | null>(null);
+  const [assetCategoriesData, setAssetCategoriesData] = useState<AssetCategory[]>([]);
+  const [filteredData, setFilteredData] = useState<AssetCategory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -127,6 +65,7 @@ export default function AssetCategoriesPage() {
     description: '',
     parentCategory: '',
     isActive: true,
+    assetType: 'Equipment', // Default asset type
     maintenanceScheduleType: 'single', // 'single' or 'multi'
     maintenanceType: 'Time', // 'Time', 'Usage', 'Distance', 'Cycles'
     maintenanceFrequency: 'Monthly',
@@ -141,14 +80,97 @@ export default function AssetCategoriesPage() {
     icon: 'package'
   });
 
+  // Fetch asset categories from API
+  const fetchAssetCategories = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      
+      console.log('🔄 Fetching asset categories...');
+      console.log('Token available:', !!token);
+      console.log('Token preview:', token ? `${token.substring(0, 20)}...` : 'None');
+      console.log('API URL:', 'http://localhost:5000/api/maintenance/asset-categories');
+      
+      // For now, we'll proceed without authentication since the API endpoint allows anonymous access
+      // TODO: Restore authentication requirement when proper auth is implemented
+      // if (!token) {
+      //   console.warn('⚠️ No authentication token found');
+      //   setError('Authentication required. Please log in to access this page.');
+      //   return;
+      // }
+      
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      
+      // Only add Authorization header if token exists
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch('http://localhost:5000/api/maintenance/asset-categories?pageSize=1000', {
+        headers
+      });
+      
+      console.log('Response status:', response.status);
+      console.log('Response ok:', response.ok);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API Error Response:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: errorText
+        });
+        
+        if (response.status === 401) {
+          setError('Authentication failed. Please log in again or check your credentials.');
+          // Optionally redirect to login
+          // window.location.href = '/login';
+        } else if (response.status === 403) {
+          setError('Access denied. You do not have permission to view asset categories.');
+        } else {
+          throw new Error(`Failed to fetch asset categories: ${response.status} ${response.statusText} - ${errorText}`);
+        }
+        return;
+      }
+      
+      const result = await response.json();
+      console.log('✅ API Response received:', result);
+      
+      const categories = result.data || result.items || result || [];
+      console.log('Processed categories count:', categories.length);
+      
+      setAssetCategoriesData(categories);
+    } catch (error) {
+      console.error('❌ Error fetching asset categories:', error);
+      
+      // Check if it's a network error
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        setError('Unable to connect to the server. Please check if the API is running on http://localhost:5000');
+      } else {
+        setError(`Failed to load asset categories: ${error.message}`);
+      }
+      
+      setAssetCategoriesData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAssetCategories();
+  }, []);
+
   useEffect(() => {
     let filtered = assetCategoriesData;
 
     if (searchTerm) {
       filtered = filtered.filter(item =>
-        item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.description.toLowerCase().includes(searchTerm.toLowerCase())
+        item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.description?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
@@ -167,45 +189,176 @@ export default function AssetCategoriesPage() {
     }
 
     setFilteredData(filtered);
-  }, [searchTerm, statusFilter, parentFilter]);
+  }, [searchTerm, statusFilter, parentFilter, assetCategoriesData]);
 
-  const handleCreate = () => {
-    console.log('Creating asset category:', formData);
-    setIsCreateDialogOpen(false);
-    resetForm();
+  const handleCreate = async () => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      // Map form data to CreateMaintenanceAssetCategoryDto structure
+      const createDto = {
+        name: formData.name,
+        code: formData.code || '',
+        description: formData.description || '',
+        parentCategoryId: formData.parentCategory || null,
+        isActive: formData.isActive,
+        assetType: formData.assetType, // Add asset type classification
+        color: formData.color,
+        icon: formData.icon,
+        maintenanceScheduleType: formData.maintenanceScheduleType,
+        maintenanceType: formData.maintenanceType,
+        maintenanceFrequency: formData.maintenanceType === 'Time' ? formData.maintenanceFrequency : null,
+        maintenanceValue: formData.maintenanceType !== 'Time' ? parseFloat(formData.maintenanceValue) || null : null,
+        maintenanceUnit: formData.maintenanceType !== 'Time' ? formData.maintenanceUnit : null,
+        secondaryMaintenanceType: formData.maintenanceScheduleType === 'multi' ? formData.secondaryMaintenanceType : null,
+        secondaryMaintenanceFrequency: formData.maintenanceScheduleType === 'multi' && formData.secondaryMaintenanceType === 'Time' ? formData.secondaryMaintenanceFrequency : null,
+        secondaryMaintenanceValue: formData.maintenanceScheduleType === 'multi' && formData.secondaryMaintenanceType !== 'Time' ? parseFloat(formData.secondaryMaintenanceValue) || null : null,
+        secondaryMaintenanceUnit: formData.maintenanceScheduleType === 'multi' && formData.secondaryMaintenanceType !== 'Time' ? formData.secondaryMaintenanceUnit : null
+      };
+
+      console.log('Sending create request:', createDto);
+
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch('http://localhost:5000/api/maintenance/asset-categories', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(createDto)
+      });
+
+      if (response.ok) {
+        const newCategory = await response.json();
+        setAssetCategoriesData(prev => [...prev, newCategory]);
+        setIsCreateDialogOpen(false);
+        resetForm();
+        console.log('Asset category created successfully');
+      } else {
+        const error = await response.text();
+        console.error('Failed to create asset category:', error);
+      }
+    } catch (error) {
+      console.error('Error creating asset category:', error);
+    }
   };
 
   const handleEdit = (category: any) => {
     setSelectedCategory(category);
     setFormData({
-      name: category.name,
-      code: category.code,
-      description: category.description,
+      name: category.name || '',
+      code: category.code || '',
+      description: category.description || '',
       parentCategory: category.parentCategory?.toString() || '',
-      isActive: category.isActive,
+      isActive: category.isActive ?? true,
+      assetType: category.assetType || 'Equipment',
       maintenanceScheduleType: category.maintenanceScheduleType || 'single',
       maintenanceType: category.maintenanceType || 'Time',
       maintenanceFrequency: category.maintenanceFrequency || 'Monthly',
-      maintenanceValue: category.maintenanceValue || '',
+      maintenanceValue: category.maintenanceValue?.toString() || '',
       maintenanceUnit: category.maintenanceUnit || 'months',
       secondaryMaintenanceType: category.secondaryMaintenanceType || 'Distance',
       secondaryMaintenanceFrequency: category.secondaryMaintenanceFrequency || 'Monthly',
-      secondaryMaintenanceValue: category.secondaryMaintenanceValue || '',
+      secondaryMaintenanceValue: category.secondaryMaintenanceValue?.toString() || '',
       secondaryMaintenanceUnit: category.secondaryMaintenanceUnit || 'km',
-      color: category.color,
-      icon: category.icon
+      color: category.color || '#3b82f6',
+      icon: category.icon || 'package'
     });
     setIsEditDialogOpen(true);
   };
 
-  const handleUpdate = () => {
-    console.log('Updating asset category:', selectedCategory?.id, formData);
-    setIsEditDialogOpen(false);
-    resetForm();
+  const handleUpdate = async () => {
+    if (!selectedCategory?.id) return;
+
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      // Map form data to UpdateMaintenanceAssetCategoryDto structure
+      const updateDto = {
+        name: formData.name,
+        code: formData.code || '',
+        description: formData.description || '',
+        parentCategoryId: formData.parentCategory || null,
+        isActive: formData.isActive,
+        assetType: formData.assetType, // Add asset type classification
+        color: formData.color,
+        icon: formData.icon,
+        maintenanceScheduleType: formData.maintenanceScheduleType,
+        maintenanceType: formData.maintenanceType,
+        maintenanceFrequency: formData.maintenanceType === 'Time' ? formData.maintenanceFrequency : null,
+        maintenanceValue: formData.maintenanceType !== 'Time' ? parseFloat(formData.maintenanceValue) || null : null,
+        maintenanceUnit: formData.maintenanceType !== 'Time' ? formData.maintenanceUnit : null,
+        secondaryMaintenanceType: formData.maintenanceScheduleType === 'multi' ? formData.secondaryMaintenanceType : null,
+        secondaryMaintenanceFrequency: formData.maintenanceScheduleType === 'multi' && formData.secondaryMaintenanceType === 'Time' ? formData.secondaryMaintenanceFrequency : null,
+        secondaryMaintenanceValue: formData.maintenanceScheduleType === 'multi' && formData.secondaryMaintenanceType !== 'Time' ? parseFloat(formData.secondaryMaintenanceValue) || null : null,
+        secondaryMaintenanceUnit: formData.maintenanceScheduleType === 'multi' && formData.secondaryMaintenanceType !== 'Time' ? formData.secondaryMaintenanceUnit : null
+      };
+
+      console.log('Sending update request:', updateDto);
+
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch(`http://localhost:5000/api/maintenance/asset-categories/${selectedCategory.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(updateDto)
+      });
+
+      if (response.ok) {
+        const updatedCategory = await response.json();
+        setAssetCategoriesData(prev => 
+          prev.map(item => item.id === selectedCategory.id ? updatedCategory : item)
+        );
+        setIsEditDialogOpen(false);
+        resetForm();
+        console.log('Asset category updated successfully');
+      } else {
+        const error = await response.text();
+        console.error('Failed to update asset category:', error);
+      }
+    } catch (error) {
+      console.error('Error updating asset category:', error);
+    }
   };
 
-  const handleDelete = (id: number) => {
-    console.log('Deleting asset category:', id);
+  const handleDelete = async (id: string | number) => {
+    if (!confirm('Are you sure you want to delete this asset category?')) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch(`http://localhost:5000/api/maintenance/asset-categories/${id}`, {
+        method: 'DELETE',
+        headers
+      });
+
+      if (response.ok) {
+        setAssetCategoriesData(prev => prev.filter(item => item.id !== id));
+        console.log('Asset category deleted successfully');
+      } else {
+        const error = await response.text();
+        console.error('Failed to delete asset category:', error);
+      }
+    } catch (error) {
+      console.error('Error deleting asset category:', error);
+    }
   };
 
   const resetForm = () => {
@@ -215,6 +368,7 @@ export default function AssetCategoriesPage() {
       description: '',
       parentCategory: '',
       isActive: true,
+      assetType: 'Equipment',
       maintenanceScheduleType: 'single',
       maintenanceType: 'Time',
       maintenanceFrequency: 'Monthly',
@@ -336,7 +490,7 @@ export default function AssetCategoriesPage() {
                 />
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="parent">Parent Category</Label>
                   <Select value={formData.parentCategory || 'none'} onValueChange={(value) => setFormData({...formData, parentCategory: value === 'none' ? null : value})}>
@@ -350,6 +504,25 @@ export default function AssetCategoriesPage() {
                           {cat.name}
                         </SelectItem>
                       ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="assetType">Asset Type</Label>
+                  <Select value={formData.assetType} onValueChange={(value) => setFormData({...formData, assetType: value})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select asset type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Equipment">Equipment</SelectItem>
+                      <SelectItem value="Vehicle">Vehicle</SelectItem>
+                      <SelectItem value="Building">Building</SelectItem>
+                      <SelectItem value="Infrastructure">Infrastructure</SelectItem>
+                      <SelectItem value="ITAsset">IT Asset</SelectItem>
+                      <SelectItem value="Furniture">Furniture</SelectItem>
+                      <SelectItem value="Tool">Tool</SelectItem>
+                      <SelectItem value="Safety">Safety</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -757,12 +930,30 @@ export default function AssetCategoriesPage() {
         <CardHeader>
           <CardTitle>Asset Categories</CardTitle>
           <CardDescription>
-            {filteredData.length} categor{filteredData.length === 1 ? 'y' : 'ies'} found
+            {loading ? 'Loading...' : error ? 'Error loading data' : `${filteredData.length} categor${filteredData.length === 1 ? 'y' : 'ies'} found`}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {filteredData.map((category) => (
+          {loading && (
+            <div className="flex items-center justify-center py-8">
+              <div className="text-muted-foreground">Loading asset categories...</div>
+            </div>
+          )}
+          
+          {error && (
+            <div className="flex items-center justify-center py-8">
+              <div className="text-red-600">{error}</div>
+            </div>
+          )}
+          
+          {!loading && !error && (
+            <div className="space-y-4">
+              {filteredData.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  No asset categories found. {searchTerm || statusFilter !== 'all' || parentFilter !== 'all' ? 'Try adjusting your filters.' : 'Create your first asset category to get started.'}
+                </div>
+              ) : (
+                filteredData.map((category) => (
               <div key={category.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
                 <div className="flex items-start justify-between">
                   <div className="space-y-3 flex-1">
@@ -776,20 +967,28 @@ export default function AssetCategoriesPage() {
                       <Badge className={category.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
                         {category.isActive ? 'Active' : 'Inactive'}
                       </Badge>
+                      {category.assetType && (
+                        <Badge variant="outline" className="bg-blue-50 text-blue-700">
+                          {category.assetType}
+                        </Badge>
+                      )}
                       {category.parentCategory && (
                         <Badge variant="secondary">Sub-category</Badge>
                       )}
                     </div>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-muted-foreground">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 text-sm text-muted-foreground">
                       <div>
                         <span className="font-medium">Parent:</span> {getParentCategoryName(category.parentCategory)}
+                      </div>
+                      <div>
+                        <span className="font-medium">Type:</span> {category.assetType || 'Not specified'}
                       </div>
                       <div>
                         <span className="font-medium">Maintenance:</span> {getMaintenanceScheduleDisplay(category)}
                       </div>
                       <div>
-                        <span className="font-medium">Assets:</span> {category.assetCount}
+                        <span className="font-medium">Assets:</span> {category.assetCount || 0}
                       </div>
                       <div>
                         <span className="font-medium">Icon:</span> {category.icon}
@@ -817,8 +1016,10 @@ export default function AssetCategoriesPage() {
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
+                ))
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -865,7 +1066,7 @@ export default function AssetCategoriesPage() {
               />
             </div>
             
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="edit-parent">Parent Category</Label>
                 <Select value={formData.parentCategory || 'none'} onValueChange={(value) => setFormData({...formData, parentCategory: value === 'none' ? null : value})}>
@@ -879,6 +1080,25 @@ export default function AssetCategoriesPage() {
                         {cat.name}
                       </SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-assetType">Asset Type</Label>
+                <Select value={formData.assetType} onValueChange={(value) => setFormData({...formData, assetType: value})}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select asset type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Equipment">Equipment</SelectItem>
+                    <SelectItem value="Vehicle">Vehicle</SelectItem>
+                    <SelectItem value="Building">Building</SelectItem>
+                    <SelectItem value="Infrastructure">Infrastructure</SelectItem>
+                    <SelectItem value="ITAsset">IT Asset</SelectItem>
+                    <SelectItem value="Furniture">Furniture</SelectItem>
+                    <SelectItem value="Tool">Tool</SelectItem>
+                    <SelectItem value="Safety">Safety</SelectItem>
+                    <SelectItem value="Other">Other</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

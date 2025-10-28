@@ -23,137 +23,18 @@ import {
   Users,
   Clock,
   AlertCircle,
+  AlertTriangle,
   Eye,
   Copy
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { 
+  InspectionTemplate,
+  CreateInspectionTemplateDto,
+  UpdateInspectionTemplateDto,
+  inspectionTemplateService
+} from '@/services/inspectionTemplateService';
 
-// Mock data for inspection templates
-const inspectionTemplatesData = [
-  {
-    id: 1,
-    name: 'Monthly Equipment Safety Inspection',
-    code: 'MESI-001',
-    description: 'Comprehensive monthly safety check for all production equipment',
-    category: 'Safety',
-    frequency: 'Monthly',
-    estimatedDuration: 120,
-    isActive: true,
-    requiresSignature: true,
-    allowPhotos: true,
-    version: '2.1',
-    createdBy: 'John Smith',
-    lastUpdated: '2024-03-15',
-    checklistItems: [
-      { id: 1, item: 'Check emergency stop buttons', type: 'checklist', required: true },
-      { id: 2, item: 'Inspect safety guards', type: 'checklist', required: true },
-      { id: 3, item: 'Test warning lights', type: 'checklist', required: true },
-      { id: 4, item: 'Verify lockout/tagout procedures', type: 'checklist', required: true },
-      { id: 5, item: 'Document any issues found', type: 'text', required: false }
-    ],
-    assetTypes: ['Production Equipment', 'Conveyors'],
-    inspectorRoles: ['Safety Inspector', 'Maintenance Supervisor'],
-    priority: 'High'
-  },
-  {
-    id: 2,
-    name: 'HVAC System Quarterly Review',
-    code: 'HVAC-Q001',
-    description: 'Quarterly inspection template for heating, ventilation, and air conditioning systems',
-    category: 'HVAC',
-    frequency: 'Quarterly',
-    estimatedDuration: 90,
-    isActive: true,
-    requiresSignature: true,
-    allowPhotos: true,
-    version: '1.5',
-    createdBy: 'Sarah Johnson',
-    lastUpdated: '2024-03-10',
-    checklistItems: [
-      { id: 1, item: 'Check air filter condition', type: 'checklist', required: true },
-      { id: 2, item: 'Inspect ductwork for leaks', type: 'checklist', required: true },
-      { id: 3, item: 'Test thermostat calibration', type: 'measurement', required: true },
-      { id: 4, item: 'Record temperature readings', type: 'number', required: true },
-      { id: 5, item: 'Clean condenser coils', type: 'checklist', required: false }
-    ],
-    assetTypes: ['HVAC Units', 'Air Handlers'],
-    inspectorRoles: ['HVAC Technician', 'Facility Manager'],
-    priority: 'Medium'
-  },
-  {
-    id: 3,
-    name: 'Electrical Panel Annual Inspection',
-    code: 'ELEC-A001',
-    description: 'Annual comprehensive inspection of electrical panels and distribution systems',
-    category: 'Electrical',
-    frequency: 'Annual',
-    estimatedDuration: 180,
-    isActive: true,
-    requiresSignature: true,
-    allowPhotos: true,
-    version: '3.0',
-    createdBy: 'Mike Davis',
-    lastUpdated: '2024-03-08',
-    checklistItems: [
-      { id: 1, item: 'Inspect panel condition', type: 'checklist', required: true },
-      { id: 2, item: 'Check wire connections', type: 'checklist', required: true },
-      { id: 3, item: 'Test circuit breakers', type: 'checklist', required: true },
-      { id: 4, item: 'Measure voltage levels', type: 'measurement', required: true },
-      { id: 5, item: 'Document any anomalies', type: 'text', required: false }
-    ],
-    assetTypes: ['Electrical Panels', 'Distribution Boards'],
-    inspectorRoles: ['Electrician', 'Electrical Engineer'],
-    priority: 'High'
-  },
-  {
-    id: 4,
-    name: 'Fire Safety Equipment Check',
-    code: 'FIRE-M001',
-    description: 'Monthly inspection of fire extinguishers, alarms, and emergency equipment',
-    category: 'Fire Safety',
-    frequency: 'Monthly',
-    estimatedDuration: 60,
-    isActive: true,
-    requiresSignature: true,
-    allowPhotos: false,
-    version: '1.2',
-    createdBy: 'Lisa Brown',
-    lastUpdated: '2024-03-12',
-    checklistItems: [
-      { id: 1, item: 'Check fire extinguisher pressure', type: 'checklist', required: true },
-      { id: 2, item: 'Test smoke detector functionality', type: 'checklist', required: true },
-      { id: 3, item: 'Verify emergency exit signs', type: 'checklist', required: true },
-      { id: 4, item: 'Inspect sprinkler heads', type: 'checklist', required: true }
-    ],
-    assetTypes: ['Fire Extinguishers', 'Smoke Detectors', 'Emergency Lighting'],
-    inspectorRoles: ['Fire Safety Officer', 'Facility Manager'],
-    priority: 'Critical'
-  },
-  {
-    id: 5,
-    name: 'Conveyor Belt Daily Inspection',
-    code: 'CONV-D001',
-    description: 'Daily operational inspection for conveyor belt systems',
-    category: 'Operations',
-    frequency: 'Daily',
-    estimatedDuration: 30,
-    isActive: true,
-    requiresSignature: false,
-    allowPhotos: true,
-    version: '1.0',
-    createdBy: 'Tom Wilson',
-    lastUpdated: '2024-03-14',
-    checklistItems: [
-      { id: 1, item: 'Check belt alignment', type: 'checklist', required: true },
-      { id: 2, item: 'Inspect rollers for wear', type: 'checklist', required: true },
-      { id: 3, item: 'Lubricate bearings', type: 'checklist', required: false },
-      { id: 4, item: 'Record belt speed', type: 'number', required: false }
-    ],
-    assetTypes: ['Conveyor Systems'],
-    inspectorRoles: ['Production Operator', 'Maintenance Technician'],
-    priority: 'Medium'
-  }
-];
 
 export default function InspectionTemplatesPage() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -163,18 +44,21 @@ export default function InspectionTemplatesPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState(null);
-  const [filteredData, setFilteredData] = useState(inspectionTemplatesData);
+  const [selectedTemplate, setSelectedTemplate] = useState<InspectionTemplate | null>(null);
+  const [templatesData, setTemplatesData] = useState<InspectionTemplate[]>([]);
+  const [filteredData, setFilteredData] = useState<InspectionTemplate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   // Form state
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<CreateInspectionTemplateDto>({
     name: '',
     code: '',
     description: '',
     category: 'Safety',
     frequency: 'Monthly',
     estimatedDuration: 60,
-    isActive: true,
     requiresSignature: false,
     allowPhotos: false,
     version: '1.0',
@@ -184,20 +68,40 @@ export default function InspectionTemplatesPage() {
     checklistItems: []
   });
 
+  // Fetch templates from API
+  const fetchTemplates = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await inspectionTemplateService.getAllTemplates();
+      setTemplatesData(data);
+    } catch (error) {
+      console.error('Error fetching inspection templates:', error);
+      setError('Failed to load inspection templates. Please try again later.');
+      setTemplatesData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
   useEffect(() => {
-    let filtered = inspectionTemplatesData;
+    fetchTemplates();
+  }, []);
+
+  useEffect(() => {
+    let filtered = templatesData;
 
     if (searchTerm) {
       filtered = filtered.filter(item =>
-        item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.category.toLowerCase().includes(searchTerm.toLowerCase())
+        item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.category?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(item => 
+      filtered = filtered.filter(item =>
         statusFilter === 'active' ? item.isActive : !item.isActive
       );
     }
@@ -211,15 +115,28 @@ export default function InspectionTemplatesPage() {
     }
 
     setFilteredData(filtered);
-  }, [searchTerm, statusFilter, categoryFilter, frequencyFilter]);
+  }, [searchTerm, statusFilter, categoryFilter, frequencyFilter, templatesData]);
 
-  const handleCreate = () => {
-    console.log('Creating inspection template:', formData);
-    setIsCreateDialogOpen(false);
-    resetForm();
+  const handleCreate = async () => {
+    if (isSubmitting) return;
+    
+    try {
+      setIsSubmitting(true);
+      setError(null);
+      console.log('Creating inspection template with data:', formData);
+      const newTemplate = await inspectionTemplateService.createTemplate(formData);
+      setTemplatesData([...templatesData, newTemplate]);
+      setIsCreateDialogOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error('Error creating inspection template:', error);
+      setError('Failed to create inspection template. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleEdit = (template: any) => {
+  const handleEdit = (template: InspectionTemplate) => {
     setSelectedTemplate(template);
     setFormData({
       name: template.name,
@@ -228,35 +145,77 @@ export default function InspectionTemplatesPage() {
       category: template.category,
       frequency: template.frequency,
       estimatedDuration: template.estimatedDuration,
-      isActive: template.isActive,
       requiresSignature: template.requiresSignature,
       allowPhotos: template.allowPhotos,
       version: template.version,
       assetTypes: template.assetTypes,
       inspectorRoles: template.inspectorRoles,
       priority: template.priority,
-      checklistItems: template.checklistItems
+      checklistItems: template.checklistItems.map(item => ({
+        item: item.item,
+        type: item.type,
+        required: item.required
+      }))
     });
     setIsEditDialogOpen(true);
   };
 
-  const handleView = (template: any) => {
+  const handleView = (template: InspectionTemplate) => {
     setSelectedTemplate(template);
     setIsViewDialogOpen(true);
   };
 
-  const handleUpdate = () => {
-    console.log('Updating inspection template:', selectedTemplate?.id, formData);
-    setIsEditDialogOpen(false);
-    resetForm();
+  const handleUpdate = async () => {
+    if (!selectedTemplate?.id || isSubmitting) return;
+    
+    try {
+      setIsSubmitting(true);
+      setError(null);
+      const updateData: UpdateInspectionTemplateDto = {
+        ...formData,
+        isActive: selectedTemplate.isActive
+      };
+      console.log('Updating inspection template with data:', updateData);
+      
+      const updatedTemplate = await inspectionTemplateService.updateTemplate(selectedTemplate.id, updateData);
+      setTemplatesData(templatesData.map(t => t.id === selectedTemplate.id ? updatedTemplate : t));
+      setIsEditDialogOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error('Error updating inspection template:', error);
+      setError('Failed to update inspection template. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleDelete = (id: number) => {
-    console.log('Deleting inspection template:', id);
+  const handleDelete = async (template: InspectionTemplate) => {
+    if (!confirm(`Are you sure you want to delete "${template.name}"?`)) return;
+    
+    try {
+      setError(null);
+      console.log(`Deleting inspection template: ${template.name}`);
+      await inspectionTemplateService.deleteTemplate(template.id);
+      setTemplatesData(templatesData.filter(t => t.id !== template.id));
+    } catch (error) {
+      console.error('Error deleting inspection template:', error);
+      setError('Failed to delete inspection template. Please try again.');
+    }
   };
 
-  const handleDuplicate = (template: any) => {
-    console.log('Duplicating inspection template:', template.id);
+  const handleDuplicate = async (template: InspectionTemplate) => {
+    try {
+      setError(null);
+      const newName = `${template.name} (Copy)`;
+      const newCode = `${template.code}-COPY`;
+      console.log(`Duplicating inspection template: ${template.name}`);
+      
+      const duplicatedTemplate = await inspectionTemplateService.duplicateTemplate(template.id, newName, newCode);
+      setTemplatesData([...templatesData, duplicatedTemplate]);
+    } catch (error) {
+      console.error('Error duplicating inspection template:', error);
+      setError('Failed to duplicate inspection template. Please try again.');
+    }
   };
 
   const resetForm = () => {
@@ -267,7 +226,6 @@ export default function InspectionTemplatesPage() {
       category: 'Safety',
       frequency: 'Monthly',
       estimatedDuration: 60,
-      isActive: true,
       requiresSignature: false,
       allowPhotos: false,
       version: '1.0',
@@ -454,11 +412,11 @@ export default function InspectionTemplatesPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button onClick={handleCreate}>
-                Add Template
+              <Button onClick={handleCreate} disabled={!formData.name || !formData.code || isSubmitting}>
+                {isSubmitting ? 'Creating...' : 'Add Template'}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -485,6 +443,18 @@ export default function InspectionTemplatesPage() {
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
+
+      {/* Error Message */}
+      {error && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="pt-6">
+            <div className="flex items-center text-red-800">
+              <AlertTriangle className="h-4 w-4 mr-2" />
+              {error}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -611,6 +581,13 @@ export default function InspectionTemplatesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {loading ? (
+            <div className="text-center py-4">Loading inspection templates...</div>
+          ) : error ? (
+            <div className="text-center py-4 text-red-600">{error}</div>
+          ) : filteredData.length === 0 ? (
+            <div className="text-center py-4 text-muted-foreground">No inspection templates found</div>
+          ) : (
           <div className="space-y-4">
             {filteredData.map((template) => (
               <div key={template.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
@@ -677,7 +654,7 @@ export default function InspectionTemplatesPage() {
                     <Button 
                       size="sm" 
                       variant="outline" 
-                      onClick={() => handleDelete(template.id)}
+                      onClick={() => handleDelete(template)}
                       className="text-red-600 hover:text-red-700"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -690,6 +667,7 @@ export default function InspectionTemplatesPage() {
               </div>
             ))}
           </div>
+          )}
         </CardContent>
       </Card>
 
@@ -898,10 +876,12 @@ export default function InspectionTemplatesPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button onClick={handleUpdate}>Update Template</Button>
+            <Button onClick={handleUpdate} disabled={!formData.name || !formData.code || isSubmitting}>
+              {isSubmitting ? 'Updating...' : 'Update Template'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -33,49 +33,79 @@ import {
   ClipboardCheck
 } from 'lucide-react';
 
-const workOrderStatusData = [
-  { name: 'Open', value: 12, color: '#3b82f6' },
-  { name: 'In Progress', value: 8, color: '#f59e0b' },
-  { name: 'Completed', value: 45, color: '#10b981' },
-  { name: 'On Hold', value: 3, color: '#6b7280' },
-];
-
-const monthlyMaintenanceData = [
-  { month: 'Jan', planned: 20, emergency: 5, completed: 18 },
-  { month: 'Feb', planned: 18, emergency: 3, completed: 19 },
-  { month: 'Mar', planned: 22, emergency: 7, completed: 21 },
-  { month: 'Apr', planned: 25, emergency: 4, completed: 24 },
-  { month: 'May', planned: 28, emergency: 6, completed: 26 },
-  { month: 'Jun', planned: 30, emergency: 8, completed: 29 },
-];
-
-const assetHealthData = [
-  { category: 'HVAC', good: 15, fair: 8, poor: 2 },
-  { category: 'Electrical', good: 22, fair: 5, poor: 1 },
-  { category: 'Plumbing', good: 18, fair: 6, poor: 3 },
-  { category: 'Safety', good: 12, fair: 4, poor: 1 },
-];
-
-const upcomingMaintenance = [
-  { id: 1, asset: 'HVAC Unit A1', type: 'Preventive', dueDate: '2024-01-20', technician: 'John Smith' },
-  { id: 2, asset: 'Generator B2', type: 'Inspection', dueDate: '2024-01-22', technician: 'Mike Johnson' },
-  { id: 3, asset: 'Elevator C1', type: 'Preventive', dueDate: '2024-01-25', technician: 'Sarah Davis' },
-  { id: 4, asset: 'Fire System D1', type: 'Safety Check', dueDate: '2024-01-28', technician: 'Tom Wilson' },
-];
-
-const recentWorkOrders = [
-  { id: 1, title: 'HVAC Filter Replacement', asset: 'Building A - Unit 1', status: 'Completed', priority: 'Medium' },
-  { id: 2, title: 'Emergency Plumbing', asset: 'Building B - Basement', status: 'In Progress', priority: 'Critical' },
-  { id: 3, title: 'Electrical Inspection', asset: 'Building C - Panel 3', status: 'Open', priority: 'High' },
-  { id: 4, title: 'Generator Maintenance', asset: 'Backup Generator 1', status: 'Completed', priority: 'Medium' },
-];
+interface DashboardData {
+  workOrderStatusData: Array<{ name: string; value: number; color: string }>;
+  monthlyMaintenanceData: Array<{ month: string; planned: number; emergency: number; completed: number }>;
+  assetHealthData: Array<{ category: string; good: number; fair: number; poor: number }>;
+  upcomingMaintenance: Array<{ id: number; asset: string; type: string; dueDate: string; technician: string }>;
+  recentWorkOrders: Array<{ id: number; title: string; asset: string; status: string; priority: string }>;
+}
 
 export default function MaintenanceDashboard() {
-  const [totalWorkOrders] = useState(68);
-  const [activeWorkOrders] = useState(23);
-  const [totalAssets] = useState(156);
-  const [availableTechnicians] = useState(12);
-  const [overdueItems] = useState(5);
+  const [loading, setLoading] = useState(true);
+  const [dashboardData, setDashboardData] = useState<DashboardData>({
+    workOrderStatusData: [],
+    monthlyMaintenanceData: [],
+    assetHealthData: [],
+    upcomingMaintenance: [],
+    recentWorkOrders: []
+  });
+  const [totalWorkOrders, setTotalWorkOrders] = useState(0);
+  const [activeWorkOrders, setActiveWorkOrders] = useState(0);
+  const [totalAssets, setTotalAssets] = useState(0);
+  const [availableTechnicians, setAvailableTechnicians] = useState(0);
+  const [overdueItems, setOverdueItems] = useState(0);
+
+  // Load dashboard data from API
+  useEffect(() => {
+    const loadDashboardData = async () => {
+      setLoading(true);
+      try {
+        const token = localStorage.getItem('token');
+        const [dashboardResponse, metricsResponse] = await Promise.all([
+          fetch('http://localhost:5000/api/maintenance/dashboard/data', {
+            headers: {
+              'Authorization': token ? `Bearer ${token}` : '',
+              'Content-Type': 'application/json'
+            }
+          }),
+          fetch('http://localhost:5000/api/maintenance/dashboard/metrics', {
+            headers: {
+              'Authorization': token ? `Bearer ${token}` : '',
+              'Content-Type': 'application/json'
+            }
+          })
+        ]);
+        
+        if (dashboardResponse.ok) {
+          const data = await dashboardResponse.json();
+          setDashboardData(data.data || data || {
+            workOrderStatusData: [],
+            monthlyMaintenanceData: [],
+            assetHealthData: [],
+            upcomingMaintenance: [],
+            recentWorkOrders: []
+          });
+        }
+        
+        if (metricsResponse.ok) {
+          const metrics = await metricsResponse.json();
+          const metricsData = metrics.data || metrics || {};
+          setTotalWorkOrders(metricsData.totalWorkOrders || 0);
+          setActiveWorkOrders(metricsData.activeWorkOrders || 0);
+          setTotalAssets(metricsData.totalAssets || 0);
+          setAvailableTechnicians(metricsData.availableTechnicians || 0);
+          setOverdueItems(metricsData.overdueItems || 0);
+        }
+      } catch (error) {
+        console.error('Failed to load dashboard data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadDashboardData();
+  }, []);
 
   const getStatusBadge = (status: string) => {
     const colors = {
@@ -216,7 +246,7 @@ export default function MaintenanceDashboard() {
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie
-                  data={workOrderStatusData}
+                  data={dashboardData.workOrderStatusData}
                   cx="50%"
                   cy="50%"
                   innerRadius={60}
@@ -224,7 +254,7 @@ export default function MaintenanceDashboard() {
                   paddingAngle={2}
                   dataKey="value"
                 >
-                  {workOrderStatusData.map((entry, index) => (
+                  {dashboardData.workOrderStatusData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
@@ -232,7 +262,7 @@ export default function MaintenanceDashboard() {
               </PieChart>
             </ResponsiveContainer>
             <div className="flex flex-wrap justify-center gap-4 mt-4">
-              {workOrderStatusData.map((item) => (
+              {dashboardData.workOrderStatusData.map((item) => (
                 <div key={item.name} className="flex items-center space-x-2">
                   <div
                     className="w-3 h-3 rounded-full"
@@ -253,7 +283,7 @@ export default function MaintenanceDashboard() {
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={monthlyMaintenanceData}>
+              <LineChart data={dashboardData.monthlyMaintenanceData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="month" />
                 <YAxis />
@@ -275,7 +305,7 @@ export default function MaintenanceDashboard() {
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={assetHealthData}>
+            <BarChart data={dashboardData.assetHealthData}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="category" />
               <YAxis />
@@ -298,7 +328,7 @@ export default function MaintenanceDashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {recentWorkOrders.map((order) => (
+              {dashboardData.recentWorkOrders.map((order) => (
                 <div key={order.id} className="flex items-center justify-between p-3 border rounded-lg">
                   <div className="space-y-1">
                     <p className="font-medium text-sm">{order.title}</p>
@@ -322,7 +352,7 @@ export default function MaintenanceDashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {upcomingMaintenance.map((task) => (
+              {dashboardData.upcomingMaintenance.map((task) => (
                 <div key={task.id} className="flex items-center justify-between p-3 border rounded-lg">
                   <div className="space-y-1">
                     <p className="font-medium text-sm">{task.asset}</p>

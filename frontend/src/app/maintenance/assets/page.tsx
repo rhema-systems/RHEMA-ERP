@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Plus, Search, Eye, Edit, Calendar, AlertCircle, Settings, History, MapPin } from 'lucide-react';
+import { Plus, Search, Eye, Edit, Calendar, AlertCircle, Settings, History, MapPin, Trash2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -28,9 +28,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useToast } from '@/hooks/use-toast';
 
 interface Asset {
   id: string;
+  assetNumber: string;
   name: string;
   description: string;
   category: string;
@@ -60,114 +62,27 @@ interface MaintenanceHistory {
   cost: number;
 }
 
-const mockAssets: Asset[] = [
-  {
-    id: '1',
-    name: 'HVAC Unit - Building A',
-    description: 'Central air conditioning system for Building A',
-    category: 'HVAC',
-    status: 'Operational',
-    location: 'Building A - Rooftop',
-    manufacturer: 'Trane',
-    model: 'XR15',
-    serialNumber: 'TR-2023-001',
-    purchaseDate: '2023-03-15',
-    warrantyExpiry: '2028-03-15',
-    lastMaintenanceDate: '2024-01-10',
-    nextMaintenanceDate: '2024-04-10',
-    condition: 'Good',
-    criticality: 'High',
-    value: 25000,
-  },
-  {
-    id: '2',
-    name: 'Emergency Generator',
-    description: 'Backup power generator for critical systems',
-    category: 'Electrical',
-    status: 'Maintenance Required',
-    location: 'Building B - Basement',
-    manufacturer: 'Generac',
-    model: 'RG048',
-    serialNumber: 'GN-2022-015',
-    purchaseDate: '2022-08-20',
-    warrantyExpiry: '2027-08-20',
-    lastMaintenanceDate: '2023-12-15',
-    nextMaintenanceDate: '2024-01-15',
-    condition: 'Fair',
-    criticality: 'Critical',
-    value: 45000,
-  },
-  {
-    id: '3',
-    name: 'Water Pump System',
-    description: 'Main water circulation pump for building water supply',
-    category: 'Plumbing',
-    status: 'Under Maintenance',
-    location: 'Building C - Mechanical Room',
-    manufacturer: 'Grundfos',
-    model: 'CR64-2',
-    serialNumber: 'WP-2021-008',
-    purchaseDate: '2021-11-12',
-    warrantyExpiry: '2026-11-12',
-    lastMaintenanceDate: '2024-01-18',
-    nextMaintenanceDate: '2024-07-18',
-    condition: 'Good',
-    criticality: 'High',
-    value: 8500,
-  },
-];
-
-const mockMaintenanceHistory: MaintenanceHistory[] = [
-  {
-    id: '1',
-    assetId: '1',
-    workOrderId: 'WO-2024-001',
-    date: '2024-01-10',
-    type: 'Preventive',
-    technician: 'John Smith',
-    description: 'Filter replacement and system inspection',
-    status: 'Completed',
-    cost: 450,
-  },
-  {
-    id: '2',
-    assetId: '1',
-    workOrderId: 'WO-2023-087',
-    date: '2023-10-10',
-    type: 'Preventive',
-    technician: 'Mike Johnson',
-    description: 'Quarterly maintenance check',
-    status: 'Completed',
-    cost: 320,
-  },
-  {
-    id: '3',
-    assetId: '2',
-    workOrderId: 'WO-2023-098',
-    date: '2023-12-15',
-    type: 'Corrective',
-    technician: 'Sarah Davis',
-    description: 'Battery replacement and load testing',
-    status: 'Completed',
-    cost: 1200,
-  },
-];
 
 export default function AssetsPage() {
-  const [assets, setAssets] = useState<Asset[]>(mockAssets);
-  const [filteredAssets, setFilteredAssets] = useState<Asset[]>(mockAssets);
-  const [maintenanceHistory] = useState<MaintenanceHistory[]>(mockMaintenanceHistory);
+  const { toast } = useToast();
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [filteredAssets, setFilteredAssets] = useState<Asset[]>([]);
+  const [maintenanceHistory, setMaintenanceHistory] = useState<MaintenanceHistory[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [assetTypes, setAssetTypes] = useState<Array<{id: string, name: string, description?: string}>>([]);
   
   const [newAsset, setNewAsset] = useState({
     name: '',
+    assetNumber: '',
     description: '',
-    category: 'HVAC',
+    category: '',
     location: '',
     manufacturer: '',
     model: '',
@@ -178,6 +93,135 @@ export default function AssetsPage() {
     value: 0,
   });
 
+  // Helper function to format date for HTML input (YYYY-MM-DD)
+  const formatDateForInput = (dateString: string | null | undefined): string => {
+    if (!dateString) return '';
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return '';
+      return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD format
+    } catch {
+      return '';
+    }
+  };
+
+  // Helper function to map backend assets to frontend format
+  const mapAssets = (rawAssets: any[]) => {
+    console.log('Raw assets for mapping:', rawAssets); // Debug logging
+    // Log first asset in detail to see all available properties
+    if (rawAssets.length > 0) {
+      console.log('First asset detailed properties:', Object.keys(rawAssets[0]));
+      console.log('First asset PurchaseDate:', rawAssets[0].purchaseDate || rawAssets[0].PurchaseDate);
+      console.log('First asset WarrantyEndDate:', rawAssets[0].warrantyEndDate || rawAssets[0].WarrantyEndDate);
+    }
+    return rawAssets.map((asset: any) => {
+      const mapped = {
+        ...asset,
+        assetNumber: asset.assetNumber || asset.AssetNumber || 'N/A',
+        value: asset.currentValue || asset.CurrentValue || 0,
+        category: asset.assetCategory?.name || asset.categoryName || asset.CategoryName || 'Unknown',
+        // Map date fields with proper formatting
+        purchaseDate: formatDateForInput(asset.purchaseDate || asset.PurchaseDate),
+        warrantyExpiry: formatDateForInput(asset.warrantyEndDate || asset.WarrantyEndDate || asset.warrantyExpiry),
+        // Map other potential field name variations
+        manufacturer: asset.manufacturer || asset.Manufacturer || '',
+        model: asset.model || asset.Model || '',
+        serialNumber: asset.serialNumber || asset.SerialNumber || '',
+        location: asset.location || asset.Location || '',
+        description: asset.description || asset.Description || '',
+        name: asset.name || asset.Name || '',
+        status: asset.status || asset.Status || 'Operational',
+        criticality: asset.criticality || asset.Criticality || 'Medium',
+        condition: asset.condition || asset.Condition || 'Good'
+      };
+      console.log('Mapped asset:', mapped); // Debug logging
+      return mapped;
+    });
+  };
+
+  // Load assets and maintenance history from API
+  useEffect(() => {
+    const loadAssetsData = async () => {
+      setLoading(true);
+      try {
+        const token = localStorage.getItem('authToken');
+        const [assetsResponse, historyResponse, categoriesResponse] = await Promise.all([
+          fetch('http://localhost:5000/api/maintenance/assets', {
+            headers: {
+              'Authorization': token ? `Bearer ${token}` : '',
+              'Content-Type': 'application/json'
+            }
+          }),
+          fetch('http://localhost:5000/api/maintenance/assets/history', {
+            headers: {
+              'Authorization': token ? `Bearer ${token}` : '',
+              'Content-Type': 'application/json'
+            }
+          }),
+          fetch('http://localhost:5000/api/maintenance/asset-categories', {
+            headers: {
+              'Authorization': token ? `Bearer ${token}` : '',
+              'Content-Type': 'application/json'
+            }
+          })
+        ]);
+        
+        if (assetsResponse.ok) {
+          const assetsData = await assetsResponse.json();
+          const rawAssets = assetsData.data || assetsData.items || assetsData || [];
+          setAssets(mapAssets(rawAssets));
+        }
+        
+        if (historyResponse.ok) {
+          const historyData = await historyResponse.json();
+          setMaintenanceHistory(historyData.data || historyData.items || historyData || []);
+        }
+        
+        console.log('Asset categories response status:', categoriesResponse.status);
+        
+        if (categoriesResponse.ok) {
+          const categoriesData = await categoriesResponse.json();
+          console.log('Asset categories loaded from API:', categoriesData);
+          console.log('Number of asset categories:', categoriesData?.length || 0);
+          
+          if (categoriesData && categoriesData.length > 0) {
+            setAssetTypes(categoriesData);
+            console.log('Asset categories set successfully');
+          } else {
+            console.warn('API returned empty asset categories');
+            setAssetTypes([]);
+          }
+        } else {
+          console.error('Asset categories API failed:', {
+            status: categoriesResponse.status,
+            statusText: categoriesResponse.statusText
+          });
+          const errorText = await categoriesResponse.text();
+          console.error('Asset categories API error details:', errorText);
+          setAssetTypes([]);
+        }
+      } catch (error) {
+        console.error('Failed to load assets data:', error);
+        setAssets([]);
+        setMaintenanceHistory([]);
+        
+        // Add some default asset types for testing if API fails
+        console.warn('Using fallback asset types for testing');
+        setAssetTypes([
+          { id: 'temp-1', name: 'Electrical Equipment', description: 'Electrical systems and equipment' },
+          { id: 'temp-2', name: 'Mechanical Equipment', description: 'Mechanical systems and equipment' },
+          { id: 'temp-3', name: 'HVAC Equipment', description: 'Heating, ventilation, and air conditioning' },
+          { id: 'temp-4', name: 'Safety Equipment', description: 'Safety and security systems' }
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadAssetsData();
+  }, []);
+
+  // Filter assets
   useEffect(() => {
     let filtered = assets;
 
@@ -200,31 +244,305 @@ export default function AssetsPage() {
     setFilteredAssets(filtered);
   }, [assets, searchTerm, categoryFilter, statusFilter]);
 
-  const handleCreateAsset = () => {
-    const asset: Asset = {
-      id: (assets.length + 1).toString(),
-      ...newAsset,
-      status: 'Operational',
-      lastMaintenanceDate: '',
-      nextMaintenanceDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 90 days from now
-      condition: 'Good',
-    };
-    
-    setAssets([...assets, asset]);
-    setIsCreateDialogOpen(false);
+  const handleCreateAsset = async () => {
+    try {
+      // Find the selected asset type
+      const selectedType = assetTypes.find(type => type.name === newAsset.category);
+      const typeId = selectedType?.id || assetTypes[0]?.id;
+      
+      // Log debugging info
+      console.log('Creating asset with data:', {
+        newAsset,
+        selectedType,
+        typeId,
+        assetTypes: assetTypes.slice(0, 3) // Log first 3 types
+      });
+      
+      // Validate required fields
+      if (!newAsset.name?.trim()) {
+        toast({
+          title: "Validation Error",
+          description: "Asset name is required",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      if (!typeId) {
+        toast({
+          title: "Validation Error",
+          description: "Asset type is required",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      // Validate that we have actual asset types from the API
+      if (assetTypes.length === 0) {
+        toast({
+          title: "Configuration Error",
+          description: "No asset types available. Please contact your administrator.",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      const token = localStorage.getItem('authToken');
+      
+      // Basic API connectivity test
+      try {
+        const testResponse = await fetch('http://localhost:5000/api/maintenance/assets', {
+          method: 'GET',
+          headers: {
+            'Authorization': token ? `Bearer ${token}` : '',
+            'Content-Type': 'application/json'
+          }
+        });
+        console.log('Assets API connectivity test - Status:', testResponse.status);
+        if (!testResponse.ok && testResponse.status !== 401) {
+          toast({
+            title: "API Error",
+            description: `API is not responding properly. Status: ${testResponse.status}`,
+            variant: "destructive"
+          });
+          return;
+        }
+      } catch (apiError) {
+        console.error('API connectivity failed:', apiError);
+        toast({
+          title: "Connection Error",
+          description: "Cannot connect to the API server. Please check if the backend is running.",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      const payload = {
+        name: newAsset.name.trim(),
+        assetNumber: newAsset.assetNumber?.trim() || '', // Use form value or empty for auto-generation
+        description: newAsset.description?.trim() || '',
+        assetCategoryId: typeId,
+        manufacturer: newAsset.manufacturer?.trim() || null,
+        model: newAsset.model?.trim() || null,
+        serialNumber: newAsset.serialNumber?.trim() || null,
+        location: newAsset.location?.trim() || null,
+        status: 'Active',
+        criticality: newAsset.criticality || 'Medium',
+        purchaseDate: newAsset.purchaseDate || null,
+        warrantyEndDate: newAsset.warrantyExpiry || null,
+        currentValue: newAsset.value || null
+      };
+      
+      console.log('Sending payload:', payload);
+      console.log('Token available:', !!token);
+      console.log('Request URL:', 'http://localhost:5000/api/maintenance/assets');
+      
+      const response = await fetch('http://localhost:5000/api/maintenance/assets', {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      if (!response.ok) {
+        let errorDetails;
+        let errorJson = null;
+        try {
+          const responseClone = response.clone();
+          try {
+            errorJson = await response.json();
+            errorDetails = JSON.stringify(errorJson, null, 2);
+          } catch {
+            errorDetails = await responseClone.text();
+          }
+        } catch (e) {
+          errorDetails = 'Could not read error response';
+        }
+        
+        const errorInfo = {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorDetails,
+          token: token ? `Token present (${token.substring(0, 20)}...)` : 'No token found',
+          payload: JSON.stringify(payload, null, 2)
+        };
+        
+        console.error('Asset creation failed:');
+        console.error('Status:', response.status);
+        console.error('Status Text:', response.statusText);
+        console.error('Error Details:', errorDetails);
+        console.error('Payload:', payload);
+        
+        // Try to parse error details for more specific message
+        let userMessage = `Failed to create asset: ${response.status} ${response.statusText}`;
+        if (errorDetails && errorDetails.includes('AssetCategory')) {
+          userMessage = 'Invalid asset category. Please try selecting a different category.';
+        } else if (errorDetails && errorDetails.includes('unique')) {
+          userMessage = 'Asset number already exists. Please use a different number.';
+        }
+        
+        toast({
+          title: "Error",
+          description: userMessage,
+          variant: "destructive"
+        });
+        throw new Error(userMessage);
+      }
+      
+      // Refresh the list
+      const assetsResponse = await fetch('http://localhost:5000/api/maintenance/assets', {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (assetsResponse.ok) {
+        const assetsData = await assetsResponse.json();
+        const rawAssets = assetsData.data || assetsData.items || assetsData || [];
+        setAssets(mapAssets(rawAssets));
+      }
+      
+      setIsCreateDialogOpen(false);
+      setNewAsset({
+        name: '',
+        assetNumber: '',
+        description: '',
+        category: assetTypes.length > 0 ? assetTypes[0].name : '',
+        location: '',
+        manufacturer: '',
+        model: '',
+        serialNumber: '',
+        purchaseDate: '',
+        warrantyExpiry: '',
+        criticality: 'Medium',
+        value: 0,
+      });
+    } catch (error) {
+      console.error('Error creating asset:', error);
+    }
+  };
+
+  const handleEditAsset = (asset: Asset) => {
+    setSelectedAsset(asset);
     setNewAsset({
-      name: '',
-      description: '',
-      category: 'HVAC',
-      location: '',
-      manufacturer: '',
-      model: '',
-      serialNumber: '',
-      purchaseDate: '',
-      warrantyExpiry: '',
-      criticality: 'Medium',
-      value: 0,
+      name: asset.name || '',
+      assetNumber: asset.assetNumber || '',
+      description: asset.description || '',
+      category: asset.category || '',
+      location: asset.location || '',
+      manufacturer: asset.manufacturer || '',
+      model: asset.model || '',
+      serialNumber: asset.serialNumber || '',
+      purchaseDate: formatDateForInput(asset.purchaseDate),
+      warrantyExpiry: formatDateForInput(asset.warrantyExpiry),
+      criticality: asset.criticality || 'Medium',
+      value: asset.value || 0,
     });
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdateAsset = async () => {
+    if (!selectedAsset?.id) return;
+    
+    try {
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(`http://localhost:5000/api/maintenance/assets/${selectedAsset.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: newAsset.name,
+          description: newAsset.description,
+          assetCategoryId: assetTypes.find(type => type.name === newAsset.category)?.id || assetTypes[0]?.id || '',
+          manufacturer: newAsset.manufacturer,
+          model: newAsset.model,
+          serialNumber: newAsset.serialNumber,
+          location: newAsset.location,
+          status: 'Active',
+          criticality: newAsset.criticality,
+          purchaseDate: newAsset.purchaseDate || null,
+          warrantyEndDate: newAsset.warrantyExpiry || null,
+          currentValue: newAsset.value || null
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to update asset');
+      }
+      
+      // Refresh the list
+      const assetsResponse = await fetch('http://localhost:5000/api/maintenance/assets', {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (assetsResponse.ok) {
+        const assetsData = await assetsResponse.json();
+        const rawAssets = assetsData.data || assetsData.items || assetsData || [];
+        setAssets(mapAssets(rawAssets));
+      }
+      
+      setIsEditDialogOpen(false);
+      setSelectedAsset(null);
+      setNewAsset({
+        name: '',
+        assetNumber: '',
+        description: '',
+        category: assetTypes.length > 0 ? assetTypes[0].name : '',
+        location: '',
+        manufacturer: '',
+        model: '',
+        serialNumber: '',
+        purchaseDate: '',
+        warrantyExpiry: '',
+        criticality: 'Medium',
+        value: 0,
+      });
+    } catch (error) {
+      console.error('Error updating asset:', error);
+    }
+  };
+
+  const handleDeleteAsset = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this asset?')) return;
+    
+    try {
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(`http://localhost:5000/api/maintenance/assets/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to delete asset');
+      }
+      
+      // Refresh the list
+      const assetsResponse = await fetch('http://localhost:5000/api/maintenance/assets', {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (assetsResponse.ok) {
+        const assetsData = await assetsResponse.json();
+        const rawAssets = assetsData.data || assetsData.items || assetsData || [];
+        setAssets(mapAssets(rawAssets));
+      }
+    } catch (error) {
+      console.error('Error deleting asset:', error);
+    }
   };
 
   const getStatusBadge = (status: Asset['status']) => {
@@ -338,18 +656,31 @@ export default function AssetsPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="category">Category</Label>
+                  <Label htmlFor="assetNumber">Asset Number (Optional)</Label>
+                  <Input
+                    id="assetNumber"
+                    value={newAsset.assetNumber}
+                    onChange={(e) => setNewAsset(prev => ({ ...prev, assetNumber: e.target.value }))}
+                    placeholder="Leave empty to auto-generate"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    If left empty, will be auto-generated based on asset type
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="category">Asset Type</Label>
                   <Select value={newAsset.category} onValueChange={(value) => setNewAsset(prev => ({ ...prev, category: value }))}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="HVAC">HVAC</SelectItem>
-                      <SelectItem value="Electrical">Electrical</SelectItem>
-                      <SelectItem value="Plumbing">Plumbing</SelectItem>
-                      <SelectItem value="Safety">Safety</SelectItem>
-                      <SelectItem value="Mechanical">Mechanical</SelectItem>
-                      <SelectItem value="IT">IT Equipment</SelectItem>
+                      {assetTypes.map((type) => (
+                        <SelectItem key={type.id} value={type.name}>
+                          {type.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -461,6 +792,156 @@ export default function AssetsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        
+        {/* Edit Asset Dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Edit Asset</DialogTitle>
+              <DialogDescription>
+                Update the asset information.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4">
+              {selectedAsset && (
+                <div className="bg-muted p-3 rounded">
+                  <Label className="text-sm font-medium text-muted-foreground">Asset Number</Label>
+                  <p className="text-sm font-mono mt-1">{selectedAsset.assetNumber}</p>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-name">Asset Name</Label>
+                  <Input
+                    id="edit-name"
+                    value={newAsset.name}
+                    onChange={(e) => setNewAsset(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="Asset name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-category">Asset Type</Label>
+                  <Select value={newAsset.category} onValueChange={(value) => setNewAsset(prev => ({ ...prev, category: value }))}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assetTypes.map((type) => (
+                        <SelectItem key={type.id} value={type.name}>
+                          {type.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-description">Description</Label>
+                <Textarea
+                  id="edit-description"
+                  value={newAsset.description}
+                  onChange={(e) => setNewAsset(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Detailed description of the asset"
+                  rows={3}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-location">Location</Label>
+                  <Input
+                    id="edit-location"
+                    value={newAsset.location}
+                    onChange={(e) => setNewAsset(prev => ({ ...prev, location: e.target.value }))}
+                    placeholder="Physical location"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-criticality">Criticality</Label>
+                  <Select value={newAsset.criticality} onValueChange={(value) => setNewAsset(prev => ({ ...prev, criticality: value as Asset['criticality'] }))}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Low">Low</SelectItem>
+                      <SelectItem value="Medium">Medium</SelectItem>
+                      <SelectItem value="High">High</SelectItem>
+                      <SelectItem value="Critical">Critical</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-manufacturer">Manufacturer</Label>
+                  <Input
+                    id="edit-manufacturer"
+                    value={newAsset.manufacturer}
+                    onChange={(e) => setNewAsset(prev => ({ ...prev, manufacturer: e.target.value }))}
+                    placeholder="Manufacturer"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-model">Model</Label>
+                  <Input
+                    id="edit-model"
+                    value={newAsset.model}
+                    onChange={(e) => setNewAsset(prev => ({ ...prev, model: e.target.value }))}
+                    placeholder="Model number"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-serial">Serial Number</Label>
+                  <Input
+                    id="edit-serial"
+                    value={newAsset.serialNumber}
+                    onChange={(e) => setNewAsset(prev => ({ ...prev, serialNumber: e.target.value }))}
+                    placeholder="Serial number"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-purchaseDate">Purchase Date</Label>
+                  <Input
+                    id="edit-purchaseDate"
+                    type="date"
+                    value={newAsset.purchaseDate}
+                    onChange={(e) => setNewAsset(prev => ({ ...prev, purchaseDate: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-warrantyExpiry">Warranty Expiry</Label>
+                  <Input
+                    id="edit-warrantyExpiry"
+                    type="date"
+                    value={newAsset.warrantyExpiry}
+                    onChange={(e) => setNewAsset(prev => ({ ...prev, warrantyExpiry: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-value">Asset Value ($)</Label>
+                  <Input
+                    id="edit-value"
+                    type="number"
+                    min="0"
+                    step="100"
+                    value={newAsset.value}
+                    onChange={(e) => setNewAsset(prev => ({ ...prev, value: parseFloat(e.target.value) || 0 }))}
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleUpdateAsset}>
+                Update Asset
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {/* Asset Statistics */}
@@ -542,19 +1023,18 @@ export default function AssetsPage() {
               </div>
             </div>
             <div className="space-y-1">
-              <Label htmlFor="category-filter" className="text-sm">Category</Label>
+              <Label htmlFor="category-filter" className="text-sm">Asset Type</Label>
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                 <SelectTrigger className="w-[140px]">
-                  <SelectValue placeholder="All Categories" />
+                  <SelectValue placeholder="All Asset Types" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Categories</SelectItem>
-                  <SelectItem value="HVAC">HVAC</SelectItem>
-                  <SelectItem value="Electrical">Electrical</SelectItem>
-                  <SelectItem value="Plumbing">Plumbing</SelectItem>
-                  <SelectItem value="Safety">Safety</SelectItem>
-                  <SelectItem value="Mechanical">Mechanical</SelectItem>
-                  <SelectItem value="IT">IT Equipment</SelectItem>
+                  <SelectItem value="all">All Asset Types</SelectItem>
+                  {assetTypes.map((type) => (
+                    <SelectItem key={type.id} value={type.name}>
+                      {type.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -586,8 +1066,9 @@ export default function AssetsPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead>Asset Number</TableHead>
                 <TableHead>Name</TableHead>
-                <TableHead>Category</TableHead>
+                <TableHead>Asset Type</TableHead>
                 <TableHead>Location</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Condition</TableHead>
@@ -599,6 +1080,11 @@ export default function AssetsPage() {
             <TableBody>
               {filteredAssets.map((asset) => (
                 <TableRow key={asset.id}>
+                  <TableCell>
+                    <div className="font-mono text-sm font-medium">
+                      {asset.assetNumber}
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <div>
                       <p className="font-medium">{asset.name}</p>
@@ -644,8 +1130,17 @@ export default function AssetsPage() {
                       <Button
                         size="sm"
                         variant="outline"
+                        onClick={() => handleEditAsset(asset)}
                       >
                         <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-red-600 hover:text-red-700"
+                        onClick={() => handleDeleteAsset(asset.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </TableCell>
@@ -677,20 +1172,24 @@ export default function AssetsPage() {
                 <div className="grid grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Asset Number</Label>
+                      <p className="text-sm font-mono bg-muted p-2 rounded">{selectedAsset.assetNumber || 'N/A'}</p>
+                    </div>
+                    <div>
                       <Label className="text-sm font-medium text-muted-foreground">Asset Name</Label>
-                      <p className="text-sm font-medium">{selectedAsset.name}</p>
+                      <p className="text-sm font-medium">{selectedAsset.name || 'N/A'}</p>
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Description</Label>
-                      <p className="text-sm">{selectedAsset.description}</p>
+                      <p className="text-sm">{selectedAsset.description || 'No description'}</p>
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Location</Label>
-                      <p className="text-sm">{selectedAsset.location}</p>
+                      <p className="text-sm">{selectedAsset.location || 'Not specified'}</p>
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Category</Label>
-                      <p className="text-sm">{selectedAsset.category}</p>
+                      <p className="text-sm">{selectedAsset.category || 'Uncategorized'}</p>
                     </div>
                   </div>
                   <div className="space-y-4">
@@ -708,7 +1207,12 @@ export default function AssetsPage() {
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Asset Value</Label>
-                      <p className="text-sm">${selectedAsset.value.toLocaleString()}</p>
+                      <p className="text-sm">
+                        {selectedAsset.currentValue 
+                          ? `$${selectedAsset.currentValue.toLocaleString()}` 
+                          : 'N/A'
+                        }
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -718,15 +1222,15 @@ export default function AssetsPage() {
                   <div className="grid grid-cols-3 gap-4">
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Manufacturer</Label>
-                      <p className="text-sm">{selectedAsset.manufacturer}</p>
+                      <p className="text-sm">{selectedAsset.manufacturer || 'Not specified'}</p>
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Model</Label>
-                      <p className="text-sm">{selectedAsset.model}</p>
+                      <p className="text-sm">{selectedAsset.model || 'Not specified'}</p>
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Serial Number</Label>
-                      <p className="text-sm">{selectedAsset.serialNumber}</p>
+                      <p className="text-sm">{selectedAsset.serialNumber || 'Not specified'}</p>
                     </div>
                   </div>
                 </div>
@@ -736,11 +1240,21 @@ export default function AssetsPage() {
                   <div className="grid grid-cols-3 gap-4">
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Purchase Date</Label>
-                      <p className="text-sm">{new Date(selectedAsset.purchaseDate).toLocaleDateString()}</p>
+                      <p className="text-sm">
+                        {selectedAsset.purchaseDate 
+                          ? new Date(selectedAsset.purchaseDate).toLocaleDateString()
+                          : 'Not specified'
+                        }
+                      </p>
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Warranty Expiry</Label>
-                      <p className="text-sm">{new Date(selectedAsset.warrantyExpiry).toLocaleDateString()}</p>
+                      <p className="text-sm">
+                        {selectedAsset.warrantyExpiry 
+                          ? new Date(selectedAsset.warrantyExpiry).toLocaleDateString()
+                          : 'Not specified'
+                        }
+                      </p>
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Last Maintenance</Label>

@@ -37,6 +37,7 @@ import {
 } from '@/services/qualityChecklistService';
 
 export default function QualityChecklistsPage() {
+  const [mounted, setMounted] = useState(false);
   const [checklists, setChecklists] = useState<QualityChecklist[]>([]);
   const [filteredChecklists, setFilteredChecklists] = useState<QualityChecklist[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,6 +52,10 @@ export default function QualityChecklistsPage() {
   const [isPreviewDialogOpen, setIsPreviewDialogOpen] = useState(false);
   const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false);
   const [selectedChecklist, setSelectedChecklist] = useState<QualityChecklist | null>(null);
+
+  // Error and loading states
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form data
   const [formData, setFormData] = useState<CreateQualityChecklistDto>({
@@ -74,22 +79,75 @@ export default function QualityChecklistsPage() {
   const [maintenanceTypes, setMaintenanceTypes] = useState<string[]>([]);
   const [checklistCategories, setChecklistCategories] = useState<string[]>([]);
 
+  // Define filterChecklists function before useEffect that uses it
+  const filterChecklists = () => {
+    let filtered = checklists.filter(checklist => checklist != null);
+
+    if (searchTerm) {
+      filtered = filtered.filter(checklist =>
+        checklist?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        checklist?.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        checklist?.workOrderType?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        checklist?.assetCategory?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    if (typeFilter !== 'all') {
+      filtered = filtered.filter(checklist => checklist?.workOrderType?.toLowerCase() === typeFilter);
+    }
+
+    if (categoryFilter !== 'all') {
+      filtered = filtered.filter(checklist => checklist?.assetCategory?.toLowerCase() === categoryFilter);
+    }
+
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(checklist => 
+        statusFilter === 'active' ? checklist?.isActive : !checklist?.isActive
+      );
+    }
+
+    setFilteredChecklists(filtered);
+  };
+
   useEffect(() => {
-    loadData();
-    loadOptions();
+    setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (mounted) {
+      loadData();
+      loadOptions();
+    }
+  }, [mounted]);
 
   useEffect(() => {
     filterChecklists();
   }, [checklists, searchTerm, typeFilter, categoryFilter, statusFilter]);
 
+  // Prevent hydration mismatch by not rendering until mounted
+  if (!mounted) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Quality Checklists</h1>
+            <p className="text-muted-foreground">Manage quality control checklists for maintenance work orders</p>
+          </div>
+        </div>
+        <div className="text-center py-8">Loading...</div>
+      </div>
+    );
+  }
+
   const loadData = async () => {
     try {
       setLoading(true);
+      setError(null);
       const data = await qualityChecklistService.getAllChecklists();
       setChecklists(data);
     } catch (error) {
       console.error('Error loading checklists:', error);
+      setError('Failed to load checklists. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -113,59 +171,41 @@ export default function QualityChecklistsPage() {
     }
   };
 
-  const filterChecklists = () => {
-    let filtered = checklists;
-
-    if (searchTerm) {
-      filtered = filtered.filter(checklist =>
-        checklist.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        checklist.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        checklist.workOrderType.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        checklist.assetCategory.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    if (typeFilter !== 'all') {
-      filtered = filtered.filter(checklist => checklist.workOrderType.toLowerCase() === typeFilter);
-    }
-
-    if (categoryFilter !== 'all') {
-      filtered = filtered.filter(checklist => checklist.assetCategory.toLowerCase() === categoryFilter);
-    }
-
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(checklist => 
-        statusFilter === 'active' ? checklist.isActive : !checklist.isActive
-      );
-    }
-
-    setFilteredChecklists(filtered);
-  };
-
   const handleCreate = async () => {
+    if (isSubmitting) return;
+    
     try {
+      setIsSubmitting(true);
+      setError(null);
       const createData = {
         ...formData,
         maintenanceType: formData.maintenanceType === 'none' ? '' : formData.maintenanceType
       };
+      console.log('Creating quality checklist with data:', createData);
       const newChecklist = await qualityChecklistService.createChecklist(createData);
       setChecklists([...checklists, newChecklist]);
       setIsCreateDialogOpen(false);
       resetForm();
     } catch (error) {
       console.error('Error creating checklist:', error);
+      setError('Failed to create checklist. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleUpdate = async () => {
-    if (!selectedChecklist) return;
+    if (!selectedChecklist || isSubmitting) return;
 
     try {
+      setIsSubmitting(true);
+      setError(null);
       const updateData: UpdateQualityChecklistDto = {
         ...formData,
         maintenanceType: formData.maintenanceType === 'none' ? '' : formData.maintenanceType,
         isActive: selectedChecklist.isActive
       };
+      console.log('Updating quality checklist with data:', updateData);
       
       const updatedChecklist = await qualityChecklistService.updateChecklist(selectedChecklist.id, updateData);
       setChecklists(checklists.map(c => c.id === selectedChecklist.id ? updatedChecklist : c));
@@ -173,6 +213,9 @@ export default function QualityChecklistsPage() {
       resetForm();
     } catch (error) {
       console.error('Error updating checklist:', error);
+      setError('Failed to update checklist. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -182,10 +225,13 @@ export default function QualityChecklistsPage() {
     }
 
     try {
+      setError(null);
+      console.log(`Deleting quality checklist: ${checklist.name}`);
       await qualityChecklistService.deleteChecklist(checklist.id);
       setChecklists(checklists.filter(c => c.id !== checklist.id));
     } catch (error) {
       console.error('Error deleting checklist:', error);
+      setError('Failed to delete checklist. Please try again.');
     }
   };
 
@@ -402,7 +448,7 @@ export default function QualityChecklistsPage() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-2xl font-bold">{checklists.length}</p>
+                <p className="text-2xl font-bold">{loading ? '-' : checklists.length}</p>
                 <p className="text-sm text-muted-foreground">Total Checklists</p>
               </div>
               <ClipboardCheck className="h-8 w-8 text-blue-500" />
@@ -415,7 +461,7 @@ export default function QualityChecklistsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-2xl font-bold text-green-600">
-                  {checklists.filter(c => c.isActive).length}
+                  {loading ? '-' : checklists.filter(c => c?.isActive).length}
                 </p>
                 <p className="text-sm text-muted-foreground">Active</p>
               </div>
@@ -429,7 +475,7 @@ export default function QualityChecklistsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-2xl font-bold text-orange-600">
-                  {checklists.filter(c => c.isMandatory).length}
+                  {loading ? '-' : checklists.filter(c => c?.isMandatory).length}
                 </p>
                 <p className="text-sm text-muted-foreground">Mandatory</p>
               </div>
@@ -443,7 +489,7 @@ export default function QualityChecklistsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-2xl font-bold text-purple-600">
-                  {checklists.reduce((total, c) => total + c.items.length, 0)}
+                  {loading ? '-' : checklists.reduce((total, c) => total + (c?.items?.length || 0), 0)}
                 </p>
                 <p className="text-sm text-muted-foreground">Total Items</p>
               </div>
@@ -507,6 +553,18 @@ export default function QualityChecklistsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Error Message */}
+      {error && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="pt-6">
+            <div className="flex items-center text-red-800">
+              <AlertTriangle className="h-4 w-4 mr-2" />
+              {error}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Checklists List */}
       <Card>
@@ -905,9 +963,12 @@ export default function QualityChecklistsPage() {
             </Button>
             <Button 
               onClick={isCreateDialogOpen ? handleCreate : handleUpdate}
-              disabled={!formData.name || !formData.workOrderType || !formData.assetCategory}
+              disabled={!formData.name || !formData.workOrderType || !formData.assetCategory || isSubmitting}
             >
-              {isCreateDialogOpen ? 'Create Checklist' : 'Update Checklist'}
+              {isSubmitting 
+                ? (isCreateDialogOpen ? 'Creating...' : 'Updating...')
+                : (isCreateDialogOpen ? 'Create Checklist' : 'Update Checklist')
+              }
             </Button>
           </DialogFooter>
         </DialogContent>

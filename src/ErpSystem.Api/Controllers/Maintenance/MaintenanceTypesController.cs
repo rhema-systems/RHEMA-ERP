@@ -52,10 +52,7 @@ public class MaintenanceTypesController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving maintenance types");
-            
-            // Fallback to mock data if service is unavailable
-            var fallbackResult = GetMockMaintenanceTypes(page, pageSize, searchTerm, category, isActive);
-            return Ok(fallbackResult);
+            return StatusCode(500, "An error occurred while retrieving maintenance types");
         }
     }
 
@@ -73,10 +70,7 @@ public class MaintenanceTypesController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving active maintenance types");
-            
-            // Fallback to mock data
-            var fallbackResult = GetMockActiveMaintenanceTypes();
-            return Ok(fallbackResult);
+            return StatusCode(500, "An error occurred while retrieving active maintenance types");
         }
     }
 
@@ -97,13 +91,7 @@ public class MaintenanceTypesController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving maintenance type {MaintenanceTypeId}", id);
-            
-            // Fallback to mock data
-            var fallbackResult = GetMockMaintenanceTypeById(id);
-            if (fallbackResult == null)
-                return NotFound($"Maintenance type with ID {id} not found");
-            
-            return Ok(fallbackResult);
+            return StatusCode(500, $"An error occurred while retrieving maintenance type {id}");
         }
     }
 
@@ -204,95 +192,4 @@ public class MaintenanceTypesController : ControllerBase
             return StatusCode(500, "An error occurred while toggling the maintenance type status");
         }
     }
-
-    #region Fallback Methods
-
-    private PagedResult<MaintenanceTypeDto> GetMockMaintenanceTypes(
-        int page, int pageSize, string? searchTerm, string? category, bool? isActive)
-    {
-        var mockData = new List<MaintenanceTypeDto>
-        {
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Preventive Maintenance",
-                Code = "PM-001",
-                Description = "Scheduled maintenance to prevent equipment failure",
-                Category = "Preventive",
-                Priority = "Medium",
-                EstimatedDuration = 2.0m,
-                IsActive = true,
-                RequiresDowntime = false,
-                Color = "#3b82f6",
-                Icon = "calendar",
-                Frequency = "Monthly",
-                SkillLevel = "Intermediate",
-                SafetyRequirements = "Standard PPE required",
-                ToolsRequired = "Basic maintenance tools",
-                Notes = "Follow manufacturer guidelines"
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Corrective Maintenance",
-                Code = "CM-001",
-                Description = "Maintenance performed to restore equipment to working condition",
-                Category = "Corrective",
-                Priority = "High",
-                EstimatedDuration = 4.0m,
-                IsActive = true,
-                RequiresDowntime = true,
-                Color = "#ef4444",
-                Icon = "wrench",
-                Frequency = "As Needed",
-                SkillLevel = "Advanced",
-                SafetyRequirements = "Enhanced PPE and lockout/tagout",
-                ToolsRequired = "Specialized repair tools",
-                Notes = "Document root cause analysis"
-            }
-        };
-
-        // Apply filters
-        var filtered = mockData.AsQueryable();
-
-        if (!string.IsNullOrEmpty(searchTerm))
-        {
-            filtered = filtered.Where(x => x.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
-                                          x.Code.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
-                                          x.Description.Contains(searchTerm, StringComparison.OrdinalIgnoreCase));
-        }
-
-        if (!string.IsNullOrEmpty(category))
-        {
-            filtered = filtered.Where(x => x.Category == category);
-        }
-
-        if (isActive.HasValue)
-        {
-            filtered = filtered.Where(x => x.IsActive == isActive.Value);
-        }
-
-        var totalCount = filtered.Count();
-        var items = filtered.Skip((page - 1) * pageSize).Take(pageSize).ToList();
-
-        return new PagedResult<MaintenanceTypeDto>
-        {
-            Items = items,
-            TotalCount = totalCount,
-            Page = page,
-            PageSize = pageSize
-        };
-    }
-
-    private IEnumerable<MaintenanceTypeDto> GetMockActiveMaintenanceTypes()
-    {
-        return GetMockMaintenanceTypes(1, 100, null, null, true).Items;
-    }
-
-    private MaintenanceTypeDto? GetMockMaintenanceTypeById(Guid id)
-    {
-        return GetMockMaintenanceTypes(1, 100, null, null, null).Items.FirstOrDefault();
-    }
-
-    #endregion
 }

@@ -1,5 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Base;
 
 namespace ErpSystem.Core.Entities.Maintenance;
 
@@ -199,109 +201,374 @@ public class TechnicianCapacity
     /// </summary>
     public double PerformanceScore { get; set; }
 
-    public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
     public Guid TenantId { get; set; }
 }
 
+#region Enhanced Resource Management
+
 /// <summary>
-/// Tracks skill demand and availability
+/// Maintenance tools and equipment inventory
 /// </summary>
-public class SkillDemandAnalysis
+public class MaintenanceTool : TenantEntity
 {
-    [Key]
-    public Guid Id { get; set; }
+    [Required]
+    [MaxLength(50)]
+    public string ToolCode { get; set; } = string.Empty;
 
     [Required]
-    public Guid SkillId { get; set; }
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
 
-    [Required]
-    public DateTime AnalysisDate { get; set; }
-
-    /// <summary>
-    /// Current demand for this skill
-    /// </summary>
-    public int CurrentDemand { get; set; }
-
-    /// <summary>
-    /// Number of technicians with this skill
-    /// </summary>
-    public int AvailableTechnicians { get; set; }
-
-    /// <summary>
-    /// Average proficiency level
-    /// </summary>
-    public double AverageProficiencyLevel { get; set; }
-
-    /// <summary>
-    /// Projected demand for next month
-    /// </summary>
-    public int ProjectedDemand { get; set; }
-
-    /// <summary>
-    /// Gap analysis result
-    /// </summary>
-    public int SkillGap { get; set; }
-
-    /// <summary>
-    /// Recommended actions
-    /// </summary>
     [MaxLength(1000)]
-    public string? RecommendedActions { get; set; }
+    public string? Description { get; set; }
 
-    /// <summary>
-    /// Priority level for addressing skill gap
-    /// </summary>
+    [MaxLength(50)]
+    public string Category { get; set; } = "General"; // General, Specialized, Safety, Diagnostic, etc.
+
+    [MaxLength(100)]
+    public string? Manufacturer { get; set; }
+
+    [MaxLength(100)]
+    public string? Model { get; set; }
+
+    [MaxLength(100)]
+    public string? SerialNumber { get; set; }
+
+    // Availability and location
     [MaxLength(20)]
-    public string Priority { get; set; } = "Medium";
+    public string Status { get; set; } = "Available"; // Available, InUse, Maintenance, OutOfService
 
-    public Guid TenantId { get; set; }
+    [MaxLength(200)]
+    public string? CurrentLocation { get; set; }
 
-    // Navigation property
-    [ForeignKey("SkillId")]
-    public virtual TechnicianSkill Skill { get; set; } = null!;
+    [MaxLength(200)]
+    public string? HomeLocation { get; set; }
+
+    // Maintenance and calibration
+    public DateTime? LastMaintenanceDate { get; set; }
+    public DateTime? NextMaintenanceDate { get; set; }
+    public DateTime? LastCalibrationDate { get; set; }
+    public DateTime? NextCalibrationDate { get; set; }
+
+    // Cost and value
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PurchasePrice { get; set; } = 0;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal CurrentValue { get; set; } = 0;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal DailyRentalRate { get; set; } = 0;
+
+    // Usage tracking
+    public int TotalUsageDays { get; set; } = 0;
+    public DateTime? LastUsedDate { get; set; }
+
+    // Safety and certification requirements
+    public bool RequiresCertification { get; set; } = false;
+    public bool RequiresTraining { get; set; } = false;
+    
+    [MaxLength(1000)]
+    public string? SafetyNotes { get; set; }
+
+    // Documentation
+    [Column(TypeName = "nvarchar(max)")]
+    public string? DocumentPaths { get; set; } // JSON: manuals, certificates, etc.
+
+    public bool IsActive { get; set; } = true;
+
+    // Navigation properties
+    public virtual ICollection<ToolCheckout> Checkouts { get; set; } = new List<ToolCheckout>();
+    public virtual ICollection<WorkOrderTool> WorkOrderTools { get; set; } = new List<WorkOrderTool>();
 }
 
 /// <summary>
-/// Enhanced work order resource requirements
+/// Tool checkout/check-in tracking
 /// </summary>
-public class WorkOrderResourceRequirement
+public class ToolCheckout : TenantEntity
 {
-    [Key]
-    public Guid Id { get; set; }
+    [Required]
+    public Guid ToolId { get; set; }
 
+    [Required]
+    public Guid CheckedOutById { get; set; }
+
+    public Guid? WorkOrderId { get; set; }
+    public Guid? JobCardId { get; set; }
+
+    [Required]
+    public DateTime CheckoutDate { get; set; } = DateTime.UtcNow;
+
+    public DateTime? ExpectedReturnDate { get; set; }
+    public DateTime? ActualReturnDate { get; set; }
+
+    public Guid? CheckedInById { get; set; }
+
+    [MaxLength(20)]
+    public string Status { get; set; } = "CheckedOut"; // CheckedOut, Returned, Overdue, Lost, Damaged
+
+    [MaxLength(1000)]
+    public string? CheckoutNotes { get; set; }
+
+    [MaxLength(1000)]
+    public string? ReturnNotes { get; set; }
+
+    // Condition tracking
+    [MaxLength(20)]
+    public string? ConditionOnCheckout { get; set; }
+
+    [MaxLength(20)]
+    public string? ConditionOnReturn { get; set; }
+
+    // Damage or issues
+    public bool DamageReported { get; set; } = false;
+    
+    [MaxLength(2000)]
+    public string? DamageDescription { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? DamageCost { get; set; }
+
+    // Navigation properties
+    public virtual MaintenanceTool Tool { get; set; } = null!;
+    public virtual Employee CheckedOutBy { get; set; } = null!;
+    public virtual Employee? CheckedInBy { get; set; }
+    public virtual WorkOrder? WorkOrder { get; set; }
+    public virtual JobCard? JobCard { get; set; }
+}
+
+/// <summary>
+/// Links work orders to required tools
+/// </summary>
+public class WorkOrderTool : TenantEntity
+{
     [Required]
     public Guid WorkOrderId { get; set; }
 
-    /// <summary>
-    /// Required skill for this work order
-    /// </summary>
     [Required]
-    public Guid RequiredSkillId { get; set; }
+    public Guid ToolId { get; set; }
 
-    /// <summary>
-    /// Minimum proficiency level required
-    /// </summary>
-    [Range(1, 4)]
-    public int MinProficiencyLevel { get; set; }
+    [Required]
+    public bool IsRequired { get; set; } = true;
 
-    /// <summary>
-    /// Whether this skill is mandatory
-    /// </summary>
-    public bool IsMandatory { get; set; } = true;
+    public bool IsAllocated { get; set; } = false;
+    public DateTime? AllocationDate { get; set; }
 
-    /// <summary>
-    /// Estimated hours for this skill
-    /// </summary>
-    public double EstimatedHours { get; set; }
+    public Guid? CheckoutId { get; set; }
 
-    /// <summary>
-    /// Priority of this skill requirement
-    /// </summary>
-    public int Priority { get; set; } = 1;
-
-    public Guid TenantId { get; set; }
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
 
     // Navigation properties
-    [ForeignKey("RequiredSkillId")]
-    public virtual TechnicianSkill RequiredSkill { get; set; } = null!;
+    public virtual WorkOrder WorkOrder { get; set; } = null!;
+    public virtual MaintenanceTool Tool { get; set; } = null!;
+    public virtual ToolCheckout? Checkout { get; set; }
 }
+
+/// <summary>
+/// Staff availability and scheduling for maintenance work
+/// </summary>
+public class MaintenanceStaffSchedule : TenantEntity
+{
+    [Required]
+    public Guid TechnicianId { get; set; }
+
+    [Required]
+    public DateTime StartDateTime { get; set; }
+
+    [Required]
+    public DateTime EndDateTime { get; set; }
+
+    [MaxLength(50)]
+    public string ScheduleType { get; set; } = "WorkOrder"; // WorkOrder, Available, Training, Leave, Travel
+
+    [MaxLength(20)]
+    public string Status { get; set; } = "Scheduled"; // Scheduled, InProgress, Completed, Cancelled
+
+    // Work assignment
+    public Guid? WorkOrderId { get; set; }
+    public Guid? JobCardId { get; set; }
+    public Guid? TeamId { get; set; }
+
+    // Location information
+    [MaxLength(200)]
+    public string? WorkLocation { get; set; }
+
+    [MaxLength(200)]
+    public string? Address { get; set; }
+
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+
+    // Travel information
+    public bool RequiresTravel { get; set; } = false;
+    public DateTime? DepartureTime { get; set; }
+    public DateTime? ArrivalTime { get; set; }
+    public int? EstimatedTravelMinutes { get; set; }
+    public int? ActualTravelMinutes { get; set; }
+
+    // Vehicle/transportation
+    public Guid? AssignedVehicleId { get; set; }
+    
+    [MaxLength(100)]
+    public string? TransportationType { get; set; } // Company Vehicle, Personal Vehicle, Public Transport
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+
+    // Time tracking
+    public DateTime? ActualStartTime { get; set; }
+    public DateTime? ActualEndTime { get; set; }
+
+    // Navigation properties
+    public virtual Employee Technician { get; set; } = null!;
+    public virtual WorkOrder? WorkOrder { get; set; }
+    public virtual JobCard? JobCard { get; set; }
+    public virtual TechnicianTeam? Team { get; set; }
+    public virtual MaintenanceVehicle? AssignedVehicle { get; set; }
+    public virtual ICollection<MaintenanceExpense> Expenses { get; set; } = new List<MaintenanceExpense>();
+}
+
+/// <summary>
+/// Transportation and travel expenses for maintenance operations
+/// </summary>
+public class MaintenanceExpense : TenantEntity
+{
+    [Required]
+    public Guid WorkOrderId { get; set; }
+
+    public Guid? ScheduleId { get; set; }
+    public Guid? TechnicianId { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string ExpenseType { get; set; } = "Travel"; // Travel, Fuel, Accommodation, Meals, Tools, Parts, Other
+
+    [Required]
+    [MaxLength(200)]
+    public string Description { get; set; } = string.Empty;
+
+    [Required]
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal Amount { get; set; }
+
+    [Required]
+    public DateTime ExpenseDate { get; set; } = DateTime.UtcNow;
+
+    // Mileage tracking
+    public decimal? MileageDriven { get; set; }
+    public decimal? MileageRate { get; set; }
+
+    // Fuel tracking
+    public decimal? FuelQuantity { get; set; }
+    public decimal? FuelPricePerUnit { get; set; }
+
+    // Receipt and documentation
+    [MaxLength(500)]
+    public string? ReceiptPath { get; set; }
+
+    [MaxLength(100)]
+    public string? VendorName { get; set; }
+
+    [MaxLength(50)]
+    public string? ReferenceNumber { get; set; }
+
+    // Approval and reimbursement
+    [MaxLength(20)]
+    public string Status { get; set; } = "Pending"; // Pending, Approved, Rejected, Reimbursed
+
+    public Guid? ApprovedById { get; set; }
+    public DateTime? ApprovedDate { get; set; }
+    
+    [MaxLength(1000)]
+    public string? ApprovalNotes { get; set; }
+
+    public bool IsReimbursable { get; set; } = true;
+    public bool IsReimbursed { get; set; } = false;
+    public DateTime? ReimbursedDate { get; set; }
+
+    // Location information
+    [MaxLength(200)]
+    public string? Location { get; set; }
+
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+
+    // Navigation properties
+    public virtual WorkOrder WorkOrder { get; set; } = null!;
+    public virtual MaintenanceStaffSchedule? Schedule { get; set; }
+    public virtual Employee? Technician { get; set; }
+    public virtual Employee? ApprovedBy { get; set; }
+}
+
+/// <summary>
+/// Vehicle/transportation asset management for maintenance teams
+/// </summary>
+public class MaintenanceVehicle : TenantEntity
+{
+    [Required]
+    [MaxLength(50)]
+    public string VehicleCode { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(20)]
+    public string VehicleType { get; set; } = "Van"; // Van, Truck, Car, Motorcycle, Other
+
+    [MaxLength(20)]
+    public string LicensePlate { get; set; } = string.Empty;
+
+    [MaxLength(100)]
+    public string? Make { get; set; }
+
+    [MaxLength(100)]
+    public string? Model { get; set; }
+
+    public int? Year { get; set; }
+
+    [MaxLength(50)]
+    public string? VIN { get; set; }
+
+    // Current status and location
+    [MaxLength(20)]
+    public string Status { get; set; } = "Available"; // Available, InUse, Maintenance, OutOfService
+
+    [MaxLength(200)]
+    public string? CurrentLocation { get; set; }
+
+    [MaxLength(200)]
+    public string? HomeBase { get; set; }
+
+    // Usage tracking
+    public decimal CurrentMileage { get; set; } = 0;
+    public DateTime? LastServiceDate { get; set; }
+    public DateTime? NextServiceDate { get; set; }
+
+    // Fuel and efficiency
+    public decimal FuelCapacity { get; set; } = 0;
+    public decimal FuelLevel { get; set; } = 0;
+    public decimal AverageFuelConsumption { get; set; } = 0;
+
+    // Assignment
+    public Guid? AssignedTechnicianId { get; set; }
+    public Guid? AssignedTeamId { get; set; }
+
+    // Insurance and registration
+    public DateTime? InsuranceExpiry { get; set; }
+    public DateTime? RegistrationExpiry { get; set; }
+    public DateTime? InspectionExpiry { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+
+    // Navigation properties
+    public virtual Employee? AssignedTechnician { get; set; }
+    public virtual TechnicianTeam? AssignedTeam { get; set; }
+    public virtual ICollection<MaintenanceStaffSchedule> Schedules { get; set; } = new List<MaintenanceStaffSchedule>();
+}
+
+#endregion

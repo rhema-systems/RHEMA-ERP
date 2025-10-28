@@ -34,131 +34,64 @@ import {
 import { format, subDays, subMonths } from 'date-fns';
 import { cn } from '@/lib/utils';
 
-// Mock data for maintenance history
-const maintenanceHistoryData = [
-  {
-    id: 1,
-    workOrderId: 'WO-2024-001',
-    title: 'HVAC Filter Replacement',
-    type: 'Preventive',
-    assetId: 'HVAC-001',
-    assetName: 'Main Building HVAC Unit A',
-    location: 'Building A - Roof',
-    technician: 'John Smith',
-    startDate: '2024-01-15T08:00:00Z',
-    completedDate: '2024-01-15T12:30:00Z',
-    status: 'Completed',
-    priority: 'Medium',
-    cost: 450.00,
-    laborHours: 4.5,
-    description: 'Replaced air filters and cleaned HVAC system',
-    partsUsed: ['Air Filter HVAC-F001 x2', 'Cleaning Solution x1'],
-    notes: 'System running efficiently after filter replacement',
-    rating: 5,
-    downtime: 4.5,
-    category: 'HVAC'
-  },
-  {
-    id: 2,
-    workOrderId: 'WO-2024-002',
-    title: 'Elevator Emergency Repair',
-    type: 'Emergency',
-    assetId: 'ELEV-001',
-    assetName: 'Main Elevator A1',
-    location: 'Building A - All Floors',
-    technician: 'Mike Johnson',
-    startDate: '2024-01-14T14:20:00Z',
-    completedDate: '2024-01-14T18:45:00Z',
-    status: 'Completed',
-    priority: 'Critical',
-    cost: 1250.00,
-    laborHours: 4.25,
-    description: 'Emergency repair of elevator door mechanism',
-    partsUsed: ['Door Motor Assembly x1', 'Safety Sensor x2'],
-    notes: 'Elevator fully operational, passed safety inspection',
-    rating: 4,
-    downtime: 4.25,
-    category: 'Elevator'
-  },
-  {
-    id: 3,
-    workOrderId: 'WO-2024-003',
-    title: 'Plumbing Leak Fix',
-    type: 'Corrective',
-    assetId: 'PLUMB-002',
-    assetName: 'Water Line B3F',
-    location: 'Building B - 3rd Floor',
-    technician: 'Sarah Davis',
-    startDate: '2024-01-13T09:15:00Z',
-    completedDate: '2024-01-13T16:30:00Z',
-    status: 'Completed',
-    priority: 'High',
-    cost: 320.00,
-    laborHours: 7.25,
-    description: 'Fixed water leak in ceiling pipe',
-    partsUsed: ['Pipe Fitting 3/4" x4', 'Sealant x2'],
-    notes: 'No further leakage detected after 24hr observation',
-    rating: 5,
-    downtime: 0,
-    category: 'Plumbing'
-  },
-  {
-    id: 4,
-    workOrderId: 'WO-2024-004',
-    title: 'Generator Routine Maintenance',
-    type: 'Preventive',
-    assetId: 'GEN-001',
-    assetName: 'Backup Generator B2',
-    location: 'Building B - Generator Room',
-    technician: 'Tom Wilson',
-    startDate: '2024-01-12T07:00:00Z',
-    completedDate: '2024-01-12T11:00:00Z',
-    status: 'Completed',
-    priority: 'Medium',
-    cost: 275.00,
-    laborHours: 4.0,
-    description: 'Routine maintenance and load testing',
-    partsUsed: ['Engine Oil 5L x1', 'Oil Filter x1', 'Fuel Filter x1'],
-    notes: 'Generator tested successfully at full load',
-    rating: 5,
-    downtime: 0,
-    category: 'Electrical'
-  },
-  {
-    id: 5,
-    workOrderId: 'WO-2024-005',
-    title: 'Fire System Inspection',
-    type: 'Inspection',
-    assetId: 'FIRE-001',
-    assetName: 'Fire Suppression System',
-    location: 'Building A - All Areas',
-    technician: 'Lisa Brown',
-    startDate: '2024-01-11T08:30:00Z',
-    completedDate: '2024-01-11T15:00:00Z',
-    status: 'Completed',
-    priority: 'High',
-    cost: 180.00,
-    laborHours: 6.5,
-    description: 'Comprehensive fire safety system inspection',
-    partsUsed: [],
-    notes: 'All systems passed inspection, certificate issued',
-    rating: 5,
-    downtime: 0,
-    category: 'Safety'
-  }
-];
+interface MaintenanceHistoryItem {
+  id: number;
+  workOrderId: string;
+  title: string;
+  type: string;
+  assetId: string;
+  assetName: string;
+  location: string;
+  technician: string;
+  startDate: string;
+  completedDate: string;
+  status: string;
+  priority: string;
+  cost: number;
+  laborHours: number;
+  description: string;
+  partsUsed: string[];
+  notes: string;
+  rating: number;
+  downtime: number;
+  category: string;
+}
 
 export default function MaintenanceHistoryPage() {
+  const [maintenanceHistoryData, setMaintenanceHistoryData] = useState<MaintenanceHistoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [technicianFilter, setTechnicianFilter] = useState('all');
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
-  const [filteredData, setFilteredData] = useState(maintenanceHistoryData);
+  const [filteredData, setFilteredData] = useState<MaintenanceHistoryItem[]>([]);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
 
+  // Load maintenance history from API
+  useEffect(() => {
+    const loadMaintenanceHistory = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch('/api/maintenance/history');
+        if (response.ok) {
+          const data = await response.json();
+          setMaintenanceHistoryData(data);
+        }
+      } catch (error) {
+        console.error('Failed to load maintenance history:', error);
+        setMaintenanceHistoryData([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadMaintenanceHistory();
+  }, []);
+
+  // Filter maintenance history
   useEffect(() => {
     let filtered = maintenanceHistoryData;
 

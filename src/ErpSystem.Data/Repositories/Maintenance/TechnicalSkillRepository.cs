@@ -75,83 +75,10 @@ public class TechnicalSkillRepository : GenericRepository<TechnicalSkill>, ITech
 
     public async Task<IEnumerable<TechnicalSkill>> GetFromHRModuleAsync()
     {
-        // This would typically call HR API and return synchronized skills
-        // For now, return mock data for testing
-        var mockSkills = new List<TechnicalSkill>
-        {
-            new TechnicalSkill
-            {
-                Id = Guid.NewGuid(),
-                Name = "Electrical Systems Maintenance",
-                Code = "HR-ELEC-001",
-                Description = "Maintenance and repair of electrical systems and components",
-                Category = "Electrical",
-                SkillLevel = "Intermediate",
-                Complexity = "Medium",
-                RiskLevel = "High",
-                Prerequisites = "[]",
-                Certifications = "[\"Electrical Safety Certificate\"]",
-                EstimatedLearningHours = 40,
-                ToolsRequired = "[\"Multimeter\", \"Wire Strippers\", \"Electrical Tape\"]",
-                SafetyRequirements = "Must wear insulated gloves and safety glasses",
-                CompetencyAreas = "[\"Troubleshooting\", \"Repair\", \"Installation\"]",
-                RelatedMaintenanceTypes = "[\"Corrective\", \"Preventive\"]",
-                IsActive = true,
-                IsFromHRModule = true,
-                TechniciansCount = 0,
-                AverageRating = 0,
-                CreatedAt = DateTime.UtcNow
-            },
-            new TechnicalSkill
-            {
-                Id = Guid.NewGuid(),
-                Name = "HVAC System Operations",
-                Code = "HR-HVAC-001",
-                Description = "Operation and maintenance of heating, ventilation, and air conditioning systems",
-                Category = "HVAC",
-                SkillLevel = "Advanced",
-                Complexity = "High",
-                RiskLevel = "Medium",
-                Prerequisites = "[\"Basic HVAC Knowledge\"]",
-                Certifications = "[\"HVAC Technician License\", \"EPA 608 Certification\"]",
-                EstimatedLearningHours = 80,
-                ToolsRequired = "[\"Manifold Gauges\", \"Refrigerant Recovery Unit\", \"Leak Detector\"]",
-                SafetyRequirements = "Proper handling of refrigerants and chemicals",
-                CompetencyAreas = "[\"Installation\", \"Maintenance\", \"Troubleshooting\"]",
-                RelatedMaintenanceTypes = "[\"Preventive\", \"Predictive\"]",
-                IsActive = true,
-                IsFromHRModule = true,
-                TechniciansCount = 0,
-                AverageRating = 0,
-                CreatedAt = DateTime.UtcNow
-            },
-            new TechnicalSkill
-            {
-                Id = Guid.NewGuid(),
-                Name = "Mechanical Systems Repair",
-                Code = "HR-MECH-001",
-                Description = "Repair and maintenance of mechanical systems and equipment",
-                Category = "Mechanical",
-                SkillLevel = "Intermediate",
-                Complexity = "Medium",
-                RiskLevel = "Medium",
-                Prerequisites = "[]",
-                Certifications = "[\"Mechanical Maintenance Certificate\"]",
-                EstimatedLearningHours = 60,
-                ToolsRequired = "[\"Torque Wrench\", \"Bearing Puller\", \"Alignment Tools\"]",
-                SafetyRequirements = "Standard PPE required",
-                CompetencyAreas = "[\"Repair\", \"Alignment\", \"Assembly\"]",
-                RelatedMaintenanceTypes = "[\"Corrective\", \"Preventive\"]",
-                IsActive = true,
-                IsFromHRModule = true,
-                TechniciansCount = 0,
-                AverageRating = 0,
-                CreatedAt = DateTime.UtcNow
-            }
-        };
-
-        await Task.Delay(100); // Simulate API call delay
-        return mockSkills;
+        // TODO: Implement actual HR API integration
+        // For now, return empty collection until HR integration is implemented
+        await Task.CompletedTask;
+        return new List<TechnicalSkill>();
     }
 
     public async Task<IEnumerable<TechnicalSkill>> SyncFromHRAsync()

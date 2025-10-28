@@ -1,5 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Base;
 
 namespace ErpSystem.Core.Entities.Maintenance;
 
@@ -273,6 +275,347 @@ public class InspectionApproval
     // Navigation property
     [ForeignKey("InspectionId")]
     public virtual AssetInspection Inspection { get; set; } = null!;
+    
+    public virtual Employee Approver { get; set; } = null!;
+    public virtual Employee? DelegatedTo { get; set; }
+}
+
+/// <summary>
+/// Multi-level quality sign-off workflow for work orders
+/// </summary>
+public class WorkOrderQualitySignOff : TenantEntity
+{
+    [Required]
+    public Guid WorkOrderId { get; set; }
+
+    [Required]
+    public int SignOffLevel { get; set; }
+
+    [Required]
+    [MaxLength(100)]
+    public string SignOffRole { get; set; } = string.Empty; // Technician, Supervisor, QualityInspector, Manager, Customer
+
+    [Required]
+    public Guid SignOffById { get; set; }
+
+    [MaxLength(20)]
+    public string Status { get; set; } = "Pending"; // Pending, Approved, Rejected, Conditional, Delegated
+
+    public DateTime? SignOffDate { get; set; }
+
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
+
+    [MaxLength(1000)]
+    public string? Conditions { get; set; } // Conditions for conditional approval
+
+    [MaxLength(1000)]
+    public string? RejectionReason { get; set; }
+
+    // Quality assessment
+    [Range(1, 5)]
+    public int? QualityRating { get; set; } // 1=Poor, 5=Excellent
+
+    public bool SafetyCompliant { get; set; } = true;
+    public bool WorkmanshipSatisfactory { get; set; } = true;
+    public bool MaterialsAcceptable { get; set; } = true;
+    public bool TestingComplete { get; set; } = false;
+    public bool DocumentationComplete { get; set; } = false;
+
+    // Delegation tracking
+    public Guid? DelegatedToId { get; set; }
+    public DateTime? DelegatedDate { get; set; }
+    [MaxLength(500)]
+    public string? DelegationReason { get; set; }
+
+    // Photos and documentation
+    [Column(TypeName = "nvarchar(max)")]
+    public string? PhotoPaths { get; set; } // JSON array of photo file paths
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string? DocumentPaths { get; set; } // JSON array of document file paths
+
+    // Follow-up requirements
+    public bool RequiresFollowUp { get; set; } = false;
+    public DateTime? FollowUpDate { get; set; }
+    [MaxLength(1000)]
+    public string? FollowUpInstructions { get; set; }
+
+    public bool IsRequired { get; set; } = true;
+    public int SortOrder { get; set; } = 0;
+
+    // Navigation properties
+    public virtual WorkOrder WorkOrder { get; set; } = null!;
+    public virtual Employee SignOffBy { get; set; } = null!;
+    public virtual Employee? DelegatedTo { get; set; }
+    public virtual ICollection<QualitySignOffChecklist> ChecklistItems { get; set; } = new List<QualitySignOffChecklist>();
+}
+
+/// <summary>
+/// Detailed checklist items for quality sign-off
+/// </summary>
+public class QualitySignOffChecklist : TenantEntity
+{
+    [Required]
+    public Guid SignOffId { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string CheckItem { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    [MaxLength(50)]
+    public string Category { get; set; } = "General"; // Safety, Quality, Documentation, Testing, etc.
+
+    [MaxLength(20)]
+    public string CheckType { get; set; } = "Boolean"; // Boolean, Rating, Measurement, Text
+
+    public bool IsRequired { get; set; } = true;
+    public int SortOrder { get; set; } = 0;
+
+    // Check results
+    public bool? BooleanResult { get; set; }
+    [Range(1, 5)]
+    public int? RatingResult { get; set; }
+    public decimal? MeasurementResult { get; set; }
+    [MaxLength(50)]
+    public string? MeasurementUnit { get; set; }
+    [MaxLength(1000)]
+    public string? TextResult { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+
+    // Photo evidence
+    [Column(TypeName = "nvarchar(max)")]
+    public string? PhotoPaths { get; set; }
+
+    public DateTime? CheckedDate { get; set; }
+    public Guid? CheckedById { get; set; }
+
+    // Navigation properties
+    [ForeignKey("SignOffId")]
+    public virtual WorkOrderQualitySignOff SignOff { get; set; } = null!;
+    public virtual Employee? CheckedBy { get; set; }
+}
+
+/// <summary>
+/// Enhanced rejection and rework workflow
+/// </summary>
+public class WorkOrderRejection : TenantEntity
+{
+    [Required]
+    public Guid WorkOrderId { get; set; }
+
+    [Required]
+    public Guid RejectedById { get; set; }
+
+    [Required]
+    public DateTime RejectedDate { get; set; } = DateTime.UtcNow;
+
+    [Required]
+    [MaxLength(50)]
+    public string RejectionType { get; set; } = string.Empty; // Quality, Safety, Incomplete, Materials, Other
+
+    [Required]
+    [MaxLength(2000)]
+    public string RejectionReason { get; set; } = string.Empty;
+
+    [MaxLength(20)]
+    public string Severity { get; set; } = "Medium"; // Low, Medium, High, Critical
+
+    [MaxLength(20)]
+    public string Status { get; set; } = "Open"; // Open, Acknowledged, Rework_Assigned, Rework_InProgress, Resolved, Cancelled
+
+    // Rework assignment
+    public Guid? ReworkAssignedToId { get; set; }
+    public DateTime? ReworkAssignedDate { get; set; }
+    public DateTime? ReworkDueDate { get; set; }
+    public DateTime? ReworkCompletedDate { get; set; }
+
+    // Cost impact
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal EstimatedReworkCost { get; set; } = 0;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal ActualReworkCost { get; set; } = 0;
+
+    public double EstimatedReworkHours { get; set; } = 0;
+    public double ActualReworkHours { get; set; } = 0;
+
+    // Customer impact
+    public bool CustomerNotified { get; set; } = false;
+    public DateTime? CustomerNotifiedDate { get; set; }
+    public bool AffectsDelivery { get; set; } = false;
+    public DateTime? RevisedDeliveryDate { get; set; }
+
+    // Resolution tracking
+    [MaxLength(2000)]
+    public string? ResolutionNotes { get; set; }
+
+    public Guid? ResolvedById { get; set; }
+    public DateTime? ResolvedDate { get; set; }
+
+    // Re-inspection after rework
+    public bool RequiresReinspection { get; set; } = true;
+    public Guid? ReinspectedById { get; set; }
+    public DateTime? ReinspectedDate { get; set; }
+    [MaxLength(20)]
+    public string? ReinspectionResult { get; set; } // Passed, Failed, Conditional
+
+    // Documentation
+    [Column(TypeName = "nvarchar(max)")]
+    public string? PhotoPaths { get; set; }
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string? DocumentPaths { get; set; }
+
+    // Escalation
+    public bool IsEscalated { get; set; } = false;
+    public Guid? EscalatedToId { get; set; }
+    public DateTime? EscalatedDate { get; set; }
+    [MaxLength(1000)]
+    public string? EscalationReason { get; set; }
+
+    // Navigation properties
+    public virtual WorkOrder WorkOrder { get; set; } = null!;
+    public virtual Employee RejectedBy { get; set; } = null!;
+    public virtual Employee? ReworkAssignedTo { get; set; }
+    public virtual Employee? ResolvedBy { get; set; }
+    public virtual Employee? ReinspectedBy { get; set; }
+    public virtual Employee? EscalatedTo { get; set; }
+    public virtual ICollection<RejectionFollowUp> FollowUps { get; set; } = new List<RejectionFollowUp>();
+}
+
+/// <summary>
+/// Follow-up actions for rejected work orders
+/// </summary>
+public class RejectionFollowUp : TenantEntity
+{
+    [Required]
+    public Guid RejectionId { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string FollowUpAction { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    [Required]
+    public Guid AssignedToId { get; set; }
+
+    public DateTime? DueDate { get; set; }
+
+    [MaxLength(20)]
+    public string Status { get; set; } = "Pending"; // Pending, InProgress, Completed, Cancelled
+
+    public DateTime? CompletedDate { get; set; }
+    public Guid? CompletedById { get; set; }
+
+    [MaxLength(1000)]
+    public string? CompletionNotes { get; set; }
+
+    public int Priority { get; set; } = 3; // 1=High, 5=Low
+
+    // Navigation properties
+    [ForeignKey("RejectionId")]
+    public virtual WorkOrderRejection Rejection { get; set; } = null!;
+    public virtual Employee AssignedTo { get; set; } = null!;
+    public virtual Employee? CompletedBy { get; set; }
+}
+
+/// <summary>
+/// Customizable inspection checklist templates
+/// </summary>
+public class InspectionChecklistTemplate : TenantEntity
+{
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    [MaxLength(50)]
+    public string Category { get; set; } = "General"; // Safety, Quality, Preventive, Compliance, etc.
+
+    // Applicable contexts
+    [Column(TypeName = "nvarchar(max)")]
+    public string? ApplicableAssetTypes { get; set; } // JSON array of asset type IDs
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string? ApplicableMaintenanceTypes { get; set; } // JSON array of maintenance type IDs
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string? ApplicableWorkOrderTypes { get; set; } // JSON array of work order type IDs
+
+    public bool IsActive { get; set; } = true;
+    public bool IsDefault { get; set; } = false;
+
+    public int SortOrder { get; set; } = 0;
+
+    // Version control
+    public int Version { get; set; } = 1;
+    [MaxLength(1000)]
+    public string? VersionNotes { get; set; }
+
+    // Navigation properties
+    public virtual ICollection<InspectionChecklistItem> ChecklistItems { get; set; } = new List<InspectionChecklistItem>();
+}
+
+/// <summary>
+/// Individual items in inspection checklist templates
+/// </summary>
+public class InspectionChecklistItem : TenantEntity
+{
+    [Required]
+    public Guid TemplateId { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string ItemText { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    [MaxLength(50)]
+    public string Category { get; set; } = "General";
+
+    [MaxLength(20)]
+    public string ItemType { get; set; } = "Boolean"; // Boolean, Rating, Measurement, Text, MultiChoice
+
+    public bool IsRequired { get; set; } = true;
+    public bool IsCritical { get; set; } = false; // Critical items that can fail entire inspection
+
+    public int SortOrder { get; set; } = 0;
+
+    // Validation rules
+    [Column(TypeName = "nvarchar(max)")]
+    public string? ValidationRules { get; set; } // JSON: min/max values, required patterns, etc.
+
+    // Options for multi-choice items
+    [Column(TypeName = "nvarchar(max)")]
+    public string? ChoiceOptions { get; set; } // JSON array of options
+
+    // Default values
+    [MaxLength(500)]
+    public string? DefaultValue { get; set; }
+
+    // Help text and instructions
+    [MaxLength(1000)]
+    public string? HelpText { get; set; }
+
+    // Photo requirements
+    public bool RequiresPhoto { get; set; } = false;
+    public int MinPhotos { get; set; } = 0;
+    public int MaxPhotos { get; set; } = 5;
+
+    // Navigation properties
+    [ForeignKey("TemplateId")]
+    public virtual InspectionChecklistTemplate Template { get; set; } = null!;
 }
 
 /// <summary>

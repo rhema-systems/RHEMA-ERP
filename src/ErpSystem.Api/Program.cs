@@ -8,6 +8,7 @@ using ErpSystem.Api.Extensions;
 using ErpSystem.Web.Middleware;
 using ErpSystem.Api.Middleware;
 using ErpSystem.Data;
+using ErpSystem.Api.Data;
 
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
@@ -23,6 +24,31 @@ if (args.Length > 0 && args[0] == "seed")
     
     // Run user seeding
     await ErpSystem.Api.UserSeeder.SeedTestUsersAsync(tempApp.Services);
+    return;
+}
+
+// Check for maintenance workflow seeding command
+if (args.Length > 0 && args[0] == "seed-maintenance")
+{
+    var tempBuilder = WebApplication.CreateBuilder(args);
+    
+    // Configure services for seeding
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    
+    var tempApp = tempBuilder.Build();
+    
+    // Run maintenance workflow seeding using the new MaintenanceDataSeeder
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var context = scope.ServiceProvider.GetRequiredService<ErpSystem.Data.ApplicationDbContext>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<ErpSystem.Data.Seeders.MaintenanceDataSeeder>>();
+        var seeder = new ErpSystem.Data.Seeders.MaintenanceDataSeeder(context, logger);
+        
+        await seeder.SeedAsync();
+    }
+    
+    Console.WriteLine("Maintenance workflow seeding completed!");
     return;
 }
 
@@ -108,7 +134,11 @@ app.UseSimpleDevelopmentMiddleware(app.Environment);
 // Add Serilog request logging
 app.UseSerilogRequestLogging();
 
-app.UseHttpsRedirection();
+// Only use HTTPS redirection in production
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 app.UseResponseCaching();
 
 // Enable static file serving for uploaded files

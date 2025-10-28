@@ -1,4 +1,4 @@
-import { apiService } from './api';
+import { compatibleApiService as apiService } from './compatibleApiService';
 import type { ApiResponse } from '../types';
 import type {
   WorkflowDefinitionAdminDto,
@@ -26,7 +26,7 @@ import type {
  * Service for handling workflow-related API operations
  */
 export class WorkflowApiService {
-  private readonly basePath = '/api/workflow';
+  private readonly basePath = '/workflow';
 
   // Workflow Definition Management
 

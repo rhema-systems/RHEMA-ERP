@@ -155,16 +155,8 @@ public class MaintenanceMobileController : ControllerBase
             if (photos == null || !photos.Any())
                 return BadRequest("No photos provided");
 
-            // TODO: Photo upload functionality needs to be implemented in the service
-            // For now, return a mock successful response
-            var result = new MobilePhotoUploadResultDto
-            {
-                Success = true,
-                Message = "Photo upload functionality not yet implemented",
-                PhotoIds = new List<string>(),
-                TotalUploaded = 0
-            };
-            return Ok(result);
+            // Photo upload functionality not yet implemented
+            return BadRequest("Photo upload functionality is currently under development");
         }
         catch (Exception ex)
         {

@@ -11,12 +11,12 @@ namespace ErpSystem.Api.Controllers
     [Authorize]
     public class NotificationsController : ControllerBase
     {
-        private readonly INotificationService _notificationService;
+        private readonly ErpSystem.Core.Services.INotificationService _notificationService;
         private readonly ICurrentUserService _currentUserService;
         private readonly ILogger<NotificationsController> _logger;
 
         public NotificationsController(
-            INotificationService notificationService,
+            ErpSystem.Core.Services.INotificationService notificationService,
             ICurrentUserService currentUserService,
             ILogger<NotificationsController> logger)
         {
@@ -60,6 +60,40 @@ namespace ErpSystem.Api.Controllers
             {
                 _logger.LogError(ex, "Error retrieving notifications");
                 return StatusCode(500, "An error occurred while retrieving notifications");
+            }
+        }
+
+        /// <summary>
+        /// Get unread notifications
+        /// </summary>
+        [HttpGet("unread")]
+        public async Task<ActionResult<List<NotificationDto>>> GetUnreadNotifications(
+            [FromQuery] int limit = 10)
+        {
+            try
+            {
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
+                
+                if (!tenantId.HasValue)
+                {
+                    return BadRequest("TenantId not found in token");
+                }
+                
+                if (!userId.HasValue)
+                {
+                    return BadRequest("UserId not found in token");
+                }
+
+                var notifications = await _notificationService.GetNotificationsAsync(
+                    userId.Value, tenantId.Value, 1, limit, unreadOnly: true);
+                
+                return Ok(notifications.Items);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving unread notifications");
+                return StatusCode(500, "An error occurred while retrieving unread notifications");
             }
         }
 
@@ -198,10 +232,9 @@ namespace ErpSystem.Api.Controllers
         }
 
         /// <summary>
-        /// Create a notification (Admin only)
+        /// Create a notification
         /// </summary>
         [HttpPost]
-        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
         public async Task<ActionResult<NotificationDto>> CreateNotification(CreateNotificationDto createNotificationDto)
         {
             try

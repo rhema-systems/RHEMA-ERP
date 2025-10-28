@@ -17,19 +17,22 @@ public class MaintenanceAssetService : IMaintenanceAssetService
     private readonly IMapper _mapper;
     private readonly ILogger<MaintenanceAssetService> _logger;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IUnitOfWork _unitOfWork;
 
     public MaintenanceAssetService(
         IMaintenanceAssetRepository assetRepository,
         IMaintenanceAssetCategoryRepository categoryRepository,
         IMapper mapper,
         ILogger<MaintenanceAssetService> logger,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        IUnitOfWork unitOfWork)
     {
         _assetRepository = assetRepository;
         _categoryRepository = categoryRepository;
         _mapper = mapper;
         _logger = logger;
         _currentUserService = currentUserService;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<MaintenanceAssetDto> CreateAssetAsync(CreateMaintenanceAssetDto createDto)
@@ -71,10 +74,12 @@ public class MaintenanceAssetService : IMaintenanceAssetService
 
             var asset = _mapper.Map<MaintenanceAsset>(createDto);
             asset.TenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
+            
+            // Debug logging
+            _logger.LogInformation("Creating asset with AssetCategoryId: {CategoryId}", asset.AssetCategoryId);
 
             var createdAsset = await _assetRepository.AddAsync(asset);
-            await _assetRepository.GetQueryable().Where(x => x.Id == createdAsset.Id).ExecuteUpdateAsync(
-                updates => updates.SetProperty(a => a.CreatedAt, DateTime.UtcNow));
+            await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Successfully created maintenance asset with ID: {AssetId}", createdAsset.Id);
 
@@ -124,6 +129,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
 
             _mapper.Map(updateDto, existingAsset);
             await _assetRepository.UpdateAsync(existingAsset);
+            await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Successfully updated maintenance asset: {AssetId}", id);
 
@@ -163,6 +169,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
             }
 
             await _assetRepository.DeleteAsync(id);
+            await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Successfully deleted maintenance asset: {AssetId}", id);
         }
@@ -240,13 +247,19 @@ public class MaintenanceAssetService : IMaintenanceAssetService
                 Name = a.Name,
                 AssetNumber = a.AssetNumber,
                 Description = a.Description,
+                AssetCategoryId = a.AssetCategoryId,
                 CategoryName = a.AssetCategory.Name,
+                AssetType = a.AssetCategory.AssetType,
                 Manufacturer = a.Manufacturer,
                 Model = a.Model,
                 Status = a.Status.ToString(),
                 Criticality = a.Criticality.ToString(),
                 Location = a.Location,
                 CurrentValue = a.CurrentValue,
+                SerialNumber = a.SerialNumber,
+                PurchaseDate = a.PurchaseDate,
+                WarrantyEndDate = a.WarrantyEndDate,
+                WarrantyStartDate = a.WarrantyStartDate,
                 // These would need additional queries or joins
                 ActiveWorkOrdersCount = 0, // TODO: Implement
                 LastMaintenanceDate = null, // TODO: Implement
@@ -482,4 +495,5 @@ public class MaintenanceAssetService : IMaintenanceAssetService
 
         return false;
     }
+    
 }

@@ -212,4 +212,23 @@ public class WorkOrderTypesController : ControllerBase
             return StatusCode(500, "An error occurred while retrieving work order types by category");
         }
     }
+
+    /// <summary>
+    /// Test endpoint to verify API is working
+    /// </summary>
+    [HttpGet("test")]
+    public ActionResult<object> Test()
+    {
+        return Ok(new { message = "Work Order Types API is working!", timestamp = DateTime.UtcNow });
+    }
+
+    /// <summary>
+    /// Public test endpoint to verify API is working (no auth required)
+    /// </summary>
+    [HttpGet("ping")]
+    [AllowAnonymous]
+    public ActionResult<object> Ping()
+    {
+        return Ok(new { message = "Work Order Types API is reachable!", timestamp = DateTime.UtcNow });
+    }
 }

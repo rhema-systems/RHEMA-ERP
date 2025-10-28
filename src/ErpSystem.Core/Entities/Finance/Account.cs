@@ -1,49 +1,49 @@
-using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using ErpSystem.Core.Entities;
+using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.Base;
 
-namespace ErpSystem.Core.Entities.Finance
+namespace ErpSystem.Core.Entities.Finance;
+
+public enum AccountType
 {
-    public class Account : BaseEntity
-    {
-        [Required]
-        [MaxLength(50)]
-        public string AccountNumber { get; set; } = string.Empty;
+    Asset = 1,
+    Liability = 2,
+    Equity = 3,
+    Income = 4,
+    Expense = 5
+}
 
-        [Required]
-        [MaxLength(200)]
-        public string Name { get; set; } = string.Empty;
+public class Account : BusinessEntity
+{
+    [Required]
+    [MaxLength(20)]
+    public string AccountNumber { get; set; } = string.Empty;
 
-        [MaxLength(500)]
-        public string? Description { get; set; }
+    [Required]
+    [MaxLength(100)]
+    public string AccountName { get; set; } = string.Empty;
 
-        public AccountType AccountType { get; set; }
+    [Required]
+    public AccountType AccountType { get; set; }
 
-        public decimal Balance { get; set; }
+    [MaxLength(500)]
+    public string? Description { get; set; }
 
-        public bool IsActive { get; set; } = true;
+    public Guid? ParentAccountId { get; set; }
 
-        public Guid? ParentAccountId { get; set; }
-        public Account? ParentAccount { get; set; }
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal Balance { get; set; } = 0;
 
-        public ICollection<Account> ChildAccounts { get; set; } = new List<Account>();
-        public ICollection<AccountTransaction> Transactions { get; set; } = new List<AccountTransaction>();
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal DebitBalance { get; set; } = 0;
 
-        [Required]
-        [MaxLength(3)]
-        public string CurrencyCode { get; set; } = "USD";
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal CreditBalance { get; set; } = 0;
 
-        public int Level { get; set; } = 1;
-        public string FullPath { get; set; } = string.Empty;
-    }
+    public new bool IsActive { get; set; } = true;
 
-    public enum AccountType
-    {
-        Asset = 1,
-        Liability = 2,
-        Equity = 3,
-        Income = 4,
-        Expense = 5
-    }
+    // Navigation properties
+    public virtual Account? ParentAccount { get; set; }
+    public virtual ICollection<Account> ChildAccounts { get; set; } = new List<Account>();
+    public virtual ICollection<AccountTransaction> Transactions { get; set; } = new List<AccountTransaction>();
 }

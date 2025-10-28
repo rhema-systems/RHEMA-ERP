@@ -158,6 +158,7 @@ const navigationItems: NavItem[] = [
         icon: Wrench,
         children: [
           { title: 'Dashboard', href: '/maintenance/dashboard', icon: LayoutDashboard },
+          { title: 'Job Cards', href: '/maintenance/job-cards', icon: FileText },
           { title: 'Work Orders', href: '/maintenance/work-orders', icon: FileText },
           { title: 'Assets', href: '/maintenance/assets', icon: Package },
           { title: 'Technicians', href: '/maintenance/technicians', icon: Users },
@@ -331,6 +332,7 @@ const navigationItems: NavItem[] = [
               { title: 'Work Order Types', href: '/administration/maintenance/work-order-types', icon: FileText },
               { title: 'Maintenance Types', href: '/administration/maintenance/maintenance-types', icon: Wrench },
               { title: 'Priority Levels', href: '/administration/maintenance/priorities', icon: AlertTriangle },
+              { title: 'Task Templates', href: '/administration/maintenance/task-templates', icon: FileText },
               { title: 'Quality Checklists', href: '/administration/maintenance/quality-checklists', icon: CheckSquare },
               { title: 'Inspection Templates', href: '/administration/maintenance/inspection-templates', icon: ClipboardCheck },
               { title: 'Inspectors', href: '/administration/maintenance/inspectors', icon: Users },
@@ -374,6 +376,7 @@ const navigationItems: NavItem[] = [
           },
           { title: 'User Management', href: '/administration/identity-management/users', icon: Users },
           { title: 'Role Management', href: '/administration/identity-management/roles', icon: Shield },
+          { title: 'User-Employee Links', href: '/administration/user-employee-links', icon: UserCheck },
           { title: 'Tenant Management', href: '/administration/tenant-management', icon: Building },
           { title: 'Email Settings', href: '/administration/settings/email', icon: Mail },
           { title: 'User-Tenant Mapping', href: '/administration/user-tenant-mapping', icon: Users },

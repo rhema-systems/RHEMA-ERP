@@ -133,6 +133,19 @@ public class CurrentUserService : ICurrentUserService, ICurrentUserProvider
         }
     }
 
+    public Guid? EmployeeId
+    {
+        get
+        {
+            var employeeIdClaim = _httpContextAccessor.HttpContext?.User?.FindFirst("employee_id");
+            if (employeeIdClaim != null && Guid.TryParse(employeeIdClaim.Value, out var employeeId))
+            {
+                return employeeId;
+            }
+            return null;
+        }
+    }
+
     public bool IsInRole(string role)
     {
         return _httpContextAccessor.HttpContext?.User?.IsInRole(role) ?? false;

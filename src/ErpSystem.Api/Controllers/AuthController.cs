@@ -349,8 +349,18 @@ namespace ErpSystem.Api.Controllers
                     _logger.LogInformation("2FA verification successful for user {Username}", request.Username);
                 }
 
-                // Get security settings for concurrent login prevention from user's tenant
+                // Determine the effective tenant ID for this login session
                 var effectiveTenantId = tenant?.Id ?? user.TenantId;
+                
+                // Update user's current tenant if tenant was specified in login
+                if (tenant != null && user.TenantId != tenant.Id)
+                {
+                    user.TenantId = tenant.Id;
+                    await _userManager.UpdateAsync(user);
+                    _logger.LogInformation("Updated user {Username} tenant to {TenantId}", user.UserName, tenant.Id);
+                }
+                
+                // Get security settings for concurrent login prevention from user's tenant
                 var securitySettings = await _settingsService.GetSecuritySettingsAsync(effectiveTenantId);
                 var preventConcurrentLogin = securitySettings?.PreventConcurrentLogin.ToString() ?? "Disabled";
                 
@@ -389,7 +399,7 @@ namespace ErpSystem.Api.Controllers
                 // Create user session (this handles concurrent login prevention logic)
                 var userSession = await _userSessionService.CreateSessionAsync(
                     user.Id, 
-                    tenant?.Id ?? user.TenantId,
+                    effectiveTenantId,
                     ipAddress, 
                     userAgent, 
                     deviceFingerprint, 
@@ -463,7 +473,7 @@ namespace ErpSystem.Api.Controllers
                         Email = user.Email!,
                         FirstName = user.FirstName,
                         LastName = user.LastName,
-                        CurrentTenantId = tenant?.Id,
+                        CurrentTenantId = effectiveTenantId,
                         CurrentTenantCode = tenant?.Code,
                         CurrentTenantName = tenant?.Name,
                         IsActive = user.IsActive,
