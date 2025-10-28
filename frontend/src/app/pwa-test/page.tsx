@@ -20,6 +20,9 @@ import {
   Zap
 } from 'lucide-react'
 
+// Disable static generation for this page
+export const dynamic = 'force-dynamic'
+
 // Extend window interface for PWA
 declare global {
   interface Window {
@@ -42,6 +45,9 @@ export default function PWATestPage() {
   useEffect(() => {
     setMounted(true)
     
+    // Only run in browser
+    if (typeof window === 'undefined') return
+    
     // Check notification permission
     if ('Notification' in window) {
       setNotificationPermission(Notification.permission)
@@ -54,10 +60,10 @@ export default function PWATestPage() {
     const diagnostics = {
       isHttps: window.location.protocol === 'https:' || window.location.hostname === 'localhost',
       hasManifest: document.querySelector('link[rel="manifest"]') !== null,
-      hasServiceWorker: 'serviceWorker' in navigator,
+      hasServiceWorker: typeof navigator !== 'undefined' && 'serviceWorker' in navigator,
       isStandalone: window.matchMedia('(display-mode: standalone)').matches,
-      userAgent: navigator.userAgent,
-      platform: navigator.platform
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+      platform: typeof navigator !== 'undefined' ? navigator.platform : ''
     }
     setPwaDiagnostics(diagnostics)
     
@@ -180,6 +186,17 @@ export default function PWATestPage() {
     )
   }
 
+  // Don't render until mounted on client
+  if (!mounted) {
+    return (
+      <div className="container mx-auto p-4">
+        <div className="flex items-center justify-center h-screen">
+          <p>Loading PWA Test Dashboard...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="container mx-auto p-4 space-y-6">
       <div className="flex items-center justify-between">
@@ -214,7 +231,7 @@ export default function PWATestPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span>Registered</span>
-                {getStatusIcon('serviceWorker' in navigator)}
+                {getStatusIcon(typeof navigator !== 'undefined' && 'serviceWorker' in navigator)}
               </div>
               <div className="flex items-center justify-between">
                 <span>Update Available</span>
