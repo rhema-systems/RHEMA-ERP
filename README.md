@@ -162,6 +162,7 @@ dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=(localdb)\
 dotnet user-secrets set "JwtSettings:SecretKey" "your-super-secret-256-bit-key-here-make-it-long-and-random"
 dotnet user-secrets set "JwtSettings:Issuer" "ErpSystem"
 dotnet user-secrets set "JwtSettings:Audience" "ErpSystemUsers"
+dotnet user-secrets set "Security:EncryptionKey" "your-base64-encoded-32-byte-encryption-key"
 
 # For other database providers:
 # SQL Server
@@ -186,6 +187,9 @@ Edit `src/ErpSystem.Api/appsettings.Development.json`:
     "Issuer": "ErpSystem",
     "Audience": "ErpSystemUsers",
     "ExpiryMinutes": 60
+  },
+  "Security": {
+    "EncryptionKey": "your-base64-encoded-32-byte-encryption-key"
   },
   "Database": {
     "Provider": "SqlServer"

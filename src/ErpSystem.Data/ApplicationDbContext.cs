@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
@@ -26,6 +27,30 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, Guid? tenantId) : base(options)
     {
         _tenantId = tenantId;
+    }
+    
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, IServiceProvider serviceProvider) : base(options)
+    {
+        // Try to get tenant ID from ICurrentUserProvider
+        var currentUserProvider = serviceProvider?.GetService(typeof(ErpSystem.Core.Interfaces.ICurrentUserProvider)) 
+            as ErpSystem.Core.Interfaces.ICurrentUserProvider;
+            
+        if (currentUserProvider != null)
+        {
+            try
+            {
+                var tid = currentUserProvider.TenantId;
+                if (tid != Guid.Empty)
+                {
+                    _tenantId = tid;
+                }
+            }
+            catch
+            {
+                // Tenant ID not available - this is fine for seeding and anonymous requests
+                _tenantId = null;
+            }
+        }
     }
 
     // Core entities

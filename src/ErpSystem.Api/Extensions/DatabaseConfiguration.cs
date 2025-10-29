@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ErpSystem.Data;
 using ErpSystem.Data.Extensions;
+using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Api.Extensions
 {
