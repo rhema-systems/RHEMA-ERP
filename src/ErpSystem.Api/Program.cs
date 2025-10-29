@@ -53,6 +53,30 @@ if (args.Length > 0 && args[0] == "seed-maintenance")
     return;
 }
 
+// Check for maintenance E2E test data seeding command
+if (args.Length > 0 && args[0] == "seed-maintenance-e2e")
+{
+    var tempBuilder = WebApplication.CreateBuilder(args);
+    
+    // Configure services for seeding
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
+    
+    var tempApp = tempBuilder.Build();
+    
+    // Run E2E maintenance test data seeding
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        await seedingService.SeedMaintenanceE2ETestDataAsync();
+    }
+    
+    Console.WriteLine("✅ Maintenance E2E test data seeding completed!");
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Configure host shutdown timeout

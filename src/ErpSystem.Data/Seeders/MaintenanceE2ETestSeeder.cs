@@ -65,47 +65,47 @@ public class MaintenanceE2ETestSeeder
         _defaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         
         // Categories
-        _vehicleCategoryId = Guid.Parse("CAT00000-0000-0000-0000-000000000001");
-        _equipmentCategoryId = Guid.Parse("CAT00000-0000-0000-0000-000000000002");
+        _vehicleCategoryId = Guid.Parse("00000001-0000-0000-0000-000000000001");
+        _equipmentCategoryId = Guid.Parse("00000001-0000-0000-0000-000000000002");
         
         // Maintenance Types
-        _preventiveMaintenanceTypeId = Guid.Parse("MT000000-0000-0000-0000-000000000001");
-        _correctiveMaintenanceTypeId = Guid.Parse("MT000000-0000-0000-0000-000000000002");
-        _emergencyMaintenanceTypeId = Guid.Parse("MT000000-0000-0000-0000-000000000003");
+        _preventiveMaintenanceTypeId = Guid.Parse("00000002-0000-0000-0000-000000000001");
+        _correctiveMaintenanceTypeId = Guid.Parse("00000002-0000-0000-0000-000000000002");
+        _emergencyMaintenanceTypeId = Guid.Parse("00000002-0000-0000-0000-000000000003");
         
         // Asset Types
-        _vehicleAssetTypeId = Guid.Parse("AT000000-0000-0000-0000-000000000001");
-        _equipmentAssetTypeId = Guid.Parse("AT000000-0000-0000-0000-000000000002");
+        _vehicleAssetTypeId = Guid.Parse("00000003-0000-0000-0000-000000000001");
+        _equipmentAssetTypeId = Guid.Parse("00000003-0000-0000-0000-000000000002");
         
         // Priority Levels
-        _highPriorityId = Guid.Parse("PR000000-0000-0000-0000-000000000001");
-        _mediumPriorityId = Guid.Parse("PR000000-0000-0000-0000-000000000002");
-        _lowPriorityId = Guid.Parse("PR000000-0000-0000-0000-000000000003");
+        _highPriorityId = Guid.Parse("00000004-0000-0000-0000-000000000001");
+        _mediumPriorityId = Guid.Parse("00000004-0000-0000-0000-000000000002");
+        _lowPriorityId = Guid.Parse("00000004-0000-0000-0000-000000000003");
         
         // Work Order Types
-        _preventiveWorkOrderTypeId = Guid.Parse("WOT00000-0000-0000-0000-000000000001");
-        _correctiveWorkOrderTypeId = Guid.Parse("WOT00000-0000-0000-0000-000000000002");
+        _preventiveWorkOrderTypeId = Guid.Parse("00000005-0000-0000-0000-000000000001");
+        _correctiveWorkOrderTypeId = Guid.Parse("00000005-0000-0000-0000-000000000002");
         
         // Employees (will be created or linked to existing)
-        _fleetManagerId = Guid.Parse("EMP00000-0000-0000-0000-000000000001");
-        _maintenanceSupervisorId = Guid.Parse("EMP00000-0000-0000-0000-000000000002");
-        _maintenanceManagerId = Guid.Parse("EMP00000-0000-0000-0000-000000000003");
-        _seniorTechnicianId = Guid.Parse("EMP00000-0000-0000-0000-000000000004");
-        _juniorTechnicianId = Guid.Parse("EMP00000-0000-0000-0000-000000000005");
-        _qualityInspectorId = Guid.Parse("EMP00000-0000-0000-0000-000000000006");
-        _serviceAdvisorId = Guid.Parse("EMP00000-0000-0000-0000-000000000007");
+        _fleetManagerId = Guid.Parse("00000006-0000-0000-0000-000000000001");
+        _maintenanceSupervisorId = Guid.Parse("00000006-0000-0000-0000-000000000002");
+        _maintenanceManagerId = Guid.Parse("00000006-0000-0000-0000-000000000003");
+        _seniorTechnicianId = Guid.Parse("00000006-0000-0000-0000-000000000004");
+        _juniorTechnicianId = Guid.Parse("00000006-0000-0000-0000-000000000005");
+        _qualityInspectorId = Guid.Parse("00000006-0000-0000-0000-000000000006");
+        _serviceAdvisorId = Guid.Parse("00000006-0000-0000-0000-000000000007");
         
         // Assets
-        _deliveryTruckId = Guid.Parse("AST00000-0000-0000-0000-000000000001");
-        _forkliftId = Guid.Parse("AST00000-0000-0000-0000-000000000002");
-        _generatorId = Guid.Parse("AST00000-0000-0000-0000-000000000003");
+        _deliveryTruckId = Guid.Parse("00000007-0000-0000-0000-000000000001");
+        _forkliftId = Guid.Parse("00000007-0000-0000-0000-000000000002");
+        _generatorId = Guid.Parse("00000007-0000-0000-0000-000000000003");
         
         // Inventory Parts
-        _engineOilPartId = Guid.Parse("PART0000-0000-0000-0000-000000000001");
-        _oilFilterPartId = Guid.Parse("PART0000-0000-0000-0000-000000000002");
-        _airFilterPartId = Guid.Parse("PART0000-0000-0000-0000-000000000003");
-        _brakeFluidPartId = Guid.Parse("PART0000-0000-0000-0000-000000000004");
-        _sparkPlugPartId = Guid.Parse("PART0000-0000-0000-0000-000000000005");
+        _engineOilPartId = Guid.Parse("00000008-0000-0000-0000-000000000001");
+        _oilFilterPartId = Guid.Parse("00000008-0000-0000-0000-000000000002");
+        _airFilterPartId = Guid.Parse("00000008-0000-0000-0000-000000000003");
+        _brakeFluidPartId = Guid.Parse("00000008-0000-0000-0000-000000000004");
+        _sparkPlugPartId = Guid.Parse("00000008-0000-0000-0000-000000000005");
     }
 
     public async Task SeedAsync()
@@ -179,14 +179,14 @@ public class MaintenanceE2ETestSeeder
         _logger.LogInformation("Seeding HR Employees...");
 
         // First, ensure we have departments and positions
-        var maintenanceDeptId = Guid.Parse("DEPT0000-0000-0000-0000-000000000001");
-        var fleetDeptId = Guid.Parse("DEPT0000-0000-0000-0000-000000000002");
-        var qcDeptId = Guid.Parse("DEPT0000-0000-0000-0000-000000000003");
+        var maintenanceDeptId = Guid.Parse("00000009-0000-0000-0000-000000000001");
+        var fleetDeptId = Guid.Parse("00000009-0000-0000-0000-000000000002");
+        var qcDeptId = Guid.Parse("00000009-0000-0000-0000-000000000003");
         
-        var managerPosId = Guid.Parse("POS00000-0000-0000-0000-000000000001");
-        var supervisorPosId = Guid.Parse("POS00000-0000-0000-0000-000000000002");
-        var technicianPosId = Guid.Parse("POS00000-0000-0000-0000-000000000003");
-        var inspectorPosId = Guid.Parse("POS00000-0000-0000-0000-000000000004");
+        var managerPosId = Guid.Parse("0000000A-0000-0000-0000-000000000001");
+        var supervisorPosId = Guid.Parse("0000000A-0000-0000-0000-000000000002");
+        var technicianPosId = Guid.Parse("0000000A-0000-0000-0000-000000000003");
+        var inspectorPosId = Guid.Parse("0000000A-0000-0000-0000-000000000004");
 
         // Seed Departments
         if (!await _context.Departments.AnyAsync(d => d.Id == maintenanceDeptId))
@@ -346,10 +346,10 @@ public class MaintenanceE2ETestSeeder
         _logger.LogInformation("Seeding Inventory Parts...");
 
         // First create inventory categories
-        var lubricantsCategoryId = Guid.Parse("INVC0000-0000-0000-0000-000000000001");
-        var filtersCategoryId = Guid.Parse("INVC0000-0000-0000-0000-000000000002");
-        var fluidsCategoryId = Guid.Parse("INVC0000-0000-0000-0000-000000000003");
-        var ignitionCategoryId = Guid.Parse("INVC0000-0000-0000-0000-000000000004");
+        var lubricantsCategoryId = Guid.Parse("0000000B-0000-0000-0000-000000000001");
+        var filtersCategoryId = Guid.Parse("0000000B-0000-0000-0000-000000000002");
+        var fluidsCategoryId = Guid.Parse("0000000B-0000-0000-0000-000000000003");
+        var ignitionCategoryId = Guid.Parse("0000000B-0000-0000-0000-000000000004");
 
         if (!await _context.InventoryCategories.AnyAsync(c => c.Id == lubricantsCategoryId))
         {

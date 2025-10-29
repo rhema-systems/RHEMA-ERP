@@ -1,5 +1,6 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Data;
+using ErpSystem.Data.Seeders;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +12,7 @@ namespace ErpSystem.Web.Services
         Task SeedAsync();
         Task SeedBasicDataAsync();
         Task SeedTestUsersAsync();
+        Task SeedMaintenanceE2ETestDataAsync();
         Task<bool> HasSeedDataAsync();
     }
 
@@ -114,6 +116,27 @@ namespace ErpSystem.Web.Services
                 "Jane", "Employee", defaultTenant.Id, Constants.Roles.Employee);
 
             _logger.LogInformation("Test users seeding completed");
+        }
+        
+        public async Task SeedMaintenanceE2ETestDataAsync()
+        {
+            _logger.LogInformation("Seeding Maintenance E2E test data...");
+            
+            try
+            {
+                // Create a logger factory to get the properly typed logger
+                var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+                var seederLogger = loggerFactory.CreateLogger<MaintenanceE2ETestSeeder>();
+                
+                var seeder = new MaintenanceE2ETestSeeder(_context, seederLogger);
+                await seeder.SeedAsync();
+                _logger.LogInformation("Maintenance E2E test data seeding completed");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error seeding Maintenance E2E test data");
+                throw;
+            }
         }
 
         public async Task<bool> HasSeedDataAsync()
