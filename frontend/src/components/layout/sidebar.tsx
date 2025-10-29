@@ -581,7 +581,7 @@ export function Sidebar({ className }: SidebarProps) {
         timeoutRef.current = setTimeout(() => {
           if (!mouseInMenu) clearMenus();
           setIsMovingToChild(false);
-        }, 600);
+        }, 800);
         return;
       }
     }
@@ -600,18 +600,18 @@ export function Sidebar({ className }: SidebarProps) {
         timeoutRef.current = setTimeout(() => {
           if (!mouseInMenu) clearMenus();
           setIsMovingToChild(false);
-        }, 600);
+        }, 800);
         return;
       }
     }
     
-    // Default behavior - shorter timeout
+    // Default behavior - longer timeout for better UX
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }
     timeoutRef.current = setTimeout(() => {
       clearMenus();
-    }, 200);
+    }, 400);
   };
 
   const handleSidebarMouseLeave = () => {
@@ -621,7 +621,7 @@ export function Sidebar({ className }: SidebarProps) {
     }
     timeoutRef.current = setTimeout(() => {
       clearMenus();
-    }, 300);
+    }, 500);
   };
 
   const toggleSection = (title: string) => {
