@@ -1127,6 +1127,7 @@ public class MaintenanceTypeDto
     public string Code { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
+    public string Location { get; set; } = string.Empty; // Internal, External, Onsite, Offsite
     public string Priority { get; set; } = string.Empty;
     public decimal EstimatedDuration { get; set; }
     public bool IsActive { get; set; }
@@ -1155,6 +1156,9 @@ public class CreateMaintenanceTypeDto
     
     [Required, StringLength(50)]
     public string Category { get; set; } = string.Empty;
+    
+    [StringLength(20)]
+    public string Location { get; set; } = "Internal"; // Internal, External, Onsite, Offsite
     
     [Required, StringLength(20)]
     public string Priority { get; set; } = string.Empty;
@@ -2246,6 +2250,8 @@ public class WorkOrderDto
     public string WorkOrderNumber { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public Guid? JobCardId { get; set; }
+    public string? JobCardNumber { get; set; }
     public Guid AssetId { get; set; }
     public Guid WorkOrderTypeId { get; set; }
     public Guid MaintenanceTypeId { get; set; }
@@ -2318,14 +2324,19 @@ public class WorkOrderListDto
     public string WorkOrderNumber { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public Guid? JobCardId { get; set; }
+    public string? JobCardNumber { get; set; }
     public Guid AssetId { get; set; }
     public string AssetName { get; set; } = string.Empty;
     public string AssetNumber { get; set; } = string.Empty;
+    public Guid WorkOrderTypeId { get; set; }
     public string WorkOrderTypeName { get; set; } = string.Empty;
+    public Guid MaintenanceTypeId { get; set; }
     public string MaintenanceTypeName { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public string Priority { get; set; } = string.Empty;
     public string PriorityName { get; set; } = string.Empty;
+    public Guid PriorityLevelId { get; set; }
     public int PriorityLevel { get; set; }
     public Guid? AssignedTechnicianId { get; set; }
     public string? AssignedTechnicianName { get; set; }
@@ -2406,12 +2417,13 @@ public class CreateWorkOrderDto
 
     public Guid? ParentWorkOrderId { get; set; }
     public Guid? MaintenanceScheduleId { get; set; }
+    public Guid? JobCardId { get; set; }
     
     // Custom field values (JSON serialized)
     public Dictionary<string, object>? CustomFieldValues { get; set; }
 }
 
-public class UpdateWorkOrderDto
+public class UpdateWorkOrderDto : IValidatableObject
 {
     public Guid Id { get; set; }
     
@@ -2426,14 +2438,11 @@ public class UpdateWorkOrderDto
     public string Notes { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
 
-    [Required]
-    public Guid WorkOrderTypeId { get; set; }
+    public Guid? WorkOrderTypeId { get; set; }
 
-    [Required]
-    public Guid MaintenanceTypeId { get; set; }
+    public Guid? MaintenanceTypeId { get; set; }
 
-    [Required]
-    public Guid PriorityLevelId { get; set; }
+    public Guid? PriorityLevelId { get; set; }
 
     public Guid? AssignedTechnicianId { get; set; }
     public Guid? AssignedTeamId { get; set; }
@@ -2450,6 +2459,27 @@ public class UpdateWorkOrderDto
     public bool RequiresPermit { get; set; }
     public bool RequiresLockout { get; set; }
     public bool RequiresConfinedSpaceEntry { get; set; }
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        // Ensure empty GUIDs (Guid.Empty) are treated as null
+        if (WorkOrderTypeId.HasValue && WorkOrderTypeId.Value == Guid.Empty)
+            WorkOrderTypeId = null;
+        
+        if (MaintenanceTypeId.HasValue && MaintenanceTypeId.Value == Guid.Empty)
+            MaintenanceTypeId = null;
+        
+        if (PriorityLevelId.HasValue && PriorityLevelId.Value == Guid.Empty)
+            PriorityLevelId = null;
+        
+        if (AssignedTechnicianId.HasValue && AssignedTechnicianId.Value == Guid.Empty)
+            AssignedTechnicianId = null;
+        
+        if (AssignedTeamId.HasValue && AssignedTeamId.Value == Guid.Empty)
+            AssignedTeamId = null;
+
+        return Enumerable.Empty<ValidationResult>();
+    }
 }
 
 public class UpdateWorkOrderStatusRequest

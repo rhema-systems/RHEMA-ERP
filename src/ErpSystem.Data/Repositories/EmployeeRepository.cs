@@ -203,22 +203,29 @@ namespace ErpSystem.Data.Repositories
         public async Task<string> GenerateEmployeeNumberAsync()
         {
             var currentYear = DateTime.Now.Year.ToString();
-            var maxNumber = await _dbSet
-                .Where(e => e.EmployeeNumber.StartsWith(currentYear))
+            
+            // Get all employee numbers for the current year to find max sequence
+            var employeeNumbersInYear = await _dbSet
+                .Where(e => e.EmployeeNumber.StartsWith(currentYear) && !e.IsDeleted)
                 .Select(e => e.EmployeeNumber)
                 .ToListAsync();
 
-            var maxNumericPart = 0;
-            foreach (var empNum in maxNumber)
+            int nextSequence = 1;
+            if (employeeNumbersInYear.Any())
             {
-                if (empNum.Length > 4 && int.TryParse(empNum.Substring(4), out var numPart))
-                {
-                    maxNumericPart = Math.Max(maxNumericPart, numPart);
-                }
+                // Parse all sequence numbers and find the maximum
+                var maxSequence = employeeNumbersInYear
+                    .Select(empNum => {
+                        if (empNum.Length > 4 && int.TryParse(empNum.Substring(4), out var seq))
+                            return seq;
+                        return 0;
+                    })
+                    .Max();
+                
+                nextSequence = maxSequence + 1;
             }
 
-            var nextNumber = maxNumericPart + 1;
-            return $"{currentYear}{nextNumber:D4}";
+            return $"{currentYear}{nextSequence:D4}";
         }
     }
 }

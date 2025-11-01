@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Shared;
 using ErpSystem.Core.Entities.Maintenance;
+using WorkOrderTaskDtoFull = ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -683,6 +684,7 @@ public class WorkOrderService : IWorkOrderService
                     ((_currentUserService.UserId != null && Guid.TryParse(_currentUserService.UserId, out var userId)) ? userId : Guid.Empty),
                 AssignedTechnicianId = createDto.AssignedTechnicianId, // Assign technician if provided
                 AssignedTeamId = createDto.AssignedTeamId, // Assign team if provided
+                JobCardId = createDto.JobCardId, // Link to job card if generated from one
                 Status = "Draft",
                 RequestedStartDate = createDto.RequestedStartDate,
                 RequestedCompletionDate = createDto.RequestedCompletionDate,
@@ -729,9 +731,19 @@ public class WorkOrderService : IWorkOrderService
             // Manual mapping
             workOrder.Title = updateDto.Title;
             workOrder.Description = updateDto.Description;
-            workOrder.WorkOrderTypeId = updateDto.WorkOrderTypeId;
-            workOrder.MaintenanceTypeId = updateDto.MaintenanceTypeId;
-            workOrder.PriorityLevelId = updateDto.PriorityLevelId;
+            
+            // Only update these fields if provided
+            if (updateDto.WorkOrderTypeId.HasValue)
+                workOrder.WorkOrderTypeId = updateDto.WorkOrderTypeId.Value;
+            if (updateDto.MaintenanceTypeId.HasValue)
+                workOrder.MaintenanceTypeId = updateDto.MaintenanceTypeId.Value;
+            if (updateDto.PriorityLevelId.HasValue)
+                workOrder.PriorityLevelId = updateDto.PriorityLevelId.Value;
+            
+            workOrder.AssignedTechnicianId = updateDto.AssignedTechnicianId;
+            workOrder.AssignedTeamId = updateDto.AssignedTeamId;
+            workOrder.RequestedStartDate = updateDto.RequestedStartDate;
+            workOrder.RequestedCompletionDate = updateDto.RequestedCompletionDate;
             workOrder.EstimatedHours = updateDto.EstimatedHours;
             workOrder.EstimatedCost = updateDto.EstimatedCost;
             workOrder.SafetyRequirements = updateDto.SafetyRequirements;
@@ -1287,6 +1299,8 @@ public class WorkOrderService : IWorkOrderService
             WorkOrderNumber = workOrder.WorkOrderNumber,
             Title = workOrder.Title,
             Description = workOrder.Description,
+            JobCardId = workOrder.JobCardId,
+            JobCardNumber = workOrder.JobCard?.JobCardNumber,
             Status = workOrder.Status,
             AssetId = workOrder.AssetId,
             WorkOrderTypeId = workOrder.WorkOrderTypeId,
@@ -1316,6 +1330,65 @@ public class WorkOrderService : IWorkOrderService
             ParentWorkOrderId = workOrder.ParentWorkOrderId,
             MaintenanceScheduleId = workOrder.MaintenanceScheduleId,
             IsRecurring = workOrder.IsRecurring,
+            // Map navigation properties
+            WorkOrderType = workOrder.WorkOrderType != null ? new WorkOrderTypeDto
+            {
+                Id = workOrder.WorkOrderType.Id,
+                Name = workOrder.WorkOrderType.Name,
+                Code = workOrder.WorkOrderType.Code,
+                Description = workOrder.WorkOrderType.Description,
+                Color = workOrder.WorkOrderType.Color,
+                Icon = workOrder.WorkOrderType.Icon,
+                IsActive = workOrder.WorkOrderType.IsActive,
+                RequiresApproval = workOrder.WorkOrderType.RequiresApproval,
+                DefaultPriority = workOrder.WorkOrderType.DefaultPriority
+            } : null,
+            MaintenanceType = workOrder.MaintenanceType != null ? new MaintenanceTypeDto
+            {
+                Id = workOrder.MaintenanceType.Id,
+                Name = workOrder.MaintenanceType.Name,
+                Code = workOrder.MaintenanceType.Code,
+                Description = workOrder.MaintenanceType.Description,
+                Color = workOrder.MaintenanceType.Color,
+                Icon = workOrder.MaintenanceType.Icon,
+                IsActive = workOrder.MaintenanceType.IsActive
+            } : null,
+            PriorityLevel = workOrder.PriorityLevel != null ? new PriorityLevelDto
+            {
+                Id = workOrder.PriorityLevel.Id,
+                Name = workOrder.PriorityLevel.Name,
+                Code = string.Empty, // Not in entity
+                Level = workOrder.PriorityLevel.Level,
+                Description = workOrder.PriorityLevel.Description ?? string.Empty,
+                Color = workOrder.PriorityLevel.Color ?? string.Empty,
+                Icon = string.Empty, // Not in entity
+                ResponseTime = workOrder.PriorityLevel.ResponseTimeHours * 60, // Convert hours to minutes
+                EscalationTime = 0, // Not in entity
+                RequiresApproval = false, // Not in entity
+                NotificationRules = string.Empty, // Not in entity
+                SlaHours = workOrder.PriorityLevel.ResponseTimeHours,
+                AutoAssign = false, // Not in entity
+                IsActive = workOrder.PriorityLevel.IsActive,
+                CreatedAt = workOrder.PriorityLevel.CreatedAt,
+                UpdatedAt = workOrder.PriorityLevel.UpdatedAt
+            } : null,
+            Tasks = workOrder.Tasks?.Select(t => new WorkOrderTaskDtoFull
+            {
+                Id = t.Id,
+                WorkOrderId = t.WorkOrderId,
+                TaskName = t.TaskName,
+                Description = t.Description,
+                Sequence = t.Sequence,
+                Status = t.Status,
+                EstimatedHours = t.EstimatedHours,
+                ActualHours = t.ActualHours,
+                IsRequired = t.IsRequired,
+                AssignedTechnicianId = t.AssignedTechnicianId,
+                StartedAt = t.StartedAt,
+                CompletedAt = t.CompletedAt,
+                CompletionNotes = t.CompletionNotes,
+                CreatedAt = t.CreatedAt
+            }).ToList() ?? new List<WorkOrderTaskDtoFull>(),
             CreatedAt = workOrder.CreatedAt,
             UpdatedAt = workOrder.UpdatedAt
         };
@@ -1417,14 +1490,19 @@ public class WorkOrderService : IWorkOrderService
             WorkOrderNumber = workOrder.WorkOrderNumber,
             Title = workOrder.Title,
             Description = workOrder.Description,
+            JobCardId = workOrder.JobCardId,
+            JobCardNumber = workOrder.JobCard?.JobCardNumber,
             AssetId = workOrder.AssetId,
             Status = workOrder.Status,
             AssetName = assetName,
             AssetNumber = assetNumber,
+            WorkOrderTypeId = workOrder.WorkOrderTypeId,
             WorkOrderTypeName = workOrderTypeName,
+            MaintenanceTypeId = workOrder.MaintenanceTypeId,
             MaintenanceTypeName = maintenanceTypeName,
             Priority = priorityName,
             PriorityName = priorityName,
+            PriorityLevelId = workOrder.PriorityLevelId,
             PriorityLevel = priorityLevel,
             AssignedTechnicianId = workOrder.AssignedTechnicianId,
             AssignedTechnicianName = assignedTechnicianName,
@@ -1603,6 +1681,105 @@ public class WorkOrderService : IWorkOrderService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating work orders from schedule {ScheduleId}", scheduleId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Updates a work order task status with user tracking
+    /// </summary>
+    public async Task<ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto?> UpdateTaskStatusAsync(
+        Guid taskId, 
+        string status, 
+        double? actualHours = null, 
+        string? completionNotes = null)
+    {
+        try
+        {
+            var task = await _taskRepository.GetByIdAsync(taskId);
+            if (task == null)
+            {
+                _logger.LogWarning("Task {TaskId} not found", taskId);
+                return null;
+            }
+
+            var currentUserId = _currentUserService.UserId;
+            var currentEmployeeId = _currentUserService.EmployeeId;
+
+            _logger.LogInformation(
+                "Updating task {TaskId} status from {OldStatus} to {NewStatus} by user {UserId}",
+                taskId, task.Status, status, currentUserId);
+
+            // Update task status
+            var previousStatus = task.Status;
+            task.Status = status;
+            task.UpdatedAt = DateTime.UtcNow;
+            task.UpdatedBy = currentUserId ?? "System";
+
+            // Track who is working on the task
+            if (status == "InProgress" && previousStatus == "Pending")
+            {
+                task.StartedAt = DateTime.UtcNow;
+                // If no technician assigned yet, assign current user
+                if (!task.AssignedTechnicianId.HasValue && currentEmployeeId.HasValue)
+                {
+                    task.AssignedTechnicianId = currentEmployeeId.Value;
+                }
+            }
+
+            // Handle task completion
+            if (status == "Completed")
+            {
+                task.CompletedAt = DateTime.UtcNow;
+                if (actualHours.HasValue)
+                {
+                    task.ActualHours = actualHours.Value;
+                }
+                if (!string.IsNullOrEmpty(completionNotes))
+                {
+                    task.CompletionNotes = completionNotes;
+                }
+            }
+
+            await _taskRepository.UpdateAsync(task);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Task {TaskId} status updated successfully to {Status}",
+                taskId, status);
+
+            // Map to DTO and include technician information
+            var technician = task.AssignedTechnicianId.HasValue 
+                ? await _employeeRepository.GetByIdAsync(task.AssignedTechnicianId.Value)
+                : null;
+
+            return new WorkOrderTaskDtoFull
+            {
+                Id = task.Id,
+                WorkOrderId = task.WorkOrderId,
+                TaskName = task.TaskName,
+                Description = task.Description,
+                Sequence = task.Sequence,
+                Status = task.Status,
+                EstimatedHours = task.EstimatedHours,
+                ActualHours = task.ActualHours,
+                IsRequired = task.IsRequired,
+                AssignedTechnicianId = task.AssignedTechnicianId,
+                StartedAt = task.StartedAt,
+                CompletedAt = task.CompletedAt,
+                CompletionNotes = task.CompletionNotes,
+                CreatedAt = task.CreatedAt,
+                AssignedTechnician = technician != null ? new ErpSystem.Core.DTOs.HR.EmployeeDto
+                {
+                    Id = technician.Id,
+                    FullName = $"{technician.FirstName} {technician.LastName}",
+                    EmployeeNumber = technician.EmployeeNumber
+                } : null
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating task {TaskId} status", taskId);
             throw;
         }
     }

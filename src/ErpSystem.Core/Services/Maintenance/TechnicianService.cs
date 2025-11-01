@@ -383,7 +383,7 @@ public class TechnicianService : ITechnicianService
         return new TechnicianDto
         {
             Id = employee.Id,
-            EmployeeId = Guid.Parse(employee.EmployeeId),
+            EmployeeId = employee.Id, // Use the Employee's ID, not EmployeeNumber
             FirstName = employee.FirstName,
             LastName = employee.LastName,
             FullName = employee.FullName,

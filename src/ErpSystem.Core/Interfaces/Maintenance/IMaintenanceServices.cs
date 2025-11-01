@@ -72,18 +72,21 @@ public interface ITaskTemplateService
     
     // Manage asset-specific task templates
     Task<IEnumerable<AssetTaskTemplateDto>> GetAssetTaskTemplatesAsync(Guid assetId);
+    Task<IEnumerable<AssetTaskTemplateDto>> GetAllAssetTaskTemplatesAsync();
     Task<AssetTaskTemplateDto> CreateAssetTaskTemplateAsync(CreateAssetTaskTemplateDto createDto);
     Task<AssetTaskTemplateDto> UpdateAssetTaskTemplateAsync(Guid id, UpdateAssetTaskTemplateDto updateDto);
     Task DeleteAssetTaskTemplateAsync(Guid id);
     
     // Manage asset type task templates
     Task<IEnumerable<AssetTypeTaskTemplateDto>> GetAssetTypeTaskTemplatesAsync(Guid assetTypeId);
+    Task<IEnumerable<AssetTypeTaskTemplateDto>> GetAllAssetTypeTaskTemplatesAsync();
     Task<AssetTypeTaskTemplateDto> CreateAssetTypeTaskTemplateAsync(CreateAssetTypeTaskTemplateDto createDto);
     Task<AssetTypeTaskTemplateDto> UpdateAssetTypeTaskTemplateAsync(Guid id, UpdateAssetTypeTaskTemplateDto updateDto);
     Task DeleteAssetTypeTaskTemplateAsync(Guid id);
     
     // Manage maintenance type task templates (system defaults)
     Task<IEnumerable<MaintenanceTaskTemplateDto>> GetMaintenanceTaskTemplatesAsync(Guid maintenanceTypeId);
+    Task<IEnumerable<MaintenanceTaskTemplateDto>> GetAllMaintenanceTaskTemplatesAsync();
     Task<MaintenanceTaskTemplateDto> CreateMaintenanceTaskTemplateAsync(CreateMaintenanceTaskTemplateDto createDto);
     Task<MaintenanceTaskTemplateDto> UpdateMaintenanceTaskTemplateAsync(Guid id, UpdateMaintenanceTaskTemplateDto updateDto);
     Task DeleteMaintenanceTaskTemplateAsync(Guid id);
@@ -334,6 +337,9 @@ public interface IWorkOrderService
     // Child work orders
     Task<WorkOrderDto> CreateChildWorkOrderAsync(Guid parentId, CreateWorkOrderDto createDto);
     Task<IEnumerable<WorkOrderListDto>> GetChildWorkOrdersAsync(Guid parentId);
+    
+    // Task management
+    Task<ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto?> UpdateTaskStatusAsync(Guid taskId, string status, double? actualHours = null, string? completionNotes = null);
 }
 
 public interface IWorkOrderTaskService

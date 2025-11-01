@@ -113,6 +113,7 @@ public class JobCardRepository : IJobCardRepository
                 JobCardNumber = j.JobCardNumber,
                 Title = j.Title,
                 Description = j.Description,
+                ProblemDescription = j.ProblemDescription,
                 AssetId = j.AssetId,
                 AssetName = j.Asset != null ? j.Asset.Name : "Unknown",
                 AssetCode = j.Asset != null ? j.Asset.AssetNumber : "N/A",
@@ -234,8 +235,27 @@ public class JobCardRepository : IJobCardRepository
 
     public async Task<int> GetNextSequenceNumberAsync(int year)
     {
-        var count = await _context.JobCards.CountAsync(j => j.CreatedAt.Year == year);
-        return count + 1;
+        // Use JobCardNumber pattern instead of CreatedAt.Year to avoid timezone issues
+        var prefix = $"JC-{year}-";
+        var jobCardsInYear = await _context.JobCards
+            .Where(j => j.JobCardNumber.StartsWith(prefix))
+            .Select(j => j.JobCardNumber)
+            .ToListAsync();
+        
+        if (!jobCardsInYear.Any())
+            return 1;
+        
+        // Parse sequence numbers and find the maximum
+        var maxSequence = jobCardsInYear
+            .Select(jcn => {
+                var parts = jcn.Split('-');
+                if (parts.Length == 3 && int.TryParse(parts[2], out int seq))
+                    return seq;
+                return 0;
+            })
+            .Max();
+        
+        return maxSequence + 1;
     }
 
     public async Task<int> GetNextCertificateSequenceNumberAsync(int year)

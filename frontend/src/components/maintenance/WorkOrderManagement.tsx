@@ -86,6 +86,7 @@ interface WorkOrder {
   title: string;
   description: string;
   jobCardId?: string;
+  jobCardNumber?: string;
   assetId: string;
   assetName: string;
   workOrderType: string;
@@ -1252,9 +1253,9 @@ const WorkOrderManagement: React.FC = () => {
                   <Typography variant="body2" fontWeight="medium">
                     {workOrder.title}
                   </Typography>
-                  {workOrder.jobCardId && (
+                  {workOrder.jobCardNumber && (
                     <Typography variant="caption" color="text.secondary">
-                      From: {workOrder.jobCardId}
+                      From Job Card: {workOrder.jobCardNumber}
                     </Typography>
                   )}
                 </TableCell>

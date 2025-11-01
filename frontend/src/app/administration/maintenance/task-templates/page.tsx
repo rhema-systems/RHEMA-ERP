@@ -171,13 +171,68 @@ export default function TaskTemplatesPage() {
     setError(null);
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-      // For now, just set empty arrays since we need asset/type selection to fetch templates
-      setAssetTemplates([]);
-      setAssetTypeTemplates([]);
-      setMaintenanceTemplates([]);
+      
+      // Fetch all asset templates
+      try {
+        const assetResponse = await fetch('http://localhost:5000/api/maintenance/task-templates/asset', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (assetResponse.ok) {
+          const assetData = await assetResponse.json();
+          setAssetTemplates(Array.isArray(assetData) ? assetData : []);
+        } else {
+          console.error('Failed to fetch asset templates:', assetResponse.status);
+          setAssetTemplates([]);
+        }
+      } catch (error) {
+        console.error('Error fetching asset templates:', error);
+        setAssetTemplates([]);
+      }
+      
+      // Fetch all asset type templates
+      try {
+        const assetTypeResponse = await fetch('http://localhost:5000/api/maintenance/task-templates/asset-type', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (assetTypeResponse.ok) {
+          const assetTypeData = await assetTypeResponse.json();
+          setAssetTypeTemplates(Array.isArray(assetTypeData) ? assetTypeData : []);
+        } else {
+          console.error('Failed to fetch asset type templates:', assetTypeResponse.status);
+          setAssetTypeTemplates([]);
+        }
+      } catch (error) {
+        console.error('Error fetching asset type templates:', error);
+        setAssetTypeTemplates([]);
+      }
+      
+      // Fetch all maintenance type templates
+      const maintenanceResponse = await fetch('http://localhost:5000/api/maintenance/task-templates/maintenance-type', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (maintenanceResponse.ok) {
+        const maintenanceData = await maintenanceResponse.json();
+        setMaintenanceTemplates(Array.isArray(maintenanceData) ? maintenanceData : []);
+      } else {
+        console.error('Failed to fetch maintenance templates:', maintenanceResponse.status);
+        setMaintenanceTemplates([]);
+      }
     } catch (error) {
       console.error('Failed to fetch templates:', error);
       setError('Failed to load task templates.');
+      setMaintenanceTemplates([]);
     } finally {
       setLoading(false);
     }
@@ -218,6 +273,30 @@ export default function TaskTemplatesPage() {
 
     return filtered.sort((a: any, b: any) => a.sequence - b.sequence);
   }, [assetTemplates, assetTypeTemplates, maintenanceTemplates, activeTab, searchTerm, statusFilter, typeFilter]);
+
+  // Group templates for better organization
+  const groupedData = useMemo(() => {
+    const groups: { [key: string]: any[] } = {};
+    
+    filteredData.forEach((template: any) => {
+      let groupKey = '';
+      
+      if (activeTab === 'asset') {
+        groupKey = (template as AssetTaskTemplate).assetName || 'Unknown Asset';
+      } else if (activeTab === 'assetType') {
+        groupKey = (template as AssetTypeTaskTemplate).assetTypeName || 'Unknown Asset Type';
+      } else {
+        groupKey = template.maintenanceTypeName || 'Unknown Maintenance Type';
+      }
+      
+      if (!groups[groupKey]) {
+        groups[groupKey] = [];
+      }
+      groups[groupKey].push(template);
+    });
+    
+    return groups;
+  }, [filteredData, activeTab]);
 
   const handleCreate = async () => {
     try {
@@ -431,7 +510,7 @@ export default function TaskTemplatesPage() {
             Manage task templates for work orders across assets, asset types, and maintenance types
           </p>
         </div>
-        {mounted && <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
@@ -605,7 +684,7 @@ export default function TaskTemplatesPage() {
               </Button>
             </DialogFooter>
           </DialogContent>
-        </Dialog>}
+        </Dialog>
       </div>
 
       {/* Breadcrumbs */}
@@ -676,9 +755,7 @@ export default function TaskTemplatesPage() {
                   />
                 </div>
                 
-                {mounted && (
-                  <>
-                    <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <Select value={typeFilter} onValueChange={setTypeFilter}>
                       <SelectTrigger>
                         <SelectValue placeholder="Maintenance Type" />
                       </SelectTrigger>
@@ -702,8 +779,6 @@ export default function TaskTemplatesPage() {
                         <SelectItem value="inactive">Inactive</SelectItem>
                       </SelectContent>
                     </Select>
-                  </>
-                )}
               </div>
             </CardContent>
           </Card>
@@ -726,74 +801,78 @@ export default function TaskTemplatesPage() {
                   <p className="text-sm">Click "Add Template" to create your first template.</p>
                 </div>
               ) : (
-              <div className="space-y-4">
-                {filteredData.map((template: any) => (
-                  <div key={template.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
-                    <div className="flex items-start justify-between">
-                      <div className="space-y-3 flex-1">
-                        <div className="flex items-center space-x-3">
-                          <Badge variant="outline" className="font-mono">
-                            #{template.sequence}
-                          </Badge>
-                          <h3 className="font-semibold">{template.taskName}</h3>
-                          {template.isRequired && (
-                            <Badge className="bg-red-100 text-red-800">
-                              Required
-                            </Badge>
-                          )}
-                          <Badge className={template.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
-                            {template.isActive ? 'Active' : 'Inactive'}
-                          </Badge>
-                        </div>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-muted-foreground">
-                          <div className="flex items-center space-x-2">
-                            <Clock className="h-4 w-4" />
-                            <span>{template.estimatedHours}h estimated</span>
-                          </div>
-                          {activeTab === 'asset' && (
-                            <div className="flex items-center space-x-2">
-                              <Package className="h-4 w-4" />
-                              <span>{(template as AssetTaskTemplate).assetName}</span>
+              <div className="space-y-6">
+                {Object.entries(groupedData).map(([groupName, templates]) => (
+                  <div key={groupName} className="space-y-3">
+                    {/* Group Header */}
+                    <div className="flex items-center gap-3 px-3 py-2 bg-muted/30 rounded-md border-l-4 border-primary">
+                      {activeTab === 'asset' && <Package className="h-5 w-5 text-primary" />}
+                      {activeTab === 'assetType' && <Settings className="h-5 w-5 text-primary" />}
+                      {activeTab === 'maintenance' && <ListChecks className="h-5 w-5 text-primary" />}
+                      <h3 className="font-semibold text-lg">{groupName}</h3>
+                      <Badge variant="outline" className="ml-auto">{templates.length} template{templates.length === 1 ? '' : 's'}</Badge>
+                    </div>
+                    
+                    {/* Templates in Group */}
+                    <div className="space-y-3 pl-3">
+                      {templates.map((template: any) => (
+                        <div key={template.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
+                          <div className="flex items-start justify-between">
+                            <div className="space-y-3 flex-1">
+                              <div className="flex items-center space-x-3">
+                                <Badge variant="outline" className="font-mono">
+                                  #{template.sequence}
+                                </Badge>
+                                <h3 className="font-semibold">{template.taskName}</h3>
+                                {template.isRequired && (
+                                  <Badge className="bg-red-100 text-red-800">
+                                    Required
+                                  </Badge>
+                                )}
+                                <Badge className={template.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
+                                  {template.isActive ? 'Active' : 'Inactive'}
+                                </Badge>
+                              </div>
+                              
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-muted-foreground">
+                                <div className="flex items-center space-x-2">
+                                  <Clock className="h-4 w-4" />
+                                  <span>{template.estimatedHours}h estimated</span>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <ListChecks className="h-4 w-4" />
+                                  <span>{template.maintenanceTypeName}</span>
+                                </div>
+                              </div>
+                              
+                              {template.description && (
+                                <p className="text-sm text-muted-foreground">{template.description}</p>
+                              )}
+                              
+                              {template.safetyRequirements && (
+                                <div className="flex items-start space-x-2 text-sm">
+                                  <AlertTriangle className="h-4 w-4 text-yellow-600 mt-0.5" />
+                                  <span className="text-yellow-700">{template.safetyRequirements}</span>
+                                </div>
+                              )}
                             </div>
-                          )}
-                          {activeTab === 'assetType' && (
+                            
                             <div className="flex items-center space-x-2">
-                              <Settings className="h-4 w-4" />
-                              <span>{(template as AssetTypeTaskTemplate).assetTypeName}</span>
+                              <Button size="sm" variant="outline" onClick={() => handleEdit(template)}>
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                className="text-red-600 hover:text-red-700"
+                                onClick={() => handleDelete(template.id)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
                             </div>
-                          )}
-                          <div className="flex items-center space-x-2">
-                            <ListChecks className="h-4 w-4" />
-                            <span>{template.maintenanceTypeName}</span>
                           </div>
                         </div>
-                        
-                        {template.description && (
-                          <p className="text-sm text-muted-foreground">{template.description}</p>
-                        )}
-                        
-                        {template.safetyRequirements && (
-                          <div className="flex items-start space-x-2 text-sm">
-                            <AlertTriangle className="h-4 w-4 text-yellow-600 mt-0.5" />
-                            <span className="text-yellow-700">{template.safetyRequirements}</span>
-                          </div>
-                        )}
-                      </div>
-                      
-                      <div className="flex items-center space-x-2">
-                        <Button size="sm" variant="outline" onClick={() => handleEdit(template)}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button 
-                          size="sm" 
-                          variant="outline" 
-                          className="text-red-600 hover:text-red-700"
-                          onClick={() => handleDelete(template.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
+                      ))}
                     </div>
                   </div>
                 ))}
@@ -805,23 +884,73 @@ export default function TaskTemplatesPage() {
       </Tabs>
 
       {/* Edit Dialog (similar structure to create dialog) */}
-      {mounted && selectedTemplate && <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[700px]">
+      {selectedTemplate && <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="max-w-5xl">
           <DialogHeader>
             <DialogTitle>Edit Task Template</DialogTitle>
             <DialogDescription>
               Update the task template information.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto">
-            {/* Same form fields as create dialog */}
-            <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-6 py-4 max-h-[75vh] overflow-y-auto">
+            {/* Asset/Asset Type/Maintenance Type Dropdowns */}
+            {activeTab === 'asset' && (
               <div className="space-y-2">
+                <Label htmlFor="edit-asset">Asset</Label>
+                <Select value={formData.assetId} onValueChange={(value) => setFormData({...formData, assetId: value})}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select asset" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assets.map((asset) => (
+                      <SelectItem key={asset.id} value={asset.id}>
+                        {asset.name} ({asset.assetNumber})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {activeTab === 'assetType' && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-assetType">Asset Type</Label>
+                <Select value={formData.assetTypeId} onValueChange={(value) => setFormData({...formData, assetTypeId: value})}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select asset type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assetTypes.map((type) => (
+                      <SelectItem key={type.id} value={type.id}>
+                        {type.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="edit-maintenanceType">Maintenance Type</Label>
+              <Select value={formData.maintenanceTypeId} onValueChange={(value) => setFormData({...formData, maintenanceTypeId: value})}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select maintenance type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {maintenanceTypes.map((type) => (
+                    <SelectItem key={type.id} value={type.id}>
+                      {type.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="col-span-2 space-y-2">
                 <Label htmlFor="edit-taskName">Task Name</Label>
                 <Input
                   id="edit-taskName"
                   value={formData.taskName}
                   onChange={(e) => setFormData({...formData, taskName: e.target.value})}
+                  placeholder="e.g., Check fluid levels"
                 />
               </div>
               <div className="space-y-2">
@@ -831,27 +960,72 @@ export default function TaskTemplatesPage() {
                   type="number"
                   value={formData.sequence}
                   onChange={(e) => setFormData({...formData, sequence: parseInt(e.target.value) || 1})}
+                  placeholder="1"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-description">Description</Label>
+                <Textarea
+                  id="edit-description"
+                  value={formData.description}
+                  onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  placeholder="Describe the task..."
+                  rows={2}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-instructions">Instructions</Label>
+                <Textarea
+                  id="edit-instructions"
+                  value={formData.instructions}
+                  onChange={(e) => setFormData({...formData, instructions: e.target.value})}
+                  placeholder="Step-by-step instructions..."
+                  rows={2}
                 />
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="edit-description">Description</Label>
+              <Label htmlFor="edit-safetyRequirements">Safety Requirements</Label>
               <Textarea
-                id="edit-description"
-                value={formData.description}
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                id="edit-safetyRequirements"
+                value={formData.safetyRequirements}
+                onChange={(e) => setFormData({...formData, safetyRequirements: e.target.value})}
+                placeholder="Safety protocols and PPE requirements..."
                 rows={2}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-estimatedHours">Estimated Hours</Label>
-              <Input
-                id="edit-estimatedHours"
-                type="number"
-                step="0.5"
-                value={formData.estimatedHours}
-                onChange={(e) => setFormData({...formData, estimatedHours: parseFloat(e.target.value) || 1})}
-              />
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-requiredTools">Required Tools</Label>
+                <Input
+                  id="edit-requiredTools"
+                  value={formData.requiredTools}
+                  onChange={(e) => setFormData({...formData, requiredTools: e.target.value})}
+                  placeholder="e.g., Wrench, Multimeter"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-requiredParts">Required Parts</Label>
+                <Input
+                  id="edit-requiredParts"
+                  value={formData.requiredParts}
+                  onChange={(e) => setFormData({...formData, requiredParts: e.target.value})}
+                  placeholder="e.g., Oil filter, Gasket"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-estimatedHours">Estimated Hours</Label>
+                <Input
+                  id="edit-estimatedHours"
+                  type="number"
+                  step="0.5"
+                  value={formData.estimatedHours}
+                  onChange={(e) => setFormData({...formData, estimatedHours: parseFloat(e.target.value) || 1})}
+                  placeholder="1.0"
+                />
+              </div>
             </div>
             <div className="space-y-4">
               <div className="flex items-center space-x-2">

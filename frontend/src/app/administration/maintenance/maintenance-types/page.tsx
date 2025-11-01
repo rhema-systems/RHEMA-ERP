@@ -33,6 +33,7 @@ interface MaintenanceType {
   code: string;
   description?: string;
   category?: string;
+  location?: string; // Internal, External, Onsite, Offsite
   isActive: boolean;
   priority?: string;
   color?: string;
@@ -66,6 +67,7 @@ export default function MaintenanceTypesPage() {
     code: '',
     description: '',
     category: 'Preventive',
+    location: 'Internal',
     isActive: true,
     priority: 'Medium',
     color: '#10b981',
@@ -184,6 +186,7 @@ export default function MaintenanceTypesPage() {
         code: formData.code,
         description: formData.description || '',
         category: formData.category,
+        location: formData.location || 'Internal',
         priority: formData.priority,
         estimatedDuration: formData.estimatedDuration / 60, // Convert minutes to hours
         isActive: formData.isActive,
@@ -234,6 +237,7 @@ export default function MaintenanceTypesPage() {
       code: type.code || '',
       description: type.description || '',
       category: type.category || 'Preventive',
+      location: type.location || 'Internal',
       isActive: type.isActive ?? true,
       priority: type.priority || 'Medium',
       color: type.color || '#10b981',
@@ -265,6 +269,7 @@ export default function MaintenanceTypesPage() {
         code: formData.code,
         description: formData.description || '',
         category: formData.category,
+        location: formData.location || 'Internal',
         priority: formData.priority,
         estimatedDuration: formData.estimatedDuration / 60, // Convert minutes to hours
         isActive: formData.isActive,
@@ -346,6 +351,7 @@ export default function MaintenanceTypesPage() {
       code: '',
       description: '',
       category: 'Preventive',
+      location: 'Internal',
       isActive: true,
       priority: 'Medium',
       color: '#10b981',
@@ -388,14 +394,14 @@ export default function MaintenanceTypesPage() {
               Add Maintenance Type
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[600px]">
+        <DialogContent className="max-w-[900px]">
             <DialogHeader>
               <DialogTitle>Add Maintenance Type</DialogTitle>
               <DialogDescription>
                 Create a new maintenance type to categorize maintenance activities.
               </DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto">
+            <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">Type Name</Label>
@@ -444,6 +450,23 @@ export default function MaintenanceTypesPage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
+                  <Label htmlFor="location">Location Type</Label>
+                  <Select value={formData.location} onValueChange={(value) => setFormData({...formData, location: value})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select location type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Internal">Internal</SelectItem>
+                      <SelectItem value="External">External</SelectItem>
+                      <SelectItem value="Onsite">Onsite</SelectItem>
+                      <SelectItem value="Offsite">Offsite</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
                   <Label htmlFor="priority">Priority</Label>
                   <Select value={formData.priority} onValueChange={(value) => setFormData({...formData, priority: value})}>
                     <SelectTrigger>
@@ -457,9 +480,6 @@ export default function MaintenanceTypesPage() {
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="skillLevel">Required Skill Level</Label>
                   <Select value={formData.skillLevel} onValueChange={(value) => setFormData({...formData, skillLevel: value})}>
@@ -474,6 +494,9 @@ export default function MaintenanceTypesPage() {
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="frequency">Typical Frequency</Label>
                   <Select value={formData.frequency} onValueChange={(value) => setFormData({...formData, frequency: value})}>
@@ -490,6 +513,15 @@ export default function MaintenanceTypesPage() {
                       <SelectItem value="As Required">As Required</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="icon">Icon</Label>
+                  <Input
+                    id="icon"
+                    value={formData.icon}
+                    onChange={(e) => setFormData({...formData, icon: e.target.value})}
+                    placeholder="wrench, calendar, settings"
+                  />
                 </div>
               </div>
 
@@ -861,14 +893,14 @@ export default function MaintenanceTypesPage() {
 
       {/* Edit Dialog */}
       {mounted && <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[700px]">
+        <DialogContent className="max-w-[900px]">
           <DialogHeader>
-            <DialogTitle>Edit Maintenance Type</DialogTitle>
+            <DialogTitle>Edit Maintenance Type {selectedType?.code ? `- ${selectedType.code}` : ''}</DialogTitle>
             <DialogDescription>
               Update the maintenance type information.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto">
+          <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="edit-name">Type Name</Label>
@@ -897,7 +929,7 @@ export default function MaintenanceTypesPage() {
                 value={formData.description}
                 onChange={(e) => setFormData({...formData, description: e.target.value})}
                 placeholder="Describe this maintenance type..."
-                rows={3}
+                rows={2}
               />
             </div>
             
@@ -919,6 +951,23 @@ export default function MaintenanceTypesPage() {
                 </Select>
               </div>
               <div className="space-y-2">
+                <Label htmlFor="edit-location">Location Type</Label>
+                <Select value={formData.location} onValueChange={(value) => setFormData({...formData, location: value})}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select location type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Internal">Internal</SelectItem>
+                    <SelectItem value="External">External</SelectItem>
+                    <SelectItem value="Onsite">Onsite</SelectItem>
+                    <SelectItem value="Offsite">Offsite</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
                 <Label htmlFor="edit-priority">Default Priority</Label>
                 <Select value={formData.priority} onValueChange={(value) => setFormData({...formData, priority: value})}>
                   <SelectTrigger>
@@ -929,6 +978,20 @@ export default function MaintenanceTypesPage() {
                     <SelectItem value="High">High</SelectItem>
                     <SelectItem value="Medium">Medium</SelectItem>
                     <SelectItem value="Low">Low</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-skill">Required Skill Level</Label>
+                <Select value={formData.skillLevel} onValueChange={(value) => setFormData({...formData, skillLevel: value})}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select skill level" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Basic">Basic</SelectItem>
+                    <SelectItem value="Intermediate">Intermediate</SelectItem>
+                    <SelectItem value="Advanced">Advanced</SelectItem>
+                    <SelectItem value="Expert">Expert</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -947,37 +1010,22 @@ export default function MaintenanceTypesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-skill">Required Skill Level</Label>
-                <Select value={formData.skillLevel} onValueChange={(value) => setFormData({...formData, skillLevel: value})}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select skill level" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Basic">Basic</SelectItem>
-                    <SelectItem value="Intermediate">Intermediate</SelectItem>
-                    <SelectItem value="Advanced">Advanced</SelectItem>
-                    <SelectItem value="Expert">Expert</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="edit-color">Color</Label>
-              <div className="flex items-center space-x-2">
-                <Input
-                  id="edit-color"
-                  type="color"
-                  value={formData.color}
-                  onChange={(e) => setFormData({...formData, color: e.target.value})}
-                  className="w-16 h-10"
-                />
-                <Input
-                  value={formData.color}
-                  onChange={(e) => setFormData({...formData, color: e.target.value})}
-                  placeholder="#3b82f6"
-                  className="flex-1"
-                />
+                <Label htmlFor="edit-color">Color</Label>
+                <div className="flex items-center space-x-2">
+                  <Input
+                    id="edit-color"
+                    type="color"
+                    value={formData.color}
+                    onChange={(e) => setFormData({...formData, color: e.target.value})}
+                    className="w-16 h-10"
+                  />
+                  <Input
+                    value={formData.color}
+                    onChange={(e) => setFormData({...formData, color: e.target.value})}
+                    placeholder="#3b82f6"
+                    className="flex-1"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1024,7 +1072,7 @@ export default function MaintenanceTypesPage() {
                 value={formData.safetyRequirements}
                 onChange={(e) => setFormData({...formData, safetyRequirements: e.target.value})}
                 placeholder="List safety requirements and protocols..."
-                rows={2}
+                rows={1}
               />
             </div>
 
@@ -1045,7 +1093,7 @@ export default function MaintenanceTypesPage() {
                 value={formData.notes}
                 onChange={(e) => setFormData({...formData, notes: e.target.value})}
                 placeholder="Additional notes or instructions..."
-                rows={3}
+                rows={2}
               />
             </div>
             

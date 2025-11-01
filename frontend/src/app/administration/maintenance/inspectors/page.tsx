@@ -188,18 +188,83 @@ export default function InspectorsPage() {
     try {
       setLoading(true);
       
-      // In a real implementation, you would:
-      // 1. Load all employees from HR system
-      // 2. Load inspector metadata for employees with inspector roles
-      // 3. Load performance data
-      // 4. Merge the data to create InspectorView objects
+      // Fetch employees from HR/Employees API filtered by Quality Control department
+      const response = await fetch('/api/hr/employees?department=Quality Control');
+      if (!response.ok) {
+        throw new Error('Failed to fetch employees');
+      }
       
-      // For now, using mock data that simulates this structure
+      const employeesData = await response.json();
+      
+      // For now, use mock metadata until backend API is ready
+      const mockInspectorMetadata = await getMockQualityControlMetadata();
+      const performance = await performanceAnalyticsService.getInspectorPerformance();
+      
+      // Transform employee data to match Employee interface
+      const employees: Employee[] = employeesData.map((emp: any) => ({
+        id: emp.id,
+        firstName: emp.firstName,
+        lastName: emp.lastName,
+        email: emp.emailAddress || emp.email,
+        phone: emp.mobileNumber || emp.phone,
+        employeeId: emp.employeeNumber || emp.employeeId,
+        department: emp.department?.name || emp.department || 'Quality Control',
+        position: emp.position?.title || emp.position || 'Inspector',
+        hireDate: emp.dateEmployed || emp.hireDate,
+        status: emp.isActive ? 'Active' : 'Inactive',
+        skills: emp.skills || [],
+        certifications: emp.certifications || [],
+        trainings: emp.trainings || [],
+        roles: ['Quality Inspector']
+      }));
+      
+      // Merge employee data with inspector metadata
+      const inspectorViews = employees
+        .map(employee => {
+          const metadata = mockInspectorMetadata.find(m => m.employeeId === employee.employeeId);
+          if (metadata) {
+            return {
+              ...employee,
+              qualityControlMetadata: metadata
+            } as InspectorView;
+          }
+          // Create default metadata for employees without it
+          return {
+            ...employee,
+            qualityControlMetadata: {
+              employeeId: employee.employeeId,
+              certificationLevel: 'Intermediate',
+              performanceMetrics: {
+                totalInspections: 0,
+                averageScore: 0,
+                passRate: 0,
+                averageTimeToComplete: 0
+              },
+              isActiveInspector: true,
+              dateAssignedAsInspector: employee.hireDate,
+              inspectorNotes: ''
+            }
+          } as InspectorView;
+        });
+      
+      // Get non-inspector employees for "assign as inspector" functionality
+      const employeesWithoutInspectorRole = employees.filter(emp => 
+        !mockInspectorMetadata.some(meta => meta.employeeId === emp.employeeId)
+      );
+      
+      setEmployees(employees);
+      setInspectorMetadata(mockInspectorMetadata);
+      setInspectorViews(inspectorViews);
+      setAvailableEmployees(employeesWithoutInspectorRole);
+      setInspectorPerformance(performance);
+      
+    } catch (error) {
+      console.error('Error loading inspectors data:', error);
+      // Fallback to mock data on error
       const mockEmployees = await getMockEmployees();
       const mockInspectorMetadata = await getMockQualityControlMetadata();
       const performance = await performanceAnalyticsService.getInspectorPerformance();
       
-      // Merge employee data with inspector metadata
       const inspectorViews = mockEmployees
         .map(employee => {
           const metadata = mockInspectorMetadata.find(m => m.employeeId === employee.employeeId);
@@ -213,19 +278,11 @@ export default function InspectorsPage() {
         })
         .filter(Boolean) as InspectorView[];
       
-      // Get non-inspector employees for "assign as inspector" functionality
-      const employeesWithoutInspectorRole = mockEmployees.filter(emp => 
-        !mockInspectorMetadata.some(meta => meta.employeeId === emp.employeeId)
-      );
-      
       setEmployees(mockEmployees);
       setInspectorMetadata(mockInspectorMetadata);
       setInspectorViews(inspectorViews);
-      setAvailableEmployees(employeesWithoutInspectorRole);
+      setAvailableEmployees([]);
       setInspectorPerformance(performance);
-      
-    } catch (error) {
-      console.error('Error loading inspectors data:', error);
     } finally {
       setLoading(false);
     }

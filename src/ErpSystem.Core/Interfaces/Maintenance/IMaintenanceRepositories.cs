@@ -232,20 +232,13 @@ public interface ITechnicianTeamMemberRepository : IGenericRepository<Technician
     Task<TechnicianTeamMember?> GetActiveMembershipAsync(Guid technicianId, Guid teamId);
 }
 
-public interface ITechnicalSkillRepository : IGenericRepository<TechnicalSkill>
+public interface ITechnicalSkillRepository : IGenericRepository<Skill>
 {
-    Task<IEnumerable<TechnicalSkill>> GetActiveAsync();
-    Task<IEnumerable<TechnicalSkill>> GetByCategoryAsync(string category);
-    Task<IEnumerable<TechnicalSkill>> GetByComplexityAsync(string complexity);
-    Task<IEnumerable<TechnicalSkill>> GetByRiskLevelAsync(string riskLevel);
-    Task<bool> IsSkillNameUniqueAsync(string name, Guid? excludeId = null);
-    Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null);
+    Task<IEnumerable<Skill>> GetActiveAsync();
+    Task<IEnumerable<Skill>> GetByCategoryAsync(string category);
     Task<int> GetTechnicianCountBySkillAsync(Guid skillId);
-    Task<IEnumerable<TechnicalSkill>> GetBySkillLevelAsync(int skillLevel);
     Task<bool> IsNameUniqueAsync(string name, Guid? excludeId = null);
-    Task<IEnumerable<TechnicalSkill>> SyncFromHRAsync();
-    Task<IEnumerable<TechnicalSkill>> GetFromHRModuleAsync();
-    Task<TechnicalSkill?> GetByCodeAsync(string code);
+    Task<Skill?> GetByNameAsync(string name);
 }
 
 public interface ITechnicianSkillAssignmentRepository : IGenericRepository<TechnicianSkillAssignment>

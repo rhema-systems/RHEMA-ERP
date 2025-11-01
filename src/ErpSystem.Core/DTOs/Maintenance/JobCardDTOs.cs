@@ -122,6 +122,7 @@ public class JobCardListDto
     public string JobCardNumber { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? ProblemDescription { get; set; }
     public Guid AssetId { get; set; }
     public string AssetName { get; set; } = string.Empty;
     public string AssetCode { get; set; } = string.Empty;

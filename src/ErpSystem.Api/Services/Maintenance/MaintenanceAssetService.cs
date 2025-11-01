@@ -458,21 +458,29 @@ public class MaintenanceAssetService : IMaintenanceAssetService
             var currentYear = DateTime.UtcNow.Year;
             var prefix = $"{categoryPrefix}{currentYear}-";
 
-            var lastAsset = await _assetRepository.GetQueryable()
+            // Get all assets for the current prefix to find max sequence
+            var assetsWithPrefix = await _assetRepository.GetQueryable()
                 .Where(a => a.AssetNumber.StartsWith(prefix))
-                .OrderByDescending(a => a.AssetNumber)
-                .FirstOrDefaultAsync();
+                .Select(a => a.AssetNumber)
+                .ToListAsync();
 
-            if (lastAsset != null)
+            int nextSequence = 1;
+            if (assetsWithPrefix.Any())
             {
-                var numberPart = lastAsset.AssetNumber.Substring(prefix.Length);
-                if (int.TryParse(numberPart, out int lastNumber))
-                {
-                    return $"{prefix}{(lastNumber + 1):D4}";
-                }
+                // Parse all sequence numbers and find the maximum
+                var maxSequence = assetsWithPrefix
+                    .Select(assetNum => {
+                        var numberPart = assetNum.Substring(prefix.Length);
+                        if (int.TryParse(numberPart, out int seq))
+                            return seq;
+                        return 0;
+                    })
+                    .Max();
+                
+                nextSequence = maxSequence + 1;
             }
 
-            return $"{prefix}0001";
+            return $"{prefix}{nextSequence:D4}";
         }
         catch (Exception ex)
         {

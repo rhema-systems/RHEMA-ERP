@@ -223,4 +223,42 @@ public class WorkOrdersController : ControllerBase
             return StatusCode(500, "An error occurred while retrieving work order metrics");
         }
     }
+
+    /// <summary>
+    /// Updates a work order task status
+    /// </summary>
+    [HttpPut("tasks/{taskId:guid}/status")]
+    public async Task<ActionResult<ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto>> UpdateTaskStatus(
+        Guid taskId, 
+        [FromBody] UpdateTaskStatusRequest request)
+    {
+        try
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            var updatedTask = await _workOrderService.UpdateTaskStatusAsync(
+                taskId, 
+                request.Status, 
+                request.ActualHours, 
+                request.CompletionNotes);
+            
+            if (updatedTask == null)
+                return NotFound($"Task with ID {taskId} not found");
+
+            return Ok(updatedTask);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Error updating task {taskId} status");
+            return StatusCode(500, $"An error occurred while updating task status");
+        }
+    }
+}
+
+public class UpdateTaskStatusRequest
+{
+    public string Status { get; set; } = string.Empty;
+    public double? ActualHours { get; set; }
+    public string? CompletionNotes { get; set; }
 }

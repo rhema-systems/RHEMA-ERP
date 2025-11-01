@@ -246,6 +246,13 @@ class MaintenanceApiService {
   // Technicians
   async getTechnicians(): Promise<Employee[]> {
     try {
+      // Check if user is authenticated
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+      if (!token) {
+        console.warn('No authentication token found. User must log in to access employees.');
+        return [];
+      }
+
       // Try the specific maintenance technician endpoint first
       try {
         const response = await apiService.request<any>('/employees/maintenance-available');

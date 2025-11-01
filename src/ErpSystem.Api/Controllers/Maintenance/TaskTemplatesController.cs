@@ -23,6 +23,25 @@ public class TaskTemplatesController : ControllerBase
     #region Asset Task Templates
 
     /// <summary>
+    /// Get all asset task templates across all assets
+    /// </summary>
+    [HttpGet("asset")]
+    public async Task<IActionResult> GetAllAssetTaskTemplates()
+    {
+        try
+        {
+            // Query all asset task templates from the database
+            var templates = await _taskTemplateService.GetAllAssetTaskTemplatesAsync();
+            return Ok(templates);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving all asset task templates");
+            return StatusCode(500, "An error occurred while retrieving asset task templates");
+        }
+    }
+
+    /// <summary>
     /// Get all task templates for a specific asset
     /// </summary>
     [HttpGet("asset/{assetId}")]
@@ -131,6 +150,25 @@ public class TaskTemplatesController : ControllerBase
     #region Asset Type Task Templates
 
     /// <summary>
+    /// Get all asset type task templates across all asset types
+    /// </summary>
+    [HttpGet("asset-type")]
+    public async Task<IActionResult> GetAllAssetTypeTaskTemplates()
+    {
+        try
+        {
+            // Query all asset type task templates from the database
+            var templates = await _taskTemplateService.GetAllAssetTypeTaskTemplatesAsync();
+            return Ok(templates);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving all asset type task templates");
+            return StatusCode(500, "An error occurred while retrieving asset type task templates");
+        }
+    }
+
+    /// <summary>
     /// Get all task templates for a specific asset type
     /// </summary>
     [HttpGet("asset-type/{assetTypeId}")]
@@ -219,6 +257,33 @@ public class TaskTemplatesController : ControllerBase
     #endregion
 
     #region Maintenance Type Task Templates
+
+    /// <summary>
+    /// Get all maintenance task templates (optionally filtered by maintenance type)
+    /// </summary>
+    [HttpGet("maintenance-type")]
+    public async Task<IActionResult> GetAllMaintenanceTaskTemplates([FromQuery] Guid? maintenanceTypeId)
+    {
+        try
+        {
+            if (maintenanceTypeId.HasValue)
+            {
+                var templates = await _taskTemplateService.GetMaintenanceTaskTemplatesAsync(maintenanceTypeId.Value);
+                return Ok(templates);
+            }
+            else
+            {
+                // Return all maintenance task templates
+                var allTemplates = await _taskTemplateService.GetAllMaintenanceTaskTemplatesAsync();
+                return Ok(allTemplates);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving maintenance task templates");
+            return StatusCode(500, "An error occurred while retrieving maintenance task templates");
+        }
+    }
 
     /// <summary>
     /// Get all task templates for a specific maintenance type

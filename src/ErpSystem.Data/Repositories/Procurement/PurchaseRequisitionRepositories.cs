@@ -123,19 +123,26 @@ public class PurchaseRequisitionRepository : GenericRepository<PurchaseRequisiti
         var currentYear = DateTime.UtcNow.Year;
         var yearPrefix = currentYear.ToString().Substring(2); // Last 2 digits of year
         
-        var lastRequisition = await _dbSet
+        // Get all requisitions for the current year to find max sequence
+        var requisitionsInYear = await _dbSet
             .Where(pr => pr.RequisitionNumber.StartsWith($"REQ{yearPrefix}") && !pr.IsDeleted)
-            .OrderByDescending(pr => pr.RequisitionNumber)
-            .FirstOrDefaultAsync();
+            .Select(pr => pr.RequisitionNumber)
+            .ToListAsync();
             
         int nextSequence = 1;
-        if (lastRequisition != null)
+        if (requisitionsInYear.Any())
         {
-            var sequencePart = lastRequisition.RequisitionNumber.Substring(5); // Remove "REQ" + year prefix
-            if (int.TryParse(sequencePart, out int lastSequence))
-            {
-                nextSequence = lastSequence + 1;
-            }
+            // Parse all sequence numbers and find the maximum
+            var maxSequence = requisitionsInYear
+                .Select(rn => {
+                    var sequencePart = rn.Substring(5); // Remove "REQ" + year prefix
+                    if (int.TryParse(sequencePart, out int seq))
+                        return seq;
+                    return 0;
+                })
+                .Max();
+            
+            nextSequence = maxSequence + 1;
         }
         
         return $"REQ{yearPrefix}{nextSequence:D4}"; // Format as REQ24NNNN

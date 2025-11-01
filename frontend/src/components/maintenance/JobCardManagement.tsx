@@ -40,6 +40,7 @@ interface JobCard {
   jobCardNumber: string;
   title: string;
   description?: string;
+  problemDescription?: string;
   assetId: string;
   assetName: string;
   assetCode: string;
@@ -217,6 +218,7 @@ export default function JobCardsPage() {
               jobCardNumber: card.jobCardNumber,
               title: card.title,
               description: card.description,
+              problemDescription: card.problemDescription,
               assetName: card.assetName,
               requestedBy: card.requestedBy,
               jobCardStatus: card.jobCardStatus as JobCard['jobCardStatus'],
@@ -276,6 +278,7 @@ export default function JobCardsPage() {
         jobCardNumber: card.jobCardNumber,
         title: card.title,
         description: card.description,
+        problemDescription: card.problemDescription,
         assetName: card.assetName,
         requestedBy: card.requestedBy,
         jobCardStatus: card.jobCardStatus as JobCard['jobCardStatus'],
@@ -382,6 +385,12 @@ export default function JobCardsPage() {
         
         // Refresh job cards list
         await refreshJobCards();
+        
+        toast({
+          title: "Success",
+          description: "Job card created successfully",
+          variant: "default",
+        });
       }
       
       setIsCreateDialogOpen(false);
@@ -482,8 +491,19 @@ export default function JobCardsPage() {
       
       // Refresh job cards list
       await refreshJobCards();
+      
+      toast({
+        title: "Success",
+        description: `Job card ${jobCard?.jobCardNumber || ''} submitted for approval successfully`,
+        variant: "default",
+      });
     } catch (error) {
       console.error('Error submitting job card:', error);
+      toast({
+        title: "Error",
+        description: "Failed to submit job card. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -523,8 +543,19 @@ export default function JobCardsPage() {
       
       // Refresh job cards list
       await refreshJobCards();
+      
+      toast({
+        title: "Success",
+        description: `Job card ${jobCard?.jobCardNumber || ''} approved successfully`,
+        variant: "default",
+      });
     } catch (error) {
       console.error('Error approving job card:', error);
+      toast({
+        title: "Error",
+        description: "Failed to approve job card. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -564,6 +595,12 @@ export default function JobCardsPage() {
       
       // Refresh job cards list
       await refreshJobCards();
+      
+      toast({
+        title: "Job Card Rejected",
+        description: `Job card ${jobCard?.jobCardNumber || ''} has been rejected`,
+        variant: "destructive",
+      });
     } catch (error) {
       console.error('Error rejecting job card:', error);
     }
@@ -629,8 +666,19 @@ export default function JobCardsPage() {
       console.log('Work order generated:', result);
       // Refresh job cards list to show updated status
       await refreshJobCards();
+      
+      toast({
+        title: "Success",
+        description: "Work order generated successfully",
+        variant: "default",
+      });
     } catch (error) {
       console.error('Error generating work order:', error);
+      toast({
+        title: "Error",
+        description: "Failed to generate work order. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -938,7 +986,7 @@ export default function JobCardsPage() {
                                 priorityLevelId: card.priorityLevelId,
                                 estimatedHours: card.estimatedHours,
                                 estimatedCost: card.estimatedCost,
-                                problemDescription: '',
+                                problemDescription: card.problemDescription || '',
                               });
                               setIsEditDialogOpen(true);
                             }}
@@ -1019,7 +1067,7 @@ export default function JobCardsPage() {
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Edit Job Card</DialogTitle>
+            <DialogTitle>Edit Job Card {selectedCard?.jobCardNumber ? `- ${selectedCard.jobCardNumber}` : ''}</DialogTitle>
             <DialogDescription>
               Update job card details
             </DialogDescription>

@@ -184,6 +184,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<EmployeeIdentificationCard> EmployeeIdentificationCards { get; set; }
     public DbSet<EmployeeWorkHistory> EmployeeWorkHistories { get; set; }
     public DbSet<EmployeeContractDetail> EmployeeContractDetails { get; set; }
+    public DbSet<Skill> Skills { get; set; }
     public DbSet<EmployeeSkill> EmployeeSkills { get; set; }
     public DbSet<AttendanceRecord> AttendanceRecords { get; set; }
     public DbSet<EmployeeBiometric> EmployeeBiometrics { get; set; }

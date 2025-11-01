@@ -205,6 +205,12 @@ public class TaskTemplateService : ITaskTemplateService
         await _unitOfWork.SaveChangesAsync();
     }
 
+    public async Task<IEnumerable<AssetTaskTemplateDto>> GetAllAssetTaskTemplatesAsync()
+    {
+        var templates = await _assetTaskTemplateRepository.GetAllAsync();
+        return templates.Select(MapToAssetTaskTemplateDto);
+    }
+
     #endregion
 
     #region Asset Type Task Templates
@@ -270,13 +276,25 @@ public class TaskTemplateService : ITaskTemplateService
         await _unitOfWork.SaveChangesAsync();
     }
 
+    public async Task<IEnumerable<AssetTypeTaskTemplateDto>> GetAllAssetTypeTaskTemplatesAsync()
+    {
+        var templates = await _assetTypeTaskTemplateRepository.GetAllAsync();
+        return templates.Select(MapToAssetTypeTaskTemplateDto);
+    }
+
     #endregion
 
-    #region Maintenance Task Templates
+    #region Maintenance Type Task Templates
 
     public async Task<IEnumerable<MaintenanceTaskTemplateDto>> GetMaintenanceTaskTemplatesAsync(Guid maintenanceTypeId)
     {
         var templates = await _maintenanceTaskTemplateRepository.GetByMaintenanceTypeIdAsync(maintenanceTypeId);
+        return templates.Select(MapToMaintenanceTaskTemplateDto);
+    }
+    
+    public async Task<IEnumerable<MaintenanceTaskTemplateDto>> GetAllMaintenanceTaskTemplatesAsync()
+    {
+        var templates = await _maintenanceTaskTemplateRepository.GetAllAsync();
         return templates.Select(MapToMaintenanceTaskTemplateDto);
     }
 

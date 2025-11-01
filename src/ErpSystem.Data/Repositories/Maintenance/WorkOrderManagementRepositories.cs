@@ -11,6 +11,32 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
 {
     public WorkOrderRepository(ApplicationDbContext context) : base(context) { }
 
+    public override async Task<WorkOrder?> GetByIdAsync(Guid id)
+    {
+        return await _dbSet
+            .Where(wo => wo.Id == id && !wo.IsDeleted)
+            .Include(wo => wo.JobCard)
+            .Include(wo => wo.Asset)
+            .Include(wo => wo.PriorityLevel)
+            .Include(wo => wo.MaintenanceType)
+            .Include(wo => wo.WorkOrderType)
+            .Include(wo => wo.Tasks)
+            .FirstOrDefaultAsync();
+    }
+
+    public override async Task<IEnumerable<WorkOrder>> GetAllAsync()
+    {
+        return await _dbSet
+            .Where(wo => !wo.IsDeleted)
+            .Include(wo => wo.JobCard)
+            .Include(wo => wo.Asset)
+            .Include(wo => wo.PriorityLevel)
+            .Include(wo => wo.MaintenanceType)
+            .Include(wo => wo.WorkOrderType)
+            .Include(wo => wo.Tasks)
+            .ToListAsync();
+    }
+
     public async Task<WorkOrder?> GetByWorkOrderNumberAsync(string workOrderNumber)
     {
         if (string.IsNullOrWhiteSpace(workOrderNumber))
@@ -18,6 +44,7 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
             
         return await _dbSet
             .Where(wo => wo.WorkOrderNumber == workOrderNumber && !wo.IsDeleted)
+            .Include(wo => wo.JobCard)
             .Include(wo => wo.Asset)
             .Include(wo => wo.PriorityLevel)
             .Include(wo => wo.MaintenanceType)
@@ -44,6 +71,7 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
             
         return await _dbSet
             .Where(wo => wo.AssetId == assetId && !wo.IsDeleted)
+            .Include(wo => wo.JobCard)
             .Include(wo => wo.Asset)
             .Include(wo => wo.PriorityLevel)
             .Include(wo => wo.MaintenanceType)
@@ -59,6 +87,7 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
             
         return await _dbSet
             .Where(wo => wo.Status == status && !wo.IsDeleted)
+            .Include(wo => wo.JobCard)
             .Include(wo => wo.Asset)
             .Include(wo => wo.PriorityLevel)
             .Include(wo => wo.MaintenanceType)
@@ -73,6 +102,7 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
             
         return await _dbSet
             .Where(wo => wo.PriorityLevelId == priorityLevelId && !wo.IsDeleted)
+            .Include(wo => wo.JobCard)
             .Include(wo => wo.Asset)
             .Include(wo => wo.PriorityLevel)
             .Include(wo => wo.MaintenanceType)
@@ -87,6 +117,7 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
             
         return await _dbSet
             .Where(wo => wo.AssignedTechnicianId == technicianId && !wo.IsDeleted)
+            .Include(wo => wo.JobCard)
             .Include(wo => wo.Asset)
             .Include(wo => wo.PriorityLevel)
             .Include(wo => wo.MaintenanceType)
@@ -101,6 +132,7 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
             
         return await _dbSet
             .Where(wo => wo.AssignedTeamId == teamId && !wo.IsDeleted)
+            .Include(wo => wo.JobCard)
             .Include(wo => wo.Asset)
             .Include(wo => wo.PriorityLevel)
             .Include(wo => wo.MaintenanceType)
@@ -116,6 +148,7 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
                         wo.Status != "Completed" &&
                         wo.Status != "Cancelled" &&
                         wo.RequestedStartDate < today)
+            .Include(wo => wo.JobCard)
             .Include(wo => wo.Asset)
             .Include(wo => wo.PriorityLevel)
             .Include(wo => wo.MaintenanceType)
@@ -131,6 +164,7 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
                         wo.Status != "Completed" &&
                         wo.Status != "Cancelled" &&
                         wo.RequestedStartDate <= targetDate)
+            .Include(wo => wo.JobCard)
             .Include(wo => wo.Asset)
             .Include(wo => wo.PriorityLevel)
             .Include(wo => wo.MaintenanceType)
@@ -145,6 +179,7 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
             
         return await _dbSet
             .Where(wo => wo.MaintenanceScheduleId == scheduleId && !wo.IsDeleted)
+            .Include(wo => wo.JobCard)
             .Include(wo => wo.Asset)
             .Include(wo => wo.PriorityLevel)
             .Include(wo => wo.MaintenanceType)
@@ -159,6 +194,7 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
             
         return await _dbSet
             .Where(wo => wo.ParentWorkOrderId == parentWorkOrderId && !wo.IsDeleted)
+            .Include(wo => wo.JobCard)
             .Include(wo => wo.Asset)
             .Include(wo => wo.PriorityLevel)
             .Include(wo => wo.MaintenanceType)
@@ -175,6 +211,7 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
             .Where(wo => !wo.IsDeleted &&
                         wo.RequestedStartDate >= startDate &&
                         wo.RequestedStartDate <= endDate)
+            .Include(wo => wo.JobCard)
             .Include(wo => wo.Asset)
             .Include(wo => wo.PriorityLevel)
             .Include(wo => wo.MaintenanceType)
@@ -186,23 +223,31 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
     {
         var currentYear = DateTime.UtcNow.Year;
         var yearPrefix = currentYear.ToString().Substring(2); // Last 2 digits of year
+        var prefix = $"WO{yearPrefix}";
         
-        var lastWorkOrder = await _dbSet
-            .Where(wo => wo.WorkOrderNumber.StartsWith($"WO{yearPrefix}") && !wo.IsDeleted)
-            .OrderByDescending(wo => wo.WorkOrderNumber)
-            .FirstOrDefaultAsync();
+        // Get all work order numbers for the current year
+        var workOrdersInYear = await _dbSet
+            .Where(wo => wo.WorkOrderNumber.StartsWith(prefix) && !wo.IsDeleted)
+            .Select(wo => wo.WorkOrderNumber)
+            .ToListAsync();
             
         int nextSequence = 1;
-        if (lastWorkOrder != null)
+        if (workOrdersInYear.Any())
         {
-            var sequencePart = lastWorkOrder.WorkOrderNumber.Substring(4); // Remove "WO" + year prefix
-            if (int.TryParse(sequencePart, out int lastSequence))
-            {
-                nextSequence = lastSequence + 1;
-            }
+            // Parse all sequence numbers and find the maximum
+            var maxSequence = workOrdersInYear
+                .Select(won => {
+                    var sequencePart = won.Substring(4); // Remove "WO" + year prefix (2 chars each)
+                    if (int.TryParse(sequencePart, out int seq))
+                        return seq;
+                    return 0;
+                })
+                .Max();
+            
+            nextSequence = maxSequence + 1;
         }
         
-        return $"WO{yearPrefix}{nextSequence:D4}"; // Format as WO24NNNN
+        return $"WO{yearPrefix}{nextSequence:D4}"; // Format as WO25NNNN
     }
 
     public async Task<decimal> GetTotalCostByAssetAsync(Guid assetId)

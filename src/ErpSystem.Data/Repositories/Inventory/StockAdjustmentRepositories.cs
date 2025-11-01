@@ -88,19 +88,26 @@ public class StockAdjustmentRepository : GenericRepository<StockAdjustment>, ISt
         var currentYear = DateTime.UtcNow.Year;
         var yearPrefix = currentYear.ToString().Substring(2); // Last 2 digits of year
         
-        var lastAdjustment = await _dbSet
+        // Get all adjustments for the current year to find max sequence
+        var adjustmentsInYear = await _dbSet
             .Where(sa => sa.AdjustmentNumber.StartsWith($"ADJ{yearPrefix}") && !sa.IsDeleted)
-            .OrderByDescending(sa => sa.AdjustmentNumber)
-            .FirstOrDefaultAsync();
+            .Select(sa => sa.AdjustmentNumber)
+            .ToListAsync();
             
         int nextSequence = 1;
-        if (lastAdjustment != null)
+        if (adjustmentsInYear.Any())
         {
-            var sequencePart = lastAdjustment.AdjustmentNumber.Substring(5); // Remove "ADJ" + year prefix
-            if (int.TryParse(sequencePart, out int lastSequence))
-            {
-                nextSequence = lastSequence + 1;
-            }
+            // Parse all sequence numbers and find the maximum
+            var maxSequence = adjustmentsInYear
+                .Select(an => {
+                    var sequencePart = an.Substring(5); // Remove "ADJ" + year prefix
+                    if (int.TryParse(sequencePart, out int seq))
+                        return seq;
+                    return 0;
+                })
+                .Max();
+            
+            nextSequence = maxSequence + 1;
         }
         
         return $"ADJ{yearPrefix}{nextSequence:D4}"; // Format as ADJ24NNNN

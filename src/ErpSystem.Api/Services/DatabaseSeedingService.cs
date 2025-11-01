@@ -64,6 +64,14 @@ namespace ErpSystem.Web.Services
                 {
                     _logger.LogInformation("Ensuring test users have correct passwords...");
                     await SeedTestUsersAsync();
+                    
+                    // Always ensure maintenance configuration is seeded in development
+                    _logger.LogInformation("Ensuring maintenance configuration is seeded...");
+                    await SeedMaintenanceConfigurationAsync();
+                    
+                    // Seed comprehensive maintenance data (inventory, assets, templates, checklists)
+                    _logger.LogInformation("Ensuring comprehensive maintenance data is seeded...");
+                    await SeedMaintenanceComprehensiveDataAsync();
                 }
 
                 await _context.SaveChangesAsync();
@@ -88,6 +96,12 @@ namespace ErpSystem.Web.Services
             
             // Seed default tenant modules
             await SeedDefaultTenantModulesAsync();
+
+            // Seed HR data (departments, positions, employees)
+            await SeedHRDataAsync();
+
+            // Seed maintenance configuration (work order types, priority levels, maintenance types)
+            await SeedMaintenanceConfigurationAsync();
 
             _logger.LogInformation("Basic data seeding completed");
         }
@@ -135,6 +149,66 @@ namespace ErpSystem.Web.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error seeding Maintenance E2E test data");
+                throw;
+            }
+        }
+
+        private async Task SeedHRDataAsync()
+        {
+            _logger.LogInformation("Seeding HR data...");
+            
+            try
+            {
+                var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+                var seederLogger = loggerFactory.CreateLogger<HRDataSeeder>();
+                
+                var seeder = new HRDataSeeder(_context, seederLogger);
+                await seeder.SeedAsync();
+                _logger.LogInformation("HR data seeding completed");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error seeding HR data");
+                throw;
+            }
+        }
+
+        private async Task SeedMaintenanceConfigurationAsync()
+        {
+            _logger.LogInformation("Seeding maintenance configuration...");
+            
+            try
+            {
+                var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+                var seederLogger = loggerFactory.CreateLogger<MaintenanceConfigurationSeeder>();
+                
+                var seeder = new MaintenanceConfigurationSeeder(_context, seederLogger);
+                await seeder.SeedAsync();
+                _logger.LogInformation("Maintenance configuration seeding completed");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error seeding maintenance configuration");
+                throw;
+            }
+        }
+        
+        private async Task SeedMaintenanceComprehensiveDataAsync()
+        {
+            _logger.LogInformation("Seeding comprehensive maintenance data...");
+            
+            try
+            {
+                var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+                var seederLogger = loggerFactory.CreateLogger<MaintenanceComprehensiveDataSeeder>();
+                
+                var seeder = new MaintenanceComprehensiveDataSeeder(_context, seederLogger);
+                await seeder.SeedAsync();
+                _logger.LogInformation("Comprehensive maintenance data seeding completed");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error seeding comprehensive maintenance data");
                 throw;
             }
         }

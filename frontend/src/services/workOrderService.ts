@@ -7,6 +7,8 @@ export interface WorkOrder {
   workOrderNumber: string;
   title: string;
   description: string;
+  jobCardId?: string;
+  jobCardNumber?: string;
   assetId: string;
   assetName?: string;
   workOrderTypeId: string;
@@ -61,6 +63,8 @@ export interface WorkOrderListItem {
   workOrderNumber: string;
   title: string;
   description?: string;
+  jobCardId?: string;
+  jobCardNumber?: string;
   assetId: string;
   assetName: string;
   assetNumber: string;
@@ -125,22 +129,22 @@ export interface UpdateWorkOrderRequest {
   id: string;
   title: string;
   description?: string;
-  instructions: string;
-  notes: string;
-  status: string;
-  workOrderTypeId: string;
-  maintenanceTypeId: string;
-  priorityLevelId: string;
+  instructions?: string;
+  notes?: string;
+  status?: string;
+  workOrderTypeId?: string;
+  maintenanceTypeId?: string;
+  priorityLevelId?: string;
   assignedTechnicianId?: string;
   assignedTeamId?: string;
   requestedStartDate?: string;
   requestedCompletionDate?: string;
-  estimatedCost: number;
-  estimatedHours: number;
+  estimatedCost?: number;
+  estimatedHours?: number;
   safetyRequirements?: string;
-  requiresPermit: boolean;
-  requiresLockout: boolean;
-  requiresConfinedSpaceEntry: boolean;
+  requiresPermit?: boolean;
+  requiresLockout?: boolean;
+  requiresConfinedSpaceEntry?: boolean;
 }
 
 export interface UpdateWorkOrderStatusRequest {
@@ -217,7 +221,17 @@ class WorkOrderService {
 
   // Update work order
   async updateWorkOrder(id: string, data: UpdateWorkOrderRequest): Promise<WorkOrder> {
-    const response = await axios.put(`${API_URL}/maintenance/work-orders/${id}`, data, {
+    // Clean up empty strings - convert to null/undefined for GUID fields
+    const cleanedData = {
+      ...data,
+      workOrderTypeId: data.workOrderTypeId && data.workOrderTypeId.trim() !== '' ? data.workOrderTypeId : undefined,
+      maintenanceTypeId: data.maintenanceTypeId && data.maintenanceTypeId.trim() !== '' ? data.maintenanceTypeId : undefined,
+      priorityLevelId: data.priorityLevelId && data.priorityLevelId.trim() !== '' ? data.priorityLevelId : undefined,
+      assignedTechnicianId: data.assignedTechnicianId && data.assignedTechnicianId.trim() !== '' ? data.assignedTechnicianId : undefined,
+      assignedTeamId: data.assignedTeamId && data.assignedTeamId.trim() !== '' ? data.assignedTeamId : undefined,
+    };
+    
+    const response = await axios.put(`${API_URL}/maintenance/work-orders/${id}`, cleanedData, {
       headers: this.getAuthHeaders()
     });
     return response.data;

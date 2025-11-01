@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, ChevronDown, User, ClipboardList, History, FileText } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 import {
   Dialog,
   DialogContent,
@@ -61,8 +62,10 @@ interface WorkOrder {
   createdAt: string;
   requestedCompletionDate?: string;
   actualCompletionDate?: string;
+  actualStartDate?: string;
   estimatedHours?: number;
   actualHours?: number;
+  estimatedCost?: number;
   jobCardId?: string;
   jobCardNumber?: string;
   tasks?: WorkOrderTask[];
@@ -83,22 +86,32 @@ interface JobCard {
 
 
 export default function WorkOrdersPage() {
+  const { toast } = useToast();
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<WorkOrder[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<WorkOrder | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [selectedOrderTasks, setSelectedOrderTasks] = useState<WorkOrderTask[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [qualityValidation, setQualityValidation] = useState<{[key: string]: QualityValidationResult}>({});
   
+  // Task completion dialog state
+  const [isTaskCompletionDialogOpen, setIsTaskCompletionDialogOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<WorkOrderTask | null>(null);
+  const [taskActualHours, setTaskActualHours] = useState<number>(0);
+  const [taskCompletionNotes, setTaskCompletionNotes] = useState<string>('');
+  
   // Data from services
   const [technicians, setTechnicians] = useState<Employee[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [workOrderTypes, setWorkOrderTypes] = useState<WorkOrderType[]>([]);
+  const [maintenanceTypes, setMaintenanceTypes] = useState<any[]>([]);
+  const [priorities, setPriorities] = useState<PriorityLevel[]>([]);
   const [priorityLevels, setPriorityLevels] = useState<PriorityLevel[]>([]);
   const [jobCards, setJobCards] = useState<JobCard[]>([]);
   const [loadingData, setLoadingData] = useState(true);
@@ -121,16 +134,19 @@ export default function WorkOrdersPage() {
     const loadData = async () => {
       setLoadingData(true);
       try {
-        const [techniciansList, assetsResponse, workOrderTypesList, priorityLevelsList] = await Promise.all([
+        const [techniciansList, assetsResponse, workOrderTypesList, maintenanceTypesList, priorityLevelsList] = await Promise.all([
           maintenanceApiService.getTechnicians(),
           maintenanceApiService.getAssets(),
           maintenanceApiService.getWorkOrderTypes(),
+          maintenanceApiService.getMaintenanceTypes(),
           maintenanceApiService.getPriorityLevels()
         ]);
         
         setTechnicians(Array.isArray(techniciansList) ? techniciansList : []);
         setAssets(assetsResponse.items || []);
         setWorkOrderTypes(Array.isArray(workOrderTypesList) ? workOrderTypesList : []);
+        setMaintenanceTypes(Array.isArray(maintenanceTypesList) ? maintenanceTypesList : []);
+        setPriorities(Array.isArray(priorityLevelsList) ? priorityLevelsList : []);
         setPriorityLevels(Array.isArray(priorityLevelsList) ? priorityLevelsList : []);
         
         // Get approved job cards from API (with error handling)
@@ -227,6 +243,36 @@ export default function WorkOrdersPage() {
     }
   };
 
+  const handleEditWorkOrder = async () => {
+    if (!selectedOrder) return;
+    
+    try {
+      const updateData = {
+        id: selectedOrder.id,
+        title: selectedOrder.title,
+        description: selectedOrder.description,
+        workOrderTypeId: selectedOrder.workOrderTypeId,
+        maintenanceTypeId: selectedOrder.maintenanceTypeId,
+        priorityLevelId: selectedOrder.priorityLevelId,
+        assignedTechnicianId: selectedOrder.assignedTechnicianId,
+        requestedCompletionDate: selectedOrder.requestedCompletionDate,
+        estimatedHours: selectedOrder.estimatedHours || 0,
+        estimatedCost: selectedOrder.estimatedCost || 0,
+      };
+
+      await maintenanceApiService.updateWorkOrder(selectedOrder.id, updateData);
+      
+      // Refresh work orders list
+      const workOrdersResponse = await maintenanceApiService.getWorkOrders();
+      setWorkOrders(workOrdersResponse.items);
+      
+      setIsEditDialogOpen(false);
+      setSelectedOrder(null);
+    } catch (error) {
+      console.error('Error updating work order:', error);
+    }
+  };
+
   const getStatusBadge = (status: WorkOrder['status']) => {
     const variants = {
       'Draft': 'outline',
@@ -280,12 +326,20 @@ export default function WorkOrdersPage() {
       if (newStatus === 'Completed') {
         const validation = await validateQualityControl(orderId);
         if (!validation.canComplete) {
-          alert(`Cannot complete work order: ${validation.validationFailures.join(', ')}`);
+          toast({
+            title: 'Cannot Complete Work Order',
+            description: validation.validationFailures.join(', '),
+            variant: 'destructive'
+          });
           return;
         }
         
         if (validation.requiresInspectionOfficerApproval) {
-          alert('Work order requires inspection officer approval before completion.');
+          toast({
+            title: 'Inspection Required',
+            description: 'Work order requires inspection officer approval before completion.',
+            variant: 'destructive'
+          });
           return;
         }
       }
@@ -295,8 +349,19 @@ export default function WorkOrdersPage() {
       // Refresh work orders list
       const workOrdersResponse = await maintenanceApiService.getWorkOrders();
       setWorkOrders(workOrdersResponse.items);
+      
+      toast({
+        title: 'Success',
+        description: `Work order status updated to ${newStatus}`,
+        variant: 'success'
+      });
     } catch (error) {
       console.error('Error updating work order status:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to update work order status',
+        variant: 'destructive'
+      });
     }
   };
 
@@ -318,6 +383,68 @@ export default function WorkOrdersPage() {
         requiresInspectionOfficerApproval: false
       };
     }
+  };
+
+
+  const handleTaskStatusUpdate = async (taskId: string, newStatus: string, actualHours: number | null = null, completionNotes: string | null = null) => {
+    try {
+      // Update task status via API
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/maintenance/work-orders/tasks/${taskId}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`
+        },
+        body: JSON.stringify({
+          status: newStatus,
+          actualHours: actualHours,
+          completionNotes: completionNotes
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update task status');
+      }
+
+      const updatedTask = await response.json();
+      
+      // Update local state with the response from the server
+      setSelectedOrderTasks(prevTasks =>
+        prevTasks.map(task =>
+          task.id === taskId ? updatedTask : task
+        )
+      );
+      
+      toast({
+        title: 'Success',
+        description: `Task ${newStatus === 'Completed' ? 'completed' : 'updated'} successfully`,
+        variant: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating task status:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to update task status',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleCompleteTaskClick = (task: WorkOrderTask) => {
+    setSelectedTask(task);
+    setTaskActualHours(task.actualHours || task.estimatedHours);
+    setTaskCompletionNotes('');
+    setIsTaskCompletionDialogOpen(true);
+  };
+
+  const handleCompleteTaskSubmit = async () => {
+    if (!selectedTask) return;
+    
+    await handleTaskStatusUpdate(selectedTask.id, 'Completed', taskActualHours, taskCompletionNotes);
+    setIsTaskCompletionDialogOpen(false);
+    setSelectedTask(null);
+    setTaskActualHours(0);
+    setTaskCompletionNotes('');
   };
 
   return (
@@ -670,8 +797,8 @@ export default function WorkOrdersPage() {
                             size="sm"
                             variant="outline"
                             onClick={() => {
-                              // TODO: Add edit functionality
-                              console.log('Edit work order:', order.id);
+                              setSelectedOrder(order);
+                              setIsEditDialogOpen(true);
                             }}
                           >
                             <Edit className="h-4 w-4" />
@@ -698,7 +825,11 @@ export default function WorkOrdersPage() {
                               if (validation.canComplete && !validation.requiresInspectionOfficerApproval) {
                                 updateWorkOrderStatus(order.id, 'Completed');
                               } else {
-                                alert(`Quality Control Required: ${validation.validationFailures.join(', ')}`);
+                                toast({
+                                  title: 'Quality Control Required',
+                                  description: validation.validationFailures.join(', '),
+                                  variant: 'destructive'
+                                });
                               }
                             })}
                             className={qualityValidation[order.id]?.canComplete ? 'bg-green-50 hover:bg-green-100' : 'bg-yellow-50 hover:bg-yellow-100'}
@@ -888,6 +1019,35 @@ export default function WorkOrdersPage() {
                             <Badge variant="outline" className="text-xs">Required</Badge>
                           )}
                         </div>
+                        {/* Task action buttons */}
+                        {selectedOrder.status !== 'Completed' && selectedOrder.status !== 'Cancelled' && (
+                          <div className="flex gap-2 mt-3 pl-11">
+                            {task.status === 'Pending' && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleTaskStatusUpdate(task.id, 'InProgress')}
+                              >
+                                Start Task
+                              </Button>
+                            )}
+                            {task.status === 'InProgress' && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleCompleteTaskClick(task)}
+                              >
+                                Mark Complete
+                              </Button>
+                            )}
+                            {task.status === 'Completed' && task.completedAt && (
+                              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                                <CheckCircle className="h-3 w-3 text-green-600" />
+                                Completed on {new Date(task.completedAt).toLocaleString()}
+                              </p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -986,6 +1146,236 @@ export default function WorkOrdersPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      </ClientOnly>
+
+      {/* Edit Work Order Dialog */}
+      <ClientOnly>
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit Work Order - {selectedOrder?.workOrderNumber}</DialogTitle>
+            <DialogDescription>
+              Update work order details
+            </DialogDescription>
+          </DialogHeader>
+          {selectedOrder && (
+            <div className="grid gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-title">Title</Label>
+                <Input
+                  id="edit-title"
+                  value={selectedOrder.title}
+                  onChange={(e) => setSelectedOrder({ ...selectedOrder, title: e.target.value })}
+                  placeholder="Work order title"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-description">Description</Label>
+                <Textarea
+                  id="edit-description"
+                  value={selectedOrder.description || ''}
+                  onChange={(e) => setSelectedOrder({ ...selectedOrder, description: e.target.value })}
+                  placeholder="Detailed description of the work to be performed"
+                  rows={3}
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-workOrderType">Work Order Type</Label>
+                  <Select 
+                    value={selectedOrder.workOrderTypeId || 'none'} 
+                    onValueChange={(value) => setSelectedOrder({ 
+                      ...selectedOrder, 
+                      workOrderTypeId: value === 'none' ? undefined : value 
+                    })} 
+                    disabled={loadingData}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={loadingData ? "Loading..." : "Select type"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Not Selected</SelectItem>
+                      {workOrderTypes.map((type) => (
+                        <SelectItem key={type.id} value={type.id}>
+                          {type.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-maintenanceType">Maintenance Type</Label>
+                  <Select 
+                    value={selectedOrder.maintenanceTypeId || 'none'} 
+                    onValueChange={(value) => setSelectedOrder({ 
+                      ...selectedOrder, 
+                      maintenanceTypeId: value === 'none' ? undefined : value 
+                    })} 
+                    disabled={loadingData}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={loadingData ? "Loading..." : "Select type"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Not Selected</SelectItem>
+                      {maintenanceTypes.map((type) => (
+                        <SelectItem key={type.id} value={type.id}>
+                          {type.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-priority">Priority Level</Label>
+                  <Select 
+                    value={selectedOrder.priorityLevelId || 'none'} 
+                    onValueChange={(value) => setSelectedOrder({ 
+                      ...selectedOrder, 
+                      priorityLevelId: value === 'none' ? undefined : value 
+                    })} 
+                    disabled={loadingData}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={loadingData ? "Loading..." : "Select priority"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Not Selected</SelectItem>
+                      {priorities.map((priority) => (
+                        <SelectItem key={priority.id} value={priority.id}>
+                          {priority.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-technician">Assigned Technician</Label>
+                  <Select 
+                    value={selectedOrder.assignedTechnicianId || 'none'} 
+                    onValueChange={(value) => setSelectedOrder({ 
+                      ...selectedOrder, 
+                      assignedTechnicianId: value === 'none' ? undefined : value 
+                    })} 
+                    disabled={loadingData}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={loadingData ? "Loading technicians..." : "Select technician"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Unassigned</SelectItem>
+                      {technicians.map((technician) => (
+                        <SelectItem key={technician.id} value={technician.id}>
+                          {technician.firstName} {technician.lastName} - {technician.position}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-dueDate">Due Date</Label>
+                  <Input
+                    id="edit-dueDate"
+                    type="date"
+                    value={selectedOrder.requestedCompletionDate ? new Date(selectedOrder.requestedCompletionDate).toISOString().split('T')[0] : ''}
+                    onChange={(e) => setSelectedOrder({ ...selectedOrder, requestedCompletionDate: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-estimatedHours">Estimated Hours</Label>
+                  <Input
+                    id="edit-estimatedHours"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={selectedOrder.estimatedHours || 0}
+                    onChange={(e) => setSelectedOrder({ ...selectedOrder, estimatedHours: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-estimatedCost">Estimated Cost</Label>
+                  <Input
+                    id="edit-estimatedCost"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={selectedOrder.estimatedCost || 0}
+                    onChange={(e) => setSelectedOrder({ ...selectedOrder, estimatedCost: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setIsEditDialogOpen(false);
+              setSelectedOrder(null);
+            }}>
+              Cancel
+            </Button>
+            <Button onClick={handleEditWorkOrder}>
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      </ClientOnly>
+
+      {/* Task Completion Dialog */}
+      <ClientOnly>
+      <Dialog open={isTaskCompletionDialogOpen} onOpenChange={setIsTaskCompletionDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Complete Task</DialogTitle>
+            <DialogDescription>
+              Enter actual hours worked and completion notes
+            </DialogDescription>
+          </DialogHeader>
+          {selectedTask && (
+            <div className="space-y-4">
+              <div>
+                <Label className="text-sm font-medium">Task</Label>
+                <p className="text-sm text-muted-foreground">{selectedTask.taskName}</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="actualHours">Actual Hours</Label>
+                <Input
+                  id="actualHours"
+                  type="number"
+                  min="0"
+                  step="0.25"
+                  value={taskActualHours}
+                  onChange={(e) => setTaskActualHours(parseFloat(e.target.value) || 0)}
+                  placeholder="Enter actual hours worked"
+                />
+                <p className="text-xs text-muted-foreground">Estimated: {selectedTask.estimatedHours} hours</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="completionNotes">Completion Notes (Optional)</Label>
+                <Textarea
+                  id="completionNotes"
+                  value={taskCompletionNotes}
+                  onChange={(e) => setTaskCompletionNotes(e.target.value)}
+                  placeholder="Add any notes about the completed task..."
+                  rows={3}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsTaskCompletionDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCompleteTaskSubmit}>
+              Complete Task
             </Button>
           </DialogFooter>
         </DialogContent>

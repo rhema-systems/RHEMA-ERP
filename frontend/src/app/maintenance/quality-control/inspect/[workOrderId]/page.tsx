@@ -134,10 +134,10 @@ export default function InspectionPage() {
         const files = await fileUploadService.getFilesByEntity('inspection', activeInspection.id);
         setUploadedFiles(files);
       } else {
-        // Load available checklists
+        // Load available checklists based on work order's asset category
         const checklists = await qualityChecklistService.getChecklistsForWorkOrder(
           workOrderData.workOrderType,
-          'Vehicle', // This should be dynamic based on asset category
+          workOrderData.assetCategory, // Use actual asset category from work order
           workOrderData.maintenanceType
         );
         setAvailableChecklists(checklists);

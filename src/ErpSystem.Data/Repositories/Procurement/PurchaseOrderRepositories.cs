@@ -126,19 +126,26 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
         var currentYear = DateTime.UtcNow.Year;
         var yearPrefix = currentYear.ToString().Substring(2); // Last 2 digits of year
         
-        var lastOrder = await _dbSet
+        // Get all purchase orders for the current year to find max sequence
+        var ordersInYear = await _dbSet
             .Where(po => po.OrderNumber.StartsWith($"PO{yearPrefix}") && !po.IsDeleted)
-            .OrderByDescending(po => po.OrderNumber)
-            .FirstOrDefaultAsync();
+            .Select(po => po.OrderNumber)
+            .ToListAsync();
             
         int nextSequence = 1;
-        if (lastOrder != null)
+        if (ordersInYear.Any())
         {
-            var sequencePart = lastOrder.OrderNumber.Substring(4); // Remove "PO" + year prefix
-            if (int.TryParse(sequencePart, out int lastSequence))
-            {
-                nextSequence = lastSequence + 1;
-            }
+            // Parse all sequence numbers and find the maximum
+            var maxSequence = ordersInYear
+                .Select(on => {
+                    var sequencePart = on.Substring(4); // Remove "PO" + year prefix
+                    if (int.TryParse(sequencePart, out int seq))
+                        return seq;
+                    return 0;
+                })
+                .Max();
+            
+            nextSequence = maxSequence + 1;
         }
         
         return $"PO{yearPrefix}{nextSequence:D4}"; // Format as PO24NNNN
@@ -483,19 +490,26 @@ public class PurchaseOrderReceiptRepository : GenericRepository<PurchaseOrderRec
         var currentYear = DateTime.UtcNow.Year;
         var yearPrefix = currentYear.ToString().Substring(2); // Last 2 digits of year
         
-        var lastReceipt = await _dbSet
+        // Get all receipts for the current year to find max sequence
+        var receiptsInYear = await _dbSet
             .Where(por => por.ReceiptNumber.StartsWith($"REC{yearPrefix}") && !por.IsDeleted)
-            .OrderByDescending(por => por.ReceiptNumber)
-            .FirstOrDefaultAsync();
+            .Select(por => por.ReceiptNumber)
+            .ToListAsync();
             
         int nextSequence = 1;
-        if (lastReceipt != null)
+        if (receiptsInYear.Any())
         {
-            var sequencePart = lastReceipt.ReceiptNumber.Substring(5); // Remove "REC" + year prefix
-            if (int.TryParse(sequencePart, out int lastSequence))
-            {
-                nextSequence = lastSequence + 1;
-            }
+            // Parse all sequence numbers and find the maximum
+            var maxSequence = receiptsInYear
+                .Select(rn => {
+                    var sequencePart = rn.Substring(5); // Remove "REC" + year prefix
+                    if (int.TryParse(sequencePart, out int seq))
+                        return seq;
+                    return 0;
+                })
+                .Max();
+            
+            nextSequence = maxSequence + 1;
         }
         
         return $"REC{yearPrefix}{nextSequence:D4}"; // Format as REC24NNNN

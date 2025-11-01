@@ -522,8 +522,8 @@ public class JobCardService : IJobCardService
                 AssignedTeamId = jobCard.AssignedTeamId,
                 SafetyRequirements = jobCard.SafetyRequirements,
                 RequiresPermit = jobCard.RequiresSafetyPermit,
-                RequiresLockout = jobCard.RequiresShutdown
-                // Note: JobCardId and CustomFieldValues would need to be added to CreateWorkOrderDto if needed
+                RequiresLockout = jobCard.RequiresShutdown,
+                JobCardId = jobCardId // Link the work order to the job card
             };
 
             _logger.LogDebug("Calling WorkOrderService.CreateWorkOrderAsync with DTO: {@CreateWorkOrderDto}", createWorkOrderDto);

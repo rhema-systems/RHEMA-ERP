@@ -12,6 +12,15 @@ public class AssetTaskTemplateRepository : GenericRepository<AssetTaskTemplate>,
     {
     }
 
+    public override async Task<IEnumerable<AssetTaskTemplate>> GetAllAsync()
+    {
+        return await _dbSet
+            .Include(t => t.Asset)
+            .Include(t => t.MaintenanceType)
+            .Include(t => t.AssignedTechnician)
+            .ToListAsync();
+    }
+
     public async Task<IEnumerable<AssetTaskTemplate>> GetByAssetIdAsync(Guid assetId)
     {
         return await _dbSet
@@ -73,6 +82,15 @@ public class AssetTypeTaskTemplateRepository : GenericRepository<AssetTypeTaskTe
     {
     }
 
+    public override async Task<IEnumerable<AssetTypeTaskTemplate>> GetAllAsync()
+    {
+        return await _dbSet
+            .Include(t => t.AssetType)
+            .Include(t => t.MaintenanceType)
+            .Include(t => t.AssignedTechnician)
+            .ToListAsync();
+    }
+
     public async Task<IEnumerable<AssetTypeTaskTemplate>> GetByAssetTypeIdAsync(Guid assetTypeId)
     {
         return await _dbSet
@@ -132,6 +150,14 @@ public class MaintenanceTaskTemplateRepository : GenericRepository<MaintenanceTa
 {
     public MaintenanceTaskTemplateRepository(ApplicationDbContext context) : base(context)
     {
+    }
+
+    public override async Task<IEnumerable<MaintenanceTaskTemplate>> GetAllAsync()
+    {
+        return await _dbSet
+            .Include(t => t.MaintenanceType)
+            .Include(t => t.AssignedTechnician)
+            .ToListAsync();
     }
 
     public async Task<IEnumerable<MaintenanceTaskTemplate>> GetByMaintenanceTypeIdAsync(Guid maintenanceTypeId)

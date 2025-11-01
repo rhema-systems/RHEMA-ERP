@@ -38,30 +38,18 @@ public class TechnicalSkillService : ITechnicalSkillService
         {
             _logger.LogInformation("Creating technical skill: {SkillName}", createDto.Name);
 
-            // Only allow creation of local skills (non-HR)
-            if (await _skillRepository.IsCodeUniqueAsync(createDto.Code))
-                throw new ArgumentException($"Skill code '{createDto.Code}' already exists");
+            // Check if skill name already exists
+            if (!await _skillRepository.IsNameUniqueAsync(createDto.Name))
+                throw new ArgumentException($"Skill name '{createDto.Name}' already exists");
 
-            var skill = new TechnicalSkill
+            var skill = new Core.Entities.HR.Skill
             {
                 Id = Guid.NewGuid(),
                 Name = createDto.Name,
-                Code = createDto.Code,
                 Description = createDto.Description,
                 Category = createDto.Category,
-                SkillLevel = createDto.SkillLevel,
-                Complexity = createDto.Complexity,
-                RiskLevel = createDto.RiskLevel,
-                Prerequisites = JsonSerializer.Serialize(createDto.Prerequisites),
-                Certifications = JsonSerializer.Serialize(createDto.Certifications),
-                EstimatedLearningHours = createDto.EstimatedLearningHours,
-                ToolsRequired = JsonSerializer.Serialize(createDto.ToolsRequired),
-                SafetyRequirements = createDto.SafetyRequirements,
-                CompetencyAreas = JsonSerializer.Serialize(createDto.CompetencyAreas),
-                RelatedMaintenanceTypes = JsonSerializer.Serialize(createDto.RelatedMaintenanceTypes),
                 IsActive = createDto.IsActive,
-                IsFromHRModule = false, // Local skill
-                CreatedById = _currentUserProvider.UserId,
+                RequiresCertification = false,
                 TenantId = _currentUserProvider.TenantId
             };
 
@@ -88,25 +76,11 @@ public class TechnicalSkillService : ITechnicalSkillService
             if (skill == null)
                 throw new ArgumentException($"Skill with ID {id} not found");
 
-            // Only allow updates to local skills (non-HR)
-            if (skill.IsFromHRModule)
-                throw new InvalidOperationException("Cannot modify skills synchronized from HR module. Use HR Skills Management to make changes.");
-
             skill.Name = updateDto.Name;
             skill.Description = updateDto.Description;
             skill.Category = updateDto.Category;
-            skill.SkillLevel = updateDto.SkillLevel;
-            skill.Complexity = updateDto.Complexity;
-            skill.RiskLevel = updateDto.RiskLevel;
-            skill.Prerequisites = JsonSerializer.Serialize(updateDto.Prerequisites);
-            skill.Certifications = JsonSerializer.Serialize(updateDto.Certifications);
-            skill.EstimatedLearningHours = updateDto.EstimatedLearningHours;
-            skill.ToolsRequired = JsonSerializer.Serialize(updateDto.ToolsRequired);
-            skill.SafetyRequirements = updateDto.SafetyRequirements;
-            skill.CompetencyAreas = JsonSerializer.Serialize(updateDto.CompetencyAreas);
-            skill.RelatedMaintenanceTypes = JsonSerializer.Serialize(updateDto.RelatedMaintenanceTypes);
             skill.IsActive = updateDto.IsActive;
-            skill.LastModifiedById = _currentUserProvider.UserId;
+            skill.RequiresCertification = false; // Default value
 
             await _skillRepository.UpdateAsync(skill);
             
@@ -130,10 +104,6 @@ public class TechnicalSkillService : ITechnicalSkillService
             var skill = await _skillRepository.GetByIdAsync(id);
             if (skill == null)
                 throw new ArgumentException($"Skill with ID {id} not found");
-
-            // Only allow deletion of local skills (non-HR)
-            if (skill.IsFromHRModule)
-                throw new InvalidOperationException("Cannot delete skills synchronized from HR module. Deactivate in HR Skills Management instead.");
 
             await _skillRepository.DeleteAsync(id);
             
@@ -170,31 +140,18 @@ public class TechnicalSkillService : ITechnicalSkillService
         var allSkills = await _skillRepository.GetAllAsync();
         var filtered = allSkills.AsQueryable();
 
-        // Apply filters
-        if (!string.IsNullOrEmpty(filter.SearchTerm))
-        {
-            filtered = filtered.Where(s => s.Name.Contains(filter.SearchTerm, StringComparison.OrdinalIgnoreCase) ||
-                                          s.Code.Contains(filter.SearchTerm, StringComparison.OrdinalIgnoreCase) ||
-                                          s.Description.Contains(filter.SearchTerm, StringComparison.OrdinalIgnoreCase));
-        }
+            // Apply filters
+            if (!string.IsNullOrEmpty(filter.SearchTerm))
+            {
+                filtered = filtered.Where(s => s.Name.Contains(filter.SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                                              (s.Description ?? "").Contains(filter.SearchTerm, StringComparison.OrdinalIgnoreCase));
+            }
 
-        if (!string.IsNullOrEmpty(filter.Category))
-            filtered = filtered.Where(s => s.Category == filter.Category);
+            if (!string.IsNullOrEmpty(filter.Category))
+                filtered = filtered.Where(s => s.Category == filter.Category);
 
-        if (!string.IsNullOrEmpty(filter.SkillLevel))
-            filtered = filtered.Where(s => s.SkillLevel == filter.SkillLevel);
-
-        if (!string.IsNullOrEmpty(filter.Complexity))
-            filtered = filtered.Where(s => s.Complexity == filter.Complexity);
-
-        if (!string.IsNullOrEmpty(filter.RiskLevel))
-            filtered = filtered.Where(s => s.RiskLevel == filter.RiskLevel);
-
-        if (filter.IsActive.HasValue)
-            filtered = filtered.Where(s => s.IsActive == filter.IsActive.Value);
-
-        if (filter.IsFromHRModule.HasValue)
-            filtered = filtered.Where(s => s.IsFromHRModule == filter.IsFromHRModule.Value);
+            if (filter.IsActive.HasValue)
+                filtered = filtered.Where(s => s.IsActive == filter.IsActive.Value);
 
         var totalCount = filtered.Count();
         var skillsPage = filtered
@@ -249,45 +206,23 @@ public class TechnicalSkillService : ITechnicalSkillService
 
     public async Task<IEnumerable<TechnicalSkillDto>> GetSkillsByLevelAsync(string skillLevel)
     {
-        if (!int.TryParse(skillLevel, out int level))
-            throw new ArgumentException($"Invalid skill level: {skillLevel}", nameof(skillLevel));
-            
-        var skills = await _skillRepository.GetBySkillLevelAsync(level);
-        var result = new List<TechnicalSkillDto>();
-        
-        foreach (var skill in skills)
-        {
-            result.Add(await MapToDto(skill));
-        }
-        
-        return result;
+        // HR Skills don't have skill level - return all active skills
+        return await GetActiveSkillsAsync();
     }
 
     public async Task<IEnumerable<TechnicalSkillDto>> GetSkillsByComplexityAsync(string complexity)
     {
-        var skills = await _skillRepository.GetByComplexityAsync(complexity);
-        var result = new List<TechnicalSkillDto>();
-        
-        foreach (var skill in skills)
-        {
-            result.Add(await MapToDto(skill));
-        }
-        
-        return result;
+        // HR Skills don't have complexity - return all active skills  
+        return await GetActiveSkillsAsync();
     }
+    
 
     public async Task<IEnumerable<TechnicalSkillDto>> GetSkillsByRiskLevelAsync(string riskLevel)
     {
-        var skills = await _skillRepository.GetByRiskLevelAsync(riskLevel);
-        var result = new List<TechnicalSkillDto>();
-        
-        foreach (var skill in skills)
-        {
-            result.Add(await MapToDto(skill));
-        }
-        
-        return result;
+        // HR Skills don't have risk level - return all active skills
+        return await GetActiveSkillsAsync();
     }
+    
 
     public async Task<TechnicalSkillDto> ToggleSkillStatusAsync(Guid id)
     {
@@ -295,12 +230,8 @@ public class TechnicalSkillService : ITechnicalSkillService
         if (skill == null)
             throw new ArgumentException($"Skill with ID {id} not found");
 
-        // Only allow status changes for local skills (non-HR)
-        if (skill.IsFromHRModule)
-            throw new InvalidOperationException("Cannot modify status of skills synchronized from HR module. Use HR Skills Management to make changes.");
-
+        // HR Skills can have status toggled
         skill.IsActive = !skill.IsActive;
-        skill.LastModifiedById = _currentUserProvider.UserId;
         
         await _skillRepository.UpdateAsync(skill);
         
@@ -309,7 +240,8 @@ public class TechnicalSkillService : ITechnicalSkillService
 
     public async Task<bool> IsSkillCodeUniqueAsync(string code, Guid? excludeId = null)
     {
-        return await _skillRepository.IsCodeUniqueAsync(code, excludeId);
+        // HR Skills use name instead of code
+        return await _skillRepository.IsNameUniqueAsync(code, excludeId);
     }
 
     public async Task<bool> IsSkillNameUniqueAsync(string name, Guid? excludeId = null)
@@ -359,55 +291,21 @@ public class TechnicalSkillService : ITechnicalSkillService
 
     public async Task<IEnumerable<TechnicalSkillDto>> SyncSkillsFromHRAsync()
     {
-        try
-        {
-            _logger.LogInformation("Starting synchronization of technical skills from HR module");
-
-            // This would typically call the HR API to fetch technical skills
-            // For now, we'll simulate the sync with mock data
-            var hrSkills = await _skillRepository.SyncFromHRAsync();
-            var result = new List<TechnicalSkillDto>();
-            
-            foreach (var skill in hrSkills)
-            {
-                skill.IsFromHRModule = true;
-                skill.LastSyncDate = DateTime.UtcNow;
-                await _skillRepository.UpdateAsync(skill);
-                result.Add(await MapToDto(skill));
-            }
-
-            _logger.LogInformation("Synchronized {Count} technical skills from HR module", result.Count);
-            
-            return result;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error synchronizing skills from HR module");
-            throw;
-        }
+        // Skills are already from HR module - just return all active skills
+        _logger.LogInformation("Skills are read directly from HR module");
+        return await GetActiveSkillsAsync();
     }
 
     public async Task<TechnicalSkillDto?> GetSkillFromHRAsync(Guid hrSkillId)
     {
-        // This would typically call the HR API
-        var skills = await _skillRepository.GetFromHRModuleAsync();
-        var hrSkill = skills.FirstOrDefault(s => s.Id == hrSkillId);
-        return hrSkill != null ? await MapToDto(hrSkill) : null;
+        return await GetSkillByIdAsync(hrSkillId);
     }
 
     public async Task UpdateSkillFromHRAsync(TechnicalSkillDto hrSkill)
     {
-        var existingSkill = await _skillRepository.GetByCodeAsync(hrSkill.Code);
-        if (existingSkill != null && existingSkill.IsFromHRModule)
-        {
-            // Update existing HR skill
-            existingSkill.Name = hrSkill.Name;
-            existingSkill.Description = hrSkill.Description;
-            existingSkill.Category = hrSkill.Category;
-            existingSkill.SkillLevel = hrSkill.SkillLevel;
-            existingSkill.LastSyncDate = DateTime.UtcNow;
-            await _skillRepository.UpdateAsync(existingSkill);
-        }
+        // Skills are managed in HR module
+        _logger.LogInformation("Skills are managed directly in HR module");
+        await Task.CompletedTask;
     }
 
     #endregion
@@ -567,38 +465,41 @@ public class TechnicalSkillService : ITechnicalSkillService
 
     #region Private Methods
 
-    private async Task<TechnicalSkillDto> MapToDto(TechnicalSkill skill)
+    // Map HR Skill entity to TechnicalSkillDto
+    private async Task<TechnicalSkillDto> MapToDto(Core.Entities.HR.Skill skill)
     {
+        var technicianCount = await _skillRepository.GetTechnicianCountBySkillAsync(skill.Id);
+        
         return new TechnicalSkillDto
         {
             Id = skill.Id,
             Name = skill.Name,
-            Code = skill.Code,
-            Description = skill.Description,
-            Category = skill.Category,
-            SkillLevel = skill.SkillLevel,
-            Complexity = skill.Complexity,
-            RiskLevel = skill.RiskLevel,
-            Prerequisites = JsonSerializer.Deserialize<List<string>>(skill.Prerequisites) ?? new List<string>(),
-            Certifications = JsonSerializer.Deserialize<List<string>>(skill.Certifications) ?? new List<string>(),
-            EstimatedLearningHours = skill.EstimatedLearningHours,
-            ToolsRequired = JsonSerializer.Deserialize<List<string>>(skill.ToolsRequired) ?? new List<string>(),
-            SafetyRequirements = skill.SafetyRequirements,
-            CompetencyAreas = JsonSerializer.Deserialize<List<string>>(skill.CompetencyAreas) ?? new List<string>(),
-            RelatedMaintenanceTypes = JsonSerializer.Deserialize<List<string>>(skill.RelatedMaintenanceTypes) ?? new List<string>(),
+            Code = skill.Name, // HR Skill doesn't have Code, use Name
+            Description = skill.Description ?? string.Empty,
+            Category = skill.Category ?? "General",
+            SkillLevel = "Intermediate", // HR Skill doesn't have this, use default
+            Complexity = "Medium", // Not in HR Skill
+            RiskLevel = "Low", // Not in HR Skill
+            Prerequisites = new List<string>(),
+            Certifications = new List<string>(),
+            EstimatedLearningHours = 0,
+            ToolsRequired = new List<string>(),
+            SafetyRequirements = string.Empty,
+            CompetencyAreas = new List<string>(),
+            RelatedMaintenanceTypes = new List<string>(),
             IsActive = skill.IsActive,
-            IsFromHRModule = skill.IsFromHRModule,
-            LastSyncDate = skill.LastSyncDate,
-            CreatedDate = skill.CreatedDate,
-            CreatedBy = "Created By Name", // Would be resolved
-            LastModifiedDate = skill.LastModifiedDate,
-            LastModifiedBy = "Modified By Name", // Would be resolved
-            TechniciansCount = skill.TechniciansCount,
-            AverageRating = skill.AverageRating
+            IsFromHRModule = true, // Always true for HR Skills
+            LastSyncDate = DateTime.UtcNow,
+            CreatedDate = skill.CreatedAt,
+            CreatedBy = "System", // TenantEntity doesn't expose CreatedBy as string
+            LastModifiedDate = skill.UpdatedAt,
+            LastModifiedBy = "System", // TenantEntity doesn't expose UpdatedBy as string
+            TechniciansCount = technicianCount,
+            AverageRating = 0
         };
     }
 
-    private TechnicianSkillAssignmentDto MapAssignmentToDto(TechnicianSkillAssignment assignment, TechnicalSkill skill)
+    private TechnicianSkillAssignmentDto MapAssignmentToDto(TechnicianSkillAssignment assignment, Core.Entities.HR.Skill skill)
     {
         return new TechnicianSkillAssignmentDto
         {
@@ -606,7 +507,7 @@ public class TechnicalSkillService : ITechnicalSkillService
             TechnicianId = assignment.TechnicianId,
             SkillId = assignment.SkillId,
             SkillName = skill.Name,
-            Category = skill.Category,
+            Category = skill.Category ?? "General",
             ProficiencyLevel = assignment.ProficiencyLevel,
             ProficiencyDescription = assignment.ProficiencyDescription,
             AcquiredDate = assignment.AcquiredDate,

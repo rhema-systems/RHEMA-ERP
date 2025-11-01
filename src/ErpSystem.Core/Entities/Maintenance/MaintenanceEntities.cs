@@ -577,6 +577,9 @@ public class WorkOrder : TenantEntity
     [MaxLength(2000)]
     public string? Description { get; set; }
 
+    // Optional link to originating job card
+    public Guid? JobCardId { get; set; }
+
     [Required]
     public Guid AssetId { get; set; }
 
@@ -655,6 +658,7 @@ public class WorkOrder : TenantEntity
     public string? CustomFieldValues { get; set; } // JSON object with field values
 
     // Navigation properties
+    public virtual JobCard? JobCard { get; set; }
     public virtual MaintenanceAsset Asset { get; set; } = null!;
     public virtual WorkOrderType WorkOrderType { get; set; } = null!;
     public virtual MaintenanceType MaintenanceType { get; set; } = null!;

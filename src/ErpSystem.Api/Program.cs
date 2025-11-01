@@ -60,6 +60,8 @@ if (args.Length > 0 && args[0] == "seed-maintenance-e2e")
     
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddHttpContextAccessor(); // Required for ICurrentUserProvider
+    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.ICurrentUserProvider, ErpSystem.Api.Services.CurrentUserService>();
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemIdentity();
     tempBuilder.Services.AddDatabaseSeeding();
