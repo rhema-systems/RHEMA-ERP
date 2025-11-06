@@ -309,4 +309,94 @@ public class MaintenanceScheduleRepository : GenericRepository<MaintenanceSchedu
             await UpdateAsync(schedule);
         }
     }
+
+    public async Task<IEnumerable<MaintenanceSchedule>> GetSchedulesDueForRemindersAsync(int advanceDays)
+    {
+        var today = DateTime.UtcNow.Date;
+        var reminderDate = today.AddDays(advanceDays);
+        
+        return await _context.MaintenanceSchedules
+            .Where(ms => ms.IsActive && !ms.IsDeleted &&
+                        ms.AdvanceNotificationDays.HasValue &&
+                        ms.NextDueDate.Date == reminderDate &&
+                        (ms.LastReminderSentDate == null || 
+                         ms.LastReminderSentDate.Value.Date < today) && // Don't send multiple reminders on same day
+                        !string.IsNullOrEmpty(ms.NotificationRecipients))
+            .Include(ms => ms.Asset)
+            .Include(ms => ms.MaintenanceType)
+            .Include(ms => ms.DefaultTechnician)
+            .Include(ms => ms.DefaultTeam)
+            .Include(ms => ms.PriorityLevel)
+            .OrderBy(ms => ms.NextDueDate)
+            .ToListAsync();
+    }
+
+    public async Task UpdateLastReminderSentDateAsync(Guid scheduleId, DateTime date)
+    {
+        var schedule = await GetByIdAsync(scheduleId);
+        if (schedule != null)
+        {
+            schedule.LastReminderSentDate = date;
+            schedule.UpdatedAt = DateTime.UtcNow;
+            await UpdateAsync(schedule);
+        }
+    }
+
+    public async Task<IEnumerable<MaintenanceSchedule>> GetSchedulesByUsageTriggersAsync()
+    {
+        return await _context.MaintenanceSchedules
+            .Where(ms => ms.IsActive && !ms.IsDeleted &&
+                        (ms.PrimaryTriggerType == "Usage" || 
+                         ms.PrimaryTriggerType == "Combined" ||
+                         ms.SecondaryTriggerType == "Usage") &&
+                        (ms.MileageTrigger.HasValue || 
+                         ms.OperatingHoursTrigger.HasValue ||
+                         ms.CycleTrigger.HasValue))
+            .Include(ms => ms.Asset)
+            .Include(ms => ms.MaintenanceType)
+            .Include(ms => ms.DefaultTechnician)
+            .Include(ms => ms.DefaultTeam)
+            .Include(ms => ms.PriorityLevel)
+            .OrderBy(ms => ms.NextDueDate)
+            .ToListAsync();
+    }
+
+    public async Task UpdateLastUsageCheckDateAsync(Guid scheduleId, DateTime date)
+    {
+        var schedule = await GetByIdAsync(scheduleId);
+        if (schedule != null)
+        {
+            schedule.LastUsageCheckDate = date;
+            schedule.UpdatedAt = DateTime.UtcNow;
+            await UpdateAsync(schedule);
+        }
+    }
+
+    public async Task<IEnumerable<MaintenanceSchedule>> GetSchedulesByConditionTriggersAsync()
+    {
+        return await _context.MaintenanceSchedules
+            .Where(ms => ms.IsActive && !ms.IsDeleted &&
+                        (ms.PrimaryTriggerType == "Condition" || 
+                         ms.PrimaryTriggerType == "Combined" ||
+                         ms.SecondaryTriggerType == "Condition") &&
+                        !string.IsNullOrEmpty(ms.ConditionCriteria))
+            .Include(ms => ms.Asset)
+            .Include(ms => ms.MaintenanceType)
+            .Include(ms => ms.DefaultTechnician)
+            .Include(ms => ms.DefaultTeam)
+            .Include(ms => ms.PriorityLevel)
+            .OrderBy(ms => ms.NextDueDate)
+            .ToListAsync();
+    }
+
+    public async Task UpdateLastConditionCheckDateAsync(Guid scheduleId, DateTime date)
+    {
+        var schedule = await GetByIdAsync(scheduleId);
+        if (schedule != null)
+        {
+            schedule.LastConditionCheckDate = date;
+            schedule.UpdatedAt = DateTime.UtcNow;
+            await UpdateAsync(schedule);
+        }
+    }
 }

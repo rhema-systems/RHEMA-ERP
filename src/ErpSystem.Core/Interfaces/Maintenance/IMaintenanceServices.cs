@@ -436,6 +436,25 @@ public interface IMaintenanceScheduleService
     Task<PagedResult<MaintenanceScheduleDto>> GetSchedulesPagedAsync(MaintenanceScheduleFilterDto filter);
     Task<IEnumerable<MaintenanceScheduleDto>> GetOverdueSchedulesAsync();
     Task<MaintenanceScheduleDto> ToggleScheduleStatusAsync(Guid id);
+
+    // Notification and reminder methods
+    Task SendScheduleReminderAsync(Guid scheduleId, bool force = false);
+    Task<IEnumerable<MaintenanceScheduleDto>> GetSchedulesDueForRemindersAsync();
+    Task<int> SendAdvanceRemindersAsync();
+
+    // Usage-based trigger evaluation
+    Task<bool> EvaluateUsageTriggersAsync(Guid scheduleId);
+    Task<IEnumerable<MaintenanceScheduleDto>> GetSchedulesDueByUsageAsync();
+    Task UpdateAssetUsageAsync(Guid assetId, double? mileage, double? operatingHours);
+
+    // Condition-based trigger evaluation
+    Task<bool> EvaluateConditionTriggersAsync(Guid scheduleId);
+    Task<IEnumerable<MaintenanceScheduleDto>> GetSchedulesDueByConditionAsync();
+
+    // Multi-criteria evaluation
+    Task<bool> ShouldGenerateWorkOrderAsync(Guid scheduleId);
+    Task ProcessUsageBasedSchedulesAsync();
+    Task ProcessConditionBasedSchedulesAsync();
 }
 
 #endregion

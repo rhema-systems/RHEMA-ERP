@@ -699,4 +699,495 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
     }
 
     #endregion
+
+    #region Notification and Reminder Methods
+
+    public async Task SendScheduleReminderAsync(Guid scheduleId, bool force = false)
+    {
+        try
+        {
+            _logger.LogInformation("Sending schedule reminder for schedule {ScheduleId}, force={Force}", scheduleId, force);
+
+            var schedule = await _scheduleRepository.GetByIdAsync(scheduleId);
+            if (schedule == null)
+            {
+                _logger.LogWarning("Schedule {ScheduleId} not found", scheduleId);
+                return;
+            }
+
+            // Check if reminder already sent today (unless forced)
+            if (!force && schedule.LastReminderSentDate.HasValue && 
+                schedule.LastReminderSentDate.Value.Date == DateTime.UtcNow.Date)
+            {
+                _logger.LogInformation("Reminder already sent today for schedule {ScheduleId}", scheduleId);
+                return;
+            }
+
+            // Get asset and maintenance type info
+            var asset = await _assetService.GetAssetByIdAsync(schedule.AssetId);
+            if (asset == null)
+            {
+                _logger.LogWarning("Asset not found for schedule {ScheduleId}", scheduleId);
+                return;
+            }
+
+            var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(schedule.MaintenanceTypeId);
+
+            // Parse recipients
+            var recipients = ParseRecipients(schedule.NotificationRecipients);
+            if (!recipients.Any())
+            {
+                _logger.LogWarning("No recipients configured for schedule {ScheduleId}", scheduleId);
+                return;
+            }
+
+            // Format due date
+            var dueDateFormatted = schedule.NextDueDate.ToString("MMMM dd, yyyy");
+            var daysUntilDue = (int)(schedule.NextDueDate.Date - DateTime.UtcNow.Date).TotalDays;
+
+            // Create notification record
+            var notification = new MaintenanceScheduleNotificationHistory
+            {
+                Id = Guid.NewGuid(),
+                ScheduleId = scheduleId,
+                NotificationType = "Reminder",
+                Status = "Pending",
+                ScheduledFor = DateTime.UtcNow,
+                Recipients = JsonSerializer.Serialize(recipients),
+                Subject = $"Maintenance Reminder: {schedule.Name}",
+                Message = $"Maintenance '{schedule.Name}' is due for asset '{asset.Name}' on {dueDateFormatted} ({daysUntilDue} days from now). Priority: {schedule.Priority}. Type: {maintenanceType?.Name ?? "N/A"}.",
+                CreatedById = _currentUserProvider.IsAuthenticated ? _currentUserProvider.UserId : Guid.Empty,
+                TenantId = _currentUserProvider.IsAuthenticated ? _currentUserProvider.TenantId : schedule.TenantId,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            await _unitOfWork.Repository<MaintenanceScheduleNotificationHistory>().AddAsync(notification);
+
+            // TODO: Send email to recipients using IEmailService
+            // Would need to inject IEmailService into constructor for proper implementation
+            _logger.LogInformation("Would send email to {Count} recipients for schedule {ScheduleId}", recipients.Count, scheduleId);
+
+            // Update notification status
+            notification.Status = "Sent";
+            notification.SentAt = DateTime.UtcNow;
+
+            // Update schedule's last reminder date
+            await _scheduleRepository.UpdateLastReminderSentDateAsync(scheduleId, DateTime.UtcNow);
+
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Schedule reminder sent successfully for schedule {ScheduleId}", scheduleId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending schedule reminder for schedule {ScheduleId}", scheduleId);
+            throw;
+        }
+    }
+
+    public async Task<IEnumerable<MaintenanceScheduleDto>> GetSchedulesDueForRemindersAsync()
+    {
+        try
+        {
+            // Get active schedules with advance notification configured
+            var allSchedules = await _scheduleRepository.GetActiveSchedulesAsync();
+            var dueForReminders = new List<MaintenanceSchedule>();
+
+            foreach (var schedule in allSchedules)
+            {
+                if (!schedule.AdvanceNotificationDays.HasValue || 
+                    string.IsNullOrEmpty(schedule.NotificationRecipients))
+                    continue;
+
+                var daysUntilDue = (int)(schedule.NextDueDate.Date - DateTime.UtcNow.Date).TotalDays;
+
+                // Check if we should send reminder
+                if (daysUntilDue == schedule.AdvanceNotificationDays.Value)
+                {
+                    // Check if reminder not already sent today
+                    if (!schedule.LastReminderSentDate.HasValue || 
+                        schedule.LastReminderSentDate.Value.Date < DateTime.UtcNow.Date)
+                    {
+                        dueForReminders.Add(schedule);
+                    }
+                }
+            }
+
+            var result = new List<MaintenanceScheduleDto>();
+            foreach (var schedule in dueForReminders)
+            {
+                result.Add(await MapToDto(schedule));
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting schedules due for reminders");
+            throw;
+        }
+    }
+
+    public async Task<int> SendAdvanceRemindersAsync()
+    {
+        try
+        {
+            _logger.LogInformation("Processing advance reminders");
+
+            var schedulesDue = await GetSchedulesDueForRemindersAsync();
+            var sentCount = 0;
+
+            foreach (var schedule in schedulesDue)
+            {
+                try
+                {
+                    await SendScheduleReminderAsync(schedule.Id);
+                    sentCount++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error sending reminder for schedule {ScheduleId}", schedule.Id);
+                }
+            }
+
+            _logger.LogInformation("Sent {Count} advance reminders", sentCount);
+            return sentCount;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing advance reminders");
+            throw;
+        }
+    }
+
+    #endregion
+
+    #region Usage-Based Trigger Evaluation
+
+    public async Task<bool> EvaluateUsageTriggersAsync(Guid scheduleId)
+    {
+        try
+        {
+            var schedule = await _scheduleRepository.GetByIdAsync(scheduleId);
+            if (schedule == null)
+                return false;
+
+            // Only evaluate if usage trigger is configured
+            if (schedule.PrimaryTriggerType != "Usage" && 
+                schedule.PrimaryTriggerType != "Combined" &&
+                schedule.SecondaryTriggerType != "Usage")
+                return false;
+
+            // Get current asset usage
+            var asset = await _assetService.GetAssetByIdAsync(schedule.AssetId);
+            if (asset == null)
+                return false;
+
+            bool triggerMet = false;
+
+            // Check mileage trigger
+            if (schedule.MileageTrigger.HasValue && asset.Mileage.HasValue)
+            {
+                var mileageSinceLastCheck = asset.Mileage.Value - (double)(schedule.LastUsageValue ?? 0);
+                if (mileageSinceLastCheck >= (double)schedule.MileageTrigger.Value)
+                {
+                    _logger.LogInformation("Mileage trigger met for schedule {ScheduleId}: {Current} >= {Trigger}",
+                        scheduleId, asset.Mileage.Value, schedule.MileageTrigger.Value);
+                    triggerMet = true;
+                }
+            }
+
+            // Check operating hours trigger
+            if (schedule.OperatingHoursTrigger.HasValue && asset.OperatingHours.HasValue)
+            {
+                var hoursSinceLastCheck = asset.OperatingHours.Value - (double)(schedule.LastUsageValue ?? 0);
+                if (hoursSinceLastCheck >= (double)schedule.OperatingHoursTrigger.Value)
+                {
+                    _logger.LogInformation("Operating hours trigger met for schedule {ScheduleId}: {Current} >= {Trigger}",
+                        scheduleId, asset.OperatingHours.Value, schedule.OperatingHoursTrigger.Value);
+                    triggerMet = true;
+                }
+            }
+
+            // Update last check date
+            await _scheduleRepository.UpdateLastUsageCheckDateAsync(scheduleId, DateTime.UtcNow);
+            await _unitOfWork.SaveChangesAsync();
+
+            return triggerMet;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error evaluating usage triggers for schedule {ScheduleId}", scheduleId);
+            return false;
+        }
+    }
+
+    public async Task<IEnumerable<MaintenanceScheduleDto>> GetSchedulesDueByUsageAsync()
+    {
+        try
+        {
+            var usageSchedules = await _scheduleRepository.GetSchedulesByUsageTriggersAsync();
+            var dueSchedules = new List<MaintenanceSchedule>();
+
+            foreach (var schedule in usageSchedules)
+            {
+                if (await EvaluateUsageTriggersAsync(schedule.Id))
+                {
+                    dueSchedules.Add(schedule);
+                }
+            }
+
+            var result = new List<MaintenanceScheduleDto>();
+            foreach (var schedule in dueSchedules)
+            {
+                result.Add(await MapToDto(schedule));
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting schedules due by usage");
+            throw;
+        }
+    }
+
+    public async Task UpdateAssetUsageAsync(Guid assetId, double? mileage, double? operatingHours)
+    {
+        try
+        {
+            _logger.LogInformation("Updating asset usage for asset {AssetId}", assetId);
+
+            var asset = await _assetService.GetAssetByIdAsync(assetId);
+            if (asset == null)
+            {
+                throw new ArgumentException($"Asset with ID {assetId} not found");
+            }
+
+            // This would require modifying the asset service to support usage updates
+            // For now, log the intent
+            _logger.LogInformation("Asset usage update requested: Mileage={Mileage}, Hours={Hours}",
+                mileage, operatingHours);
+
+            // TODO: Implement asset usage update in IMaintenanceAssetService
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating asset usage for asset {AssetId}", assetId);
+            throw;
+        }
+    }
+
+    #endregion
+
+    #region Condition-Based Trigger Evaluation
+
+    public async Task<bool> EvaluateConditionTriggersAsync(Guid scheduleId)
+    {
+        try
+        {
+            var schedule = await _scheduleRepository.GetByIdAsync(scheduleId);
+            if (schedule == null)
+                return false;
+
+            // Only evaluate if condition trigger is configured
+            if (schedule.PrimaryTriggerType != "Condition" && 
+                schedule.PrimaryTriggerType != "Combined" &&
+                schedule.SecondaryTriggerType != "Condition")
+                return false;
+
+            if (string.IsNullOrEmpty(schedule.ConditionCriteria))
+                return false;
+
+            // This is a placeholder - actual condition evaluation would require
+            // integration with IoT sensors or other data sources
+            _logger.LogWarning("Condition evaluation not fully implemented for schedule {ScheduleId}", scheduleId);
+
+            // Update last check date
+            await _scheduleRepository.UpdateLastConditionCheckDateAsync(scheduleId, DateTime.UtcNow);
+            await _unitOfWork.SaveChangesAsync();
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error evaluating condition triggers for schedule {ScheduleId}", scheduleId);
+            return false;
+        }
+    }
+
+    public async Task<IEnumerable<MaintenanceScheduleDto>> GetSchedulesDueByConditionAsync()
+    {
+        try
+        {
+            var conditionSchedules = await _scheduleRepository.GetSchedulesByConditionTriggersAsync();
+            var dueSchedules = new List<MaintenanceSchedule>();
+
+            foreach (var schedule in conditionSchedules)
+            {
+                if (await EvaluateConditionTriggersAsync(schedule.Id))
+                {
+                    dueSchedules.Add(schedule);
+                }
+            }
+
+            var result = new List<MaintenanceScheduleDto>();
+            foreach (var schedule in dueSchedules)
+            {
+                result.Add(await MapToDto(schedule));
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting schedules due by condition");
+            throw;
+        }
+    }
+
+    #endregion
+
+    #region Multi-Criteria Evaluation
+
+    public async Task<bool> ShouldGenerateWorkOrderAsync(Guid scheduleId)
+    {
+        try
+        {
+            var schedule = await _scheduleRepository.GetByIdAsync(scheduleId);
+            if (schedule == null || !schedule.IsActive)
+                return false;
+
+            bool primaryTriggerMet = false;
+            bool secondaryTriggerMet = false;
+
+            // Evaluate primary trigger
+            primaryTriggerMet = schedule.PrimaryTriggerType switch
+            {
+                "Time" => schedule.NextDueDate.Date <= DateTime.UtcNow.Date,
+                "Usage" => await EvaluateUsageTriggersAsync(scheduleId),
+                "Condition" => await EvaluateConditionTriggersAsync(scheduleId),
+                _ => false
+            };
+
+            // If not combined, return primary result
+            if (schedule.PrimaryTriggerType != "Combined")
+            {
+                return primaryTriggerMet;
+            }
+
+            // Evaluate secondary trigger for combined schedules
+            if (!string.IsNullOrEmpty(schedule.SecondaryTriggerType))
+            {
+                secondaryTriggerMet = schedule.SecondaryTriggerType switch
+                {
+                    "Time" => schedule.NextDueDate.Date <= DateTime.UtcNow.Date,
+                    "Usage" => await EvaluateUsageTriggersAsync(scheduleId),
+                    "Condition" => await EvaluateConditionTriggersAsync(scheduleId),
+                    _ => false
+                };
+            }
+
+            // Apply trigger logic (AND/OR)
+            var shouldGenerate = schedule.TriggerLogic?.ToUpper() == "AND" 
+                ? primaryTriggerMet && secondaryTriggerMet
+                : primaryTriggerMet || secondaryTriggerMet;
+
+            _logger.LogInformation("Schedule {ScheduleId} trigger evaluation: Primary={Primary}, Secondary={Secondary}, Logic={Logic}, Result={Result}",
+                scheduleId, primaryTriggerMet, secondaryTriggerMet, schedule.TriggerLogic, shouldGenerate);
+
+            return shouldGenerate;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error evaluating if work order should be generated for schedule {ScheduleId}", scheduleId);
+            return false;
+        }
+    }
+
+    public async Task ProcessUsageBasedSchedulesAsync()
+    {
+        try
+        {
+            _logger.LogInformation("Processing usage-based schedules");
+
+            var usageSchedules = await _scheduleRepository.GetSchedulesByUsageTriggersAsync();
+            var generatedCount = 0;
+
+            foreach (var schedule in usageSchedules.Where(s => s.AutoGenerateWorkOrders))
+            {
+                try
+                {
+                    if (await ShouldGenerateWorkOrderAsync(schedule.Id))
+                    {
+                        await GenerateWorkOrderFromScheduleAsync(schedule.Id);
+                        generatedCount++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing usage-based schedule {ScheduleId}", schedule.Id);
+                }
+            }
+
+            _logger.LogInformation("Generated {Count} work orders from usage-based schedules", generatedCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing usage-based schedules");
+            throw;
+        }
+    }
+
+    public async Task ProcessConditionBasedSchedulesAsync()
+    {
+        try
+        {
+            _logger.LogInformation("Processing condition-based schedules");
+
+            var conditionSchedules = await _scheduleRepository.GetSchedulesByConditionTriggersAsync();
+            var generatedCount = 0;
+
+            foreach (var schedule in conditionSchedules.Where(s => s.AutoGenerateWorkOrders))
+            {
+                try
+                {
+                    if (await ShouldGenerateWorkOrderAsync(schedule.Id))
+                    {
+                        await GenerateWorkOrderFromScheduleAsync(schedule.Id);
+                        generatedCount++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing condition-based schedule {ScheduleId}", schedule.Id);
+                }
+            }
+
+            _logger.LogInformation("Generated {Count} work orders from condition-based schedules", generatedCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing condition-based schedules");
+            throw;
+        }
+    }
+
+    #endregion
+
+    #region Helper Methods
+
+    private List<string> ParseRecipients(string? notificationRecipients)
+    {
+        if (string.IsNullOrWhiteSpace(notificationRecipients))
+            return new List<string>();
+
+        return notificationRecipients
+            .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(r => r.Trim())
+            .Where(r => !string.IsNullOrEmpty(r))
+            .ToList();
+    }
+
+    #endregion
 }

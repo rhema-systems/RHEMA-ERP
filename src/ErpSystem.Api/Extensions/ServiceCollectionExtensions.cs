@@ -391,6 +391,7 @@ namespace ErpSystem.Api.Extensions
             
             // New maintenance module services - NOW ENABLED
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceScheduleService, ErpSystem.Core.Services.Maintenance.MaintenanceScheduleService>();
+            services.AddScoped<ErpSystem.Core.Services.Maintenance.IConditionEvaluationService, ErpSystem.Core.Services.Maintenance.ConditionEvaluationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicalSkillService, ErpSystem.Core.Services.Maintenance.TechnicalSkillService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ISafetyProtocolService, ErpSystem.Core.Services.Maintenance.SafetyProtocolService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianService, ErpSystem.Core.Services.Maintenance.TechnicianService>();

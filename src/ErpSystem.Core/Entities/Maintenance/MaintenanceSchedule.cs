@@ -242,6 +242,16 @@ public class MaintenanceSchedule : TenantEntity
     public DateTime? LastProcessedDate { get; set; }
 
     /// <summary>
+    /// Last date a reminder was sent for this schedule
+    /// </summary>
+    public DateTime? LastReminderSentDate { get; set; }
+
+    /// <summary>
+    /// Last date usage triggers were evaluated
+    /// </summary>
+    public DateTime? LastUsageCheckDate { get; set; }
+
+    /// <summary>
     /// Default technician to assign to generated work orders
     /// </summary>
     public Guid? DefaultTechnicianId { get; set; }
@@ -286,6 +296,11 @@ public class MaintenanceSchedule : TenantEntity
     /// Work orders generated from this schedule
     /// </summary>
     public virtual ICollection<ScheduledWorkOrder> GeneratedWorkOrders { get; set; } = new List<ScheduledWorkOrder>();
+
+    /// <summary>
+    /// Notification history for this schedule
+    /// </summary>
+    public virtual ICollection<MaintenanceScheduleNotificationHistory> NotificationHistory { get; set; } = new List<MaintenanceScheduleNotificationHistory>();
 
     // Computed properties for reporting
     /// <summary>
@@ -399,6 +414,83 @@ public class ScheduledWorkOrder : BaseEntity
     [NotMapped]
     public bool IsOnTime => ActualCompletionDate.HasValue && 
                            ActualCompletionDate <= ScheduledCompletionDate;
+
+    /// <summary>
+    /// Navigation property to schedule
+    /// </summary>
+    public virtual MaintenanceSchedule? Schedule { get; set; }
+}
+
+/// <summary>
+/// Notification history for maintenance schedules
+/// </summary>
+public class MaintenanceScheduleNotificationHistory : TenantEntity
+{
+    /// <summary>
+    /// Schedule that this notification is for
+    /// </summary>
+    [Required]
+    public Guid ScheduleId { get; set; }
+
+    /// <summary>
+    /// Type of notification
+    /// </summary>
+    [Required]
+    [MaxLength(50)]
+    public string NotificationType { get; set; } = string.Empty; // Reminder, Overdue, UsageDue, ConditionMet
+
+    /// <summary>
+    /// Notification status
+    /// </summary>
+    [Required]
+    [MaxLength(20)]
+    public string Status { get; set; } = string.Empty; // Pending, Sent, Failed, Cancelled
+
+    /// <summary>
+    /// Date/time the notification was scheduled for
+    /// </summary>
+    [Required]
+    public DateTime ScheduledFor { get; set; }
+
+    /// <summary>
+    /// Date/time the notification was actually sent
+    /// </summary>
+    public DateTime? SentAt { get; set; }
+
+    /// <summary>
+    /// Recipients (JSON array of email addresses)
+    /// </summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string Recipients { get; set; } = "[]";
+
+    /// <summary>
+    /// Subject of the notification
+    /// </summary>
+    [MaxLength(200)]
+    public string? Subject { get; set; }
+
+    /// <summary>
+    /// Message content
+    /// </summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? Message { get; set; }
+
+    /// <summary>
+    /// Error message if sending failed
+    /// </summary>
+    [MaxLength(1000)]
+    public string? ErrorMessage { get; set; }
+
+    /// <summary>
+    /// Number of retry attempts
+    /// </summary>
+    public int RetryCount { get; set; } = 0;
+
+    /// <summary>
+    /// Additional data (JSON)
+    /// </summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? AdditionalData { get; set; }
 
     /// <summary>
     /// Navigation property to schedule

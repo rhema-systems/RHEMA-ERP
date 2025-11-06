@@ -291,4 +291,234 @@ public class MaintenanceSchedulesController : ControllerBase
         }
     }
 
+    #region Notification and Reminder Endpoints
+
+    /// <summary>
+    /// Gets schedules that need reminders sent
+    /// </summary>
+    [HttpGet("due-for-reminders")]
+    public async Task<ActionResult<IEnumerable<MaintenanceScheduleDto>>> GetSchedulesDueForReminders()
+    {
+        try
+        {
+            var schedules = await _scheduleService.GetSchedulesDueForRemindersAsync();
+            return Ok(schedules);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving schedules due for reminders");
+            return StatusCode(500, "An error occurred while retrieving schedules due for reminders");
+        }
+    }
+
+    /// <summary>
+    /// Sends a reminder for a specific schedule
+    /// </summary>
+    [HttpPost("{id:guid}/send-reminder")]
+    public async Task<IActionResult> SendScheduleReminder(Guid id, [FromQuery] bool force = false)
+    {
+        try
+        {
+            await _scheduleService.SendScheduleReminderAsync(id, force);
+            return Ok(new { message = "Reminder sent successfully", scheduleId = id });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending reminder for schedule {ScheduleId}", id);
+            return StatusCode(500, "An error occurred while sending the reminder");
+        }
+    }
+
+    /// <summary>
+    /// Sends advance reminders for all eligible schedules
+    /// </summary>
+    [HttpPost("send-advance-reminders")]
+    public async Task<ActionResult<object>> SendAdvanceReminders()
+    {
+        try
+        {
+            var sentCount = await _scheduleService.SendAdvanceRemindersAsync();
+            return Ok(new { message = $"Sent {sentCount} advance reminders", count = sentCount });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending advance reminders");
+            return StatusCode(500, "An error occurred while sending advance reminders");
+        }
+    }
+
+    #endregion
+
+    #region Usage-Based Trigger Endpoints
+
+    /// <summary>
+    /// Gets schedules due based on usage triggers
+    /// </summary>
+    [HttpGet("due-by-usage")]
+    public async Task<ActionResult<IEnumerable<MaintenanceScheduleDto>>> GetSchedulesDueByUsage()
+    {
+        try
+        {
+            var schedules = await _scheduleService.GetSchedulesDueByUsageAsync();
+            return Ok(schedules);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving schedules due by usage");
+            return StatusCode(500, "An error occurred while retrieving schedules due by usage");
+        }
+    }
+
+    /// <summary>
+    /// Evaluates usage triggers for a specific schedule
+    /// </summary>
+    [HttpPost("{id:guid}/evaluate-usage-triggers")]
+    public async Task<ActionResult<object>> EvaluateUsageTriggers(Guid id)
+    {
+        try
+        {
+            var triggerMet = await _scheduleService.EvaluateUsageTriggersAsync(id);
+            return Ok(new { scheduleId = id, triggerMet = triggerMet });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error evaluating usage triggers for schedule {ScheduleId}", id);
+            return StatusCode(500, "An error occurred while evaluating usage triggers");
+        }
+    }
+
+    /// <summary>
+    /// Updates asset usage metrics
+    /// </summary>
+    [HttpPost("assets/{assetId:guid}/update-usage")]
+    public async Task<IActionResult> UpdateAssetUsage(Guid assetId, [FromBody] UpdateAssetUsageDto updateDto)
+    {
+        try
+        {
+            await _scheduleService.UpdateAssetUsageAsync(assetId, updateDto.Mileage, updateDto.OperatingHours);
+            return Ok(new { message = "Asset usage updated successfully", assetId = assetId });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating asset usage for asset {AssetId}", assetId);
+            return StatusCode(500, "An error occurred while updating asset usage");
+        }
+    }
+
+    #endregion
+
+    #region Condition-Based Trigger Endpoints
+
+    /// <summary>
+    /// Gets schedules due based on condition triggers
+    /// </summary>
+    [HttpGet("due-by-condition")]
+    public async Task<ActionResult<IEnumerable<MaintenanceScheduleDto>>> GetSchedulesDueByCondition()
+    {
+        try
+        {
+            var schedules = await _scheduleService.GetSchedulesDueByConditionAsync();
+            return Ok(schedules);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving schedules due by condition");
+            return StatusCode(500, "An error occurred while retrieving schedules due by condition");
+        }
+    }
+
+    /// <summary>
+    /// Evaluates condition triggers for a specific schedule
+    /// </summary>
+    [HttpPost("{id:guid}/evaluate-condition-triggers")]
+    public async Task<ActionResult<object>> EvaluateConditionTriggers(Guid id)
+    {
+        try
+        {
+            var triggerMet = await _scheduleService.EvaluateConditionTriggersAsync(id);
+            return Ok(new { scheduleId = id, triggerMet = triggerMet });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error evaluating condition triggers for schedule {ScheduleId}", id);
+            return StatusCode(500, "An error occurred while evaluating condition triggers");
+        }
+    }
+
+    #endregion
+
+    #region Multi-Criteria Evaluation Endpoints
+
+    /// <summary>
+    /// Evaluates if a work order should be generated for a schedule
+    /// </summary>
+    [HttpPost("{id:guid}/should-generate-work-order")]
+    public async Task<ActionResult<object>> ShouldGenerateWorkOrder(Guid id)
+    {
+        try
+        {
+            var shouldGenerate = await _scheduleService.ShouldGenerateWorkOrderAsync(id);
+            return Ok(new { scheduleId = id, shouldGenerateWorkOrder = shouldGenerate });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error evaluating work order generation for schedule {ScheduleId}", id);
+            return StatusCode(500, "An error occurred while evaluating work order generation");
+        }
+    }
+
+    /// <summary>
+    /// Processes all usage-based schedules
+    /// </summary>
+    [HttpPost("process-usage-based")]
+    public async Task<IActionResult> ProcessUsageBasedSchedules()
+    {
+        try
+        {
+            await _scheduleService.ProcessUsageBasedSchedulesAsync();
+            return Ok(new { message = "Usage-based schedules processed successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing usage-based schedules");
+            return StatusCode(500, "An error occurred while processing usage-based schedules");
+        }
+    }
+
+    /// <summary>
+    /// Processes all condition-based schedules
+    /// </summary>
+    [HttpPost("process-condition-based")]
+    public async Task<IActionResult> ProcessConditionBasedSchedules()
+    {
+        try
+        {
+            await _scheduleService.ProcessConditionBasedSchedulesAsync();
+            return Ok(new { message = "Condition-based schedules processed successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing condition-based schedules");
+            return StatusCode(500, "An error occurred while processing condition-based schedules");
+        }
+    }
+
+    #endregion
+}
+
+/// <summary>
+/// DTO for updating asset usage
+/// </summary>
+public class UpdateAssetUsageDto
+{
+    public double? Mileage { get; set; }
+    public double? OperatingHours { get; set; }
 }

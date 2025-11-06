@@ -60,10 +60,19 @@ public class MaintenanceBackgroundService : BackgroundService
         // Process overdue work orders
         await ProcessOverdueWorkOrders(workOrderService, emailService, cancellationToken);
 
-        // Create work orders from schedules
+        // Create work orders from schedules (time-based)
         await CreateScheduledWorkOrders(scheduleService, cancellationToken);
 
-        // Send maintenance reminders
+        // Process usage-based schedules
+        await ProcessUsageBasedSchedules(scheduleService, cancellationToken);
+
+        // Process condition-based schedules
+        await ProcessConditionBasedSchedules(scheduleService, cancellationToken);
+
+        // Send advance reminders for upcoming maintenance
+        await SendAdvanceReminders(scheduleService, cancellationToken);
+
+        // Send maintenance reminders (existing)
         await SendMaintenanceReminders(workOrderService, emailService, cancellationToken);
 
         _logger.LogDebug("Completed maintenance task processing");
@@ -268,6 +277,54 @@ public class MaintenanceBackgroundService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error sending upcoming work order reminder to technician {TechnicianId}", technicianId);
+        }
+    }
+
+    private async Task ProcessUsageBasedSchedules(
+        IMaintenanceScheduleService scheduleService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Processing usage-based schedules...");
+            await scheduleService.ProcessUsageBasedSchedulesAsync();
+            _logger.LogInformation("Usage-based schedules processed successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing usage-based schedules");
+        }
+    }
+
+    private async Task ProcessConditionBasedSchedules(
+        IMaintenanceScheduleService scheduleService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Processing condition-based schedules...");
+            await scheduleService.ProcessConditionBasedSchedulesAsync();
+            _logger.LogInformation("Condition-based schedules processed successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing condition-based schedules");
+        }
+    }
+
+    private async Task SendAdvanceReminders(
+        IMaintenanceScheduleService scheduleService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Sending advance reminders...");
+            var sentCount = await scheduleService.SendAdvanceRemindersAsync();
+            _logger.LogInformation("Sent {Count} advance reminders", sentCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending advance reminders");
         }
     }
 }

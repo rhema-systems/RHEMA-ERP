@@ -119,6 +119,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<MaintenanceTaskTemplate> MaintenanceTaskTemplates { get; set; }
     
     public DbSet<MaintenanceSchedule> MaintenanceSchedules { get; set; }
+    public DbSet<MaintenanceScheduleNotificationHistory> MaintenanceScheduleNotificationHistories { get; set; }
     public DbSet<InspectionTemplate> InspectionTemplates { get; set; }
     public DbSet<AssetInspection> AssetInspections { get; set; }
     public DbSet<InspectionDocument> InspectionDocuments { get; set; }
