@@ -27,6 +27,7 @@ public interface IMaintenanceAssetService
     Task UpdateAssetOperatingHoursAsync(Guid assetId, double operatingHours);
     Task UpdateAssetMileageAsync(Guid assetId, double mileage);
     Task<string> GenerateAssetNumberAsync(Guid categoryId);
+    Task<IEnumerable<MaintenanceAssetDto>> GetAvailableVehiclesAsync();
 }
 
 public interface IMaintenanceAssetCategoryService
@@ -357,13 +358,41 @@ public interface IWorkOrderTaskService
 
 public interface IWorkOrderPartService
 {
+    // Single operations
     Task<WorkOrderPartDto> AddPartAsync(CreateWorkOrderPartDto createDto);
     Task<WorkOrderPartDto> UpdatePartAsync(Guid id, UpdateWorkOrderPartDto updateDto);
     Task DeletePartAsync(Guid id);
     Task<IEnumerable<WorkOrderPartDto>> GetPartsByWorkOrderAsync(Guid workOrderId);
     Task<WorkOrderPartDto> UpdatePartStatusAsync(Guid id, string status, int? quantityUsed = null);
+    Task<WorkOrderPartDto> ReturnUnusedPartsAsync(Guid partId);
     Task<decimal> GetTotalPartsCostAsync(Guid workOrderId);
     Task<IEnumerable<WorkOrderPartDto>> GetPartsRequiringOrderAsync();
+    
+    // Bulk operations
+    Task<IEnumerable<WorkOrderPartDto>> AddPartsBulkAsync(IEnumerable<CreateWorkOrderPartDto> createDtos);
+    Task DeletePartsBulkAsync(IEnumerable<Guid> ids);
+}
+
+public interface IWorkOrderToolService
+{
+    // Tool allocation
+    Task<WorkOrderToolDto> AllocateToolAsync(AllocateWorkOrderToolDto allocateDto);
+    Task<IEnumerable<WorkOrderToolDto>> GetToolsByWorkOrderAsync(Guid workOrderId);
+    Task<WorkOrderToolSummaryDto> GetWorkOrderToolSummaryAsync(Guid workOrderId);
+    Task RemoveToolAllocationAsync(Guid workOrderId, Guid toolId);
+    
+    // Bulk operations
+    Task<IEnumerable<WorkOrderToolDto>> AllocateToolsBulkAsync(IEnumerable<AllocateWorkOrderToolDto> allocateDtos);
+    Task RemoveToolAllocationsBulkAsync(IEnumerable<Guid> toolIds, Guid workOrderId);
+    
+    // Tool checkout/return for work orders
+    Task<WorkOrderToolDto> CheckoutToolAsync(CheckoutWorkOrderToolDto checkoutDto);
+    Task<WorkOrderToolDto> ReturnToolAsync(Guid workOrderId, Guid toolId, ReturnWorkOrderToolDto returnDto);
+    
+    // Query operations
+    Task<IEnumerable<WorkOrderToolDto>> GetCheckedOutToolsForWorkOrderAsync(Guid workOrderId);
+    Task<IEnumerable<WorkOrderToolDto>> GetOverdueToolsForWorkOrderAsync(Guid workOrderId);
+    Task<decimal> GetTotalToolCostAsync(Guid workOrderId);
 }
 
 public interface IWorkOrderLaborService

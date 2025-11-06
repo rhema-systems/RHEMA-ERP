@@ -16,13 +16,16 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 public class WorkOrdersController : ControllerBase
 {
     private readonly IWorkOrderService _workOrderService;
+    private readonly IWorkOrderPartService _workOrderPartService;
     private readonly ILogger<WorkOrdersController> _logger;
 
     public WorkOrdersController(
         IWorkOrderService workOrderService,
+        IWorkOrderPartService workOrderPartService,
         ILogger<WorkOrdersController> logger)
     {
         _workOrderService = workOrderService;
+        _workOrderPartService = workOrderPartService;
         _logger = logger;
     }
 
@@ -174,7 +177,30 @@ public class WorkOrdersController : ControllerBase
             if (workOrder == null)
                 return NotFound($"Work order with ID {id} not found");
 
-            var updatedWorkOrder = await _workOrderService.UpdateWorkOrderStatusAsync(id, request.Status, request.Notes);
+            WorkOrderDto updatedWorkOrder;
+            
+            // If starting the work order, use StartWorkOrderAsync which handles vehicle status updates
+            if (request.Status == "InProgress")
+            {
+                _logger.LogInformation("Starting work order {WorkOrderId}", id);
+                updatedWorkOrder = await _workOrderService.StartWorkOrderAsync(id);
+            }
+            // If completing the work order, use CompleteWorkOrderAsync which handles vehicle status updates
+            else if (request.Status == "Completed")
+            {
+                _logger.LogInformation("Completing work order {WorkOrderId}", id);
+                var completeDto = new ErpSystem.Core.DTOs.Maintenance.CompleteWorkOrderDto
+                {
+                    WorkOrderId = id,
+                    CompletionNotes = request.Notes
+                };
+                updatedWorkOrder = await _workOrderService.CompleteWorkOrderAsync(id, completeDto);
+            }
+            else
+            {
+                updatedWorkOrder = await _workOrderService.UpdateWorkOrderStatusAsync(id, request.Status, request.Notes);
+            }
+            
             return Ok(updatedWorkOrder);
         }
         catch (Exception ex)
@@ -254,6 +280,169 @@ public class WorkOrdersController : ControllerBase
             return StatusCode(500, $"An error occurred while updating task status");
         }
     }
+
+    #region Work Order Parts
+
+    /// <summary>
+    /// Gets all parts/consumables for a work order
+    /// </summary>
+    [HttpGet("{workOrderId:guid}/parts")]
+    public async Task<ActionResult<IEnumerable<WorkOrderPartDto>>> GetWorkOrderParts(Guid workOrderId)
+    {
+        try
+        {
+            var parts = await _workOrderPartService.GetPartsByWorkOrderAsync(workOrderId);
+            return Ok(parts);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Error retrieving parts for work order {workOrderId}");
+            return StatusCode(500, "An error occurred while retrieving parts");
+        }
+    }
+
+    /// <summary>
+    /// Adds a single part/consumable to a work order
+    /// </summary>
+    [HttpPost("parts")]
+    public async Task<ActionResult<WorkOrderPartDto>> AddWorkOrderPart([FromBody] CreateWorkOrderPartDto createDto)
+    {
+        try
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            var part = await _workOrderPartService.AddPartAsync(createDto);
+            return Ok(part);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding part to work order");
+            return StatusCode(500, "An error occurred while adding the part");
+        }
+    }
+
+    /// <summary>
+    /// Adds multiple parts/consumables to a work order in bulk
+    /// </summary>
+    [HttpPost("{workOrderId:guid}/parts/bulk")]
+    public async Task<ActionResult<IEnumerable<WorkOrderPartDto>>> AddWorkOrderPartsBulk(
+        Guid workOrderId,
+        [FromBody] List<CreateWorkOrderPartDto> parts)
+    {
+        try
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            if (parts == null || parts.Count == 0)
+                return BadRequest("No parts provided");
+
+            // Ensure all parts are for the same work order
+            foreach (var part in parts)
+            {
+                part.WorkOrderId = workOrderId;
+            }
+
+            var addedParts = await _workOrderPartService.AddPartsBulkAsync(parts);
+            return Ok(addedParts);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Error adding parts in bulk to work order {workOrderId}");
+            return StatusCode(500, "An error occurred while adding parts");
+        }
+    }
+
+    /// <summary>
+    /// Updates a work order part/consumable
+    /// </summary>
+    [HttpPut("parts/{id:guid}")]
+    public async Task<ActionResult<WorkOrderPartDto>> UpdateWorkOrderPart(
+        Guid id,
+        [FromBody] UpdateWorkOrderPartDto updateDto)
+    {
+        try
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            var part = await _workOrderPartService.UpdatePartAsync(id, updateDto);
+            return Ok(part);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Error updating part {id}");
+            return StatusCode(500, "An error occurred while updating the part");
+        }
+    }
+
+    /// <summary>
+    /// Deletes a work order part/consumable
+    /// </summary>
+    [HttpDelete("parts/{id:guid}")]
+    public async Task<IActionResult> DeleteWorkOrderPart(Guid id)
+    {
+        try
+        {
+            await _workOrderPartService.DeletePartAsync(id);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Error deleting part {id}");
+            return StatusCode(500, "An error occurred while deleting the part");
+        }
+    }
+
+    /// <summary>
+    /// Returns unused parts back to warehouse stock
+    /// </summary>
+    [HttpPost("parts/{id:guid}/return")]
+    public async Task<ActionResult<WorkOrderPartDto>> ReturnUnusedParts(Guid id)
+    {
+        try
+        {
+            var part = await _workOrderPartService.ReturnUnusedPartsAsync(id);
+            return Ok(part);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound($"Part with ID {id} not found");
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Error returning unused parts for part {id}");
+            return StatusCode(500, "An error occurred while returning unused parts");
+        }
+    }
+
+    /// <summary>
+    /// Deletes multiple work order parts/consumables in bulk
+    /// </summary>
+    [HttpPost("parts/bulk-delete")]
+    public async Task<IActionResult> DeleteWorkOrderPartsBulk([FromBody] List<Guid> ids)
+    {
+        try
+        {
+            if (ids == null || ids.Count == 0)
+                return BadRequest("No part IDs provided");
+
+            await _workOrderPartService.DeletePartsBulkAsync(ids);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting parts in bulk");
+            return StatusCode(500, "An error occurred while deleting parts");
+        }
+    }
+
+    #endregion
 }
 
 public class UpdateTaskStatusRequest

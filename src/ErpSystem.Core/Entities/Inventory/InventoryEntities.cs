@@ -425,6 +425,52 @@ public class InventoryLocation : TenantEntity
 
 #endregion
 
+#region Warehouse Quantities
+
+/// <summary>
+/// Tracks inventory quantities at the warehouse level
+/// Used for multi-warehouse inventory management
+/// </summary>
+public class WarehouseQuantity : TenantEntity
+{
+    [Required]
+    public Guid InventoryItemId { get; set; }
+
+    [Required]
+    public Guid WarehouseId { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal CurrentStock { get; set; } = 0;
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal AvailableStock { get; set; } = 0;
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal AllocatedStock { get; set; } = 0;
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal ReorderLevel { get; set; } = 0;
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal MaxStock { get; set; } = 0;
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal AverageCost { get; set; } = 0;
+
+    public DateTime? LastMovementDate { get; set; }
+    public DateTime? LastStockTakeDate { get; set; }
+    public DateTime? NextStockTakeDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+
+    // Navigation Properties
+    public virtual InventoryItem InventoryItem { get; set; } = null!;
+    public virtual Warehouse Warehouse { get; set; } = null!;
+}
+
+#endregion
+
 #region Inventory Allocation and Reservations
 
 /// <summary>
@@ -436,7 +482,9 @@ public class InventoryAllocation : TenantEntity
     public Guid InventoryItemId { get; set; }
 
     [Required]
-    public Guid LocationId { get; set; }
+    public Guid WarehouseId { get; set; }
+
+    public Guid? LocationId { get; set; }
 
     [Required]
     [MaxLength(50)]
@@ -471,7 +519,8 @@ public class InventoryAllocation : TenantEntity
 
     // Navigation Properties
     public virtual InventoryItem InventoryItem { get; set; } = null!;
-    public virtual WarehouseLocation Location { get; set; } = null!;
+    public virtual Warehouse Warehouse { get; set; } = null!;
+    public virtual WarehouseLocation? Location { get; set; }
     public virtual ApplicationUser? AllocatedBy { get; set; }
 }
 

@@ -12,6 +12,7 @@ public class UnitOfWork : IUnitOfWork
     private readonly Dictionary<Type, object> _repositories;
     private IDbContextTransaction? _transaction;
     private bool _disposed = false;
+    private bool _useExecutionStrategy = false;
 
     public UnitOfWork(ApplicationDbContext context)
     {
@@ -53,13 +54,21 @@ public class UnitOfWork : IUnitOfWork
         }
         catch
         {
-            await RollbackAsync(cancellationToken);
+            // Rollback only if transaction is still active
+            if (_transaction != null)
+            {
+                await _transaction.RollbackAsync(cancellationToken);
+            }
             throw;
         }
         finally
         {
-            await _transaction.DisposeAsync();
-            _transaction = null;
+            // Dispose transaction if it still exists
+            if (_transaction != null)
+            {
+                await _transaction.DisposeAsync();
+                _transaction = null;
+            }
         }
     }
 
@@ -91,6 +100,12 @@ public class UnitOfWork : IUnitOfWork
         }
         
         return (IGenericRepository<T>)_repositories[type];
+    }
+    
+    public async Task ExecuteInStrategyAsync(Func<Task> operation, CancellationToken cancellationToken = default)
+    {
+        var strategy = _context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(operation);
     }
 
     protected virtual void Dispose(bool disposing)

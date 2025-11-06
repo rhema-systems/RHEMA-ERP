@@ -352,6 +352,109 @@ public class WarehouseRepository : GenericRepository<Warehouse>, IWarehouseRepos
     }
 }
 
+public class WarehouseQuantityRepository : GenericRepository<WarehouseQuantity>, IWarehouseQuantityRepository
+{
+    public WarehouseQuantityRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<IEnumerable<WarehouseQuantity>> GetByWarehouseAsync(Guid warehouseId)
+    {
+        if (warehouseId == Guid.Empty)
+            return new List<WarehouseQuantity>();
+            
+        return await _dbSet
+            .Where(wq => wq.WarehouseId == warehouseId && !wq.IsDeleted)
+            .Include(wq => wq.InventoryItem)
+                .ThenInclude(i => i.Category)
+            .Include(wq => wq.Warehouse)
+            .OrderBy(wq => wq.InventoryItem.ItemCode)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<WarehouseQuantity>> GetByWarehouseAndItemTypeAsync(Guid warehouseId, int itemType)
+    {
+        if (warehouseId == Guid.Empty)
+            return new List<WarehouseQuantity>();
+        
+        var itemTypeEnum = (ItemType)itemType;
+        return await _dbSet
+            .Where(wq => wq.WarehouseId == warehouseId && 
+                        wq.InventoryItem.ItemType == itemTypeEnum &&
+                        !wq.IsDeleted)
+            .Include(wq => wq.InventoryItem)
+                .ThenInclude(i => i.Category)
+            .Include(wq => wq.Warehouse)
+            .OrderBy(wq => wq.InventoryItem.ItemCode)
+            .ToListAsync();
+    }
+
+    public async Task<WarehouseQuantity?> GetByWarehouseAndItemAsync(Guid warehouseId, Guid inventoryItemId)
+    {
+        if (warehouseId == Guid.Empty || inventoryItemId == Guid.Empty)
+            return null;
+            
+        return await _dbSet
+            .Where(wq => wq.WarehouseId == warehouseId && 
+                        wq.InventoryItemId == inventoryItemId && 
+                        !wq.IsDeleted)
+            .Include(wq => wq.InventoryItem)
+                .ThenInclude(i => i.Category)
+            .Include(wq => wq.Warehouse)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<IEnumerable<WarehouseQuantity>> GetByInventoryItemIdAsync(Guid inventoryItemId)
+    {
+        if (inventoryItemId == Guid.Empty)
+            return new List<WarehouseQuantity>();
+            
+        return await _dbSet
+            .Where(wq => wq.InventoryItemId == inventoryItemId && !wq.IsDeleted)
+            .Include(wq => wq.InventoryItem)
+                .ThenInclude(i => i.Category)
+            .Include(wq => wq.Warehouse)
+            .OrderBy(wq => wq.Warehouse.Name)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<WarehouseQuantity>> GetItemsWithStockAsync(Guid warehouseId, int? itemType = null)
+    {
+        var query = _dbSet
+            .Where(wq => wq.WarehouseId == warehouseId && 
+                        wq.AvailableStock > 0 && 
+                        !wq.IsDeleted);
+
+        if (itemType.HasValue)
+        {
+            var itemTypeEnum = (ItemType)itemType.Value;
+            query = query.Where(wq => wq.InventoryItem.ItemType == itemTypeEnum);
+        }
+
+        return await query
+            .Include(wq => wq.InventoryItem)
+                .ThenInclude(i => i.Category)
+            .Include(wq => wq.Warehouse)
+            .OrderBy(wq => wq.InventoryItem.ItemCode)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<WarehouseQuantity>> GetItemsBelowReorderLevelAsync(Guid warehouseId)
+    {
+        if (warehouseId == Guid.Empty)
+            return new List<WarehouseQuantity>();
+            
+        return await _dbSet
+            .Where(wq => wq.WarehouseId == warehouseId && 
+                        wq.CurrentStock <= wq.ReorderLevel && 
+                        !wq.IsDeleted)
+            .Include(wq => wq.InventoryItem)
+                .ThenInclude(i => i.Category)
+            .Include(wq => wq.Warehouse)
+            .OrderBy(wq => wq.CurrentStock)
+            .ThenBy(wq => wq.InventoryItem.ItemCode)
+            .ToListAsync();
+    }
+}
+
 public class WarehouseLocationRepository : GenericRepository<WarehouseLocation>, IWarehouseLocationRepository
 {
     public WarehouseLocationRepository(ApplicationDbContext context) : base(context) { }

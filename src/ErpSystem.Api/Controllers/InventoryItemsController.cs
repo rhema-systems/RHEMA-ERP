@@ -21,6 +21,9 @@ public class InventoryItemsController : ControllerBase
     private readonly IStockMovementRepository _stockMovementRepository;
     private readonly IInventoryLocationRepository _inventoryLocationRepository;
     private readonly IInventoryAllocationRepository _inventoryAllocationRepository;
+    private readonly IWarehouseLocationRepository _warehouseLocationRepository;
+    private readonly IWarehouseRepository _warehouseRepository;
+    private readonly IWarehouseQuantityRepository _warehouseQuantityRepository;
     private readonly IMapper _mapper;
     private readonly ILogger<InventoryItemsController> _logger;
 
@@ -29,6 +32,9 @@ public class InventoryItemsController : ControllerBase
         IStockMovementRepository stockMovementRepository,
         IInventoryLocationRepository inventoryLocationRepository,
         IInventoryAllocationRepository inventoryAllocationRepository,
+        IWarehouseLocationRepository warehouseLocationRepository,
+        IWarehouseRepository warehouseRepository,
+        IWarehouseQuantityRepository warehouseQuantityRepository,
         IMapper mapper,
         ILogger<InventoryItemsController> logger)
     {
@@ -36,25 +42,36 @@ public class InventoryItemsController : ControllerBase
         _stockMovementRepository = stockMovementRepository;
         _inventoryLocationRepository = inventoryLocationRepository;
         _inventoryAllocationRepository = inventoryAllocationRepository;
+        _warehouseLocationRepository = warehouseLocationRepository;
+        _warehouseRepository = warehouseRepository;
+        _warehouseQuantityRepository = warehouseQuantityRepository;
         _mapper = mapper;
         _logger = logger;
     }
 
     /// <summary>
-    /// Get all active inventory items
+    /// Get all active inventory items, optionally filtered by item type
     /// </summary>
+    /// <param name="itemType">Optional item type filter (1=StockItem, 2=Service, 3=NonStock, 4=FixedAsset)</param>
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<InventoryItemDto>>> GetInventoryItems()
+    public async Task<ActionResult<IEnumerable<InventoryItemDto>>> GetInventoryItems([FromQuery] ItemType? itemType = null)
     {
         try
         {
-            var items = await _inventoryItemRepository.GetActiveItemsAsync();
+            var items = (await _inventoryItemRepository.GetActiveItemsAsync()).ToList();
+            
+            // Filter by item type if specified
+            if (itemType.HasValue)
+            {
+                items = items.Where(i => i.ItemType == itemType.Value).ToList();
+            }
+            
             var itemDtos = _mapper.Map<IEnumerable<InventoryItemDto>>(items);
             return Ok(itemDtos);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving inventory items");
+            _logger.LogError(ex, "Error retrieving inventory items. ItemType filter: {ItemType}", itemType);
             return StatusCode(500, "An error occurred while retrieving inventory items");
         }
     }
@@ -430,6 +447,98 @@ public class InventoryItemsController : ControllerBase
     }
 
     /// <summary>
+    /// Get all warehouses
+    /// </summary>
+    [HttpGet("warehouses")]
+    public async Task<ActionResult<IEnumerable<WarehouseDto>>> GetWarehouses()
+    {
+        try
+        {
+            var warehouses = await _warehouseRepository.GetActiveWarehousesAsync();
+            var warehouseDtos = _mapper.Map<IEnumerable<WarehouseDto>>(warehouses);
+            return Ok(warehouseDtos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving warehouses");
+            return StatusCode(500, "An error occurred while retrieving warehouses");
+        }
+    }
+
+    /// <summary>
+    /// Get inventory items by warehouse with available stock, optionally filtered by item type
+    /// </summary>
+    /// <param name="warehouseId">The warehouse ID</param>
+    /// <param name="itemType">Optional item type filter (1=Consumable, 4=Tool)</param>
+    [HttpGet("by-warehouse/{warehouseId:guid}")]
+    public async Task<ActionResult<IEnumerable<WarehouseInventoryDto>>> GetInventoryByWarehouse(
+        Guid warehouseId, 
+        [FromQuery] int? itemType = null)
+    {
+        try
+        {
+            var warehouse = await _warehouseRepository.GetByIdAsync(warehouseId);
+            if (warehouse == null)
+            {
+                return NotFound($"Warehouse with ID {warehouseId} not found");
+            }
+
+            var warehouseQuantities = await _warehouseQuantityRepository.GetItemsWithStockAsync(warehouseId, itemType);
+            
+            var inventoryDtos = warehouseQuantities.Select(wq => new WarehouseInventoryDto
+            {
+                InventoryItemId = wq.InventoryItemId,
+                ItemCode = wq.InventoryItem.ItemCode,
+                ItemName = wq.InventoryItem.Name,
+                ItemType = (int)wq.InventoryItem.ItemType,
+                Description = wq.InventoryItem.Description,
+                UnitOfMeasure = wq.InventoryItem.UnitOfMeasure,
+                CurrentStock = wq.CurrentStock,
+                AvailableStock = wq.AvailableStock,
+                AllocatedStock = wq.AllocatedStock,
+                UnitCost = wq.InventoryItem.StandardCost,
+                CategoryName = wq.InventoryItem.Category?.Name
+            });
+            
+            return Ok(inventoryDtos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving inventory for warehouse {WarehouseId}", warehouseId);
+            return StatusCode(500, "An error occurred while retrieving warehouse inventory");
+        }
+    }
+
+    /// <summary>
+    /// Get all warehouse locations
+    /// </summary>
+    [HttpGet("warehouse-locations")]
+    public async Task<ActionResult<IEnumerable<WarehouseLocationDto>>> GetWarehouseLocations([FromQuery] Guid? warehouseId = null)
+    {
+        try
+        {
+            IEnumerable<WarehouseLocation> locations;
+            
+            if (warehouseId.HasValue)
+            {
+                locations = await _warehouseLocationRepository.GetLocationsByWarehouseAsync(warehouseId.Value);
+            }
+            else
+            {
+                locations = await _warehouseLocationRepository.GetAllAsync();
+            }
+            
+            var locationDtos = _mapper.Map<IEnumerable<WarehouseLocationDto>>(locations);
+            return Ok(locationDtos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving warehouse locations");
+            return StatusCode(500, "An error occurred while retrieving warehouse locations");
+        }
+    }
+
+    /// <summary>
     /// Helper method to get tenant ID from claims
     /// </summary>
     private Guid GetTenantId()
@@ -450,4 +559,22 @@ public class StockAvailabilityCheckDto
     
     [Required]
     public decimal RequiredQuantity { get; set; }
+}
+
+/// <summary>
+/// DTO for warehouse inventory with quantities
+/// </summary>
+public class WarehouseInventoryDto
+{
+    public Guid InventoryItemId { get; set; }
+    public string ItemCode { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public int ItemType { get; set; }
+    public string? Description { get; set; }
+    public string? UnitOfMeasure { get; set; }
+    public decimal CurrentStock { get; set; }
+    public decimal AvailableStock { get; set; }
+    public decimal AllocatedStock { get; set; }
+    public decimal UnitCost { get; set; }
+    public string? CategoryName { get; set; }
 }

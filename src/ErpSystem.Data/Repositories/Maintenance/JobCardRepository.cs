@@ -151,6 +151,58 @@ public class JobCardRepository : IJobCardRepository
         var jobCard = await _context.JobCards.FindAsync(id);
         if (jobCard == null) return null;
 
+        // Manually load related entities
+        var asset = await _context.MaintenanceAssets
+            .Include(a => a.AssetCategory)
+            .FirstOrDefaultAsync(a => a.Id == jobCard.AssetId);
+            
+        var maintenanceType = await _context.MaintenanceTypes
+            .FirstOrDefaultAsync(m => m.Id == jobCard.MaintenanceTypeId);
+            
+        var priorityLevel = await _context.PriorityLevels
+            .FirstOrDefaultAsync(p => p.Id == jobCard.PriorityLevelId);
+            
+        var requestedBy = await _context.Employees
+            .FirstOrDefaultAsync(e => e.Id == jobCard.RequestedById);
+            
+        var approvedBy = jobCard.ApprovedById.HasValue 
+            ? await _context.Employees.FirstOrDefaultAsync(e => e.Id == jobCard.ApprovedById.Value)
+            : null;
+            
+        var preferredTechnician = jobCard.PreferredTechnicianId.HasValue
+            ? await _context.Employees.FirstOrDefaultAsync(e => e.Id == jobCard.PreferredTechnicianId.Value)
+            : null;
+            
+        var assignedTechnician = jobCard.AssignedTechnicianId.HasValue
+            ? await _context.Employees.FirstOrDefaultAsync(e => e.Id == jobCard.AssignedTechnicianId.Value)
+            : null;
+            
+        var qualityCheckedBy = jobCard.QualityCheckedById.HasValue
+            ? await _context.Employees.FirstOrDefaultAsync(e => e.Id == jobCard.QualityCheckedById.Value)
+            : null;
+            
+        var documents = await _context.JobCardDocuments
+            .Where(d => d.JobCardId == id)
+            .Include(d => d.UploadedBy)
+            .ToListAsync();
+            
+        var comments = await _context.JobCardComments
+            .Where(c => c.JobCardId == id)
+            .Include(c => c.CommentBy)
+            .OrderBy(c => c.CommentDate)
+            .ToListAsync();
+            
+        var approvalSteps = await _context.JobCardApprovalSteps
+            .Where(a => a.JobCardId == id)
+            .Include(a => a.Approver)
+            .OrderBy(a => a.StepOrder)
+            .ToListAsync();
+            
+        // Load work order if exists
+        var workOrder = jobCard.GeneratedWorkOrderId.HasValue
+            ? await _context.WorkOrders.FirstOrDefaultAsync(w => w.Id == jobCard.GeneratedWorkOrderId.Value)
+            : null;
+
         return new JobCardDto
         {
             Id = jobCard.Id,
@@ -158,17 +210,123 @@ public class JobCardRepository : IJobCardRepository
             Title = jobCard.Title,
             Description = jobCard.Description,
             ProblemDescription = jobCard.ProblemDescription,
+            
+            // Asset Information
             AssetId = jobCard.AssetId,
+            AssetName = asset?.Name ?? "Unknown",
+            AssetCode = asset?.AssetNumber ?? "N/A",
+            AssetType = asset?.AssetCategory?.Name ?? asset?.AssetCategory?.AssetType ?? "N/A",
+            AssetLocation = asset?.Location ?? "N/A",
+            
+            // Maintenance Details
             MaintenanceTypeId = jobCard.MaintenanceTypeId,
+            MaintenanceType = maintenanceType?.Name ?? "Unknown",
+            MaintenanceCategory = maintenanceType?.Category ?? "N/A",
             PriorityLevelId = jobCard.PriorityLevelId,
-            JobCardStatus = jobCard.JobCardStatus,
-            ApprovalStatus = jobCard.ApprovalStatus,
+            Priority = priorityLevel?.Name ?? "Medium",
+            PriorityColor = priorityLevel?.Color ?? "#FFA500",
+            PriorityLevel = priorityLevel?.Level ?? 2,
+            
+            MaintenanceLocation = jobCard.MaintenanceLocation ?? "Internal",
+            
+            // Request Information
+            RequestedById = jobCard.RequestedById,
+            RequestedBy = requestedBy?.FullName ?? "Unknown",
+            RequestedDate = jobCard.RequestedDate,
+            RequiredCompletionDate = jobCard.RequiredCompletionDate,
+            
+            // Estimates
             EstimatedHours = jobCard.EstimatedHours,
             EstimatedCost = jobCard.EstimatedCost,
+            
+            // Assignment
+            PreferredTechnicianId = jobCard.PreferredTechnicianId,
+            PreferredTechnician = preferredTechnician?.FullName,
+            PreferredTeamId = jobCard.PreferredTeamId,
+            PreferredTeam = null, // Would need to load TechnicianTeam
+            ContractorId = jobCard.ContractorId,
+            
+            // Requirements
+            RequiresSpecialTools = jobCard.RequiresSpecialTools,
+            RequiresShutdown = jobCard.RequiresShutdown,
+            RequiresSafetyPermit = jobCard.RequiresSafetyPermit,
+            SpecialInstructions = jobCard.SpecialInstructions,
+            SafetyRequirements = jobCard.SafetyRequirements,
+            
+            // Status Information
+            JobCardStatus = jobCard.JobCardStatus,
+            ApprovalStatus = jobCard.ApprovalStatus,
+            SubmittedAt = jobCard.SubmittedDate,
+            ApprovedAt = jobCard.ApprovedDate,
+            ApprovedById = jobCard.ApprovedById,
+            ApprovedBy = approvedBy?.FullName,
+            
+            // Planning
+            PlannedStartDate = jobCard.PlannedStartDate,
+            PlannedEndDate = jobCard.PlannedEndDate,
+            AssignedTechnicianId = jobCard.AssignedTechnicianId,
+            AssignedTechnician = assignedTechnician?.FullName,
+            AssignedTeamId = jobCard.AssignedTeamId,
+            AssignedTeam = null, // Would need to load TechnicianTeam
+            
+            // Work Order Generation
+            GeneratedWorkOrderId = jobCard.GeneratedWorkOrderId,
+            GeneratedWorkOrderNumber = workOrder?.WorkOrderNumber,
+            WorkOrderGeneratedAt = jobCard.WorkOrderGeneratedAt,
+            
+            // Completion
+            CompletedDate = jobCard.CompletedDate,
+            CompletionNotes = jobCard.CompletionNotes,
+            WorkCompletedSummary = jobCard.WorkCompletedSummary,
+            
+            // Quality Control
+            QualityCheckPassed = jobCard.QualityCheckPassed,
+            QualityCheckedBy = qualityCheckedBy?.FullName,
+            QualityCheckDate = jobCard.QualityCheckDate,
+            
+            // Certificate
+            CertificateGenerated = jobCard.CertificateGenerated,
+            CertificateGeneratedDate = jobCard.CertificateGeneratedDate,
+            
+            // Documents, Comments, Approval Steps
+            Documents = documents.Select(d => new JobCardDocumentDto
+            {
+                Id = d.Id,
+                FileName = d.FileName,
+                FilePath = d.FilePath,
+                ContentType = d.ContentType,
+                FileSize = d.FileSize,
+                DocumentType = d.DocumentType,
+                UploadedAt = d.UploadedDate,
+                UploadedBy = d.UploadedBy?.FullName ?? "Unknown"
+            }).ToList(),
+            
+            Comments = comments.Select(c => new JobCardCommentDto
+            {
+                Id = c.Id,
+                Comment = c.Comment,
+                CommentType = c.CommentType,
+                IsInternal = c.IsInternal,
+                CommentDate = c.CommentDate,
+                CommentBy = c.CommentBy?.FullName ?? "Unknown"
+            }).ToList(),
+            
+            ApprovalSteps = approvalSteps.Select(a => new JobCardApprovalStepDto
+            {
+                Id = a.Id,
+                StepOrder = a.StepOrder,
+                StepName = a.StepName,
+                ApproverId = a.ApproverId,
+                ApproverName = a.Approver?.FullName ?? "Unknown",
+                Status = a.Status,
+                ActionDate = a.ActionDate,
+                Comments = a.Comments,
+                IsRequired = a.IsRequired
+            }).ToList(),
+            
+            // Metadata
             CreatedAt = jobCard.CreatedAt,
-            AssetName = "Asset", // Would need proper mapping
-            Priority = "Medium", // Would need proper mapping
-            RequestedBy = "User" // Would need proper mapping
+            UpdatedAt = jobCard.UpdatedAt
         };
     }
 

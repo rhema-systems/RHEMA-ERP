@@ -72,6 +72,10 @@ namespace ErpSystem.Web.Services
                     // Seed comprehensive maintenance data (inventory, assets, templates, checklists)
                     _logger.LogInformation("Ensuring comprehensive maintenance data is seeded...");
                     await SeedMaintenanceComprehensiveDataAsync();
+                    
+                    // Seed quality control checklists
+                    _logger.LogInformation("Ensuring QC checklists are seeded...");
+                    await SeedQualityControlChecklistsAsync();
                 }
 
                 await _context.SaveChangesAsync();
@@ -209,6 +213,33 @@ namespace ErpSystem.Web.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error seeding comprehensive maintenance data");
+                throw;
+            }
+        }
+        
+        private async Task SeedQualityControlChecklistsAsync()
+        {
+            _logger.LogInformation("Seeding quality control checklists...");
+            
+            try
+            {
+                var defaultTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Code == "DEFAULT");
+                if (defaultTenant == null)
+                {
+                    _logger.LogWarning("Default tenant not found, skipping QC checklist seeding");
+                    return;
+                }
+                
+                var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+                var seederLogger = loggerFactory.CreateLogger<QualityControlChecklistSeeder>();
+                
+                var seeder = new QualityControlChecklistSeeder(_context, seederLogger);
+                await seeder.SeedAsync(defaultTenant.Id);
+                _logger.LogInformation("Quality control checklists seeding completed");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error seeding quality control checklists");
                 throw;
             }
         }

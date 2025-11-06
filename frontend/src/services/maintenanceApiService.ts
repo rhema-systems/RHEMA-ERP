@@ -70,6 +70,75 @@ export interface WorkOrderTask {
   isRequired: boolean;
 }
 
+export interface WorkOrderPart {
+  id: string;
+  workOrderId: string;
+  inventoryItemId: string;
+  itemCode: string;
+  itemName: string;
+  description?: string;
+  quantityRequired: number;
+  quantityAllocated: number;
+  quantityUsed: number;
+  quantityReturned: number;
+  unitCost: number;
+  totalCost: number;
+  serialNumber?: string;
+  lotNumber?: string;
+  status: string;
+  allocationId?: string;
+  allocatedAt?: string;
+  pickedAt?: string;
+  usedAt?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface WorkOrderLabor {
+  id: string;
+  workOrderId: string;
+  technicianId: string;
+  startTime?: string;
+  endTime?: string;
+  hours: number;
+  hourlyRate: number;
+  totalCost: number;
+  notes?: string;
+  laborType?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface WorkOrderTool {
+  id: string;
+  workOrderId: string;
+  toolId: string;
+  toolCode?: string;
+  toolName?: string;
+  description?: string;
+  category?: string;
+  currentLocation?: string;
+  isRequired: boolean;
+  isAllocated: boolean;
+  allocationDate?: string;
+  checkoutId?: string;
+  isCheckedOut?: boolean;
+  checkoutDate?: string;
+  expectedReturnDate?: string;
+  actualReturnDate?: string;
+  checkoutStatus?: string;
+  checkedOutById?: string;
+  checkedOutByName?: string;
+  dailyRentalRate?: number;
+  requiresCertification?: boolean;
+  requiresTraining?: boolean;
+  safetyNotes?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface WorkOrder {
   id: string;
   workOrderNumber: string;
@@ -94,6 +163,9 @@ export interface WorkOrder {
   actualCost?: number;
   completionNotes?: string;
   tasks?: WorkOrderTask[];
+  parts?: WorkOrderPart[];
+  labor?: WorkOrderLabor[];
+  tools?: WorkOrderTool[];
 }
 
 export interface JobCard {
@@ -106,6 +178,68 @@ export interface JobCard {
   status: string;
   requestedDate: string;
   approvalStatus: string;
+}
+
+export interface MaintenanceStaffSchedule {
+  id?: string;
+  technicianId: string;
+  technicianName?: string;
+  startDateTime: string;
+  endDateTime: string;
+  scheduleType: string;
+  status: string;
+  workOrderId?: string;
+  workOrderNumber?: string;
+  jobCardId?: string;
+  jobCardNumber?: string;
+  teamId?: string;
+  teamName?: string;
+  workLocation?: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
+  requiresTravel: boolean;
+  departureTime?: string;
+  arrivalTime?: string;
+  estimatedTravelMinutes?: number;
+  actualTravelMinutes?: number;
+  assignedVehicleId?: string;
+  vehicleName?: string;
+  transportationType?: string;
+  notes?: string;
+  actualStartTime?: string;
+  actualEndTime?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface MaintenanceExpense {
+  id?: string;
+  workOrderId: string;
+  workOrderNumber?: string;
+  scheduleId?: string;
+  technicianId?: string;
+  technicianName?: string;
+  expenseType: string;
+  description: string;
+  amount: number;
+  expenseDate: string;
+  mileageDriven?: number;
+  mileageRate?: number;
+  vehicleUsed?: string;
+  receiptNumber?: string;
+  receiptPath?: string;
+  vendor?: string;
+  paymentMethod?: string;
+  category?: string;
+  status: string;
+  approvedBy?: string;
+  approvedById?: string;
+  approvedDate?: string;
+  approvalNotes?: string;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface PagedResult<T> {
@@ -204,6 +338,16 @@ class MaintenanceApiService {
 
   async getAssetById(id: string): Promise<Asset> {
     return await apiService.request<Asset>(`/maintenance/assets/${id}`);
+  }
+
+  async getAvailableVehicles(): Promise<Asset[]> {
+    try {
+      // Use the proper backend endpoint that filters by AssetType="Vehicle" in the database
+      return await apiService.request<Asset[]>('/maintenance/assets/available-vehicles');
+    } catch (error) {
+      console.error('Error fetching available vehicles:', error);
+      return [];
+    }
   }
 
   // Work Order Types
@@ -387,6 +531,148 @@ class MaintenanceApiService {
 
   async getWorkOrdersDueSoon(days: number = 7): Promise<WorkOrder[]> {
     return await apiService.request<WorkOrder[]>(`/maintenance/work-orders/due-soon?days=${days}`);
+  }
+
+  // Staff Schedules
+  async getStaffSchedulesByWorkOrder(workOrderId: string): Promise<MaintenanceStaffSchedule[]> {
+    return await apiService.request<MaintenanceStaffSchedule[]>(
+      `/maintenance/staff-schedules/by-workorder/${workOrderId}`
+    );
+  }
+
+  async getStaffSchedulesByTechnician(technicianId: string): Promise<MaintenanceStaffSchedule[]> {
+    return await apiService.request<MaintenanceStaffSchedule[]>(
+      `/maintenance/staff-schedules/by-technician/${technicianId}`
+    );
+  }
+
+  async getStaffSchedulesByDateRange(startDate: string, endDate: string): Promise<MaintenanceStaffSchedule[]> {
+    return await apiService.request<MaintenanceStaffSchedule[]>(
+      `/maintenance/staff-schedules/by-date-range?startDate=${startDate}&endDate=${endDate}`
+    );
+  }
+
+  async getStaffScheduleById(id: string): Promise<MaintenanceStaffSchedule> {
+    return await apiService.request<MaintenanceStaffSchedule>(
+      `/maintenance/staff-schedules/${id}`
+    );
+  }
+
+  async createStaffSchedule(schedule: Partial<MaintenanceStaffSchedule>): Promise<MaintenanceStaffSchedule> {
+    return await apiService.request<MaintenanceStaffSchedule>(
+      '/maintenance/staff-schedules',
+      {
+        method: 'POST',
+        body: JSON.stringify(schedule)
+      }
+    );
+  }
+
+  async updateStaffSchedule(id: string, schedule: Partial<MaintenanceStaffSchedule>): Promise<MaintenanceStaffSchedule> {
+    return await apiService.request<MaintenanceStaffSchedule>(
+      `/maintenance/staff-schedules/${id}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(schedule)
+      }
+    );
+  }
+
+  async deleteStaffSchedule(id: string): Promise<void> {
+    await apiService.request<void>(
+      `/maintenance/staff-schedules/${id}`,
+      {
+        method: 'DELETE'
+      }
+    );
+  }
+
+  async startStaffSchedule(id: string): Promise<MaintenanceStaffSchedule> {
+    return await apiService.request<MaintenanceStaffSchedule>(
+      `/maintenance/staff-schedules/${id}/start`,
+      {
+        method: 'POST'
+      }
+    );
+  }
+
+  async completeStaffSchedule(id: string): Promise<MaintenanceStaffSchedule> {
+    return await apiService.request<MaintenanceStaffSchedule>(
+      `/maintenance/staff-schedules/${id}/complete`,
+      {
+        method: 'POST'
+      }
+    );
+  }
+
+  // Expenses
+  async getExpensesByWorkOrder(workOrderId: string): Promise<MaintenanceExpense[]> {
+    return await apiService.request<MaintenanceExpense[]>(
+      `/maintenance/expenses/by-workorder/${workOrderId}`
+    );
+  }
+
+  async getExpensesByTechnician(technicianId: string): Promise<MaintenanceExpense[]> {
+    return await apiService.request<MaintenanceExpense[]>(
+      `/maintenance/expenses/by-technician/${technicianId}`
+    );
+  }
+
+  async getPendingExpenses(): Promise<MaintenanceExpense[]> {
+    return await apiService.request<MaintenanceExpense[]>(
+      '/maintenance/expenses/pending'
+    );
+  }
+
+  async getTotalExpensesByWorkOrder(workOrderId: string): Promise<number> {
+    return await apiService.request<number>(
+      `/maintenance/expenses/total-by-workorder/${workOrderId}`
+    );
+  }
+
+  async getExpenseById(id: string): Promise<MaintenanceExpense> {
+    return await apiService.request<MaintenanceExpense>(
+      `/maintenance/expenses/${id}`
+    );
+  }
+
+  async createExpense(expense: Partial<MaintenanceExpense>): Promise<MaintenanceExpense> {
+    return await apiService.request<MaintenanceExpense>(
+      '/maintenance/expenses',
+      {
+        method: 'POST',
+        body: JSON.stringify(expense)
+      }
+    );
+  }
+
+  async updateExpense(id: string, expense: Partial<MaintenanceExpense>): Promise<MaintenanceExpense> {
+    return await apiService.request<MaintenanceExpense>(
+      `/maintenance/expenses/${id}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(expense)
+      }
+    );
+  }
+
+  async deleteExpense(id: string): Promise<void> {
+    await apiService.request<void>(
+      `/maintenance/expenses/${id}`,
+      {
+        method: 'DELETE'
+      }
+    );
+  }
+
+  async approveExpense(id: string, approvalNotes?: string): Promise<MaintenanceExpense> {
+    return await apiService.request<MaintenanceExpense>(
+      `/maintenance/expenses/${id}/approve`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ approvalNotes })
+      }
+    );
   }
 }
 

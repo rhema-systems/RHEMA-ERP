@@ -84,6 +84,19 @@ public interface IWarehouseLocationRepository : IGenericRepository<WarehouseLoca
 }
 
 /// <summary>
+/// Repository interface for warehouse quantities
+/// </summary>
+public interface IWarehouseQuantityRepository : IGenericRepository<WarehouseQuantity>
+{
+    Task<IEnumerable<WarehouseQuantity>> GetByWarehouseAsync(Guid warehouseId);
+    Task<IEnumerable<WarehouseQuantity>> GetByWarehouseAndItemTypeAsync(Guid warehouseId, int itemType);
+    Task<WarehouseQuantity?> GetByWarehouseAndItemAsync(Guid warehouseId, Guid inventoryItemId);
+    Task<IEnumerable<WarehouseQuantity>> GetByInventoryItemIdAsync(Guid inventoryItemId);
+    Task<IEnumerable<WarehouseQuantity>> GetItemsWithStockAsync(Guid warehouseId, int? itemType = null);
+    Task<IEnumerable<WarehouseQuantity>> GetItemsBelowReorderLevelAsync(Guid warehouseId);
+}
+
+/// <summary>
 /// Repository interface for stock adjustments
 /// </summary>
 public interface IStockAdjustmentRepository : IGenericRepository<StockAdjustment>

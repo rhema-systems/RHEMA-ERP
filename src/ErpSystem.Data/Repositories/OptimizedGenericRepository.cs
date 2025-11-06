@@ -486,6 +486,18 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
     {
         return await _context.SaveChangesAsync();
     }
+    
+    public async Task HardDeleteAsync(T entity)
+    {
+        _dbSet.Remove(entity);
+        await Task.CompletedTask;
+    }
+    
+    public async Task HardDeleteRangeAsync(IEnumerable<T> entities)
+    {
+        _dbSet.RemoveRange(entities);
+        await Task.CompletedTask;
+    }
 
     #endregion
 }

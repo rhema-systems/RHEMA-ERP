@@ -102,7 +102,9 @@ public class WorkOrderPartRepository : GenericRepository<WorkOrderPart>, IWorkOr
         return await _dbSet
             .Where(wop => wop.WorkOrderId == workOrderId && !wop.IsDeleted)
             .Include(wop => wop.WorkOrder)
-            .OrderBy(wop => wop.ItemCode)
+            .Include(wop => wop.InventoryItem)
+            .Include(wop => wop.WarehouseLocation)
+            .OrderBy(wop => wop.CreatedAt)
             .ToListAsync();
     }
 

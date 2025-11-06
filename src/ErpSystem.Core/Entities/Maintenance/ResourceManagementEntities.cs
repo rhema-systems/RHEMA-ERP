@@ -277,9 +277,8 @@ public class MaintenanceTool : TenantEntity
 
     public bool IsActive { get; set; } = true;
 
-    // Navigation properties
-    public virtual ICollection<ToolCheckout> Checkouts { get; set; } = new List<ToolCheckout>();
-    public virtual ICollection<WorkOrderTool> WorkOrderTools { get; set; } = new List<WorkOrderTool>();
+    // Note: This entity is deprecated. Use InventoryItems with ItemType = 4 (FixedAsset) for tools instead.
+    // WorkOrderTool and ToolCheckout now reference InventoryItem directly.
 }
 
 /// <summary>
@@ -330,7 +329,8 @@ public class ToolCheckout : TenantEntity
     public decimal? DamageCost { get; set; }
 
     // Navigation properties
-    public virtual MaintenanceTool Tool { get; set; } = null!;
+    [ForeignKey(nameof(ToolId))]
+    public virtual ErpSystem.Core.Entities.Inventory.InventoryItem Tool { get; set; } = null!;
     public virtual Employee CheckedOutBy { get; set; } = null!;
     public virtual Employee? CheckedInBy { get; set; }
     public virtual WorkOrder? WorkOrder { get; set; }
@@ -355,14 +355,17 @@ public class WorkOrderTool : TenantEntity
     public DateTime? AllocationDate { get; set; }
 
     public Guid? CheckoutId { get; set; }
+    public Guid? AllocationId { get; set; }
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
 
     // Navigation properties
     public virtual WorkOrder WorkOrder { get; set; } = null!;
-    public virtual MaintenanceTool Tool { get; set; } = null!;
+    [ForeignKey(nameof(ToolId))]
+    public virtual ErpSystem.Core.Entities.Inventory.InventoryItem Tool { get; set; } = null!;
     public virtual ToolCheckout? Checkout { get; set; }
+    public virtual ErpSystem.Core.Entities.Inventory.InventoryAllocation? Allocation { get; set; }
 }
 
 /// <summary>
@@ -425,7 +428,7 @@ public class MaintenanceStaffSchedule : TenantEntity
     public virtual WorkOrder? WorkOrder { get; set; }
     public virtual JobCard? JobCard { get; set; }
     public virtual TechnicianTeam? Team { get; set; }
-    public virtual MaintenanceVehicle? AssignedVehicle { get; set; }
+    public virtual MaintenanceAsset? AssignedVehicle { get; set; }
     public virtual ICollection<MaintenanceExpense> Expenses { get; set; } = new List<MaintenanceExpense>();
 }
 
@@ -487,6 +490,9 @@ public class MaintenanceExpense : TenantEntity
     public bool IsReimbursed { get; set; } = false;
     public DateTime? ReimbursedDate { get; set; }
 
+    // Vehicle tracking
+    public Guid? VehicleId { get; set; }
+    
     // Location information
     [MaxLength(200)]
     public string? Location { get; set; }
@@ -499,6 +505,7 @@ public class MaintenanceExpense : TenantEntity
     public virtual MaintenanceStaffSchedule? Schedule { get; set; }
     public virtual Employee? Technician { get; set; }
     public virtual Employee? ApprovedBy { get; set; }
+    public virtual MaintenanceAsset? Vehicle { get; set; }
 }
 
 /// <summary>

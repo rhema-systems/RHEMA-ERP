@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +10,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, Send } from 'lucide-react';
+import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, Send, XCircle } from 'lucide-react';
+import { format } from 'date-fns';
 import {
   Dialog,
   DialogContent,
@@ -28,11 +30,14 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import maintenanceApiService, { Employee, Asset, WorkOrderType, PriorityLevel } from '@/services/maintenanceApiService';
-import jobCardService, { JobCard as JobCardType, CreateJobCardRequest, JobCardApprovalAction } from '@/services/jobCardService';
+import jobCardService, { JobCard as JobCardType, JobCardDetails, CreateJobCardRequest, JobCardApprovalAction } from '@/services/jobCardService';
+import workOrderService, { WorkOrder } from '@/services/workOrderService';
+import qualityControlService from '@/services/qualityControlService';
 import workflowApiService from '@/services/workflow-api.service';
 import { notificationService } from '@/services/notificationService';
 import ClientOnly from '@/components/ui/client-only';
 import { useToast } from '@/hooks/use-toast';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // Use the JobCard type from service instead of local interface
 interface JobCard {
@@ -65,6 +70,7 @@ interface JobCard {
 
 export default function JobCardsPage() {
   const { toast } = useToast();
+  const searchParams = useSearchParams();
   const [jobCards, setJobCards] = useState<JobCard[]>([]);
   const [filteredCards, setFilteredCards] = useState<JobCard[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -72,7 +78,11 @@ export default function JobCardsPage() {
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [selectedCard, setSelectedCard] = useState<JobCard | null>(null);
+  const [selectedCardDetails, setSelectedCardDetails] = useState<JobCardDetails | null>(null);
+  const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
+  const [selectedQCInspection, setSelectedQCInspection] = useState<any | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [loadingDetails, setLoadingDetails] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   
   // Testing mode - set to true to use mock data and bypass API calls
@@ -324,6 +334,66 @@ export default function JobCardsPage() {
     setFilteredCards(filtered);
   }, [jobCards, searchTerm, statusFilter, priorityFilter]);
 
+  // Handle opening job card from URL parameter
+  useEffect(() => {
+    const jobCardId = searchParams.get('id');
+    if (jobCardId && jobCards.length > 0 && !isViewDialogOpen && !loadingData) {
+      const jobCard = jobCards.find(jc => jc.id === jobCardId);
+      if (jobCard) {
+        console.log('Opening job card from URL:', jobCard);
+        // Use the same logic as the View button
+        setSelectedCard(jobCard);
+        setIsViewDialogOpen(true);
+        setLoadingDetails(true);
+        
+        // Load job card details asynchronously
+        (async () => {
+          try {
+            const details = await jobCardService.getJobCardById(jobCard.id);
+            setSelectedCardDetails(details);
+            
+            // Load work order if it exists
+            if (details.generatedWorkOrderId) {
+              try {
+                const workOrder = await workOrderService.getWorkOrderById(details.generatedWorkOrderId);
+                setSelectedWorkOrder(workOrder);
+                
+                // Load QC inspection if work order is completed
+                if (workOrder.status === 'Completed') {
+                  try {
+                    const inspections = await qualityControlService.getCompletedInspections();
+                    const qcInspection = inspections.find((insp: any) => insp.workOrderId === workOrder.id);
+                    setSelectedQCInspection(qcInspection || null);
+                  } catch (qcError) {
+                    console.log('No QC inspection found');
+                  }
+                }
+              } catch (woError) {
+                console.log('Work order not found or not accessible');
+              }
+            }
+          } catch (error) {
+            console.error('Error loading job card details:', error);
+            toast({
+              title: "Error",
+              description: "Failed to load job card details",
+              variant: "destructive",
+            });
+          } finally {
+            setLoadingDetails(false);
+          }
+        })();
+      } else {
+        console.warn('Job card not found with ID:', jobCardId);
+        toast({
+          title: 'Job Card not found',
+          description: 'The requested job card could not be found.',
+          variant: 'destructive'
+        });
+      }
+    }
+  }, [jobCards, searchParams, isViewDialogOpen, loadingData, toast]);
+
   const handleCreateJobCard = async () => {
     try {
       // Find selected asset and other data
@@ -388,8 +458,8 @@ export default function JobCardsPage() {
         
         toast({
           title: "Success",
-          description: "Job card created successfully",
-          variant: "default",
+          description: `Job card ${createdJobCard.jobCardNumber} created successfully`,
+          className: "bg-green-50 border-green-200",
         });
       }
       
@@ -414,12 +484,20 @@ export default function JobCardsPage() {
       }
       
       // Check if it's an Axios error with response data
+      let errorMessage = 'Failed to create job card. Please try again.';
       if (error && typeof error === 'object' && 'response' in error) {
         const axiosError = error as any;
         console.error('Response status:', axiosError.response?.status);
         console.error('Response data:', axiosError.response?.data);
         console.error('Response headers:', axiosError.response?.headers);
+        errorMessage = axiosError.response?.data?.message || axiosError.response?.data || errorMessage;
       }
+      
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive",
+      });
     }
   };
 
@@ -495,7 +573,7 @@ export default function JobCardsPage() {
       toast({
         title: "Success",
         description: `Job card ${jobCard?.jobCardNumber || ''} submitted for approval successfully`,
-        variant: "default",
+        className: "bg-green-50 border-green-200",
       });
     } catch (error) {
       console.error('Error submitting job card:', error);
@@ -547,7 +625,7 @@ export default function JobCardsPage() {
       toast({
         title: "Success",
         description: `Job card ${jobCard?.jobCardNumber || ''} approved successfully`,
-        variant: "default",
+        className: "bg-green-50 border-green-200",
       });
     } catch (error) {
       console.error('Error approving job card:', error);
@@ -599,10 +677,15 @@ export default function JobCardsPage() {
       toast({
         title: "Job Card Rejected",
         description: `Job card ${jobCard?.jobCardNumber || ''} has been rejected`,
-        variant: "destructive",
+        className: "bg-yellow-50 border-yellow-200",
       });
     } catch (error) {
       console.error('Error rejecting job card:', error);
+      toast({
+        title: "Error",
+        description: "Failed to reject job card. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -669,8 +752,8 @@ export default function JobCardsPage() {
       
       toast({
         title: "Success",
-        description: "Work order generated successfully",
-        variant: "default",
+        description: `Work order generated successfully from job card ${jobCards.find(c => c.id === cardId)?.jobCardNumber || ''}`,
+        className: "bg-green-50 border-green-200",
       });
     } catch (error) {
       console.error('Error generating work order:', error);
@@ -958,10 +1041,46 @@ export default function JobCardsPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => {
+                        onClick={async () => {
                           setSelectedCard(card);
                           setIsViewDialogOpen(true);
+                          setLoadingDetails(true);
+                          try {
+                            const details = await jobCardService.getJobCardById(card.id);
+                            setSelectedCardDetails(details);
+                            
+                            // Load work order if it exists
+                            if (details.generatedWorkOrderId) {
+                              try {
+                                const workOrder = await workOrderService.getWorkOrderById(details.generatedWorkOrderId);
+                                setSelectedWorkOrder(workOrder);
+                                
+                                // Load QC inspection if work order is completed
+                                if (workOrder.status === 'Completed') {
+                                  try {
+                                    const inspections = await qualityControlService.getCompletedInspections();
+                                    const qcInspection = inspections.find((insp: any) => insp.workOrderId === workOrder.id);
+                                    setSelectedQCInspection(qcInspection || null);
+                                  } catch (qcError) {
+                                    console.log('No QC inspection found');
+                                  }
+                                }
+                              } catch (woError) {
+                                console.log('Work order not found or not accessible');
+                              }
+                            }
+                          } catch (error) {
+                            console.error('Error loading job card details:', error);
+                            toast({
+                              title: "Error",
+                              description: "Failed to load job card details",
+                              variant: "destructive",
+                            });
+                          } finally {
+                            setLoadingDetails(false);
+                          }
                         }}
+                        title="View job card details"
                       >
                         <Eye className="h-4 w-4" />
                       </Button>
@@ -1235,8 +1354,8 @@ export default function JobCardsPage() {
                 setIsEditDialogOpen(false);
                 toast({
                   title: "Success",
-                  description: "Job card updated successfully",
-                  variant: "success",
+                  description: `Job card ${selectedCard.jobCardNumber} updated successfully`,
+                  className: "bg-green-50 border-green-200",
                 });
               } catch (error: any) {
                 console.error('Error updating job card:', error);
@@ -1256,42 +1375,508 @@ export default function JobCardsPage() {
       </Dialog>
       
       {/* View Job Card Dialog */}
-      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="max-w-2xl">
+      <Dialog open={isViewDialogOpen} onOpenChange={(open) => {
+        setIsViewDialogOpen(open);
+        if (!open) {
+          setSelectedCardDetails(null);
+          setSelectedWorkOrder(null);
+          setSelectedQCInspection(null);
+        }
+      }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Job Card Details</DialogTitle>
+            <DialogDescription>
+              {selectedCard?.jobCardNumber || 'Loading...'}
+            </DialogDescription>
           </DialogHeader>
-          {selectedCard && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Job Card #</Label>
-                  <p className="text-sm">{selectedCard.jobCardNumber}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Asset</Label>
-                  <p className="text-sm">{selectedCard.assetName}</p>
-                </div>
-              </div>
-              <div>
-                <Label className="text-sm font-medium text-muted-foreground">Title</Label>
-                <p className="text-sm">{selectedCard.title}</p>
-              </div>
-              <div>
-                <Label className="text-sm font-medium text-muted-foreground">Description</Label>
-                <p className="text-sm">{selectedCard.description}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Status</Label>
-                  <div className="pt-1">{getStatusBadge(selectedCard.status)}</div>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Priority</Label>
-                  <div className="pt-1">{getPriorityBadge(selectedCard.priority)}</div>
-                </div>
-              </div>
+          {loadingDetails ? (
+            <div className="flex items-center justify-center py-8">
+              <Clock className="h-6 w-6 animate-spin" />
+              <span className="ml-2">Loading details...</span>
             </div>
+          ) : selectedCardDetails && (
+            <Tabs defaultValue="overview" className="w-full">
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="overview">Overview</TabsTrigger>
+                <TabsTrigger value="workorder" disabled={!selectedWorkOrder}>Work Order</TabsTrigger>
+                <TabsTrigger value="qc" disabled={!selectedQCInspection}>QC Inspection</TabsTrigger>
+                <TabsTrigger value="workflow">Workflow</TabsTrigger>
+              </TabsList>
+
+              {/* Overview Tab */}
+              <TabsContent value="overview" className="space-y-6 mt-4">
+                {/* Key Information Card */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>{selectedCardDetails.title}</CardTitle>
+                    <CardDescription>Job Card #{selectedCardDetails.jobCardNumber}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Status</Label>
+                        <div className="pt-1">{getStatusBadge(selectedCardDetails.jobCardStatus)}</div>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Approval Status</Label>
+                        <div className="pt-1">
+                          <Badge style={selectedCardDetails.approvalStatus === 'Approved' ? { backgroundColor: '#d1fae5', color: '#065f46' } : selectedCardDetails.approvalStatus === 'Rejected' ? { backgroundColor: '#fee2e2', color: '#991b1b' } : { backgroundColor: '#fef3c7', color: '#92400e' }}>
+                            {selectedCardDetails.approvalStatus}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Priority</Label>
+                        <div className="pt-1">{getPriorityBadge(selectedCardDetails.priority)}</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 border-t pt-4">
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Requested By</Label>
+                        <p className="text-sm font-medium">{selectedCardDetails.requestedBy}</p>
+                        <p className="text-xs text-muted-foreground">{format(new Date(selectedCardDetails.requestedDate), 'MMM dd, yyyy HH:mm:ss')}</p>
+                      </div>
+                      {selectedCardDetails.approvedBy && (
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Approved By</Label>
+                          <p className="text-sm font-medium">{selectedCardDetails.approvedBy}</p>
+                          {selectedCardDetails.approvedAt && (
+                            <p className="text-xs text-muted-foreground">{format(new Date(selectedCardDetails.approvedAt), 'MMM dd, yyyy HH:mm:ss')}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Asset Information */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Asset Information</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Asset Name</Label>
+                        <p className="text-sm font-medium">{selectedCardDetails.assetName}</p>
+                        <p className="text-xs text-muted-foreground">{selectedCardDetails.assetCode}</p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Asset Category/Type</Label>
+                        <p className="text-sm">{selectedCardDetails.assetType || selectedCardDetails.maintenanceCategory || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Location</Label>
+                        <p className="text-sm">{selectedCardDetails.assetLocation || selectedCardDetails.maintenanceLocation || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Maintenance Type</Label>
+                        <p className="text-sm">{selectedCardDetails.maintenanceType}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Work Description Card */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Work Description</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {selectedCardDetails.description && (
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Description</Label>
+                        <p className="text-sm whitespace-pre-wrap">{selectedCardDetails.description}</p>
+                      </div>
+                    )}
+                    {selectedCardDetails.problemDescription && (
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Problem Description</Label>
+                        <p className="text-sm whitespace-pre-wrap bg-red-50 p-3 rounded">{selectedCardDetails.problemDescription}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+              {/* Comments */}
+              {selectedCardDetails.comments && selectedCardDetails.comments.length > 0 && (
+                <div className="border-t pt-4">
+                  <h3 className="text-lg font-semibold mb-3">Comments</h3>
+                  <div className="space-y-2">
+                    {selectedCardDetails.comments.map((comment) => (
+                      <div key={comment.id} className="border rounded-lg p-3">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-medium">{comment.commentBy}</span>
+                            <div className="flex items-center space-x-2">
+                            {comment.isInternal && <Badge variant="outline" className="text-xs">Internal</Badge>}
+                            <span className="text-xs text-muted-foreground">{format(new Date(comment.commentDate), 'MMM dd, yyyy HH:mm:ss')}</span>
+                          </div>
+                        </div>
+                        <p className="text-sm">{comment.comment}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Documents */}
+              {selectedCardDetails.documents && selectedCardDetails.documents.length > 0 && (
+                <div className="border-t pt-4">
+                  <h3 className="text-lg font-semibold mb-3">Documents</h3>
+                  <div className="space-y-2">
+                    {selectedCardDetails.documents.map((doc) => (
+                      <div key={doc.id} className="flex items-center justify-between border rounded-lg p-3">
+                        <div>
+                          <p className="text-sm font-medium">{doc.fileName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {doc.documentType} • {(doc.fileSize / 1024).toFixed(2)} KB • Uploaded by {doc.uploadedBy}
+                          </p>
+                        </div>
+                        <Button size="sm" variant="outline">
+                          Download
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              </TabsContent>
+
+              {/* WORKFLOW TAB */}
+              <TabsContent value="workflow" className="space-y-4 mt-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Complete Workflow Timeline</CardTitle>
+                    <CardDescription>Track the journey from job card request to work completion</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    {/* Job Card Creation */}
+                    <div className="flex gap-4">
+                      <div className="flex flex-col items-center">
+                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                          <Calendar className="h-5 w-5 text-blue-600" />
+                        </div>
+                        <div className="w-0.5 h-full bg-blue-200 mt-2"></div>
+                      </div>
+                      <div className="flex-1 pb-6">
+                        <h4 className="font-semibold text-base">Job Card Created</h4>
+                        <p className="text-sm text-muted-foreground mt-1">Requested by {selectedCardDetails.requestedBy}</p>
+                        <p className="text-xs text-muted-foreground">{format(new Date(selectedCardDetails.requestedDate), 'MMM dd, yyyy HH:mm:ss')}</p>
+                      </div>
+                    </div>
+
+                    {/* Approval Steps */}
+                    {selectedCardDetails.approvalSteps && selectedCardDetails.approvalSteps.length > 0 && selectedCardDetails.approvalSteps.map((step, index) => (
+                      <div key={step.id} className="flex gap-4">
+                        <div className="flex flex-col items-center">
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                            step.status === 'Approved' ? 'bg-green-100' : 
+                            step.status === 'Rejected' ? 'bg-red-100' : 'bg-yellow-100'
+                          }`}>
+                            {step.status === 'Approved' ? <CheckCircle className="h-5 w-5 text-green-600" /> : 
+                             step.status === 'Rejected' ? <XCircle className="h-5 w-5 text-red-600" /> : 
+                             <Clock className="h-5 w-5 text-yellow-600" />}
+                          </div>
+                          {(selectedCardDetails.generatedWorkOrderId || index < selectedCardDetails.approvalSteps.length - 1) && (
+                            <div className="w-0.5 h-full bg-gray-200 mt-2"></div>
+                          )}
+                        </div>
+                        <div className="flex-1 pb-6">
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-semibold text-base">{step.stepName}</h4>
+                            <Badge style={step.status === 'Approved' ? { backgroundColor: '#d1fae5', color: '#065f46' } : step.status === 'Rejected' ? { backgroundColor: '#fee2e2', color: '#991b1b' } : { backgroundColor: '#fef3c7', color: '#92400e' }}>
+                              {step.status}
+                            </Badge>
+                          </div>
+                          {step.approverName && (
+                            <p className="text-sm text-muted-foreground mt-1">Approver: {step.approverName}</p>
+                          )}
+                          {step.actionDate && (
+                            <p className="text-xs text-muted-foreground">{format(new Date(step.actionDate), 'MMM dd, yyyy HH:mm:ss')}</p>
+                          )}
+                          {step.comments && (
+                            <p className="text-sm mt-2 bg-gray-50 p-2 rounded">{step.comments}</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Work Order Generation */}
+                    {selectedCardDetails.generatedWorkOrderId && (
+                      <div className="flex gap-4">
+                        <div className="flex flex-col items-center">
+                          <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center">
+                            <CheckCircle className="h-5 w-5 text-purple-600" />
+                          </div>
+                          {selectedWorkOrder && (
+                            <div className="w-0.5 h-full bg-purple-200 mt-2"></div>
+                          )}
+                        </div>
+                        <div className="flex-1 pb-6">
+                          <h4 className="font-semibold text-base">Work Order Generated</h4>
+                          <p className="text-sm font-mono mt-1">{selectedCardDetails.generatedWorkOrderNumber || selectedCardDetails.generatedWorkOrderId}</p>
+                          {selectedCardDetails.workOrderGeneratedAt && (
+                            <p className="text-xs text-muted-foreground">{format(new Date(selectedCardDetails.workOrderGeneratedAt), 'MMM dd, yyyy HH:mm:ss')}</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Work Order Execution */}
+                    {selectedWorkOrder && (
+                      <>
+                        <div className="flex gap-4">
+                          <div className="flex flex-col items-center">
+                            <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center">
+                              <AlertCircle className="h-5 w-5 text-orange-600" />
+                            </div>
+                            {selectedWorkOrder.status === 'Completed' && (
+                              <div className="w-0.5 h-full bg-orange-200 mt-2"></div>
+                            )}
+                          </div>
+                          <div className="flex-1 pb-6">
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-semibold text-base">Work Order Execution</h4>
+                              <Badge>{selectedWorkOrder.status}</Badge>
+                            </div>
+                            {selectedWorkOrder.assignedTechnicianName && (
+                              <p className="text-sm text-muted-foreground mt-1">Assigned to: {selectedWorkOrder.assignedTechnicianName}</p>
+                            )}
+                            {selectedWorkOrder.actualStartDate && (
+                              <p className="text-xs text-muted-foreground">Started: {format(new Date(selectedWorkOrder.actualStartDate), 'MMM dd, yyyy HH:mm:ss')}</p>
+                            )}
+                            {selectedWorkOrder.actualCompletionDate && (
+                              <p className="text-xs text-muted-foreground">Completed: {format(new Date(selectedWorkOrder.actualCompletionDate), 'MMM dd, yyyy HH:mm:ss')}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* QC Inspection */}
+                        {selectedWorkOrder.status === 'Completed' && (
+                          <div className="flex gap-4">
+                            <div className="flex flex-col items-center">
+                              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                                selectedQCInspection ? 'bg-green-100' : 'bg-gray-100'
+                              }`}>
+                                {selectedQCInspection ? 
+                                  <CheckCircle className="h-5 w-5 text-green-600" /> : 
+                                  <Clock className="h-5 w-5 text-gray-400" />
+                                }
+                              </div>
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="font-semibold text-base">Quality Control Inspection</h4>
+                              {selectedQCInspection ? (
+                                <>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <Badge style={selectedQCInspection.overallResult === 'Pass' ? { backgroundColor: '#d1fae5', color: '#065f46' } : { backgroundColor: '#fee2e2', color: '#991b1b' }}>
+                                      {selectedQCInspection.overallResult}
+                                    </Badge>
+                                    <span className="text-sm font-semibold">Score: {selectedQCInspection.score}%</span>
+                                  </div>
+                                  <p className="text-xs text-muted-foreground">{format(new Date(selectedQCInspection.inspectionDate), 'MMM dd, yyyy HH:mm:ss')}</p>
+                                  {selectedQCInspection.overallResult === 'Pass' && (
+                                    <p className="text-sm mt-2 text-green-600 font-semibold">✓ Certificate Generated</p>
+                                  )}
+                                </>
+                              ) : (
+                                <p className="text-sm text-muted-foreground mt-1">Pending inspection</p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* WORK ORDER TAB */}
+              <TabsContent value="workorder" className="space-y-4 mt-4">
+                {selectedWorkOrder ? (
+                  <>
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-lg">Work Order Information</CardTitle>
+                        <CardDescription>WO# {selectedWorkOrder.workOrderNumber}</CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid grid-cols-3 gap-4">
+                          <div>
+                            <Label className="text-sm font-semibold">Status</Label>
+                            <Badge className="mt-1">{selectedWorkOrder.status}</Badge>
+                          </div>
+                          <div>
+                            <Label className="text-sm font-semibold">Assigned To</Label>
+                            <p className="text-base mt-1">{selectedWorkOrder.assignedTechnicianName || 'Unassigned'}</p>
+                          </div>
+                          <div>
+                            <Label className="text-sm font-semibold">Completion</Label>
+                            <p className="text-base mt-1">{selectedWorkOrder.completionPercentage || 0}%</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 border-t pt-4">
+                          <div>
+                            <Label className="text-sm font-semibold">Estimated Hours</Label>
+                            <p className="text-xl font-bold mt-1">{selectedWorkOrder.estimatedHours}</p>
+                          </div>
+                          <div>
+                            <Label className="text-sm font-semibold">Actual Hours</Label>
+                            <p className="text-xl font-bold mt-1">{selectedWorkOrder.actualHours}</p>
+                          </div>
+                          <div>
+                            <Label className="text-sm font-semibold">Estimated Cost</Label>
+                            <p className="text-xl font-bold mt-1">${selectedWorkOrder.estimatedCost.toFixed(2)}</p>
+                          </div>
+                          <div>
+                            <Label className="text-sm font-semibold">Actual Cost</Label>
+                            <p className="text-xl font-bold mt-1">${selectedWorkOrder.actualCost.toFixed(2)}</p>
+                          </div>
+                        </div>
+
+                        {selectedWorkOrder.actualStartDate && (
+                          <div className="border-t pt-4">
+                            <Label className="text-sm font-semibold">Actual Start Date</Label>
+                            <p className="text-base mt-1">{format(new Date(selectedWorkOrder.actualStartDate), 'MMM dd, yyyy HH:mm:ss')}</p>
+                          </div>
+                        )}
+
+                        {selectedWorkOrder.actualCompletionDate && (
+                          <div>
+                            <Label className="text-sm font-semibold">Actual Completion Date</Label>
+                            <p className="text-base mt-1">{format(new Date(selectedWorkOrder.actualCompletionDate), 'MMM dd, yyyy HH:mm:ss')}</p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    {selectedWorkOrder.tasks && selectedWorkOrder.tasks.length > 0 && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-lg">Work Order Tasks</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-2">
+                            {selectedWorkOrder.tasks.map((task) => (
+                              <div key={task.id} className="flex items-center justify-between border rounded-lg p-3">
+                                <div className="flex-1">
+                                  <p className="font-medium text-sm">{task.taskName}</p>
+                                  {task.description && (
+                                    <p className="text-xs text-muted-foreground">{task.description}</p>
+                                  )}
+                                </div>
+                                <Badge>{task.status}</Badge>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </>
+                ) : (
+                  <Card>
+                    <CardContent className="py-8 text-center text-muted-foreground">
+                      No work order has been generated yet.
+                    </CardContent>
+                  </Card>
+                )}
+              </TabsContent>
+
+              {/* QC INSPECTION TAB */}
+              <TabsContent value="qc" className="space-y-4 mt-4">
+                {selectedQCInspection ? (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Quality Control Inspection Results</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <Label className="text-sm font-semibold">Overall Result</Label>
+                          <div className="mt-1">
+                            <Badge style={selectedQCInspection.overallResult === 'Pass' ? { backgroundColor: '#d1fae5', color: '#065f46', fontSize: '16px', padding: '8px 12px' } : { backgroundColor: '#fee2e2', color: '#991b1b', fontSize: '16px', padding: '8px 12px' }}>
+                              {selectedQCInspection.overallResult}
+                            </Badge>
+                          </div>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-semibold">Quality Score</Label>
+                          <p className="text-3xl font-bold mt-1">{selectedQCInspection.score}%</p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-semibold">Inspection Date</Label>
+                          <p className="text-base mt-1">{format(new Date(selectedQCInspection.inspectionDate), 'MMM dd, yyyy HH:mm:ss')}</p>
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-4">
+                        <Label className="text-sm font-semibold">Inspector</Label>
+                        <p className="text-base mt-1">{selectedQCInspection.inspectorName || 'Unknown'}</p>
+                      </div>
+
+                      {selectedQCInspection.notes && (
+                        <div className="border-t pt-4">
+                          <Label className="text-sm font-semibold">Inspection Notes</Label>
+                          <p className="text-base mt-1 bg-gray-50 p-3 rounded">{selectedQCInspection.notes}</p>
+                        </div>
+                      )}
+
+                      {selectedQCInspection.overallResult === 'Pass' && (
+                        <div className="border-t pt-4">
+                          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle className="h-6 w-6 text-green-600" />
+                                <div>
+                                  <p className="font-semibold text-green-900">Quality Certificate Generated</p>
+                                  <p className="text-sm text-green-700">This work order has passed quality inspection and a certificate has been generated.</p>
+                                </div>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="bg-white hover:bg-green-50"
+                                onClick={async () => {
+                                  try {
+                                    // Open certificate in new window
+                                    const baseUrl = 'http://localhost:5000';
+                                    window.open(`${baseUrl}/api/maintenance/quality-control/certificate/${selectedQCInspection.id}`, '_blank');
+                                    toast({
+                                      title: "Opening Certificate",
+                                      description: "Certificate is opening in a new window",
+                                      className: "bg-green-50 border-green-200",
+                                    });
+                                  } catch (error) {
+                                    console.error('Error opening certificate:', error);
+                                    toast({
+                                      title: "Error",
+                                      description: "Failed to open certificate",
+                                      variant: "destructive",
+                                    });
+                                  }
+                                }}
+                              >
+                                <Eye className="h-4 w-4 mr-2" />
+                                View Certificate
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card>
+                    <CardContent className="py-8 text-center text-muted-foreground">
+                      QC inspection not yet performed.
+                    </CardContent>
+                  </Card>
+                )}
+              </TabsContent>
+            </Tabs>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>

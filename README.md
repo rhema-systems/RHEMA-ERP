@@ -158,7 +158,7 @@ cd src/ErpSystem.Api
 dotnet user-secrets init
 
 # Set database configuration
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=(localdb)\\mssqllocaldb;Database=ErpSystemDB;Trusted_Connection=true;MultipleActiveResultSets=true"
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=(localdb)\\mssqllocaldb;Database=ErpSystemDB;Trusted_Connection=true;MultipleActiveResultSets=false"
 dotnet user-secrets set "JwtSettings:SecretKey" "your-super-secret-256-bit-key-here-make-it-long-and-random"
 dotnet user-secrets set "JwtSettings:Issuer" "ErpSystem"
 dotnet user-secrets set "JwtSettings:Audience" "ErpSystemUsers"
@@ -180,7 +180,7 @@ Edit `src/ErpSystem.Api/appsettings.Development.json`:
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Server=(localdb)\\mssqllocaldb;Database=ErpSystemDB;Trusted_Connection=true;MultipleActiveResultSets=true"
+    "DefaultConnection": "Server=(localdb)\\mssqllocaldb;Database=ErpSystemDB;Trusted_Connection=true;MultipleActiveResultSets=false"
   },
   "JwtSettings": {
     "SecretKey": "your-super-secret-256-bit-key-here-make-it-long-and-random",

@@ -37,6 +37,10 @@ namespace ErpSystem.Core.Interfaces
         Task DeleteRangeAsync(IEnumerable<T> entities);
         Task DeleteRangeAsync(Expression<Func<T, bool>> predicate);
         
+        // Hard delete operations (permanent removal from database)
+        Task HardDeleteAsync(T entity);
+        Task HardDeleteRangeAsync(IEnumerable<T> entities);
+        
         // Advanced querying
         IQueryable<T> GetQueryable();
         IQueryable<T> GetQueryable(Expression<Func<T, bool>> predicate);

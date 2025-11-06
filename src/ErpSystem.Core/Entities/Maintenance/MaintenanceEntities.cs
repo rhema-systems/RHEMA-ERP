@@ -596,6 +596,10 @@ public class WorkOrder : TenantEntity
     [MaxLength(20)]
     public string Status { get; set; } = "Draft"; // Draft, Approved, Assigned, InProgress, OnHold, Completed, Cancelled, Closed
 
+    // Maintenance location classification
+    [MaxLength(20)]
+    public string MaintenanceLocation { get; set; } = "Internal"; // Internal, External, Onsite, Offsite
+
     public Guid? AssignedTechnicianId { get; set; }
     public Guid? AssignedTeamId { get; set; }
 
@@ -678,6 +682,7 @@ public class WorkOrder : TenantEntity
     public virtual ICollection<WorkOrderTask> Tasks { get; set; } = new List<WorkOrderTask>();
     public virtual ICollection<WorkOrderPart> Parts { get; set; } = new List<WorkOrderPart>();
     public virtual ICollection<WorkOrderLabor> Labor { get; set; } = new List<WorkOrderLabor>();
+    public virtual ICollection<WorkOrderTool> Tools { get; set; } = new List<WorkOrderTool>();
     public virtual ICollection<WorkOrderDocument> Documents { get; set; } = new List<WorkOrderDocument>();
     public virtual ICollection<WorkOrderComment> Comments { get; set; } = new List<WorkOrderComment>();
 }

@@ -170,6 +170,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<SafetyAudit> SafetyAudits { get; set; }
     public DbSet<ProtocolAuditDetail> ProtocolAuditDetails { get; set; }
     
+    // Tool Management entities
+    public DbSet<MaintenanceTool> MaintenanceTools { get; set; }
+    public DbSet<ToolCheckout> ToolCheckouts { get; set; }
+    public DbSet<WorkOrderTool> WorkOrderTools { get; set; }
+    
+    // Resource Management entities
+    public DbSet<MaintenanceStaffSchedule> MaintenanceStaffSchedules { get; set; }
+    public DbSet<MaintenanceExpense> MaintenanceExpenses { get; set; }
+    
     // HR entities
     public DbSet<Employee> Employees { get; set; }
     public DbSet<Department> Departments { get; set; }
@@ -200,6 +209,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<Warehouse> Warehouses { get; set; }
     public DbSet<WarehouseLocation> WarehouseLocations { get; set; }
     public DbSet<InventoryLocation> InventoryLocations { get; set; }
+    public DbSet<WarehouseQuantity> WarehouseQuantities { get; set; }
     public DbSet<InventoryAllocation> InventoryAllocations { get; set; }
     
     // Procurement entities
@@ -2125,6 +2135,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                     entry.Entity.UpdatedAt = DateTime.UtcNow;
                     break;
                 case EntityState.Deleted:
+                    // Soft delete: convert to modified and set IsDeleted flag
                     entry.State = EntityState.Modified;
                     entry.Entity.IsDeleted = true;
                     entry.Entity.DeletedAt = DateTime.UtcNow;

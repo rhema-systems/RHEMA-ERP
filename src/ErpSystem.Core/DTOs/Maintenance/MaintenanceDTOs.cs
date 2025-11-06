@@ -2257,10 +2257,12 @@ public class WorkOrderDto
     public Guid MaintenanceTypeId { get; set; }
     public Guid PriorityLevelId { get; set; }
     public string Status { get; set; } = string.Empty;
+    public string MaintenanceLocation { get; set; } = "Internal";
     public string Priority { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty;
     public string AssetName { get; set; } = string.Empty;
     public string AssetNumber { get; set; } = string.Empty;
+    public string AssetCategory { get; set; } = string.Empty;
     public string AssetLocation { get; set; } = string.Empty;
     public string Instructions { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
@@ -2308,6 +2310,7 @@ public class WorkOrderDto
     public ICollection<WorkOrderTaskDto> Tasks { get; set; } = new List<WorkOrderTaskDto>();
     public ICollection<WorkOrderPartDto> Parts { get; set; } = new List<WorkOrderPartDto>();
     public ICollection<WorkOrderLaborDto> Labor { get; set; } = new List<WorkOrderLaborDto>();
+    public ICollection<WorkOrderToolDto> Tools { get; set; } = new List<WorkOrderToolDto>();
     public ICollection<WorkOrderCommentDto> Comments { get; set; } = new List<WorkOrderCommentDto>();
 
     public DateTime CreatedAt { get; set; }
@@ -2334,6 +2337,7 @@ public class WorkOrderListDto
     public Guid MaintenanceTypeId { get; set; }
     public string MaintenanceTypeName { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    public string MaintenanceLocation { get; set; } = "Internal";
     public string Priority { get; set; } = string.Empty;
     public string PriorityName { get; set; } = string.Empty;
     public Guid PriorityLevelId { get; set; }
@@ -2392,6 +2396,10 @@ public class CreateWorkOrderDto
     public string WorkOrderType { get; set; } = string.Empty;
     public string Priority { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    
+    [StringLength(20)]
+    public string MaintenanceLocation { get; set; } = "Internal";
+    
     public string Instructions { get; set; } = string.Empty;
     public string SafetyNotes { get; set; } = string.Empty;
     public string RequiredSkills { get; set; } = string.Empty;
@@ -2437,6 +2445,9 @@ public class UpdateWorkOrderDto : IValidatableObject
     public string Instructions { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    
+    [StringLength(20)]
+    public string? MaintenanceLocation { get; set; }
 
     public Guid? WorkOrderTypeId { get; set; }
 
@@ -2669,6 +2680,8 @@ public class WorkOrderPartDto
     public decimal TotalCost { get; set; }
     
     // Location and tracking
+    public Guid? WarehouseId { get; set; }
+    public string? WarehouseName { get; set; }
     public string? SerialNumber { get; set; }
     public string? LotNumber { get; set; }
     public string? WarehouseLocationCode { get; set; }
@@ -2704,6 +2717,9 @@ public class CreateWorkOrderPartDto
     [Range(0, double.MaxValue)]
     public decimal UnitCost { get; set; }
 
+    [Required]
+    public Guid WarehouseId { get; set; }
+    
     public Guid? WarehouseLocationId { get; set; }
     
     [StringLength(100)]
@@ -3914,6 +3930,292 @@ public class AssetDowntimeReportDto
     public double AverageIncidentDuration { get; set; }
     public double AvailabilityPercentage { get; set; }
     public string MostCommonFailureReason { get; set; } = string.Empty;
+}
+
+#endregion
+
+#region Staff Schedule and Expense DTOs
+
+public class MaintenanceStaffScheduleDto
+{
+    public Guid Id { get; set; }
+    public Guid TechnicianId { get; set; }
+    public string TechnicianName { get; set; } = string.Empty;
+    public DateTime StartDateTime { get; set; }
+    public DateTime EndDateTime { get; set; }
+    public string ScheduleType { get; set; } = "WorkOrder"; // WorkOrder, Available, Training, Leave, Travel
+    public string Status { get; set; } = "Scheduled"; // Scheduled, InProgress, Completed, Cancelled
+    
+    // Work assignment
+    public Guid? WorkOrderId { get; set; }
+    public string? WorkOrderNumber { get; set; }
+    public Guid? JobCardId { get; set; }
+    public string? JobCardNumber { get; set; }
+    public Guid? TeamId { get; set; }
+    public string? TeamName { get; set; }
+    
+    // Location information
+    public string? WorkLocation { get; set; }
+    public string? Address { get; set; }
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+    
+    // Travel information
+    public bool RequiresTravel { get; set; }
+    public DateTime? DepartureTime { get; set; }
+    public DateTime? ArrivalTime { get; set; }
+    public int? EstimatedTravelMinutes { get; set; }
+    public int? ActualTravelMinutes { get; set; }
+    
+    // Vehicle/transportation
+    public Guid? AssignedVehicleId { get; set; }
+    public string? VehicleName { get; set; }
+    public string? TransportationType { get; set; }
+    
+    public string? Notes { get; set; }
+    
+    // Time tracking
+    public DateTime? ActualStartTime { get; set; }
+    public DateTime? ActualEndTime { get; set; }
+    
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+public class CreateMaintenanceStaffScheduleDto
+{
+    [Required]
+    public Guid TechnicianId { get; set; }
+    
+    [Required]
+    public DateTime StartDateTime { get; set; }
+    
+    [Required]
+    public DateTime EndDateTime { get; set; }
+    
+    [Required]
+    [StringLength(50)]
+    public string ScheduleType { get; set; } = "WorkOrder";
+    
+    [StringLength(20)]
+    public string Status { get; set; } = "Scheduled";
+    
+    public Guid? WorkOrderId { get; set; }
+    public Guid? JobCardId { get; set; }
+    public Guid? TeamId { get; set; }
+    
+    [StringLength(200)]
+    public string? WorkLocation { get; set; }
+    
+    [StringLength(200)]
+    public string? Address { get; set; }
+    
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+    
+    public bool RequiresTravel { get; set; }
+    public DateTime? DepartureTime { get; set; }
+    public DateTime? ArrivalTime { get; set; }
+    public int? EstimatedTravelMinutes { get; set; }
+    
+    public Guid? AssignedVehicleId { get; set; }
+    
+    [StringLength(100)]
+    public string? TransportationType { get; set; }
+    
+    [StringLength(1000)]
+    public string? Notes { get; set; }
+}
+
+public class UpdateMaintenanceStaffScheduleDto
+{
+    public DateTime? StartDateTime { get; set; }
+    public DateTime? EndDateTime { get; set; }
+    
+    [StringLength(20)]
+    public string? Status { get; set; }
+    
+    [StringLength(200)]
+    public string? WorkLocation { get; set; }
+    
+    [StringLength(200)]
+    public string? Address { get; set; }
+    
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+    
+    public bool? RequiresTravel { get; set; }
+    public DateTime? DepartureTime { get; set; }
+    public DateTime? ArrivalTime { get; set; }
+    public int? EstimatedTravelMinutes { get; set; }
+    public int? ActualTravelMinutes { get; set; }
+    
+    public Guid? AssignedVehicleId { get; set; }
+    
+    [StringLength(100)]
+    public string? TransportationType { get; set; }
+    
+    [StringLength(1000)]
+    public string? Notes { get; set; }
+    
+    public DateTime? ActualStartTime { get; set; }
+    public DateTime? ActualEndTime { get; set; }
+}
+
+public class MaintenanceExpenseDto
+{
+    public Guid Id { get; set; }
+    public Guid WorkOrderId { get; set; }
+    public string WorkOrderNumber { get; set; } = string.Empty;
+    public Guid? ScheduleId { get; set; }
+    public Guid? TechnicianId { get; set; }
+    public string? TechnicianName { get; set; }
+    
+    public string ExpenseType { get; set; } = "Travel"; // Travel, Fuel, Accommodation, Meals, Tools, Parts, Other
+    public string Description { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public DateTime ExpenseDate { get; set; }
+    
+    // Mileage tracking
+    public decimal? MileageDriven { get; set; }
+    public decimal? MileageRate { get; set; }
+    
+    // Fuel tracking
+    public decimal? FuelQuantity { get; set; }
+    public decimal? FuelPricePerUnit { get; set; }
+    
+    // Vehicle tracking
+    public Guid? VehicleId { get; set; }
+    public string? VehicleName { get; set; }
+    
+    // Receipt and documentation
+    public string? ReceiptPath { get; set; }
+    public string? VendorName { get; set; }
+    public string? ReferenceNumber { get; set; }
+    
+    // Approval and reimbursement
+    public string Status { get; set; } = "Pending"; // Pending, Approved, Rejected, Reimbursed
+    public Guid? ApprovedById { get; set; }
+    public string? ApprovedByName { get; set; }
+    public DateTime? ApprovedDate { get; set; }
+    public string? ApprovalNotes { get; set; }
+    
+    public bool IsReimbursable { get; set; }
+    public bool IsReimbursed { get; set; }
+    public DateTime? ReimbursedDate { get; set; }
+    
+    // Location information
+    public string? Location { get; set; }
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+    
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+public class CreateMaintenanceExpenseDto
+{
+    [Required]
+    public Guid WorkOrderId { get; set; }
+    
+    public Guid? ScheduleId { get; set; }
+    public Guid? TechnicianId { get; set; }
+    
+    [Required]
+    [StringLength(50)]
+    public string ExpenseType { get; set; } = "Travel";
+    
+    [Required]
+    [StringLength(200)]
+    public string Description { get; set; } = string.Empty;
+    
+    [Required]
+    [Range(0, double.MaxValue)]
+    public decimal Amount { get; set; }
+    
+    public DateTime ExpenseDate { get; set; } = DateTime.UtcNow;
+    
+    public decimal? MileageDriven { get; set; }
+    public decimal? MileageRate { get; set; }
+    
+    public decimal? FuelQuantity { get; set; }
+    public decimal? FuelPricePerUnit { get; set; }
+    
+    public Guid? VehicleId { get; set; }
+    
+    [StringLength(500)]
+    public string? ReceiptPath { get; set; }
+    
+    [StringLength(100)]
+    public string? VendorName { get; set; }
+    
+    [StringLength(50)]
+    public string? ReferenceNumber { get; set; }
+    
+    public bool IsReimbursable { get; set; } = true;
+    
+    [StringLength(200)]
+    public string? Location { get; set; }
+    
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+}
+
+public class UpdateMaintenanceExpenseDto
+{
+    [StringLength(50)]
+    public string? ExpenseType { get; set; }
+    
+    [StringLength(200)]
+    public string? Description { get; set; }
+    
+    [Range(0, double.MaxValue)]
+    public decimal? Amount { get; set; }
+    
+    public DateTime? ExpenseDate { get; set; }
+    
+    public decimal? MileageDriven { get; set; }
+    public decimal? MileageRate { get; set; }
+    
+    public decimal? FuelQuantity { get; set; }
+    public decimal? FuelPricePerUnit { get; set; }
+    
+    public Guid? VehicleId { get; set; }
+    
+    [StringLength(500)]
+    public string? ReceiptPath { get; set; }
+    
+    [StringLength(100)]
+    public string? VendorName { get; set; }
+    
+    [StringLength(50)]
+    public string? ReferenceNumber { get; set; }
+    
+    [StringLength(20)]
+    public string? Status { get; set; }
+    
+    [StringLength(1000)]
+    public string? ApprovalNotes { get; set; }
+    
+    public bool? IsReimbursable { get; set; }
+    public bool? IsReimbursed { get; set; }
+    public DateTime? ReimbursedDate { get; set; }
+    
+    [StringLength(200)]
+    public string? Location { get; set; }
+    
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+}
+
+public class ApproveExpenseDto
+{
+    [Required]
+    [StringLength(20)]
+    public string Status { get; set; } = "Approved"; // Approved or Rejected
+    
+    [StringLength(1000)]
+    public string? ApprovalNotes { get; set; }
 }
 
 #endregion

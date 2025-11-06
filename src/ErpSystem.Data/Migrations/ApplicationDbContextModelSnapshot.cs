@@ -72,7 +72,7 @@ namespace ErpSystem.Data.Migrations
                         new
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000001"),
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3342),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8494),
                             IsSystemRole = true,
                             Name = "SuperAdmin",
                             NormalizedName = "SUPERADMIN"
@@ -80,7 +80,7 @@ namespace ErpSystem.Data.Migrations
                         new
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000002"),
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3440),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8543),
                             IsSystemRole = true,
                             Name = "TenantAdmin",
                             NormalizedName = "TENANTADMIN"
@@ -88,7 +88,7 @@ namespace ErpSystem.Data.Migrations
                         new
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000003"),
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3444),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8546),
                             IsSystemRole = true,
                             Name = "Manager",
                             NormalizedName = "MANAGER"
@@ -96,7 +96,7 @@ namespace ErpSystem.Data.Migrations
                         new
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000004"),
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3447),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8549),
                             IsSystemRole = true,
                             Name = "Employee",
                             NormalizedName = "EMPLOYEE"
@@ -2453,7 +2453,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("LocationId")
+                    b.Property<Guid?>("LocationId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("LotNumber")
@@ -2495,6 +2495,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AllocatedById");
@@ -2504,6 +2507,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("LocationId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("WarehouseId");
 
                     b.ToTable("InventoryAllocations");
                 });
@@ -3381,6 +3386,90 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("WarehouseId");
 
                     b.ToTable("WarehouseLocations");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.WarehouseQuantity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("AllocatedStock")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("AvailableStock")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("AverageCost")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("CurrentStock")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("LastMovementDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("LastStockTakeDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("MaxStock")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime?>("NextStockTakeDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<decimal>("ReorderLevel")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.ToTable("WarehouseQuantities");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.AssetDowntime", b =>
@@ -5789,6 +5878,145 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("MaintenanceContractor");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceExpense", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("ApprovalNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("ApprovedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ApprovedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("ExpenseDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ExpenseType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<decimal?>("FuelPricePerUnit")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("FuelQuantity")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsReimbursable")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsReimbursed")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("Latitude")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("Location")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<decimal?>("Longitude")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("MileageDriven")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("MileageRate")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("ReceiptPath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("ReferenceNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime?>("ReimbursedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ScheduleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("TechnicianId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("VehicleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("VendorName")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("WorkOrderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovedById");
+
+                    b.HasIndex("ScheduleId");
+
+                    b.HasIndex("TechnicianId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("VehicleId");
+
+                    b.HasIndex("WorkOrderId");
+
+                    b.ToTable("MaintenanceExpenses");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceSchedule", b =>
                 {
                     b.Property<Guid>("Id")
@@ -6012,6 +6240,133 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("MaintenanceSchedules");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceStaffSchedule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ActualEndTime")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ActualStartTime")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ActualTravelMinutes")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("ArrivalTime")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("AssignedVehicleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("DepartureTime")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("EndDateTime")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("EstimatedTravelMinutes")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("JobCardId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("Latitude")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("Longitude")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("RequiresTravel")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ScheduleType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("StartDateTime")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("TeamId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TechnicianId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TransportationType")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("WorkLocation")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("WorkOrderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssignedVehicleId");
+
+                    b.HasIndex("JobCardId");
+
+                    b.HasIndex("TeamId");
+
+                    b.HasIndex("TechnicianId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("WorkOrderId");
+
+                    b.ToTable("MaintenanceStaffSchedules");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceTaskTemplate", b =>
                 {
                     b.Property<Guid>("Id")
@@ -6092,6 +6447,136 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.ToTable("MaintenanceTaskTemplates");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceTool", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CurrentLocation")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<decimal>("CurrentValue")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("DailyRentalRate")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("DocumentPaths")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("HomeLocation")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("LastCalibrationDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("LastMaintenanceDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("LastUsedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Manufacturer")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("NextCalibrationDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("NextMaintenanceDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("PurchasePrice")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<bool>("RequiresCertification")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("RequiresTraining")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("SafetyNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("SerialNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ToolCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("TotalUsageDays")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("MaintenanceTools");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceType", b =>
@@ -8508,6 +8993,114 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("TechnicianTeamMembers");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.ToolCheckout", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ActualReturnDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CheckedInById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CheckedOutById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CheckoutDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CheckoutNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("ConditionOnCheckout")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("ConditionOnReturn")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("DamageCost")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("DamageDescription")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<bool>("DamageReported")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ExpectedReturnDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("JobCardId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ReturnNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ToolId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("WorkOrderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CheckedInById");
+
+                    b.HasIndex("CheckedOutById");
+
+                    b.HasIndex("JobCardId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("ToolId");
+
+                    b.HasIndex("WorkOrderId");
+
+                    b.ToTable("ToolCheckouts");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.UserTechnicianSkill", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8682,6 +9275,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MaintenanceLocation")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<Guid?>("MaintenanceScheduleId")
                         .HasColumnType("uniqueidentifier");
@@ -9797,6 +10395,82 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("WorkOrderTasks");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderTool", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("AllocationDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("AllocationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CheckoutId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsAllocated")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsRequired")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ToolId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("WorkOrderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AllocationId");
+
+                    b.HasIndex("CheckoutId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("ToolId");
+
+                    b.HasIndex("WorkOrderId");
+
+                    b.ToTable("WorkOrderTools");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderType", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9944,7 +10618,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000001"),
                             Category = "User Management",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3949),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8870),
                             Description = "View user accounts and details",
                             DisplayName = "View Users",
                             IsDeleted = false,
@@ -9955,7 +10629,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000002"),
                             Category = "User Management",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3974),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8893),
                             Description = "Create new user accounts",
                             DisplayName = "Create Users",
                             IsDeleted = false,
@@ -9966,7 +10640,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000003"),
                             Category = "User Management",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3983),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8900),
                             Description = "Edit existing user accounts",
                             DisplayName = "Update Users",
                             IsDeleted = false,
@@ -9977,7 +10651,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000004"),
                             Category = "User Management",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3991),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8906),
                             Description = "Delete user accounts",
                             DisplayName = "Delete Users",
                             IsDeleted = false,
@@ -9988,7 +10662,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000005"),
                             Category = "Role Management",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4005),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8990),
                             Description = "View role definitions",
                             DisplayName = "View Roles",
                             IsDeleted = false,
@@ -9999,7 +10673,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000006"),
                             Category = "Role Management",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4014),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8998),
                             Description = "Create new roles",
                             DisplayName = "Create Roles",
                             IsDeleted = false,
@@ -10010,7 +10684,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000007"),
                             Category = "Role Management",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4023),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9004),
                             Description = "Edit existing roles",
                             DisplayName = "Update Roles",
                             IsDeleted = false,
@@ -10021,7 +10695,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000008"),
                             Category = "Role Management",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4031),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9012),
                             Description = "Delete roles",
                             DisplayName = "Delete Roles",
                             IsDeleted = false,
@@ -10032,7 +10706,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000009"),
                             Category = "Dashboard & Reports",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4044),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9023),
                             Description = "Access main dashboard",
                             DisplayName = "View Dashboard",
                             IsDeleted = false,
@@ -10043,7 +10717,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000010"),
                             Category = "Dashboard & Reports",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4125),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9032),
                             Description = "Access reporting features",
                             DisplayName = "View Reports",
                             IsDeleted = false,
@@ -10054,7 +10728,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000011"),
                             Category = "Dashboard & Reports",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4134),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9039),
                             Description = "Generate custom reports",
                             DisplayName = "Create Reports",
                             IsDeleted = false,
@@ -10065,7 +10739,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000012"),
                             Category = "Dashboard & Reports",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4141),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9045),
                             Description = "Access analytics data",
                             DisplayName = "View Analytics",
                             IsDeleted = false,
@@ -10076,7 +10750,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000013"),
                             Category = "System Administration",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4153),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9055),
                             Description = "Access admin interface",
                             DisplayName = "View Admin",
                             IsDeleted = false,
@@ -10087,7 +10761,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000014"),
                             Category = "System Administration",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4183),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9076),
                             Description = "View system settings",
                             DisplayName = "View Settings",
                             IsDeleted = false,
@@ -10098,7 +10772,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000015"),
                             Category = "System Administration",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4214),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9087),
                             Description = "Modify system settings",
                             DisplayName = "Update Settings",
                             IsDeleted = false,
@@ -10109,7 +10783,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000016"),
                             Category = "System Administration",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4227),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9094),
                             Description = "Access audit trail",
                             DisplayName = "View Audit Logs",
                             IsDeleted = false,
@@ -11733,308 +12407,308 @@ namespace ErpSystem.Data.Migrations
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000001"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4419),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9158),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000002"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4427),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9161),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000003"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4429),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9163),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000004"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4430),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9164),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000005"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4432),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9165),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000006"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4434),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9167),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000007"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4435),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9168),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000008"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4437),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9169),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000009"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4438),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9170),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000010"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4440),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9172),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000011"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4442),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9173),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000012"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4443),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9174),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000013"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4444),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9175),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000014"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4445),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9175),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000015"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4446),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9176),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000016"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(4447),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9177),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000001"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5386),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9233),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000002"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5389),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9235),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000003"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5390),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9237),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000004"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5391),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9237),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000005"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5392),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9238),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000006"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5393),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9239),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000007"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5394),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9240),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000008"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5395),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9241),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000009"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5396),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9242),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000010"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5397),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9243),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000011"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5398),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9244),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000012"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5399),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9244),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000014"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5400),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9245),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000015"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5401),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9296),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000016"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5402),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9297),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000001"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5567),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9366),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000003"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5569),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9367),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000005"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5571),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9369),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000009"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5572),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9370),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000010"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5573),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9370),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000011"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5574),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9371),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000012"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5575),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9372),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000013"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5576),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9373),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000014"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5582),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9374),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000016"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5583),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9375),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000004"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000001"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5603),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9390),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000004"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000009"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5604),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9392),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000004"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000010"),
-                            GrantedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(5606),
+                            GrantedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(9393),
                             GrantedBy = "System"
                         });
                 });
@@ -12924,7 +13598,7 @@ namespace ErpSystem.Data.Migrations
                             Id = new Guid("00000000-0000-0000-0000-000000000001"),
                             AllowSelfRegistration = false,
                             Code = "DEFAULT",
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(2196),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8143),
                             DefaultPriority = 10,
                             Description = "Default system tenant",
                             EnableAutoSelection = false,
@@ -13006,9 +13680,9 @@ namespace ErpSystem.Data.Migrations
                     b.HasData(
                         new
                         {
-                            Id = new Guid("98b86b4b-4c2b-4d3c-99f7-2dea8263a072"),
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3634),
-                            EnabledDate = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3628),
+                            Id = new Guid("3f3f75c7-04d3-46bf-8007-19b6414a7084"),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8628),
+                            EnabledDate = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8625),
                             IsDeleted = false,
                             ModuleName = "Finance",
                             Status = 1,
@@ -13016,9 +13690,9 @@ namespace ErpSystem.Data.Migrations
                         },
                         new
                         {
-                            Id = new Guid("792f5e49-edd7-4058-a615-f114756619e4"),
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3660),
-                            EnabledDate = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3659),
+                            Id = new Guid("c2dbc0fb-96ce-45a5-aafe-f8f0fc7ba714"),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8649),
+                            EnabledDate = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8649),
                             IsDeleted = false,
                             ModuleName = "HR",
                             Status = 1,
@@ -13026,9 +13700,9 @@ namespace ErpSystem.Data.Migrations
                         },
                         new
                         {
-                            Id = new Guid("53ff0afe-b958-44aa-ae42-7dcf80863fa9"),
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3680),
-                            EnabledDate = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3679),
+                            Id = new Guid("ca09f3c7-5a79-4290-9f06-3f5c65709b2c"),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8666),
+                            EnabledDate = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8665),
                             IsDeleted = false,
                             ModuleName = "Sales",
                             Status = 1,
@@ -13036,9 +13710,9 @@ namespace ErpSystem.Data.Migrations
                         },
                         new
                         {
-                            Id = new Guid("625a4223-2641-484b-8f38-34a3108cd02f"),
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3698),
-                            EnabledDate = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3697),
+                            Id = new Guid("b3a2c19a-3956-4b02-a6b7-30672f32ab5f"),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8681),
+                            EnabledDate = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8681),
                             IsDeleted = false,
                             ModuleName = "Procurement",
                             Status = 1,
@@ -13046,9 +13720,9 @@ namespace ErpSystem.Data.Migrations
                         },
                         new
                         {
-                            Id = new Guid("df25c4a7-3a5d-42fc-874f-354023468c0a"),
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3715),
-                            EnabledDate = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3715),
+                            Id = new Guid("d25eac4d-65aa-49aa-ab75-c6678b3e7be5"),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8697),
+                            EnabledDate = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8696),
                             IsDeleted = false,
                             ModuleName = "Inventory",
                             Status = 1,
@@ -13056,9 +13730,9 @@ namespace ErpSystem.Data.Migrations
                         },
                         new
                         {
-                            Id = new Guid("32715b1c-6308-45dc-9f6d-448600185404"),
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3736),
-                            EnabledDate = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3736),
+                            Id = new Guid("bd86ea7d-b041-4a19-b2f8-67ce09fa7b18"),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8713),
+                            EnabledDate = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8712),
                             IsDeleted = false,
                             ModuleName = "Marketing",
                             Status = 1,
@@ -13066,9 +13740,9 @@ namespace ErpSystem.Data.Migrations
                         },
                         new
                         {
-                            Id = new Guid("99901b55-7bdd-4787-a80b-6a5c16b11e0a"),
-                            CreatedAt = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3755),
-                            EnabledDate = new DateTime(2025, 10, 30, 0, 45, 8, 559, DateTimeKind.Utc).AddTicks(3755),
+                            Id = new Guid("b0f60214-404f-4b64-9cb8-2e3013b441d6"),
+                            CreatedAt = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8731),
+                            EnabledDate = new DateTime(2025, 11, 6, 14, 16, 46, 919, DateTimeKind.Utc).AddTicks(8730),
                             IsDeleted = false,
                             ModuleName = "WorkflowEngine",
                             Status = 1,
@@ -14846,14 +15520,18 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasOne("ErpSystem.Core.Entities.Inventory.WarehouseLocation", "Location")
                         .WithMany()
-                        .HasForeignKey("LocationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .HasForeignKey("LocationId");
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.Warehouse", "Warehouse")
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
                     b.Navigation("AllocatedBy");
@@ -14863,6 +15541,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Location");
 
                     b.Navigation("Tenant");
+
+                    b.Navigation("Warehouse");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryCategory", b =>
@@ -15056,6 +15736,33 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("ParentLocation");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("Warehouse");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.WarehouseQuantity", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryItem", "InventoryItem")
+                        .WithMany()
+                        .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.Warehouse", "Warehouse")
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("InventoryItem");
 
                     b.Navigation("Tenant");
 
@@ -15622,6 +16329,49 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Attachment");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceExpense", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ApprovedBy")
+                        .WithMany()
+                        .HasForeignKey("ApprovedById");
+
+                    b.HasOne("ErpSystem.Core.Entities.Maintenance.MaintenanceStaffSchedule", "Schedule")
+                        .WithMany("Expenses")
+                        .HasForeignKey("ScheduleId");
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Technician")
+                        .WithMany()
+                        .HasForeignKey("TechnicianId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Maintenance.MaintenanceAsset", "Vehicle")
+                        .WithMany()
+                        .HasForeignKey("VehicleId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Maintenance.WorkOrder", "WorkOrder")
+                        .WithMany()
+                        .HasForeignKey("WorkOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ApprovedBy");
+
+                    b.Navigation("Schedule");
+
+                    b.Navigation("Technician");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("Vehicle");
+
+                    b.Navigation("WorkOrder");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceSchedule", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Maintenance.MaintenanceAsset", "Asset")
@@ -15674,6 +16424,49 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceStaffSchedule", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Maintenance.MaintenanceAsset", "AssignedVehicle")
+                        .WithMany()
+                        .HasForeignKey("AssignedVehicleId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Maintenance.JobCard", "JobCard")
+                        .WithMany()
+                        .HasForeignKey("JobCardId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Maintenance.TechnicianTeam", "Team")
+                        .WithMany()
+                        .HasForeignKey("TeamId");
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Technician")
+                        .WithMany()
+                        .HasForeignKey("TechnicianId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Maintenance.WorkOrder", "WorkOrder")
+                        .WithMany()
+                        .HasForeignKey("WorkOrderId");
+
+                    b.Navigation("AssignedVehicle");
+
+                    b.Navigation("JobCard");
+
+                    b.Navigation("Team");
+
+                    b.Navigation("Technician");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("WorkOrder");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceTaskTemplate", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "AssignedTechnician")
@@ -15695,6 +16488,17 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("AssignedTechnician");
 
                     b.Navigation("MaintenanceType");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceTool", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("Tenant");
                 });
@@ -16150,6 +16954,51 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.ToolCheckout", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "CheckedInBy")
+                        .WithMany()
+                        .HasForeignKey("CheckedInById");
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "CheckedOutBy")
+                        .WithMany()
+                        .HasForeignKey("CheckedOutById")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Maintenance.JobCard", "JobCard")
+                        .WithMany()
+                        .HasForeignKey("JobCardId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryItem", "Tool")
+                        .WithMany()
+                        .HasForeignKey("ToolId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Maintenance.WorkOrder", "WorkOrder")
+                        .WithMany()
+                        .HasForeignKey("WorkOrderId");
+
+                    b.Navigation("CheckedInBy");
+
+                    b.Navigation("CheckedOutBy");
+
+                    b.Navigation("JobCard");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("Tool");
+
+                    b.Navigation("WorkOrder");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.UserTechnicianSkill", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
@@ -16568,6 +17417,45 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("AssignedTechnician");
 
                     b.Navigation("Tenant");
+
+                    b.Navigation("WorkOrder");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderTool", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryAllocation", "Allocation")
+                        .WithMany()
+                        .HasForeignKey("AllocationId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Maintenance.ToolCheckout", "Checkout")
+                        .WithMany()
+                        .HasForeignKey("CheckoutId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryItem", "Tool")
+                        .WithMany()
+                        .HasForeignKey("ToolId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Maintenance.WorkOrder", "WorkOrder")
+                        .WithMany("Tools")
+                        .HasForeignKey("WorkOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Allocation");
+
+                    b.Navigation("Checkout");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("Tool");
 
                     b.Navigation("WorkOrder");
                 });
@@ -17673,6 +18561,11 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("GeneratedWorkOrders");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceStaffSchedule", b =>
+                {
+                    b.Navigation("Expenses");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceType", b =>
                 {
                     b.Navigation("JobCards");
@@ -17756,6 +18649,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Parts");
 
                     b.Navigation("Tasks");
+
+                    b.Navigation("Tools");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderQualityCheck", b =>

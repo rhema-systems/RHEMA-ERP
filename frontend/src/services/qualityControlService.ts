@@ -128,9 +128,22 @@ export interface PagedResult<T> {
   totalPages: number;
 }
 
+export interface WorkOrderQualityCheck {
+  id: string;
+  workOrderId: string;
+  workOrderNumber: string;
+  assetName: string;
+  checklistName: string;
+  status: string;
+  inspectionDate: string;
+  overallResult?: string;
+  score: number;
+  inspectorName?: string;
+}
+
 class QualityControlService {
   private getAuthHeaders() {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('authToken');
     return {
       'Authorization': token ? `Bearer ${token}` : '',
       'Content-Type': 'application/json'
@@ -148,6 +161,37 @@ class QualityControlService {
   async getRequiredInspections(assetId: string, workOrderType: string): Promise<RequiredInspection[]> {
     const response = await axios.get(`${API_URL}/maintenance/quality-control/required-inspections`, {
       params: { assetId, workOrderType },
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  // Submit Work Order for QC Inspection
+  async submitWorkOrderForInspection(workOrderId: string): Promise<WorkOrderQualityCheck> {
+    const response = await axios.post(`${API_URL}/maintenance/quality-control/submit-for-inspection/${workOrderId}`, {}, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  // Get Pending Quality Inspections
+  async getPendingInspections(): Promise<WorkOrderQualityCheck[]> {
+    const response = await axios.get(`${API_URL}/maintenance/quality-control/pending-inspections`, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  async startInspection(workOrderId: string): Promise<WorkOrderQualityCheck> {
+    const response = await axios.post(`${API_URL}/maintenance/quality-control/start-inspection/${workOrderId}`, {}, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  // Get Completed Inspections
+  async getCompletedInspections(): Promise<any[]> {
+    const response = await axios.get(`${API_URL}/maintenance/quality-control/completed-inspections`, {
       headers: this.getAuthHeaders()
     });
     return response.data;
@@ -216,7 +260,7 @@ class QualityControlService {
 
     const response = await axios.post(`${API_URL}/maintenance/quality-check-items/${itemId}/evidence`, formData, {
       headers: {
-        'Authorization': localStorage.getItem('token') ? `Bearer ${localStorage.getItem('token')}` : '',
+        'Authorization': localStorage.getItem('authToken') ? `Bearer ${localStorage.getItem('authToken')}` : '',
         'Content-Type': 'multipart/form-data'
       }
     });

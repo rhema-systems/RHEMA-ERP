@@ -113,6 +113,9 @@ builder.Services.AddErpSystemFileUpload(builder.Configuration);
 builder.Services.AddErpSystemSignalR();
 builder.Services.AddDevelopmentServices(builder.Environment);
 
+// Add Quality Certificate Service
+builder.Services.AddScoped<ErpSystem.Api.Services.QualityCertificateService>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline

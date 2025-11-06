@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -65,6 +66,7 @@ interface MaintenanceHistory {
 
 export default function AssetsPage() {
   const { toast } = useToast();
+  const searchParams = useSearchParams();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [filteredAssets, setFilteredAssets] = useState<Asset[]>([]);
   const [maintenanceHistory, setMaintenanceHistory] = useState<MaintenanceHistory[]>([]);
@@ -220,6 +222,26 @@ export default function AssetsPage() {
 
     loadAssetsData();
   }, []);
+
+  // Handle opening asset from URL parameter
+  useEffect(() => {
+    const assetId = searchParams.get('id');
+    if (assetId && assets.length > 0 && !isViewDialogOpen) {
+      const asset = assets.find(a => a.id === assetId);
+      if (asset) {
+        console.log('Opening asset from URL:', asset);
+        setSelectedAsset(asset);
+        setIsViewDialogOpen(true);
+      } else {
+        console.warn('Asset not found with ID:', assetId);
+        toast({
+          title: 'Asset not found',
+          description: 'The requested asset could not be found.',
+          variant: 'destructive'
+        });
+      }
+    }
+  }, [assets, searchParams, isViewDialogOpen, toast]);
 
   // Filter assets
   useEffect(() => {

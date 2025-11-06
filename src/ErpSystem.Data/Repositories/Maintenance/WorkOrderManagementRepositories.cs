@@ -21,6 +21,9 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
             .Include(wo => wo.MaintenanceType)
             .Include(wo => wo.WorkOrderType)
             .Include(wo => wo.Tasks)
+            .Include(wo => wo.Parts)
+            .Include(wo => wo.Labor)
+            .Include(wo => wo.Tools)
             .FirstOrDefaultAsync();
     }
 

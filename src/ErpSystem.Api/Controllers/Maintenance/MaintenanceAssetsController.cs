@@ -221,6 +221,24 @@ public class MaintenanceAssetsController : ControllerBase
     }
 
     /// <summary>
+    /// Gets available vehicles (assets with category AssetType="Vehicle" and Status=Active)
+    /// </summary>
+    [HttpGet("available-vehicles")]
+    public async Task<ActionResult<IEnumerable<MaintenanceAssetDto>>> GetAvailableVehicles()
+    {
+        try
+        {
+            var vehicles = await _maintenanceAssetService.GetAvailableVehiclesAsync();
+            return Ok(vehicles);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving available vehicles");
+            return StatusCode(500, "An error occurred while retrieving available vehicles");
+        }
+    }
+
+    /// <summary>
     /// Gets asset hierarchy for a given root asset
     /// </summary>
     [HttpGet("{rootAssetId:guid}/hierarchy")]

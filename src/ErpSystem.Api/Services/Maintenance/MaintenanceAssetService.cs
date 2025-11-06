@@ -489,6 +489,29 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         }
     }
 
+    public async Task<IEnumerable<MaintenanceAssetDto>> GetAvailableVehiclesAsync()
+    {
+        try
+        {
+            _logger.LogInformation("Retrieving available vehicles");
+            
+            var query = _assetRepository.GetQueryable()
+                .Include(a => a.AssetCategory)
+                .Where(a => a.AssetCategory.AssetType == "Vehicle" && a.Status == AssetStatus.Active);
+            
+            var vehicles = await query.ToListAsync();
+            
+            _logger.LogInformation("Found {Count} available vehicles", vehicles.Count);
+            
+            return _mapper.Map<IEnumerable<MaintenanceAssetDto>>(vehicles);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving available vehicles");
+            throw;
+        }
+    }
+
     private async Task<bool> WouldCreateCircularReference(Guid assetId, Guid parentAssetId)
     {
         var currentId = parentAssetId;

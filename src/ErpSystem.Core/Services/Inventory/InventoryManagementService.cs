@@ -223,7 +223,7 @@ public class InventoryManagementService : IInventoryManagementService
                 InventoryItemId = createdAllocation.InventoryItemId,
                 ItemCode = item.ItemCode,
                 ItemName = item.Name,
-                LocationId = createdAllocation.LocationId,
+                LocationId = createdAllocation.LocationId ?? Guid.Empty,
                 LocationCode = bestLocation.Location.LocationCode,
                 AllocationType = createdAllocation.AllocationType,
                 ReferenceNumber = createdAllocation.ReferenceNumber,
@@ -269,7 +269,10 @@ public class InventoryManagementService : IInventoryManagementService
             await UpdateStockLevelsAsync(allocation.InventoryItemId, -quantity, -quantity);
 
             // Update location quantities
-            await UpdateLocationQuantitiesAsync(allocation.LocationId, allocation.InventoryItemId, -quantity, -quantity);
+            if (allocation.LocationId.HasValue)
+            {
+                await UpdateLocationQuantitiesAsync(allocation.LocationId.Value, allocation.InventoryItemId, -quantity, -quantity);
+            }
 
             // Create consumption movement record
             var item = await _itemRepository.GetByIdAsync(allocation.InventoryItemId);
@@ -323,7 +326,10 @@ public class InventoryManagementService : IInventoryManagementService
             await UpdateStockLevelsAsync(allocation.InventoryItemId, 0, -remainingQuantity);
 
             // Update location quantities
-            await UpdateLocationQuantitiesAsync(allocation.LocationId, allocation.InventoryItemId, 0, -remainingQuantity);
+            if (allocation.LocationId.HasValue)
+            {
+                await UpdateLocationQuantitiesAsync(allocation.LocationId.Value, allocation.InventoryItemId, 0, -remainingQuantity);
+            }
 
             // Create movement record
             var item = await _itemRepository.GetByIdAsync(allocation.InventoryItemId);

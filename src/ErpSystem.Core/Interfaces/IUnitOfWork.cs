@@ -33,4 +33,9 @@ public interface IUnitOfWork : IDisposable
     /// Get repository for specific entity type
     /// </summary>
     IGenericRepository<T> Repository<T>() where T : BaseEntity;
+    
+    /// <summary>
+    /// Execute an operation within an execution strategy (for SQL Server retry logic)
+    /// </summary>
+    Task ExecuteInStrategyAsync(Func<Task> operation, CancellationToken cancellationToken = default);
 }

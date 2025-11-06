@@ -217,6 +217,25 @@ namespace ErpSystem.Data.Repositories
             var entities = await FindAsync(predicate);
             await DeleteRangeAsync(entities);
         }
+        
+        // Hard delete operations (permanent removal from database)
+        public virtual async Task HardDeleteAsync(T entity)
+        {
+            // Use raw SQL to bypass EF tracking and soft delete interception
+            var tableName = _context.Model.FindEntityType(typeof(T))?.GetTableName();
+            await _context.Database.ExecuteSqlRawAsync($"DELETE FROM [{tableName}] WHERE Id = {{0}}", entity.Id);
+        }
+        
+        public virtual async Task HardDeleteRangeAsync(IEnumerable<T> entities)
+        {
+            var entityList = entities.ToList();
+            if (!entityList.Any()) return;
+            
+            // Use raw SQL to bypass EF tracking and soft delete interception
+            var tableName = _context.Model.FindEntityType(typeof(T))?.GetTableName();
+            var ids = string.Join(",", entityList.Select(e => $"'{e.Id}'"));
+            await _context.Database.ExecuteSqlRawAsync($"DELETE FROM [{tableName}] WHERE Id IN ({ids})");
+        }
 
 
         // Advanced querying

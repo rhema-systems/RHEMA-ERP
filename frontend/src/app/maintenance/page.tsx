@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { LayoutDashboard, FileText, Package, Users, ClipboardCheck, Calendar, AlertTriangle, Clock, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, FileText, Package, Users, ClipboardCheck, Calendar, AlertTriangle, Clock, BarChart3, Wrench } from 'lucide-react';
 
 const maintenanceModules = [
   {
@@ -70,6 +70,13 @@ const maintenanceModules = [
     href: '/maintenance/reports',
     icon: BarChart3,
     color: 'bg-pink-500',
+  },
+  {
+    title: 'Tool Management',
+    description: 'Manage tool inventory, checkouts, and returns',
+    href: '/maintenance/tools',
+    icon: Wrench,
+    color: 'bg-cyan-500',
   },
 ];
 

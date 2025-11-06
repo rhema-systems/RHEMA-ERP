@@ -167,6 +167,7 @@ const navigationItems: NavItem[] = [
           { title: 'Emergency Maintenance', href: '/maintenance/emergency', icon: AlertTriangle },
           { title: 'Inspections', href: '/maintenance/inspections', icon: ClipboardCheck },
           { title: 'Maintenance History', href: '/maintenance/history', icon: Clock },
+          { title: 'Tool Management', href: '/maintenance/tools', icon: Wrench },
           { title: 'Reports', href: '/maintenance/reports', icon: BarChart3 },
           { title: 'Asset Analytics', href: '/maintenance/analytics', icon: BarChart3 },
         ],
