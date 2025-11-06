@@ -774,7 +774,7 @@ export default function ScheduledMaintenancePage() {
                 Schedule Maintenance
               </Button>
             </DialogTrigger>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Schedule New Maintenance</DialogTitle>
               <DialogDescription>
@@ -926,6 +926,129 @@ export default function ScheduledMaintenancePage() {
                   rows={3}
                 />
               </div>
+
+              {/* Trigger Configuration Section */}
+              <div className="space-y-4 border-t pt-4">
+                <Label className="text-base font-semibold">Trigger Configuration</Label>
+                <Tabs value={formData.primaryTriggerType} onValueChange={(value) => setFormData({...formData, primaryTriggerType: value})}>
+                  <TabsList className="grid w-full grid-cols-4">
+                    <TabsTrigger value="Time">Time-Based</TabsTrigger>
+                    <TabsTrigger value="Usage">Usage-Based</TabsTrigger>
+                    <TabsTrigger value="Condition">Condition-Based</TabsTrigger>
+                    <TabsTrigger value="Combined">Combined</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+
+                {/* Usage Trigger Fields */}
+                {(formData.primaryTriggerType === 'Usage' || formData.primaryTriggerType === 'Combined') && (
+                  <div className="space-y-3 bg-muted/50 p-4 rounded-md">
+                    <Label className="text-sm font-semibold">Usage Thresholds</Label>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="mileageTrigger" className="text-xs">Mileage (km)</Label>
+                        <Input
+                          id="mileageTrigger"
+                          type="number"
+                          value={formData.mileageTrigger}
+                          onChange={(e) => setFormData({...formData, mileageTrigger: e.target.value})}
+                          placeholder="e.g., 5000"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="operatingHoursTrigger" className="text-xs">Operating Hours</Label>
+                        <Input
+                          id="operatingHoursTrigger"
+                          type="number"
+                          value={formData.operatingHoursTrigger}
+                          onChange={(e) => setFormData({...formData, operatingHoursTrigger: e.target.value})}
+                          placeholder="e.g., 200"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="cycleTrigger" className="text-xs">Cycle Count</Label>
+                        <Input
+                          id="cycleTrigger"
+                          type="number"
+                          value={formData.cycleTrigger}
+                          onChange={(e) => setFormData({...formData, cycleTrigger: e.target.value})}
+                          placeholder="e.g., 1000"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Condition Trigger Fields */}
+                {(formData.primaryTriggerType === 'Condition' || formData.primaryTriggerType === 'Combined') && (
+                  <div className="space-y-2 bg-muted/50 p-4 rounded-md">
+                    <Label htmlFor="conditionCriteria" className="text-sm font-semibold">Condition Criteria (JSON)</Label>
+                    <Textarea
+                      id="conditionCriteria"
+                      value={formData.conditionCriteria}
+                      onChange={(e) => setFormData({...formData, conditionCriteria: e.target.value})}
+                      placeholder='{"parameter": "temperature", "operator": ">", "value": 80}'
+                      rows={3}
+                      className="font-mono text-xs"
+                    />
+                    <p className="text-xs text-muted-foreground">Supported operators: &gt;, &gt;=, &lt;, &lt;=, ==, !=</p>
+                  </div>
+                )}
+
+                {/* Combined Trigger Logic */}
+                {formData.primaryTriggerType === 'Combined' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="triggerLogic">Trigger Logic</Label>
+                    <Select value={formData.triggerLogic} onValueChange={(value) => setFormData({...formData, triggerLogic: value})}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select logic" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="AND">AND (All conditions must be met)</SelectItem>
+                        <SelectItem value="OR">OR (Any condition triggers)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              {/* Notification Settings Section */}
+              <div className="space-y-3 border-t pt-4">
+                <Label className="text-base font-semibold">Notification Settings</Label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="advanceNotificationDays">Advance Notification (days)</Label>
+                    <Input
+                      id="advanceNotificationDays"
+                      type="number"
+                      value={formData.advanceNotificationDays}
+                      onChange={(e) => setFormData({...formData, advanceNotificationDays: e.target.value})}
+                      placeholder="e.g., 7"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="autoGenerateWorkOrders">Auto-Generate Work Orders</Label>
+                    <Select value={formData.autoGenerateWorkOrders.toString()} onValueChange={(value) => setFormData({...formData, autoGenerateWorkOrders: value === 'true'})}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="true">Yes</SelectItem>
+                        <SelectItem value="false">No</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="notificationRecipients">Notification Recipients</Label>
+                  <Input
+                    id="notificationRecipients"
+                    value={formData.notificationRecipients}
+                    onChange={(e) => setFormData({...formData, notificationRecipients: e.target.value})}
+                    placeholder="email1@example.com, email2@example.com"
+                  />
+                  <p className="text-xs text-muted-foreground">Separate multiple emails with commas</p>
+                </div>
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -940,7 +1063,7 @@ export default function ScheduledMaintenancePage() {
         {/* Edit Scheduled Maintenance Dialog */}
         <ClientOnly>
           <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit Scheduled Maintenance</DialogTitle>
               <DialogDescription>
@@ -1091,6 +1214,129 @@ export default function ScheduledMaintenancePage() {
                   placeholder="Detailed description of the maintenance task..."
                   rows={3}
                 />
+              </div>
+
+              {/* Trigger Configuration Section */}
+              <div className="space-y-4 border-t pt-4">
+                <Label className="text-base font-semibold">Trigger Configuration</Label>
+                <Tabs value={formData.primaryTriggerType} onValueChange={(value) => setFormData({...formData, primaryTriggerType: value})}>
+                  <TabsList className="grid w-full grid-cols-4">
+                    <TabsTrigger value="Time">Time-Based</TabsTrigger>
+                    <TabsTrigger value="Usage">Usage-Based</TabsTrigger>
+                    <TabsTrigger value="Condition">Condition-Based</TabsTrigger>
+                    <TabsTrigger value="Combined">Combined</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+
+                {/* Usage Trigger Fields */}
+                {(formData.primaryTriggerType === 'Usage' || formData.primaryTriggerType === 'Combined') && (
+                  <div className="space-y-3 bg-muted/50 p-4 rounded-md">
+                    <Label className="text-sm font-semibold">Usage Thresholds</Label>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-mileageTrigger" className="text-xs">Mileage (km)</Label>
+                        <Input
+                          id="edit-mileageTrigger"
+                          type="number"
+                          value={formData.mileageTrigger}
+                          onChange={(e) => setFormData({...formData, mileageTrigger: e.target.value})}
+                          placeholder="e.g., 5000"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-operatingHoursTrigger" className="text-xs">Operating Hours</Label>
+                        <Input
+                          id="edit-operatingHoursTrigger"
+                          type="number"
+                          value={formData.operatingHoursTrigger}
+                          onChange={(e) => setFormData({...formData, operatingHoursTrigger: e.target.value})}
+                          placeholder="e.g., 200"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-cycleTrigger" className="text-xs">Cycle Count</Label>
+                        <Input
+                          id="edit-cycleTrigger"
+                          type="number"
+                          value={formData.cycleTrigger}
+                          onChange={(e) => setFormData({...formData, cycleTrigger: e.target.value})}
+                          placeholder="e.g., 1000"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Condition Trigger Fields */}
+                {(formData.primaryTriggerType === 'Condition' || formData.primaryTriggerType === 'Combined') && (
+                  <div className="space-y-2 bg-muted/50 p-4 rounded-md">
+                    <Label htmlFor="edit-conditionCriteria" className="text-sm font-semibold">Condition Criteria (JSON)</Label>
+                    <Textarea
+                      id="edit-conditionCriteria"
+                      value={formData.conditionCriteria}
+                      onChange={(e) => setFormData({...formData, conditionCriteria: e.target.value})}
+                      placeholder='{"parameter": "temperature", "operator": ">", "value": 80}'
+                      rows={3}
+                      className="font-mono text-xs"
+                    />
+                    <p className="text-xs text-muted-foreground">Supported operators: &gt;, &gt;=, &lt;, &lt;=, ==, !=</p>
+                  </div>
+                )}
+
+                {/* Combined Trigger Logic */}
+                {formData.primaryTriggerType === 'Combined' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-triggerLogic">Trigger Logic</Label>
+                    <Select value={formData.triggerLogic} onValueChange={(value) => setFormData({...formData, triggerLogic: value})}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select logic" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="AND">AND (All conditions must be met)</SelectItem>
+                        <SelectItem value="OR">OR (Any condition triggers)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              {/* Notification Settings Section */}
+              <div className="space-y-3 border-t pt-4">
+                <Label className="text-base font-semibold">Notification Settings</Label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-advanceNotificationDays">Advance Notification (days)</Label>
+                    <Input
+                      id="edit-advanceNotificationDays"
+                      type="number"
+                      value={formData.advanceNotificationDays}
+                      onChange={(e) => setFormData({...formData, advanceNotificationDays: e.target.value})}
+                      placeholder="e.g., 7"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-autoGenerateWorkOrders">Auto-Generate Work Orders</Label>
+                    <Select value={formData.autoGenerateWorkOrders.toString()} onValueChange={(value) => setFormData({...formData, autoGenerateWorkOrders: value === 'true'})}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="true">Yes</SelectItem>
+                        <SelectItem value="false">No</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-notificationRecipients">Notification Recipients</Label>
+                  <Input
+                    id="edit-notificationRecipients"
+                    value={formData.notificationRecipients}
+                    onChange={(e) => setFormData({...formData, notificationRecipients: e.target.value})}
+                    placeholder="email1@example.com, email2@example.com"
+                  />
+                  <p className="text-xs text-muted-foreground">Separate multiple emails with commas</p>
+                </div>
               </div>
             </div>
             <DialogFooter>
