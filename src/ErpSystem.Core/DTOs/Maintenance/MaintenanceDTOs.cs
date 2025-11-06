@@ -1514,6 +1514,24 @@ public class CreateMaintenanceScheduleDto
     
     [StringLength(1000)]
     public string Notes { get; set; } = string.Empty;
+    
+    // Multi-criteria scheduling fields
+    [StringLength(20)]
+    public string PrimaryTriggerType { get; set; } = "Time"; // Time, Usage, Condition, Combined
+    
+    [StringLength(20)]
+    public string? SecondaryTriggerType { get; set; }
+    
+    [StringLength(10)]
+    public string TriggerLogic { get; set; } = "OR"; // OR, AND
+    
+    // Usage-based triggers
+    public decimal? MileageTrigger { get; set; }
+    public decimal? OperatingHoursTrigger { get; set; }
+    public decimal? CycleTrigger { get; set; }
+    
+    // Condition-based triggers
+    public string? ConditionCriteria { get; set; }
 }
 
 public class UpdateMaintenanceScheduleDto : CreateMaintenanceScheduleDto

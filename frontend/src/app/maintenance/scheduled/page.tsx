@@ -12,7 +12,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { maintenanceDataService, Employee, Asset, MaintenanceType } from '@/services/maintenanceDataService';
+import maintenanceScheduleService, { MaintenanceSchedule, CreateMaintenanceScheduleDto } from '@/services/maintenanceScheduleService';
 import { 
   Calendar as CalendarIcon,
   Clock,
@@ -48,6 +50,18 @@ interface ScheduledMaintenanceItem {
   status: string;
   estimatedHours: number;
   description: string;
+  // Trigger fields
+  primaryTriggerType?: string;
+  secondaryTriggerType?: string;
+  triggerLogic?: string;
+  mileageTrigger?: number;
+  operatingHoursTrigger?: number;
+  cycleTrigger?: number;
+  conditionCriteria?: string;
+  // Notification fields
+  advanceNotificationDays?: number;
+  notificationRecipients?: string;
+  autoGenerateWorkOrders?: boolean;
 }
 
 export default function ScheduledMaintenancePage() {
@@ -82,7 +96,19 @@ export default function ScheduledMaintenancePage() {
     assignedTechnician: '',
     priority: 'Medium',
     estimatedHours: '',
-    description: ''
+    description: '',
+    // Trigger fields
+    primaryTriggerType: 'Time',
+    secondaryTriggerType: '',
+    triggerLogic: 'OR',
+    mileageTrigger: '',
+    operatingHoursTrigger: '',
+    cycleTrigger: '',
+    conditionCriteria: '',
+    // Notification fields
+    advanceNotificationDays: '',
+    notificationRecipients: '',
+    autoGenerateWorkOrders: true
   });
 
   // Load data on component mount
@@ -91,18 +117,12 @@ export default function ScheduledMaintenancePage() {
       setLoadingData(true);
       setLoading(true);
       try {
-        const token = localStorage.getItem('authToken');
         console.log('=== LOADING MAINTENANCE DATA ===');
         const [techniciansList, assetsList, maintenanceTypesList, scheduledDataResponse] = await Promise.all([
           maintenanceDataService.getTechnicians(),
           maintenanceDataService.getAssets(),
           maintenanceDataService.getMaintenanceTypes(),
-          fetch('http://localhost:5000/api/maintenance/schedules', {
-            headers: {
-              'Authorization': token ? `Bearer ${token}` : '',
-              'Content-Type': 'application/json'
-            }
-          })
+          maintenanceScheduleService.getSchedules()
         ]);
         
         console.log('=== TECHNICIANS DEBUG ===');
@@ -127,39 +147,43 @@ export default function ScheduledMaintenancePage() {
         setAssets(assetsList);
         setMaintenanceTypes(maintenanceTypesList);
         
-        console.log('Scheduled data response status:', scheduledDataResponse.status);
-        if (scheduledDataResponse.ok) {
-          const scheduledData = await scheduledDataResponse.json();
-          console.log('Raw scheduled data response:', scheduledData);
-          
-          // The controller returns PagedResult<MaintenanceScheduleDto>
-          // Structure: { items: [...], totalCount: X, page: Y, pageSize: Z }
-          const schedules = scheduledData.items || scheduledData.data || scheduledData || [];
-          console.log('Extracted schedules:', schedules);
-          
-          // Map MaintenanceScheduleDto to ScheduledMaintenanceItem interface
-          const mappedSchedules = schedules.map((schedule: any) => ({
-            id: schedule.id,
-            title: schedule.name || schedule.title,
-            assetId: schedule.assetId,
-            assetName: schedule.assetName || 'Unknown Asset',
-            type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
-            frequency: schedule.frequency,
-            nextDue: schedule.nextDueDate || schedule.nextDue,
-            lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
-            assignedTechnician: schedule.AssignedTechnicianName || schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
-            assignedTechnicianId: schedule.AssignedTechnicianId || schedule.assignedTechnicianId || '',
-            priority: schedule.priority,
-            status: schedule.isActive ? 'Scheduled' : 'Inactive',
-            estimatedHours: schedule.estimatedHours || 0,
-            description: schedule.description || ''
-          }));
-          
-          console.log('Mapped scheduled maintenance items:', mappedSchedules);
-          setScheduledMaintenanceData(mappedSchedules);
-        } else {
-          console.error('Failed to fetch scheduled data:', scheduledDataResponse.status, scheduledDataResponse.statusText);
-        }
+        console.log('Raw scheduled data response:', scheduledDataResponse);
+        
+        // The service returns PagedResult<MaintenanceSchedule>
+        const schedules = scheduledDataResponse.items || scheduledDataResponse.data || [];
+        console.log('Extracted schedules:', schedules);
+        
+        // Map MaintenanceSchedule to ScheduledMaintenanceItem interface
+        const mappedSchedules = schedules.map((schedule: any) => ({
+          id: schedule.id,
+          title: schedule.name || schedule.title,
+          assetId: schedule.assetId,
+          assetName: schedule.assetName || 'Unknown Asset',
+          type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
+          frequency: schedule.frequency,
+          nextDue: schedule.nextDueDate || schedule.nextDue,
+          lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
+          assignedTechnician: schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
+          assignedTechnicianId: schedule.assignedTechnicianId || '',
+          priority: schedule.priority,
+          status: schedule.isActive ? 'Scheduled' : 'Inactive',
+          estimatedHours: schedule.estimatedHours || 0,
+          description: schedule.description || '',
+          // Store trigger and notification data
+          primaryTriggerType: schedule.primaryTriggerType,
+          secondaryTriggerType: schedule.secondaryTriggerType,
+          triggerLogic: schedule.triggerLogic,
+          mileageTrigger: schedule.mileageTrigger,
+          operatingHoursTrigger: schedule.operatingHoursTrigger,
+          cycleTrigger: schedule.cycleTrigger,
+          conditionCriteria: schedule.conditionCriteria,
+          advanceNotificationDays: schedule.advanceNotificationDays,
+          notificationRecipients: schedule.notificationRecipients,
+          autoGenerateWorkOrders: schedule.autoGenerateWorkOrders
+        }));
+        
+        console.log('Mapped scheduled maintenance items:', mappedSchedules);
+        setScheduledMaintenanceData(mappedSchedules);
       } catch (error) {
         console.error('Error loading data:', error);
         setScheduledMaintenanceData([]);
@@ -365,103 +389,65 @@ export default function ScheduledMaintenancePage() {
         requiredParts: [],
         isActive: true,
         autoCreate: true,
-        autoGenerateWorkOrders: true,
+        autoGenerateWorkOrders: formData.autoGenerateWorkOrders,
         leadTime: 5,
-        advanceNotificationDays: 7,
-        notificationRecipients: null,
+        advanceNotificationDays: formData.advanceNotificationDays ? parseInt(formData.advanceNotificationDays) : 7,
+        notificationRecipients: formData.notificationRecipients || null,
         maxDelayDays: 3,
-        notes: formData.description
+        notes: formData.description,
+        // Trigger fields
+        primaryTriggerType: formData.primaryTriggerType,
+        secondaryTriggerType: formData.secondaryTriggerType || null,
+        triggerLogic: formData.primaryTriggerType === 'Combined' ? formData.triggerLogic : null,
+        mileageTrigger: formData.mileageTrigger ? parseFloat(formData.mileageTrigger) : null,
+        operatingHoursTrigger: formData.operatingHoursTrigger ? parseFloat(formData.operatingHoursTrigger) : null,
+        cycleTrigger: formData.cycleTrigger ? parseInt(formData.cycleTrigger) : null,
+        conditionCriteria: formData.conditionCriteria || null
       };
       
       console.log('Sending createDto:', createDto);
-      console.log('maintenanceTypeId type:', typeof createDto.maintenanceTypeId);
-      console.log('maintenanceTypeId value:', createDto.maintenanceTypeId);
-      console.log('JSON stringified payload:', JSON.stringify(createDto, null, 2));
       
-      console.log('=== MAKING API CALL ===');
-      console.log('URL: http://localhost:5000/api/maintenance/schedules');
-      console.log('Method: POST');
-      
-      const response = await fetch('http://localhost:5000/api/maintenance/schedules', {
-        method: 'POST',
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(createDto)
-      });
-      
-      console.log('=== API RESPONSE RECEIVED ===');
-      console.log('Response status:', response.status);
-      console.log('Response ok:', response.ok);
-      console.log('Response headers:', response.headers);
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        console.error('API Error:', errorData);
-        
-        if (errorData?.errors) {
-          const errorMessages = [];
-          
-          // Handle validation errors
-          for (const [field, messages] of Object.entries(errorData.errors)) {
-            if (Array.isArray(messages)) {
-              errorMessages.push(`${field}: ${messages.join(', ')}`);
-            }
-          }
-          
-          toast({
-            title: "Validation Errors",
-            description: errorMessages.join(', '),
-            variant: "destructive"
-          });
-        } else {
-          toast({
-            title: "Error",
-            description: `Failed to create scheduled maintenance: ${response.status} ${response.statusText}`,
-            variant: "destructive"
-          });
-        }
-        
-        return;
-      }
-      
-      console.log('=== API CALL SUCCESSFUL ===');
-      const responseData = await response.json();
+      // Use service instead of fetch
+      const responseData = await maintenanceScheduleService.createSchedule(createDto as CreateMaintenanceScheduleDto);
       console.log('Response data:', responseData);
       
-      // Refresh the data
-      const refreshResponse = await fetch('http://localhost:5000/api/maintenance/schedules', {
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        }
+      toast({
+        title: "Success!",
+        description: "Scheduled maintenance created successfully.",
+        variant: "success"
       });
       
-      if (refreshResponse.ok) {
-        const scheduledData = await refreshResponse.json();
-        console.log('Refresh - Raw scheduled data:', scheduledData);
-        
-        const schedules = scheduledData.items || scheduledData.data || scheduledData || [];
-        const mappedSchedules = schedules.map((schedule: any) => ({
-          id: schedule.id,
-          title: schedule.name || schedule.title,
-          assetId: schedule.assetId,
-          assetName: schedule.assetName || 'Unknown Asset',
-          type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
-          frequency: schedule.frequency,
-          nextDue: schedule.nextDueDate || schedule.nextDue,
-          lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
-          assignedTechnician: schedule.AssignedTechnicianName || schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
-          assignedTechnicianId: schedule.AssignedTechnicianId || schedule.assignedTechnicianId || '',
-          priority: schedule.priority,
-          status: schedule.isActive ? 'Scheduled' : 'Inactive',
-          estimatedHours: schedule.estimatedHours || 0,
-          description: schedule.description || ''
-        }));
-        
-        setScheduledMaintenanceData(mappedSchedules);
-      }
+      // Refresh the data using service
+      const scheduledDataResponse = await maintenanceScheduleService.getSchedules();
+      const schedules = scheduledDataResponse.items || scheduledDataResponse.data || [];
+      const mappedSchedules = schedules.map((schedule: any) => ({
+        id: schedule.id,
+        title: schedule.name || schedule.title,
+        assetId: schedule.assetId,
+        assetName: schedule.assetName || 'Unknown Asset',
+        type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
+        frequency: schedule.frequency,
+        nextDue: schedule.nextDueDate || schedule.nextDue,
+        lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
+        assignedTechnician: schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
+        assignedTechnicianId: schedule.assignedTechnicianId || '',
+        priority: schedule.priority,
+        status: schedule.isActive ? 'Scheduled' : 'Inactive',
+        estimatedHours: schedule.estimatedHours || 0,
+        description: schedule.description || '',
+        primaryTriggerType: schedule.primaryTriggerType,
+        secondaryTriggerType: schedule.secondaryTriggerType,
+        triggerLogic: schedule.triggerLogic,
+        mileageTrigger: schedule.mileageTrigger,
+        operatingHoursTrigger: schedule.operatingHoursTrigger,
+        cycleTrigger: schedule.cycleTrigger,
+        conditionCriteria: schedule.conditionCriteria,
+        advanceNotificationDays: schedule.advanceNotificationDays,
+        notificationRecipients: schedule.notificationRecipients,
+        autoGenerateWorkOrders: schedule.autoGenerateWorkOrders
+      }));
+      
+      setScheduledMaintenanceData(mappedSchedules);
       
       setIsCreateDialogOpen(false);
       // Reset form
@@ -474,10 +460,25 @@ export default function ScheduledMaintenancePage() {
         assignedTechnician: '',
         priority: 'Medium',
         estimatedHours: '',
-        description: ''
+        description: '',
+        primaryTriggerType: 'Time',
+        secondaryTriggerType: '',
+        triggerLogic: 'OR',
+        mileageTrigger: '',
+        operatingHoursTrigger: '',
+        cycleTrigger: '',
+        conditionCriteria: '',
+        advanceNotificationDays: '',
+        notificationRecipients: '',
+        autoGenerateWorkOrders: true
       });
     } catch (error) {
       console.error('Error creating scheduled maintenance:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to create schedule",
+        variant: "destructive"
+      });
     }
   };
 
@@ -516,30 +517,10 @@ export default function ScheduledMaintenancePage() {
     if (!scheduleToGenerate) return;
     
     try {
-      const token = localStorage.getItem('authToken');
       console.log('Generating work order for schedule:', scheduleToGenerate.id);
       
-      // Generate a work order from the scheduled maintenance
-      const response = await fetch(`http://localhost:5000/api/maintenance/schedules/${scheduleToGenerate.id}/generate-work-orders?count=1`, {
-        method: 'POST',
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error');
-        console.error('Failed to generate work order:', response.status, errorText);
-        toast({
-          title: "Error",
-          description: `Failed to generate work order: ${response.status} ${response.statusText}`,
-          variant: "destructive"
-        });
-        return;
-      }
-      
-      const workOrders = await response.json();
+      // Generate a work order using the service
+      const workOrders = await maintenanceScheduleService.generateWorkOrder(scheduleToGenerate.id);
       console.log('Work orders generated:', workOrders);
       
       // Close confirmation dialog and reset state
@@ -552,37 +533,43 @@ export default function ScheduledMaintenancePage() {
         variant: "success"
       });
       
-      // Refresh the data
-      const refreshResponse = await fetch('http://localhost:5000/api/maintenance/schedules', {
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (refreshResponse.ok) {
-        const scheduledData = await refreshResponse.json();
-        const schedules = scheduledData.items || scheduledData.data || scheduledData || [];
-        const mappedSchedules = schedules.map((schedule: any) => ({
-          id: schedule.id,
-          title: schedule.name || schedule.title,
-          assetId: schedule.assetId,
-          assetName: schedule.assetName || 'Unknown Asset',
-          type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
-          frequency: schedule.frequency,
-          nextDue: schedule.nextDueDate || schedule.nextDue,
-          lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
-          assignedTechnician: schedule.AssignedTechnicianName || schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
-          assignedTechnicianId: schedule.AssignedTechnicianId || schedule.assignedTechnicianId || '',
-          priority: schedule.priority,
-          status: schedule.isActive ? 'Scheduled' : 'Inactive',
-          estimatedHours: schedule.estimatedHours || 0,
-          description: schedule.description || ''
-        }));
-        setScheduledMaintenanceData(mappedSchedules);
-      }
+      // Refresh the data using service
+      const scheduledDataResponse = await maintenanceScheduleService.getSchedules();
+      const schedules = scheduledDataResponse.items || scheduledDataResponse.data || [];
+      const mappedSchedules = schedules.map((schedule: any) => ({
+        id: schedule.id,
+        title: schedule.name || schedule.title,
+        assetId: schedule.assetId,
+        assetName: schedule.assetName || 'Unknown Asset',
+        type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
+        frequency: schedule.frequency,
+        nextDue: schedule.nextDueDate || schedule.nextDue,
+        lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
+        assignedTechnician: schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
+        assignedTechnicianId: schedule.assignedTechnicianId || '',
+        priority: schedule.priority,
+        status: schedule.isActive ? 'Scheduled' : 'Inactive',
+        estimatedHours: schedule.estimatedHours || 0,
+        description: schedule.description || '',
+        primaryTriggerType: schedule.primaryTriggerType,
+        secondaryTriggerType: schedule.secondaryTriggerType,
+        triggerLogic: schedule.triggerLogic,
+        mileageTrigger: schedule.mileageTrigger,
+        operatingHoursTrigger: schedule.operatingHoursTrigger,
+        cycleTrigger: schedule.cycleTrigger,
+        conditionCriteria: schedule.conditionCriteria,
+        advanceNotificationDays: schedule.advanceNotificationDays,
+        notificationRecipients: schedule.notificationRecipients,
+        autoGenerateWorkOrders: schedule.autoGenerateWorkOrders
+      }));
+      setScheduledMaintenanceData(mappedSchedules);
     } catch (error) {
       console.error('Error completing scheduled maintenance:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to generate work order",
+        variant: "destructive"
+      });
       // Close confirmation dialog and reset state on error too
       setIsConfirmDialogOpen(false);
       setScheduleToGenerate(null);
@@ -600,7 +587,18 @@ export default function ScheduledMaintenancePage() {
       assignedTechnician: schedule.assignedTechnicianId || '__UNASSIGNED__', // Use the ID, or placeholder if unassigned
       priority: schedule.priority,
       estimatedHours: schedule.estimatedHours.toString(),
-      description: schedule.description
+      description: schedule.description,
+      // Populate trigger and notification fields
+      primaryTriggerType: schedule.primaryTriggerType || 'Time',
+      secondaryTriggerType: schedule.secondaryTriggerType || '',
+      triggerLogic: schedule.triggerLogic || 'OR',
+      mileageTrigger: schedule.mileageTrigger?.toString() || '',
+      operatingHoursTrigger: schedule.operatingHoursTrigger?.toString() || '',
+      cycleTrigger: schedule.cycleTrigger?.toString() || '',
+      conditionCriteria: schedule.conditionCriteria || '',
+      advanceNotificationDays: schedule.advanceNotificationDays?.toString() || '',
+      notificationRecipients: schedule.notificationRecipients || '',
+      autoGenerateWorkOrders: schedule.autoGenerateWorkOrders !== undefined ? schedule.autoGenerateWorkOrders : true
     });
     setIsEditDialogOpen(true);
   };
@@ -666,38 +664,26 @@ export default function ScheduledMaintenancePage() {
         requiredParts: [],
         isActive: true,
         autoCreate: true,
-        autoGenerateWorkOrders: true,
+        autoGenerateWorkOrders: formData.autoGenerateWorkOrders,
         leadTime: 5,
-        advanceNotificationDays: 7,
-        notificationRecipients: null,
+        advanceNotificationDays: formData.advanceNotificationDays ? parseInt(formData.advanceNotificationDays) : 7,
+        notificationRecipients: formData.notificationRecipients || null,
         maxDelayDays: 3,
-        notes: formData.description
+        notes: formData.description,
+        // Trigger fields
+        primaryTriggerType: formData.primaryTriggerType,
+        secondaryTriggerType: formData.secondaryTriggerType || null,
+        triggerLogic: formData.primaryTriggerType === 'Combined' ? formData.triggerLogic : null,
+        mileageTrigger: formData.mileageTrigger ? parseFloat(formData.mileageTrigger) : null,
+        operatingHoursTrigger: formData.operatingHoursTrigger ? parseFloat(formData.operatingHoursTrigger) : null,
+        cycleTrigger: formData.cycleTrigger ? parseInt(formData.cycleTrigger) : null,
+        conditionCriteria: formData.conditionCriteria || null
       };
       
-      // Send DTO directly, not wrapped in { updateDto: ... }
-      const requestBody = updateDto;
+      console.log('Final request payload:', JSON.stringify(updateDto, null, 2));
       
-      console.log('Final request payload:', JSON.stringify(requestBody, null, 2));
-      
-      const response = await fetch(`http://localhost:5000/api/maintenance/schedules/${editingSchedule.id}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody)
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        console.error('Update API Error:', errorData);
-        toast({
-          title: "Error",
-          description: `Failed to update scheduled maintenance: ${response.status} ${response.statusText}`,
-          variant: "destructive"
-        });
-        return;
-      }
+      // Use service instead of fetch
+      await maintenanceScheduleService.updateSchedule(editingSchedule.id, updateDto);
       
       toast({
         title: "Success!",
@@ -705,35 +691,36 @@ export default function ScheduledMaintenancePage() {
         variant: "success"
       });
       
-      // Refresh the data
-      const refreshResponse = await fetch('http://localhost:5000/api/maintenance/schedules', {
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (refreshResponse.ok) {
-        const scheduledData = await refreshResponse.json();
-        const schedules = scheduledData.items || scheduledData.data || scheduledData || [];
-        const mappedSchedules = schedules.map((schedule: any) => ({
-          id: schedule.id,
-          title: schedule.name || schedule.title,
-          assetId: schedule.assetId,
-          assetName: schedule.assetName || 'Unknown Asset',
-          type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
-          frequency: schedule.frequency,
-          nextDue: schedule.nextDueDate || schedule.nextDue,
-          lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
-          assignedTechnician: schedule.assignedTechnicianName || schedule.assignedTechnician || '',
-          assignedTechnicianId: schedule.assignedTechnicianId || '',
-          priority: schedule.priority,
-          status: schedule.isActive ? 'Scheduled' : 'Inactive',
-          estimatedHours: schedule.estimatedHours || 0,
-          description: schedule.description || ''
-        }));
-        setScheduledMaintenanceData(mappedSchedules);
-      }
+      // Refresh the data using service
+      const scheduledDataResponse = await maintenanceScheduleService.getSchedules();
+      const schedules = scheduledDataResponse.items || scheduledDataResponse.data || [];
+      const mappedSchedules = schedules.map((schedule: any) => ({
+        id: schedule.id,
+        title: schedule.name || schedule.title,
+        assetId: schedule.assetId,
+        assetName: schedule.assetName || 'Unknown Asset',
+        type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
+        frequency: schedule.frequency,
+        nextDue: schedule.nextDueDate || schedule.nextDue,
+        lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
+        assignedTechnician: schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
+        assignedTechnicianId: schedule.assignedTechnicianId || '',
+        priority: schedule.priority,
+        status: schedule.isActive ? 'Scheduled' : 'Inactive',
+        estimatedHours: schedule.estimatedHours || 0,
+        description: schedule.description || '',
+        primaryTriggerType: schedule.primaryTriggerType,
+        secondaryTriggerType: schedule.secondaryTriggerType,
+        triggerLogic: schedule.triggerLogic,
+        mileageTrigger: schedule.mileageTrigger,
+        operatingHoursTrigger: schedule.operatingHoursTrigger,
+        cycleTrigger: schedule.cycleTrigger,
+        conditionCriteria: schedule.conditionCriteria,
+        advanceNotificationDays: schedule.advanceNotificationDays,
+        notificationRecipients: schedule.notificationRecipients,
+        autoGenerateWorkOrders: schedule.autoGenerateWorkOrders
+      }));
+      setScheduledMaintenanceData(mappedSchedules);
       
       setIsEditDialogOpen(false);
       setEditingSchedule(null);
@@ -747,13 +734,23 @@ export default function ScheduledMaintenancePage() {
         assignedTechnician: '',
         priority: 'Medium',
         estimatedHours: '',
-        description: ''
+        description: '',
+        primaryTriggerType: 'Time',
+        secondaryTriggerType: '',
+        triggerLogic: 'OR',
+        mileageTrigger: '',
+        operatingHoursTrigger: '',
+        cycleTrigger: '',
+        conditionCriteria: '',
+        advanceNotificationDays: '',
+        notificationRecipients: '',
+        autoGenerateWorkOrders: true
       });
     } catch (error) {
       console.error('Error updating scheduled maintenance:', error);
       toast({
         title: "Error",
-        description: "An unexpected error occurred while updating the scheduled maintenance.",
+        description: error instanceof Error ? error.message : "Failed to update schedule",
         variant: "destructive"
       });
     }
