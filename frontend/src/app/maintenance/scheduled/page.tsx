@@ -398,7 +398,7 @@ export default function ScheduledMaintenancePage() {
         // Trigger fields
         primaryTriggerType: formData.primaryTriggerType,
         secondaryTriggerType: formData.secondaryTriggerType || null,
-        triggerLogic: formData.primaryTriggerType === 'Combined' ? formData.triggerLogic : null,
+        triggerLogic: formData.triggerLogic, // Always send, backend will ignore if not Combined
         mileageTrigger: formData.mileageTrigger ? parseFloat(formData.mileageTrigger) : null,
         operatingHoursTrigger: formData.operatingHoursTrigger ? parseFloat(formData.operatingHoursTrigger) : null,
         cycleTrigger: formData.cycleTrigger ? parseInt(formData.cycleTrigger) : null,
@@ -673,7 +673,7 @@ export default function ScheduledMaintenancePage() {
         // Trigger fields
         primaryTriggerType: formData.primaryTriggerType,
         secondaryTriggerType: formData.secondaryTriggerType || null,
-        triggerLogic: formData.primaryTriggerType === 'Combined' ? formData.triggerLogic : null,
+        triggerLogic: formData.triggerLogic, // Always send, backend will ignore if not Combined
         mileageTrigger: formData.mileageTrigger ? parseFloat(formData.mileageTrigger) : null,
         operatingHoursTrigger: formData.operatingHoursTrigger ? parseFloat(formData.operatingHoursTrigger) : null,
         cycleTrigger: formData.cycleTrigger ? parseInt(formData.cycleTrigger) : null,

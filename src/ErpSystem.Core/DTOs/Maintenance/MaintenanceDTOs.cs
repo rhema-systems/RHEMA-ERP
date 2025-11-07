@@ -1523,7 +1523,7 @@ public class CreateMaintenanceScheduleDto
     public string? SecondaryTriggerType { get; set; }
     
     [StringLength(10)]
-    public string TriggerLogic { get; set; } = "OR"; // OR, AND
+    public string? TriggerLogic { get; set; } = "OR"; // OR, AND (only required for Combined)
     
     // Usage-based triggers
     public decimal? MileageTrigger { get; set; }
