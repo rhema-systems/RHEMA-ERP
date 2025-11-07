@@ -99,6 +99,14 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
                 AdvanceNotificationDays = createDto.AdvanceNotificationDays,
                 NotificationRecipients = createDto.NotificationRecipients,
                 IsActive = createDto.IsActive,
+                // Trigger fields
+                PrimaryTriggerType = createDto.PrimaryTriggerType,
+                SecondaryTriggerType = createDto.SecondaryTriggerType,
+                TriggerLogic = createDto.TriggerLogic,
+                MileageTrigger = createDto.MileageTrigger,
+                OperatingHoursTrigger = createDto.OperatingHoursTrigger,
+                CycleTrigger = createDto.CycleTrigger,
+                ConditionCriteria = createDto.ConditionCriteria,
                 CreatedById = _currentUserProvider.UserId,
                 TenantId = _currentUserProvider.TenantId
             };
@@ -150,6 +158,14 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             schedule.AdvanceNotificationDays = updateDto.AdvanceNotificationDays;
             schedule.NotificationRecipients = updateDto.NotificationRecipients;
             schedule.IsActive = updateDto.IsActive;
+            // Trigger fields
+            schedule.PrimaryTriggerType = updateDto.PrimaryTriggerType;
+            schedule.SecondaryTriggerType = updateDto.SecondaryTriggerType;
+            schedule.TriggerLogic = updateDto.TriggerLogic;
+            schedule.MileageTrigger = updateDto.MileageTrigger;
+            schedule.OperatingHoursTrigger = updateDto.OperatingHoursTrigger;
+            schedule.CycleTrigger = updateDto.CycleTrigger;
+            schedule.ConditionCriteria = updateDto.ConditionCriteria;
             schedule.LastModifiedById = _currentUserProvider.UserId;
 
             await _scheduleRepository.UpdateAsync(schedule);
