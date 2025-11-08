@@ -600,6 +600,9 @@ public class WorkOrder : TenantEntity
     [MaxLength(20)]
     public string MaintenanceLocation { get; set; } = "Internal"; // Internal, External, Onsite, Offsite
 
+    /// <summary>
+    /// ID of the user (ApplicationUser) assigned as technician for this work order
+    /// </summary>
     public Guid? AssignedTechnicianId { get; set; }
     public Guid? AssignedTeamId { get; set; }
 
@@ -905,6 +908,9 @@ public class JobCard : TenantEntity
     public decimal EstimatedCost { get; set; } = 0;
 
     // Assignment (can be pre-assigned or assigned during approval)
+    /// <summary>
+    /// ID of the user (ApplicationUser) preferred as technician
+    /// </summary>
     public Guid? PreferredTechnicianId { get; set; }
     public Guid? PreferredTeamId { get; set; }
     public Guid? ContractorId { get; set; } // For external maintenance
@@ -964,6 +970,9 @@ public class JobCard : TenantEntity
     // Planning details (filled during approval)
     public DateTime? PlannedStartDate { get; set; }
     public DateTime? PlannedEndDate { get; set; }
+    /// <summary>
+    /// ID of the user (ApplicationUser) assigned as technician during approval
+    /// </summary>
     public Guid? AssignedTechnicianId { get; set; }
     public Guid? AssignedTeamId { get; set; }
 
@@ -1228,6 +1237,9 @@ public class WorkOrderTask : TenantEntity
     public double EstimatedHours { get; set; } = 0;
     public double ActualHours { get; set; } = 0;
 
+    /// <summary>
+    /// ID of the user (ApplicationUser) assigned as technician for this task
+    /// </summary>
     public Guid? AssignedTechnicianId { get; set; }
     
     public DateTime? StartedAt { get; set; }
@@ -1321,6 +1333,9 @@ public class WorkOrderLabor : TenantEntity
     [Required]
     public Guid WorkOrderId { get; set; }
 
+    /// <summary>
+    /// ID of the user (ApplicationUser) who performed the labor
+    /// </summary>
     [Required]
     public Guid TechnicianId { get; set; }
 
@@ -1426,6 +1441,9 @@ public class AssetTaskTemplate : TenantEntity
     
     public bool IsRequired { get; set; } = true;
     
+    /// <summary>
+    /// ID of the user (ApplicationUser) assigned as technician template default
+    /// </summary>
     public Guid? AssignedTechnicianId { get; set; }
     
     [MaxLength(1000)]
@@ -1474,6 +1492,9 @@ public class AssetTypeTaskTemplate : TenantEntity
     
     public bool IsRequired { get; set; } = true;
     
+    /// <summary>
+    /// ID of the user (ApplicationUser) assigned as technician template default
+    /// </summary>
     public Guid? AssignedTechnicianId { get; set; }
     
     [MaxLength(1000)]
@@ -1518,6 +1539,9 @@ public class MaintenanceTaskTemplate : TenantEntity
     
     public bool IsRequired { get; set; } = true;
     
+    /// <summary>
+    /// ID of the user (ApplicationUser) assigned as technician template default
+    /// </summary>
     public Guid? AssignedTechnicianId { get; set; }
     
     [MaxLength(1000)]

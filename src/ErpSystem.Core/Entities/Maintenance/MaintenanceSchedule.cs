@@ -168,7 +168,7 @@ public class MaintenanceSchedule : TenantEntity
     public decimal EstimatedCost { get; set; }
 
     /// <summary>
-    /// Assigned technician (optional)
+    /// ID of the user (ApplicationUser) assigned as technician (optional)
     /// </summary>
     public Guid? AssignedTechnicianId { get; set; }
 
@@ -252,7 +252,7 @@ public class MaintenanceSchedule : TenantEntity
     public DateTime? LastUsageCheckDate { get; set; }
 
     /// <summary>
-    /// Default technician to assign to generated work orders
+    /// ID of the user (ApplicationUser) - default technician to assign to generated work orders
     /// </summary>
     public Guid? DefaultTechnicianId { get; set; }
 

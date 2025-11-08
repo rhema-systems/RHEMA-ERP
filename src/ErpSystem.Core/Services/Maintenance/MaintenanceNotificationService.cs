@@ -633,7 +633,6 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
 
             // Use DTO's TenantId if provided (for background service), otherwise use current user's tenant
             var tenantId = createDto.TenantId ?? _currentUserProvider.TenantId;
-            var userId = _currentUserProvider.UserId;
 
             // Build unified notification DTO
             var notificationData = new Dictionary<string, object>
@@ -648,6 +647,15 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
                 notificationData["AdditionalData"] = createDto.AdditionalData;
             }
 
+            // CRITICAL: RecipientId MUST be a valid UserId, not EmployeeId or TenantId
+            // If no recipient provided, this is an error - notifications require a recipient
+            if (createDto.RecipientId == Guid.Empty)
+            {
+                _logger.LogWarning("Cannot create notification: RecipientId is empty/null. NotificationType={NotificationType}, EntityType={EntityType}, EntityId={EntityId}",
+                    createDto.NotificationType, createDto.EntityType, createDto.EntityId);
+                throw new InvalidOperationException("RecipientId must be provided and cannot be empty for notifications");
+            }
+
             // Create in-app notification via unified service
             // Use provided tenantId from DTO (for background service), or current user's tenant
             var effectiveTenantId = createDto.TenantId ?? tenantId;
@@ -656,7 +664,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
             {
                 // Use explicit tenant overload for background service context
                 await _notificationService.CreateInAppNotificationAsync(
-                    userId: createDto.RecipientId != Guid.Empty ? createDto.RecipientId : userId,
+                    userId: createDto.RecipientId,
                     title: createDto.Title,
                     message: createDto.Message,
                     type: createDto.NotificationType,
@@ -668,7 +676,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
             {
                 // Use default overload (will use current user's tenant)
                 await _notificationService.CreateInAppNotificationAsync(
-                    userId: createDto.RecipientId != Guid.Empty ? createDto.RecipientId : userId,
+                    userId: createDto.RecipientId,
                     title: createDto.Title,
                     message: createDto.Message,
                     type: createDto.NotificationType,
