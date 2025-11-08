@@ -75,10 +75,10 @@ public class MaintenanceSchedule : TenantEntity
     public string? SecondaryTriggerType { get; set; }
 
     /// <summary>
-    /// Trigger logic for combined criteria
+    /// Trigger logic for combined criteria (only used for Combined trigger type)
     /// </summary>
     [MaxLength(10)]
-    public string TriggerLogic { get; set; } = "OR"; // OR, AND (how to combine multiple triggers)
+    public string? TriggerLogic { get; set; }
 
     // Usage-based triggers
     /// <summary>

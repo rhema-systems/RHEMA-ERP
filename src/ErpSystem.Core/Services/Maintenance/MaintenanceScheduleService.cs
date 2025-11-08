@@ -448,11 +448,24 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             ?? priorityLevels.FirstOrDefault(p => p.IsActive)
             ?? throw new InvalidOperationException("No active priority levels found");
 
-        // Create work order from schedule
+        // Deserialize required skills from JSON and convert to comma-separated string
+        string requiredSkillsStr = string.Empty;
+        
+        try 
+        {
+            var skillsList = JsonSerializer.Deserialize<List<string>>(schedule.RequiredSkills) ?? new List<string>();
+            requiredSkillsStr = string.Join(", ", skillsList);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to deserialize required skills for schedule {ScheduleId}", scheduleId);
+        }
+
+        // Create work order from schedule with ALL details
         var createWorkOrder = new CreateWorkOrderDto
         {
             Title = $"{schedule.Name} - Scheduled Maintenance",
-            Description = schedule.Description,
+            Description = $"{schedule.Description}\n\n[Auto-generated from maintenance schedule: {schedule.Name} ({schedule.Code}). Next due date was: {schedule.NextDueDate:yyyy-MM-dd}]",
             AssetId = schedule.AssetId,
             WorkOrderTypeId = scheduledWorkOrderType.Id,
             MaintenanceTypeId = schedule.MaintenanceTypeId,
@@ -463,12 +476,56 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             AssignedTeamId = schedule.AssignedTeamId,
             Instructions = schedule.Instructions,
             SafetyNotes = schedule.SafetyNotes,
+            RequiredSkills = requiredSkillsStr,
             RequestedStartDate = schedule.NextDueDate,
+            ScheduledStartDate = schedule.NextDueDate,
+            ScheduledEndDate = schedule.NextDueDate.AddHours((double)schedule.EstimatedHours),
             Status = "Open",
-            WorkOrderType = "Scheduled"
+            WorkOrderType = "Scheduled",
+            // JobCard is optional - work order will save without it
+            JobCardId = null,
+            // Link back to the schedule
+            MaintenanceScheduleId = scheduleId
         };
 
         var workOrder = await _workOrderService.CreateWorkOrderAsync(createWorkOrder);
+        
+        // If technician is assigned, create technician schedule entry
+        if (schedule.AssignedTechnicianId.HasValue)
+        {
+            try
+            {
+                var technicianSchedule = new TechnicianSchedule
+                {
+                    Id = Guid.NewGuid(),
+                    TechnicianId = schedule.AssignedTechnicianId.Value,
+                    WorkOrderId = workOrder.Id,
+                    StartDate = schedule.NextDueDate,
+                    EndDate = schedule.NextDueDate.AddHours((double)schedule.EstimatedHours),
+                    ScheduleType = "WorkOrder",
+                    Title = $"{schedule.Name} - Scheduled Maintenance",
+                    Description = schedule.Description,
+                    Status = "Scheduled",
+                    Priority = schedule.Priority,
+                    EstimatedHours = (double)schedule.EstimatedHours,
+                    Notes = $"Scheduled maintenance: {schedule.Name}",
+                    CreatedById = _currentUserProvider.IsAuthenticated ? _currentUserProvider.UserId : Guid.Empty,
+                    TenantId = _currentUserProvider.IsAuthenticated ? _currentUserProvider.TenantId : schedule.TenantId,
+                    CreatedAt = DateTime.UtcNow
+                };
+                
+                await _unitOfWork.Repository<TechnicianSchedule>().AddAsync(technicianSchedule);
+                await _unitOfWork.SaveChangesAsync();
+                
+                _logger.LogInformation("Created technician schedule entry for technician {TechnicianId} on work order {WorkOrderId}", 
+                    schedule.AssignedTechnicianId.Value, workOrder.Id);
+            }
+            catch (Exception schedEx)
+            {
+                _logger.LogWarning(schedEx, "Failed to create technician schedule for work order {WorkOrderId}", workOrder.Id);
+                // Don't fail the whole operation if schedule creation fails
+            }
+        }
         
         // Update the schedule's next due date based on frequency
         await UpdateNextDueDateAsync(scheduleId);
@@ -710,8 +767,88 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             CompliancePercentage = 95.0m, // Would be calculated
             NextScheduledDate = schedule.NextDueDate,
             IsOverdue = schedule.IsOverdue,
-            DaysUntilDue = schedule.DaysUntilDue
+            DaysUntilDue = schedule.DaysUntilDue,
+            // Trigger fields
+            PrimaryTriggerType = schedule.PrimaryTriggerType,
+            SecondaryTriggerType = schedule.SecondaryTriggerType,
+            TriggerLogic = schedule.TriggerLogic,
+            MileageTrigger = schedule.MileageTrigger,
+            OperatingHoursTrigger = schedule.OperatingHoursTrigger,
+            CycleTrigger = schedule.CycleTrigger,
+            ConditionCriteria = schedule.ConditionCriteria
         };
+    }
+
+    #endregion
+
+    #region History Methods
+
+    public async Task<IEnumerable<MaintenanceScheduleHistoryDto>> GetScheduleHistoryAsync(Guid scheduleId)
+    {
+        try
+        {
+            _logger.LogInformation("Getting history for schedule {ScheduleId}", scheduleId);
+
+            var schedule = await _scheduleRepository.GetByIdAsync(scheduleId);
+            if (schedule == null)
+                throw new ArgumentException($"Schedule with ID {scheduleId} not found");
+
+            // Get history records filtered by schedule ID
+            var historyRecords = await _unitOfWork.Repository<MaintenanceScheduleHistory>()
+                .FindAsync(h => h.ScheduleId == scheduleId);
+
+            // Order by CreatedAt descending (newest first)
+            var orderedHistory = historyRecords.OrderByDescending(h => h.CreatedAt).ToList();
+
+            var historyDtos = new List<MaintenanceScheduleHistoryDto>();
+            foreach (var history in orderedHistory)
+            {
+                var changedByName = "System";
+                if (history.ChangedById != Guid.Empty)
+                {
+                    try
+                    {
+                        var employee = await _employeeService.GetByIdAsync(history.ChangedById);
+                        if (employee != null)
+                        {
+                            changedByName = $"{employee.FirstName} {employee.LastName}".Trim();
+                            if (string.IsNullOrWhiteSpace(changedByName))
+                            {
+                                changedByName = employee.EmployeeNumber ?? "Unknown";
+                            }
+                        }
+                        else
+                        {
+                            changedByName = "Unknown";
+                        }
+                    }
+                    catch
+                    {
+                        changedByName = "Unknown";
+                    }
+                }
+
+                historyDtos.Add(new MaintenanceScheduleHistoryDto
+                {
+                    Id = history.Id,
+                    ScheduleId = history.ScheduleId,
+                    ChangeType = history.ChangeType,
+                    PreviousValues = history.PreviousValues,
+                    NewValues = history.NewValues,
+                    ChangeReason = history.ChangeReason,
+                    ChangedById = history.ChangedById,
+                    ChangedByName = changedByName,
+                    CreatedAt = history.CreatedAt
+                });
+            }
+
+            return historyDtos;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting history for schedule {ScheduleId}", scheduleId);
+            throw;
+        }
     }
 
     #endregion

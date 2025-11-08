@@ -61,15 +61,16 @@ export default function MaintenanceDashboard() {
     const loadDashboardData = async () => {
       setLoading(true);
       try {
-        const token = localStorage.getItem('token');
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+        const token = localStorage.getItem('authToken');
         const [dashboardResponse, metricsResponse] = await Promise.all([
-          fetch('http://localhost:5000/api/maintenance/dashboard/data', {
+          fetch(`${API_URL}/maintenance/dashboard/data`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'
             }
           }),
-          fetch('http://localhost:5000/api/maintenance/dashboard/metrics', {
+          fetch(`${API_URL}/maintenance/dashboard/metrics`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'

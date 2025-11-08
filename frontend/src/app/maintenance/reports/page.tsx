@@ -79,8 +79,9 @@ export default function MaintenanceReportsPage() {
     const loadReportsData = async () => {
       setLoading(true);
       try {
-        const token = localStorage.getItem('token');
-        const response = await fetch('http://localhost:5000/api/maintenance/reports/data', {
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+        const token = localStorage.getItem('authToken');
+        const response = await fetch(`${API_URL}/maintenance/reports/data`, {
           headers: {
             'Authorization': token ? `Bearer ${token}` : '',
             'Content-Type': 'application/json'

@@ -235,6 +235,9 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowActivityLogRepository, ErpSystem.Data.Repositories.WorkflowActivityLogRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Repositories.IWorkflowEntityTypeRepository, ErpSystem.Data.Repositories.WorkflowEntityTypeRepository>();
             
+            // Notification repository - for generic notifications
+            services.AddScoped<ErpSystem.Core.Interfaces.INotificationRepository, ErpSystem.Data.Repositories.NotificationRepository>();
+            
             // Unit of Work
             services.AddScoped<IUnitOfWork, UnitOfWork>();
 
@@ -245,7 +248,8 @@ namespace ErpSystem.Api.Extensions
         {
             // Core services
             services.AddScoped<ErpSystem.Core.Interfaces.IFileUploadService, ErpSystem.Api.Services.SimpleFileUploadService>();
-            services.AddScoped<ErpSystem.Core.Services.INotificationService, ErpSystem.Api.Services.SimpleNotificationService>();
+            // Unified notification service - comprehensive notification handling for all ERP modules
+            services.AddScoped<ErpSystem.Core.Interfaces.INotificationService, ErpSystem.Api.Services.UnifiedNotificationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowService, ErpSystem.Api.Services.SimpleWorkflowService>();
             services.AddScoped<ITenantService, TenantService>();
             services.AddScoped<IUserTenantService, UserTenantService>();
@@ -270,15 +274,11 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<IAuditLogService, AuditLogService>();
             services.AddScoped<ISecurityLogService, SecurityLogService>();
             
-            // Communication services - conditional based on environment
+            // Communication services - use ProductionEmailService to actually send emails via SMTP
+            // In development, emails will still be logged to console if SMTP settings are not configured
             services.AddScoped<ErpSystem.Web.Services.IEmailService>(serviceProvider =>
             {
-                var environment = serviceProvider.GetRequiredService<IWebHostEnvironment>();
-                if (environment.IsProduction())
-                {
-                    return serviceProvider.GetRequiredService<ProductionEmailService>();
-                }
-                return serviceProvider.GetRequiredService<SimpleEmailService>();
+                return serviceProvider.GetRequiredService<ProductionEmailService>();
             });
             
             // Register both email service implementations
@@ -296,6 +296,7 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<IUserSessionService, ErpSystem.Data.Services.UserSessionService>();
             services.AddScoped<ITwoFactorAuthService, TwoFactorAuthService>();
             services.AddScoped<IDeviceSessionService, DeviceSessionService>();
+            services.AddScoped<IPasswordResetService, PasswordResetService>();
             
             // Configure HttpClient for geolocation services
             services.AddHttpClient("geolocation", client =>
@@ -422,6 +423,10 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetCategoryService, ErpSystem.Api.Services.Maintenance.MaintenanceAssetCategoryService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IJobCardService, ErpSystem.Core.Services.Maintenance.JobCardService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITaskTemplateService, ErpSystem.Core.Services.Maintenance.TaskTemplateService>();
+            
+            // Usage Tracking and Trigger Evaluation - NOW ENABLED
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetUsageTrackingService, ErpSystem.Core.Services.Maintenance.AssetUsageTrackingService>();
+            services.AddScoped<ErpSystem.Core.Services.Maintenance.MaintenanceTriggerEvaluationService>();
             // TODO: Additional maintenance services to be implemented as needed:
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetInspectionService, ErpSystem.Core.Services.Maintenance.AssetInspectionService>();
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianTeamService, ErpSystem.Core.Services.Maintenance.TechnicianTeamService>();
@@ -436,8 +441,19 @@ namespace ErpSystem.Api.Extensions
             // HR Services - NOW ENABLED
             services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeService, ErpSystem.Core.Services.HR.EmployeeService>();
             
-            // Maintenance background services - temporarily disabled to get API running
-            // services.AddHostedService<ErpSystem.Api.Services.Maintenance.MaintenanceBackgroundService>();
+            // Maintenance background services - NOW ENABLED
+            services.AddHostedService<ErpSystem.Api.Services.Maintenance.MaintenanceTriggerEvaluationBackgroundService>();
+            
+            // Notification dispatcher background service - sends pending notifications on schedule with dead-letter support
+            services.AddHostedService<ErpSystem.Api.Services.NotificationDispatcherBackgroundService>();
+            
+            // Notification template and escalation services
+            services.AddScoped<ErpSystem.Core.Services.Maintenance.IMaintenanceNotificationTemplateService, 
+                ErpSystem.Core.Services.Maintenance.MaintenanceNotificationTemplateService>();
+            services.AddScoped<ErpSystem.Core.Services.Maintenance.IMaintenanceEscalationService, 
+                ErpSystem.Core.Services.Maintenance.MaintenanceEscalationService>();
+            services.AddScoped<ErpSystem.Core.Services.Maintenance.IDeadLetterNotificationService, 
+                ErpSystem.Core.Services.Maintenance.DeadLetterNotificationService>();
             
             // Add AutoMapper - using assembly scanning approach
             services.AddAutoMapper(typeof(Program).Assembly, typeof(ErpSystem.Core.Services.TenantService).Assembly, typeof(ErpSystem.Data.ApplicationDbContext).Assembly);

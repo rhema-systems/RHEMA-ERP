@@ -1,15 +1,15 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities;
 
 namespace ErpSystem.Core.Entities.Maintenance;
 
 /// <summary>
 /// Represents a maintenance notification
 /// </summary>
-public class MaintenanceNotification
+public class MaintenanceNotification : TenantEntity
 {
-    [Key]
-    public Guid Id { get; set; }
+    // Inherits Id, CreatedAt, UpdatedAt, CreatedBy, UpdatedBy, TenantId from TenantEntity
 
     /// <summary>
     /// Type of notification (OverdueMaintenance, MaintenanceDue, WorkOrderAssigned, etc.)
@@ -106,18 +106,14 @@ public class MaintenanceNotification
     /// </summary>
     [MaxLength(500)]
     public string? ActionUrl { get; set; }
-
-    public DateTime CreatedDate { get; set; } = DateTime.UtcNow;
-    public Guid TenantId { get; set; }
 }
 
 /// <summary>
 /// Template for generating notifications
 /// </summary>
-public class MaintenanceNotificationTemplate
+public class MaintenanceNotificationTemplate : TenantEntity
 {
-    [Key]
-    public Guid Id { get; set; }
+    // Inherits Id, CreatedAt, UpdatedAt, CreatedBy, UpdatedBy, TenantId from TenantEntity
 
     [Required]
     [MaxLength(100)]
@@ -175,21 +171,14 @@ public class MaintenanceNotificationTemplate
     /// </summary>
     [MaxLength(200)]
     public string DeliveryMethods { get; set; } = "InApp";
-
-    public DateTime CreatedDate { get; set; } = DateTime.UtcNow;
-    public DateTime? LastModifiedDate { get; set; }
-    public Guid CreatedById { get; set; }
-    public Guid? LastModifiedById { get; set; }
-    public Guid TenantId { get; set; }
 }
 
 /// <summary>
 /// Tracks escalation rules for overdue maintenance
 /// </summary>
-public class MaintenanceEscalationRule
+public class MaintenanceEscalationRule : TenantEntity
 {
-    [Key]
-    public Guid Id { get; set; }
+    // Inherits Id, CreatedAt, UpdatedAt, CreatedBy, UpdatedBy, TenantId from TenantEntity
 
     [Required]
     [MaxLength(100)]
@@ -245,12 +234,6 @@ public class MaintenanceEscalationRule
     /// Order of execution if multiple rules apply
     /// </summary>
     public int Priority { get; set; } = 0;
-
-    public DateTime CreatedDate { get; set; } = DateTime.UtcNow;
-    public DateTime? LastModifiedDate { get; set; }
-    public Guid CreatedById { get; set; }
-    public Guid? LastModifiedById { get; set; }
-    public Guid TenantId { get; set; }
 
     // Navigation properties
     [ForeignKey("NotificationTemplateId")]

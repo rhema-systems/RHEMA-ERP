@@ -80,6 +80,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<RefreshToken> RefreshTokens { get; set; }
     public DbSet<BlacklistedToken> BlacklistedTokens { get; set; }
     public DbSet<UserSession> UserSessions { get; set; }
+    public DbSet<PasswordResetToken> PasswordResetTokens { get; set; }
     
     // Permission entities
     public DbSet<Permission> Permissions { get; set; }
@@ -119,7 +120,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<MaintenanceTaskTemplate> MaintenanceTaskTemplates { get; set; }
     
     public DbSet<MaintenanceSchedule> MaintenanceSchedules { get; set; }
+    public DbSet<MaintenanceScheduleHistory> MaintenanceScheduleHistories { get; set; }
     public DbSet<MaintenanceScheduleNotificationHistory> MaintenanceScheduleNotificationHistories { get; set; }
+    public DbSet<AssetUsageTracking> AssetUsageTrackings { get; set; }
     public DbSet<InspectionTemplate> InspectionTemplates { get; set; }
     public DbSet<AssetInspection> AssetInspections { get; set; }
     public DbSet<InspectionDocument> InspectionDocuments { get; set; }
@@ -179,6 +182,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // Resource Management entities
     public DbSet<MaintenanceStaffSchedule> MaintenanceStaffSchedules { get; set; }
     public DbSet<MaintenanceExpense> MaintenanceExpenses { get; set; }
+    
+    // Notification entities
+    public DbSet<Notification> Notifications { get; set; }
+    public DbSet<MaintenanceNotification> MaintenanceNotifications { get; set; }
+    public DbSet<MaintenanceNotificationTemplate> MaintenanceNotificationTemplates { get; set; }
+    public DbSet<MaintenanceEscalationRule> MaintenanceEscalationRules { get; set; }
     
     // HR entities
     public DbSet<Employee> Employees { get; set; }

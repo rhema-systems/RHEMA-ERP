@@ -7,6 +7,8 @@ import { SessionBlacklistProvider } from "../contexts/SessionBlacklistContext";
 import { ThemeProvider } from "../contexts/ThemeContext";
 import { Toaster } from "../components/ui/toaster";
 import { PWAInit } from "../components/PWAInit";
+import { NotificationProvider } from "../contexts/NotificationContext";
+import { NotificationToast } from "../components/notifications/NotificationToast";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -44,9 +46,12 @@ export default function RootLayout({
           <ReactQueryProvider>
             <SessionBlacklistProvider>
               <TenantProvider>
-                {children}
-                <Toaster />
-                <PWAInit />
+                <NotificationProvider>
+                  {children}
+                  <Toaster />
+                  <NotificationToast position="top-right" />
+                  <PWAInit />
+                </NotificationProvider>
               </TenantProvider>
             </SessionBlacklistProvider>
           </ReactQueryProvider>

@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { maintenanceDataService, Employee, Asset, MaintenanceType } from '@/services/maintenanceDataService';
-import maintenanceScheduleService, { MaintenanceSchedule, CreateMaintenanceScheduleDto } from '@/services/maintenanceScheduleService';
+import maintenanceScheduleService, { MaintenanceSchedule, CreateMaintenanceScheduleDto, MaintenanceScheduleHistory } from '@/services/maintenanceScheduleService';
 import { 
   Calendar as CalendarIcon,
   Clock,
@@ -28,7 +28,9 @@ import {
   AlertTriangle,
   Users,
   Package,
-  RefreshCw
+  RefreshCw,
+  Loader2,
+  History
 } from 'lucide-react';
 import { format, addDays } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -76,7 +78,11 @@ export default function ScheduledMaintenancePage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
+  const [isGeneratingWorkOrder, setIsGeneratingWorkOrder] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<ScheduledMaintenanceItem | null>(null);
+  const [scheduleHistory, setScheduleHistory] = useState<MaintenanceScheduleHistory[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [activeTab, setActiveTab] = useState('details');
   const [scheduleToGenerate, setScheduleToGenerate] = useState<ScheduledMaintenanceItem | null>(null);
   const [filteredData, setFilteredData] = useState<ScheduledMaintenanceItem[]>([]);
   
@@ -516,12 +522,13 @@ export default function ScheduledMaintenancePage() {
   const handleConfirmGenerateWorkOrder = async () => {
     if (!scheduleToGenerate) return;
     
+    setIsGeneratingWorkOrder(true);
     try {
       console.log('Generating work order for schedule:', scheduleToGenerate.id);
       
       // Generate a work order using the service
-      const workOrders = await maintenanceScheduleService.generateWorkOrder(scheduleToGenerate.id);
-      console.log('Work orders generated:', workOrders);
+      const workOrder = await maintenanceScheduleService.generateWorkOrder(scheduleToGenerate.id);
+      console.log('Work order generated:', workOrder);
       
       // Close confirmation dialog and reset state
       setIsConfirmDialogOpen(false);
@@ -529,7 +536,7 @@ export default function ScheduledMaintenancePage() {
       
       toast({
         title: "Success!",
-        description: `Work order(s) generated successfully! ${Array.isArray(workOrders) ? workOrders.length : 1} work order(s) created.`,
+        description: "Work order generated successfully!",
         variant: "success"
       });
       
@@ -573,11 +580,14 @@ export default function ScheduledMaintenancePage() {
       // Close confirmation dialog and reset state on error too
       setIsConfirmDialogOpen(false);
       setScheduleToGenerate(null);
+    } finally {
+      setIsGeneratingWorkOrder(false);
     }
   };
 
   const handleEditSchedule = (schedule: ScheduledMaintenanceItem) => {
     setEditingSchedule(schedule);
+    setActiveTab('details'); // Reset to details tab when opening
     setFormData({
       title: schedule.title,
       assetId: schedule.assetId,
@@ -600,7 +610,29 @@ export default function ScheduledMaintenancePage() {
       notificationRecipients: schedule.notificationRecipients || '',
       autoGenerateWorkOrders: schedule.autoGenerateWorkOrders !== undefined ? schedule.autoGenerateWorkOrders : true
     });
+    
+    // Load history for this schedule
+    loadScheduleHistory(schedule.id);
+    
     setIsEditDialogOpen(true);
+  };
+
+  const loadScheduleHistory = async (scheduleId: string) => {
+    try {
+      setLoadingHistory(true);
+      const history = await maintenanceScheduleService.getScheduleHistory(scheduleId);
+      setScheduleHistory(history);
+    } catch (error) {
+      console.error('Error loading schedule history:', error);
+      setScheduleHistory([]);
+      toast({
+        title: "Error",
+        description: "Failed to load schedule history",
+        variant: "destructive"
+      });
+    } finally {
+      setLoadingHistory(false);
+    }
   };
 
   const handleUpdateSchedule = async () => {
@@ -724,28 +756,7 @@ export default function ScheduledMaintenancePage() {
       
       setIsEditDialogOpen(false);
       setEditingSchedule(null);
-      // Reset form
-      setFormData({
-        title: '',
-        assetId: '',
-        type: '',
-        frequency: '',
-        nextDue: '',
-        assignedTechnician: '',
-        priority: 'Medium',
-        estimatedHours: '',
-        description: '',
-        primaryTriggerType: 'Time',
-        secondaryTriggerType: '',
-        triggerLogic: 'OR',
-        mileageTrigger: '',
-        operatingHoursTrigger: '',
-        cycleTrigger: '',
-        conditionCriteria: '',
-        advanceNotificationDays: '',
-        notificationRecipients: '',
-        autoGenerateWorkOrders: true
-      });
+      resetForm();
     } catch (error) {
       console.error('Error updating scheduled maintenance:', error);
       toast({
@@ -754,6 +765,31 @@ export default function ScheduledMaintenancePage() {
         variant: "destructive"
       });
     }
+  };
+
+  // Reset form to initial state
+  const resetForm = () => {
+    setFormData({
+      title: '',
+      assetId: '',
+      type: '',
+      frequency: '',
+      nextDue: '',
+      assignedTechnician: '',
+      priority: 'Medium',
+      estimatedHours: '',
+      description: '',
+      primaryTriggerType: 'Time',
+      secondaryTriggerType: '',
+      triggerLogic: 'OR',
+      mileageTrigger: '',
+      operatingHoursTrigger: '',
+      cycleTrigger: '',
+      conditionCriteria: '',
+      advanceNotificationDays: '',
+      notificationRecipients: '',
+      autoGenerateWorkOrders: true
+    });
   };
 
   return (
@@ -767,7 +803,10 @@ export default function ScheduledMaintenancePage() {
           </p>
         </div>
         <ClientOnly>
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+          <Dialog open={isCreateDialogOpen} onOpenChange={(open) => {
+            setIsCreateDialogOpen(open);
+            if (open) resetForm(); // Reset form when opening create dialog
+          }}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
@@ -1062,7 +1101,15 @@ export default function ScheduledMaintenancePage() {
         
         {/* Edit Scheduled Maintenance Dialog */}
         <ClientOnly>
-          <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <Dialog open={isEditDialogOpen} onOpenChange={(open) => {
+            setIsEditDialogOpen(open);
+            if (!open) {
+              setEditingSchedule(null);
+              setScheduleHistory([]);
+              setActiveTab('details');
+              resetForm();
+            }
+          }}>
           <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit Scheduled Maintenance</DialogTitle>
@@ -1070,7 +1117,17 @@ export default function ScheduledMaintenancePage() {
                 Update the scheduled maintenance task details.
               </DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
+            
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="details">Details</TabsTrigger>
+                <TabsTrigger value="history">
+                  <History className="mr-2 h-4 w-4" />
+                  History
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="details" className="space-y-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="edit-title">Title</Label>
@@ -1338,23 +1395,108 @@ export default function ScheduledMaintenancePage() {
                   <p className="text-xs text-muted-foreground">Separate multiple emails with commas</p>
                 </div>
               </div>
-            </div>
+              </TabsContent>
+              
+              <TabsContent value="history" className="py-4">
+                <div className="space-y-4">
+                  {loadingHistory ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      <span className="ml-2 text-muted-foreground">Loading history...</span>
+                    </div>
+                  ) : scheduleHistory.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <History className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                      <p>No history records found for this schedule.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {scheduleHistory.map((historyItem) => {
+                        // Parse newValues to extract WorkOrderId if present
+                        let workOrderId = null;
+                        let workOrderTitle = null;
+                        try {
+                          if (historyItem.newValues && historyItem.changeType === 'WorkOrderGenerated') {
+                            const newValues = JSON.parse(historyItem.newValues);
+                            workOrderId = newValues.WorkOrderId;
+                            workOrderTitle = newValues.WorkOrderTitle;
+                          }
+                        } catch (e) {
+                          // Ignore parse errors
+                        }
+
+                        return (
+                          <div key={historyItem.id} className="border rounded-lg p-4 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <Badge variant="outline">{historyItem.changeType}</Badge>
+                                <span className="text-sm text-muted-foreground">
+                                  {format(new Date(historyItem.createdAt), 'MMM dd, yyyy HH:mm')}
+                                </span>
+                              </div>
+                              <span className="text-sm font-medium">{historyItem.changedByName}</span>
+                            </div>
+                            
+                            {historyItem.changeReason && (
+                              <div>
+                                <span className="text-sm font-medium">Reason: </span>
+                                <span className="text-sm text-muted-foreground">{historyItem.changeReason}</span>
+                              </div>
+                            )}
+                            
+                            {workOrderId && (
+                              <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-md border border-blue-200 dark:border-blue-800">
+                                <div className="flex items-center space-x-2">
+                                  <CheckCircle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                                  <span className="text-sm font-medium text-blue-900 dark:text-blue-100">Work Order Created:</span>
+                                </div>
+                                <div className="mt-2 ml-6">
+                                  <button
+                                    onClick={() => window.open(`/maintenance/work-orders?id=${workOrderId}`, '_blank')}
+                                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline font-medium flex items-center gap-1 cursor-pointer"
+                                    title="Open work order in new tab"
+                                  >
+                                    {workOrderTitle || `Work Order ${workOrderId.substring(0, 8)}...`}
+                                    <CheckCircle className="h-3 w-3" />
+                                  </button>
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    ID: {workOrderId}
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+                            
+                            {historyItem.previousValues && (
+                              <details className="group">
+                                <summary className="text-sm font-medium cursor-pointer hover:text-primary">
+                                  Previous Values
+                                </summary>
+                                <pre className="text-xs bg-muted p-2 rounded mt-2 overflow-x-auto">{historyItem.previousValues}</pre>
+                              </details>
+                            )}
+                            
+                            {historyItem.newValues && !workOrderId && (
+                              <details className="group">
+                                <summary className="text-sm font-medium cursor-pointer hover:text-primary">
+                                  New Values
+                                </summary>
+                                <pre className="text-xs bg-muted p-2 rounded mt-2 overflow-x-auto">{historyItem.newValues}</pre>
+                              </details>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            </Tabs>
+            
             <DialogFooter>
               <Button variant="outline" onClick={() => {
                 setIsEditDialogOpen(false);
                 setEditingSchedule(null);
-                // Reset form
-                setFormData({
-                  title: '',
-                  assetId: '',
-                  type: '',
-                  frequency: '',
-                  nextDue: '',
-                  assignedTechnician: '',
-                  priority: 'Medium',
-                  estimatedHours: '',
-                  description: ''
-                });
+                resetForm();
               }}>
                 Cancel
               </Button>
@@ -1516,7 +1658,7 @@ export default function ScheduledMaintenancePage() {
                       </div>
                       <div className="flex items-center space-x-2">
                         <CalendarIcon className="h-4 w-4" />
-                        <span>Due: {new Date(item.nextDue).toLocaleDateString()}</span>
+                        <span>Due: {item.nextDue ? format(new Date(item.nextDue), 'MMM dd, yyyy') : 'Not set'}</span>
                       </div>
                       <div className="flex items-center space-x-2">
                         <Clock className="h-4 w-4" />
@@ -1527,7 +1669,7 @@ export default function ScheduledMaintenancePage() {
                     <div className="text-sm">
                       <span className="font-medium">Type:</span> {item.type} | 
                       <span className="font-medium"> Frequency:</span> {item.frequency} |
-                      <span className="font-medium"> Last Done:</span> {new Date(item.lastCompleted).toLocaleDateString()}
+                      <span className="font-medium"> Last Done:</span> {item.lastCompleted ? format(new Date(item.lastCompleted), 'MMM dd, yyyy') : 'Never'}
                     </div>
                     
                     <p className="text-sm text-muted-foreground">{item.description}</p>
@@ -1571,11 +1713,7 @@ export default function ScheduledMaintenancePage() {
                 <p><strong>Asset:</strong> {scheduleToGenerate.assetName}</p>
                 <p><strong>Type:</strong> {scheduleToGenerate.type}</p>
                 <p><strong>Priority:</strong> {scheduleToGenerate.priority}</p>
-                <p><strong>Due Date:</strong> {new Date(scheduleToGenerate.nextDue).toLocaleDateString('en-GB', { 
-                  day: '2-digit', 
-                  month: 'short', 
-                  year: 'numeric' 
-                }).replace(/ /g, '-')}</p>
+                <p><strong>Due Date:</strong> {format(new Date(scheduleToGenerate.nextDue), 'MMM dd, yyyy')}</p>
                 {scheduleToGenerate.assignedTechnician && scheduleToGenerate.assignedTechnician !== 'Unassigned' ? (
                   <p><strong>Assigned to:</strong> {scheduleToGenerate.assignedTechnician}</p>
                 ) : (
@@ -1592,11 +1730,19 @@ export default function ScheduledMaintenancePage() {
                 setIsConfirmDialogOpen(false);
                 setScheduleToGenerate(null);
               }}
+              disabled={isGeneratingWorkOrder}
             >
               Cancel
             </Button>
-            <Button onClick={handleConfirmGenerateWorkOrder}>
-              Generate Work Order
+            <Button onClick={handleConfirmGenerateWorkOrder} disabled={isGeneratingWorkOrder}>
+              {isGeneratingWorkOrder ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                'Generate Work Order'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

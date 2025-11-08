@@ -442,6 +442,9 @@ public interface IMaintenanceScheduleService
     Task<IEnumerable<MaintenanceScheduleDto>> GetSchedulesDueForRemindersAsync();
     Task<int> SendAdvanceRemindersAsync();
 
+    // History methods
+    Task<IEnumerable<MaintenanceScheduleHistoryDto>> GetScheduleHistoryAsync(Guid scheduleId);
+
     // Usage-based trigger evaluation
     Task<bool> EvaluateUsageTriggersAsync(Guid scheduleId);
     Task<IEnumerable<MaintenanceScheduleDto>> GetSchedulesDueByUsageAsync();
@@ -649,6 +652,36 @@ public interface ISafetyProtocolService
     Task<IEnumerable<SafetyProtocolComplianceDto>> GetProtocolComplianceAsync(DateTime startDate, DateTime endDate);
     Task<IEnumerable<CategoryComplianceDto>> GetCategoryComplianceAsync();
     Task<SafetyAnalyticsDto> GetSafetyAnalyticsAsync(DateTime startDate, DateTime endDate);
+}
+
+#endregion
+
+#region Usage Tracking Service
+
+public interface IAssetUsageTrackingService
+{
+    // CRUD operations
+    Task<AssetUsageTrackingDto> CreateUsageRecordAsync(CreateAssetUsageTrackingDto createDto);
+    Task<IEnumerable<AssetUsageTrackingDto>> BulkCreateUsageRecordsAsync(BulkUsageImportDto bulkDto);
+    Task<AssetUsageTrackingDto?> GetUsageRecordByIdAsync(Guid id);
+    Task<IEnumerable<AssetUsageTrackingDto>> GetUsageRecordsAsync(Guid assetId, DateTime? startDate = null, DateTime? endDate = null);
+    Task<PagedResult<AssetUsageTrackingDto>> GetUsageRecordsPagedAsync(Guid assetId, int page, int pageSize, DateTime? startDate = null, DateTime? endDate = null);
+    Task DeleteUsageRecordAsync(Guid id);
+    
+    // Usage analytics
+    Task<AssetUsageSummaryDto> GetAssetUsageSummaryAsync(Guid assetId);
+    Task<AssetUsageSummaryDto> GetAssetUsageSummaryAsync(Guid assetId, Guid? tenantId);
+    Task<IEnumerable<AssetUsageSummaryDto>> GetAllAssetUsageSummariesAsync();
+    Task<decimal?> GetCurrentMileageAsync(Guid assetId);
+    Task<decimal?> GetCurrentOperatingHoursAsync(Guid assetId);
+    Task<int?> GetCurrentCyclesAsync(Guid assetId);
+    Task<decimal?> GetAverageDailyMileageAsync(Guid assetId, int days = 30);
+    Task<decimal?> GetAverageDailyHoursAsync(Guid assetId, int days = 30);
+    
+    // Integration helpers
+    Task<bool> ImportUsageDataFromSourceAsync(string dataSource, string externalData);
+    Task<IEnumerable<AssetUsageTrackingDto>> GetUnvalidatedRecordsAsync();
+    Task ValidateUsageRecordAsync(Guid id);
 }
 
 #endregion

@@ -121,17 +121,30 @@ namespace ErpSystem.Web.Services
                 return;
             }
 
-            // Create admin user
-            await CreateTestUserAsync("admin", "admin@default.com", "Admin123!", 
-                "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin);
+            // Only create test users if they don't exist - don't update existing users
+            var adminExists = await _userManager.FindByNameAsync("admin") != null;
+            if (!adminExists)
+            {
+                // Create admin user
+                await CreateTestUserAsync("admin", "admin@default.com", "Admin123!", 
+                    "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin);
+            }
 
-            // Create manager user
-            await CreateTestUserAsync("manager", "manager@default.com", "Manager123!",
-                "John", "Manager", defaultTenant.Id, Constants.Roles.Manager);
+            var managerExists = await _userManager.FindByNameAsync("manager") != null;
+            if (!managerExists)
+            {
+                // Create manager user
+                await CreateTestUserAsync("manager", "manager@default.com", "Manager123!",
+                    "John", "Manager", defaultTenant.Id, Constants.Roles.Manager);
+            }
 
-            // Create employee user
-            await CreateTestUserAsync("employee", "employee@default.com", "Employee123!",
-                "Jane", "Employee", defaultTenant.Id, Constants.Roles.Employee);
+            var employeeExists = await _userManager.FindByNameAsync("employee") != null;
+            if (!employeeExists)
+            {
+                // Create employee user
+                await CreateTestUserAsync("employee", "employee@default.com", "Employee123!",
+                    "Jane", "Employee", defaultTenant.Id, Constants.Roles.Employee);
+            }
 
             _logger.LogInformation("Test users seeding completed");
         }

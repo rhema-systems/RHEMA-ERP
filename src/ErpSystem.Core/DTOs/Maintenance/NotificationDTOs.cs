@@ -118,6 +118,13 @@ public class CreateMaintenanceNotificationDto
     
     [StringLength(500)]
     public string? ActionUrl { get; set; }
+    
+    /// <summary>
+    /// Tenant ID - used for background service context (when current user is null).
+    /// If not provided, will use current user's tenant from context.
+    /// For background/scheduled operations, set this explicitly to the DEFAULT or target tenant.
+    /// </summary>
+    public Guid? TenantId { get; set; }
 }
 
 /// <summary>

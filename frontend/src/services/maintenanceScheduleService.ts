@@ -83,6 +83,18 @@ export interface CreateMaintenanceScheduleDto {
 export interface UpdateMaintenanceScheduleDto extends CreateMaintenanceScheduleDto {
 }
 
+export interface MaintenanceScheduleHistory {
+  id: string;
+  scheduleId: string;
+  changeType: string;
+  previousValues?: string;
+  newValues?: string;
+  changeReason?: string;
+  changedById: string;
+  changedByName?: string;
+  createdAt: string;
+}
+
 export interface PagedResult<T> {
   items: T[];
   data?: T[];
@@ -192,6 +204,17 @@ class MaintenanceScheduleService {
       return response;
     } catch (error) {
       console.error(`Error evaluating condition triggers for schedule ${id}:`, error);
+      throw error;
+    }
+  }
+
+  // Get schedule history
+  async getScheduleHistory(id: string): Promise<MaintenanceScheduleHistory[]> {
+    try {
+      const response = await apiService.get(`/maintenance/schedules/${id}/history`);
+      return response;
+    } catch (error) {
+      console.error(`Error fetching history for schedule ${id}:`, error);
       throw error;
     }
   }

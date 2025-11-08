@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Services.Maintenance;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -17,15 +18,18 @@ public class WorkOrdersController : ControllerBase
 {
     private readonly IWorkOrderService _workOrderService;
     private readonly IWorkOrderPartService _workOrderPartService;
+    private readonly IMaintenanceNotificationService _notificationService;
     private readonly ILogger<WorkOrdersController> _logger;
 
     public WorkOrdersController(
         IWorkOrderService workOrderService,
         IWorkOrderPartService workOrderPartService,
+        IMaintenanceNotificationService notificationService,
         ILogger<WorkOrdersController> logger)
     {
         _workOrderService = workOrderService;
         _workOrderPartService = workOrderPartService;
+        _notificationService = notificationService;
         _logger = logger;
     }
 
@@ -177,6 +181,7 @@ public class WorkOrdersController : ControllerBase
             if (workOrder == null)
                 return NotFound($"Work order with ID {id} not found");
 
+            var previousStatus = workOrder.Status;
             WorkOrderDto updatedWorkOrder;
             
             // If starting the work order, use StartWorkOrderAsync which handles vehicle status updates
@@ -201,6 +206,21 @@ public class WorkOrdersController : ControllerBase
                 updatedWorkOrder = await _workOrderService.UpdateWorkOrderStatusAsync(id, request.Status, request.Notes);
             }
             
+            // Send status change notification
+            try
+            {
+                await _notificationService.SendWorkOrderStatusChangeNotificationAsync(id, previousStatus, updatedWorkOrder.Status);
+                
+                if (request.Status == "Completed")
+                {
+                    await _notificationService.SendWorkOrderCompletionNotificationAsync(id);
+                }
+            }
+            catch (Exception notifEx)
+            {
+                _logger.LogWarning(notifEx, "Failed to send work order status change notification for {WorkOrderId}", id);
+            }
+            
             return Ok(updatedWorkOrder);
         }
         catch (Exception ex)
@@ -223,6 +243,20 @@ public class WorkOrdersController : ControllerBase
                 return NotFound($"Work order with ID {id} not found");
 
             var approvedWorkOrder = await _workOrderService.ApproveWorkOrderAsync(id, request?.Notes);
+            
+            // Notify if assigned technician about approval
+            try
+            {
+                if (approvedWorkOrder.AssignedTechnicianId.HasValue && approvedWorkOrder.AssignedTechnicianId.Value != Guid.Empty)
+                {
+                    await _notificationService.SendWorkOrderAssignmentNotificationAsync(id, approvedWorkOrder.AssignedTechnicianId.Value);
+                }
+            }
+            catch (Exception notifEx)
+            {
+                _logger.LogWarning(notifEx, "Failed to send work order approval notification for {WorkOrderId}", id);
+            }
+            
             return Ok(approvedWorkOrder);
         }
         catch (Exception ex)
@@ -236,7 +270,7 @@ public class WorkOrdersController : ControllerBase
     /// Gets work order metrics
     /// </summary>
     [HttpGet("metrics")]
-    public async Task<ActionResult<WorkOrderMetricsDto>> GetWorkOrderMetrics()
+    public async Task<ActionResult<ErpSystem.Core.DTOs.Maintenance.WorkOrderMetricsDto>> GetWorkOrderMetrics()
     {
         try
         {

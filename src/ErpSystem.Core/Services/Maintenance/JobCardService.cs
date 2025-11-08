@@ -20,7 +20,7 @@ public class JobCardService : IJobCardService
     private readonly ErpSystem.Core.Interfaces.HR.IEmployeeRepository _employeeRepository;
     private readonly ICurrentUserService _currentUserService;
     private readonly IFileUploadService _fileUploadService;
-    private readonly INotificationService _notificationService;
+    private readonly IMaintenanceNotificationService _maintenanceNotificationService;
     private readonly IWorkflowService _workflowService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobCardService> _logger;
@@ -32,7 +32,7 @@ public class JobCardService : IJobCardService
         ErpSystem.Core.Interfaces.HR.IEmployeeRepository employeeRepository,
         ICurrentUserService currentUserService,
         IFileUploadService fileUploadService,
-        INotificationService notificationService,
+        IMaintenanceNotificationService maintenanceNotificationService,
         IWorkflowService workflowService,
         IUnitOfWork unitOfWork,
         ILogger<JobCardService> logger)
@@ -43,7 +43,7 @@ public class JobCardService : IJobCardService
         _employeeRepository = employeeRepository;
         _currentUserService = currentUserService;
         _fileUploadService = fileUploadService;
-        _notificationService = notificationService;
+        _maintenanceNotificationService = maintenanceNotificationService;
         _workflowService = workflowService;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -311,8 +311,7 @@ public class JobCardService : IJobCardService
             await _workflowService.StartApprovalWorkflowAsync("JobCard", id);
 
             // Send notification to approvers
-            // TODO: Implement job card submitted notification
-            // await _notificationService.NotifyJobCardSubmittedAsync(id);
+            await _maintenanceNotificationService.NotifyJobCardSubmittedAsync(id);
 
             // Add submission comment
             if (!string.IsNullOrEmpty(submitDto.SubmissionNotes))
@@ -435,8 +434,7 @@ public class JobCardService : IJobCardService
         await GenerateWorkOrderAsync(jobCard.Id);
 
         // Notify requestor
-        // TODO: Implement job card approved notification
-        // await _notificationService.NotifyJobCardApprovedAsync(jobCard.Id);
+        await _maintenanceNotificationService.NotifyJobCardApprovedAsync(jobCard.Id);
     }
 
     private async Task RejectJobCardAsync(JobCard jobCard, JobCardApprovalActionDto approvalDto, Guid approverId)
@@ -458,8 +456,7 @@ public class JobCardService : IJobCardService
         });
 
         // Notify requestor
-        // TODO: Implement job card rejected notification
-        // await _notificationService.NotifyJobCardRejectedAsync(jobCard.Id, approvalDto.Comments);
+        await _maintenanceNotificationService.NotifyJobCardRejectedAsync(jobCard.Id, approvalDto.Comments);
     }
 
     private async Task RequestChangesJobCardAsync(JobCard jobCard, JobCardApprovalActionDto approvalDto, Guid approverId)
@@ -481,8 +478,7 @@ public class JobCardService : IJobCardService
         });
 
         // Notify requestor
-        // TODO: Implement job card changes requested notification
-        // await _notificationService.NotifyJobCardChangesRequestedAsync(jobCard.Id, approvalDto.Comments);
+        await _maintenanceNotificationService.NotifyJobCardChangesRequestedAsync(jobCard.Id, approvalDto.Comments);
     }
 
     public async Task<Guid> GenerateWorkOrderAsync(Guid jobCardId)

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Services.Maintenance;
 using System.ComponentModel.DataAnnotations;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
@@ -12,13 +13,16 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 public class JobCardController : ControllerBase
 {
     private readonly IJobCardService _jobCardService;
+    private readonly IMaintenanceNotificationService _notificationService;
     private readonly ILogger<JobCardController> _logger;
 
     public JobCardController(
         IJobCardService jobCardService,
+        IMaintenanceNotificationService notificationService,
         ILogger<JobCardController> logger)
     {
         _jobCardService = jobCardService;
+        _notificationService = notificationService;
         _logger = logger;
     }
 
@@ -133,6 +137,18 @@ public class JobCardController : ControllerBase
                 return BadRequest(ModelState);
 
             var jobCard = await _jobCardService.CreateJobCardAsync(createDto);
+            
+            // Send notification when job card is created
+            try
+            {
+                await _notificationService.NotifyJobCardSubmittedAsync(jobCard.Id);
+            }
+            catch (Exception notifEx)
+            {
+                _logger.LogWarning(notifEx, "Failed to send job card creation notification for {JobCardId}", jobCard.Id);
+                // Don't fail the request if notification fails
+            }
+            
             return CreatedAtAction(nameof(GetJobCard), new { id = jobCard.Id }, jobCard);
         }
         catch (ArgumentException ex)
@@ -225,6 +241,17 @@ public class JobCardController : ControllerBase
                 return BadRequest(ModelState);
 
             var jobCard = await _jobCardService.SubmitJobCardAsync(id, submitDto);
+            
+            // Notify approvers when job card is submitted
+            try
+            {
+                await _notificationService.NotifyJobCardSubmittedAsync(id);
+            }
+            catch (Exception notifEx)
+            {
+                _logger.LogWarning(notifEx, "Failed to send job card submission notification for {JobCardId}", id);
+            }
+            
             return Ok(jobCard);
         }
         catch (ArgumentException ex)
@@ -258,6 +285,28 @@ public class JobCardController : ControllerBase
                 return BadRequest(ModelState);
 
             var jobCard = await _jobCardService.ProcessApprovalAsync(id, approvalDto);
+            
+            // Send notification based on approval action
+            try
+            {
+                if (approvalDto.Action?.Equals("Approve", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    await _notificationService.NotifyJobCardApprovedAsync(id);
+                }
+                else if (approvalDto.Action?.Equals("Reject", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    await _notificationService.NotifyJobCardRejectedAsync(id, approvalDto.Comments);
+                }
+                else if (approvalDto.Action?.Equals("RequestChanges", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    await _notificationService.NotifyJobCardChangesRequestedAsync(id, approvalDto.Comments);
+                }
+            }
+            catch (Exception notifEx)
+            {
+                _logger.LogWarning(notifEx, "Failed to send job card approval notification for {JobCardId}", id);
+            }
+            
             return Ok(jobCard);
         }
         catch (ArgumentException ex)

@@ -1,13 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Check, X, MoreVertical } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Bell, Check } from 'lucide-react';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
-import { 
-  Notification, 
-  notificationService 
-} from '../../services/notificationService';
+import { Notification, notificationService } from '../../services/notificationService';
+import useNotifications from '../../hooks/useNotifications';
+import { getEntityNavigationUrl } from '../../utils/notificationNavigation';
 
 interface HeaderNotificationBellProps {
   className?: string;
@@ -15,42 +14,36 @@ interface HeaderNotificationBellProps {
 
 const HeaderNotificationBell: React.FC<HeaderNotificationBellProps> = ({ className }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [loading, setLoading] = useState(false);
-  
   const dropdownRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  // Load notifications and setup real-time updates
-  useEffect(() => {
-    loadUnreadNotifications();
-    loadUnreadCount();
-    
-    // Connect to real-time notifications
-    notificationService.connectToRealTimeNotifications();
-    
-    const unsubscribe = notificationService.onNotification((notification) => {
-      setNotifications(prev => [notification, ...prev.slice(0, 9)]); // Keep max 10
-      setUnreadCount(prev => prev + 1);
-      
-      // Show browser notification if permission granted
-      if ('Notification' in window && window.Notification.permission === 'granted') {
-        new window.Notification(notification.title, {
-          body: notification.message,
+  // Use the notifications hook for state management and real-time updates
+  const {
+    notifications,
+    unreadCount,
+    loading,
+    markAsRead,
+    markAllAsRead
+  } = useNotifications({
+    autoFetch: true,
+    enableRealTime: true
+  });
+
+  // Show browser notification when new notification arrives
+  React.useEffect(() => {
+    if (notifications.length > 0) {
+      const latestNotification = notifications[0];
+      if (!latestNotification.isRead && 'Notification' in window && window.Notification.permission === 'granted') {
+        new window.Notification(latestNotification.title, {
+          body: latestNotification.message,
           icon: '/favicon.ico'
         });
       }
-    });
-
-    return () => {
-      unsubscribe();
-      notificationService.disconnectFromRealTimeNotifications();
-    };
-  }, []);
+    }
+  }, [notifications]);
 
   // Handle click outside to close
-  useEffect(() => {
+  React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
         dropdownRef.current && 
@@ -66,56 +59,16 @@ const HeaderNotificationBell: React.FC<HeaderNotificationBellProps> = ({ classNa
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const loadUnreadNotifications = async () => {
-    setLoading(true);
-    try {
-      const result = await notificationService.getUnreadNotifications(10);
-      setNotifications(result);
-    } catch (error) {
-      console.error('Failed to load notifications:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadUnreadCount = async () => {
-    try {
-      const count = await notificationService.getUnreadCount();
-      setUnreadCount(count);
-    } catch (error) {
-      console.error('Failed to load unread count:', error);
-    }
-  };
-
-  const handleMarkAsRead = async (notificationId: string) => {
-    try {
-      await notificationService.markAsRead(notificationId);
-      setNotifications(prev =>
-        prev.map(n => n.id === notificationId ? { ...n, isRead: true } : n)
-      );
-      setUnreadCount(prev => Math.max(0, prev - 1));
-    } catch (error) {
-      console.error('Failed to mark as read:', error);
-    }
-  };
-
-  const handleMarkAllAsRead = async () => {
-    try {
-      await notificationService.markAllAsRead();
-      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-      setUnreadCount(0);
-    } catch (error) {
-      console.error('Failed to mark all as read:', error);
-    }
-  };
 
   const handleNotificationClick = (notification: Notification) => {
     if (!notification.isRead) {
-      handleMarkAsRead(notification.id);
+      markAsRead(notification.id);
     }
-    
-    if (notification.actionUrl) {
-      window.location.href = notification.actionUrl;
+
+    // Prefer backend-provided actionUrl; otherwise derive from entity config
+    const url = notification.actionUrl || getEntityNavigationUrl(notification.entityType, notification.entityId);
+    if (url) {
+      window.open(url, '_blank');
       setIsOpen(false);
     }
   };
@@ -126,17 +79,17 @@ const HeaderNotificationBell: React.FC<HeaderNotificationBellProps> = ({ classNa
     }
   };
 
-  const getTypeColor = (type: Notification['type']) => {
+  const getPriorityColor = (priority: Notification['priority']) => {
     const colors = {
-      'Info': 'text-blue-600',
-      'Warning': 'text-yellow-600',
-      'Error': 'text-red-600',
-      'Success': 'text-green-600'
+      'Low': 'text-green-600',
+      'Normal': 'text-blue-600',
+      'High': 'text-yellow-600',
+      'Critical': 'text-red-600'
     };
-    return colors[type] || 'text-gray-600';
+    return colors[priority] || 'text-gray-600';
   };
 
-  const getCategoryIcon = (category: string) => {
+  const getEntityIcon = (entityType: string) => {
     // Using simple icons for header
     const icons = {
       'JobCard': '📋',
@@ -145,7 +98,7 @@ const HeaderNotificationBell: React.FC<HeaderNotificationBellProps> = ({ classNa
       'Asset': '📦',
       'System': '⚙️'
     };
-    return icons[category as keyof typeof icons] || '🔔';
+    return icons[entityType as keyof typeof icons] || '🔔';
   };
 
   return (
@@ -193,7 +146,7 @@ const HeaderNotificationBell: React.FC<HeaderNotificationBellProps> = ({ classNa
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={handleMarkAllAsRead}
+                  onClick={() => markAllAsRead()}
                   className="h-6 px-2 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20"
                 >
                   Mark all read
@@ -227,7 +180,7 @@ const HeaderNotificationBell: React.FC<HeaderNotificationBellProps> = ({ classNa
                     <div className="flex items-start space-x-3">
                       <div className="flex-shrink-0 mt-0.5">
                         <span className="text-lg">
-                          {getCategoryIcon(notification.category)}
+                          {getEntityIcon(notification.entityType)}
                         </span>
                       </div>
                       <div className="flex-1 min-w-0">
@@ -243,31 +196,31 @@ const HeaderNotificationBell: React.FC<HeaderNotificationBellProps> = ({ classNa
                               {notification.message}
                             </p>
                             <div className="flex items-center space-x-2 mt-2">
-                              <span className={cn('text-xs', getTypeColor(notification.type))}>
-                                {notification.type}
+                              <span className={cn('text-xs', getPriorityColor(notification.priority))}>
+                                {notification.priority}
                               </span>
                               <span className="text-xs text-slate-400">•</span>
                               <span className="text-xs text-slate-500 dark:text-slate-400">
-                                {notification.category}
+                                {notification.entityType}
                               </span>
                               <span className="text-xs text-slate-400">•</span>
                               <span className="text-xs text-slate-500 dark:text-slate-400">
-                                {notificationService.formatNotificationTime(notification.createdAt)}
+                                {notificationService.formatNotificationTime(notification.timestamp || notification.createdAt)}
                               </span>
                             </div>
                           </div>
                           {!notification.isRead && (
                             <div className="flex-shrink-0 ml-2">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleMarkAsRead(notification.id);
-                                }}
-                                className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded transition-colors"
-                                title="Mark as read"
-                              >
-                                <Check className="h-3 w-3 text-slate-500" />
-                              </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    markAsRead(notification.id);
+                                  }}
+                                  className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded transition-colors"
+                                  title="Mark as read"
+                                >
+                                  <Check className="h-3 w-3 text-slate-500" />
+                                </button>
                             </div>
                           )}
                         </div>

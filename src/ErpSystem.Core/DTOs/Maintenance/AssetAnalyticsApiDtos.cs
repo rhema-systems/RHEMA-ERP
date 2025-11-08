@@ -899,13 +899,43 @@ public class UpcomingMaintenanceDto
 /// </summary>
 public class MaintenanceHistoryItemDto
 {
-    public DateTime Date { get; set; }
-    public string WorkOrderNumber { get; set; } = string.Empty;
+    public Guid Id { get; set; }
+    public string WorkOrderId { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public decimal Cost { get; set; }
+    public string AssetId { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public string Location { get; set; } = string.Empty;
+    public string Technician { get; set; } = string.Empty;
+    public DateTime StartDate { get; set; }
+    public DateTime CompletedDate { get; set; }
     public string Status { get; set; } = string.Empty;
-    public double Duration { get; set; }
+    public string Priority { get; set; } = string.Empty;
+    public decimal Cost { get; set; }
+    public double LaborHours { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public List<string> PartsUsed { get; set; } = new();
+    public string Notes { get; set; } = string.Empty;
+    public int Rating { get; set; }
+    public double Downtime { get; set; }
+    public string Category { get; set; } = string.Empty;
+    
+    // Keep legacy properties for backward compatibility
+    public DateTime Date
+    {
+        get => CompletedDate;
+        set => CompletedDate = value;
+    }
+    public string WorkOrderNumber
+    {
+        get => WorkOrderId;
+        set => WorkOrderId = value;
+    }
+    public double Duration
+    {
+        get => LaborHours;
+        set => LaborHours = value;
+    }
 }
 
 /// <summary>

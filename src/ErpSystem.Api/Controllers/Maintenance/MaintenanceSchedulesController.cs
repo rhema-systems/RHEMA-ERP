@@ -148,6 +148,28 @@ public class MaintenanceSchedulesController : ControllerBase
     }
 
     /// <summary>
+    /// Gets the history of changes for a specific maintenance schedule
+    /// </summary>
+    [HttpGet("{id:guid}/history")]
+    public async Task<ActionResult<IEnumerable<MaintenanceScheduleHistoryDto>>> GetScheduleHistory(Guid id)
+    {
+        try
+        {
+            var history = await _scheduleService.GetScheduleHistoryAsync(id);
+            return Ok(history);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving history for schedule {ScheduleId}", id);
+            return StatusCode(500, $"An error occurred while retrieving history for schedule {id}");
+        }
+    }
+
+    /// <summary>
     /// Creates a new maintenance schedule
     /// </summary>
     [HttpPost]
@@ -246,7 +268,33 @@ public class MaintenanceSchedulesController : ControllerBase
     }
 
     /// <summary>
-    /// Generates work orders from a specific schedule
+    /// Generates a single work order from a schedule (most common use case)
+    /// </summary>
+    [HttpPost("{id:guid}/generate-work-order")]
+    public async Task<ActionResult<WorkOrderDto>> GenerateWorkOrder(Guid id)
+    {
+        try
+        {
+            var workOrder = await _scheduleService.GenerateWorkOrderFromScheduleAsync(id);
+            return Ok(workOrder);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating work order from schedule {ScheduleId}", id);
+            return StatusCode(500, "An error occurred while generating work order");
+        }
+    }
+
+    /// <summary>
+    /// Generates multiple work orders from a specific schedule (bulk operation)
     /// </summary>
     [HttpPost("{id:guid}/generate-work-orders")]
     public async Task<ActionResult<IEnumerable<WorkOrderDto>>> GenerateWorkOrders(Guid id, [FromQuery] int count = 1)

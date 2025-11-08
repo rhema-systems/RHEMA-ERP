@@ -149,9 +149,9 @@ export default function NotificationsPage() {
         </div>
 
         {/* Main Content Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid grid-cols-6 gap-4">
-            <TabsTrigger value="center" className="flex items-center gap-2">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6" suppressHydrationWarning>
+          <TabsList className="grid grid-cols-6 gap-4" suppressHydrationWarning>
+            <TabsTrigger value="center" className="flex items-center gap-2" suppressHydrationWarning>
               <Bell className="h-4 w-4" />
               Notification Center
             </TabsTrigger>

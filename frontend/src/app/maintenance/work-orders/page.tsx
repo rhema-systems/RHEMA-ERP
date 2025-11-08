@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -93,6 +94,7 @@ interface JobCard {
 
 export default function WorkOrdersPage() {
   const { toast } = useToast();
+  const searchParams = useSearchParams();
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<WorkOrder[]>([]);
   const [workOrderSchedulesMap, setWorkOrderSchedulesMap] = useState<{[key: string]: MaintenanceStaffSchedule[]}>({});
@@ -326,6 +328,98 @@ export default function WorkOrdersPage() {
     
     loadData();
   }, []);
+
+  // Handle URL parameter to auto-open work order
+  useEffect(() => {
+    const workOrderId = searchParams.get('id');
+    if (workOrderId && workOrders.length > 0 && !isViewDialogOpen) {
+      const workOrder = workOrders.find(wo => wo.id === workOrderId);
+      if (workOrder) {
+        // Simulate clicking on the work order to open it
+        setSelectedOrder(workOrder);
+        setIsViewDialogOpen(true);
+        
+        // Fetch work order details
+        const fetchDetails = async () => {
+          setLoadingTasks(true);
+          setLoadingParts(true);
+          setLoadingTools(true);
+          setSelectedOrderTasks([]);
+          setWorkOrderParts([]);
+          setWorkOrderTools([]);
+          setWorkOrderLabor([]);
+          setStaffSchedules([]);
+          setExpenses([]);
+          
+          try {
+            const workOrderDetails = await maintenanceApiService.getWorkOrderById(workOrder.id);
+            
+            if (workOrderDetails.labor && Array.isArray(workOrderDetails.labor)) {
+              setWorkOrderLabor(workOrderDetails.labor);
+            }
+            
+            if (workOrderDetails.tasks && Array.isArray(workOrderDetails.tasks)) {
+              setSelectedOrderTasks(workOrderDetails.tasks);
+            }
+            
+            if (workOrder.status === 'Completed' || workOrder.status === 'Cancelled') {
+              if (workOrderDetails.parts && Array.isArray(workOrderDetails.parts)) {
+                setWorkOrderParts(workOrderDetails.parts);
+              }
+              if (workOrderDetails.tools && Array.isArray(workOrderDetails.tools)) {
+                setWorkOrderTools(workOrderDetails.tools);
+              }
+            } else {
+              try {
+                const parts = await workOrderPartService.getWorkOrderParts(workOrder.id);
+                setWorkOrderParts(parts || []);
+              } catch (error) {
+                console.error('Error loading parts:', error);
+              }
+              
+              try {
+                const tools = await workOrderToolService.getWorkOrderTools(workOrder.id);
+                setWorkOrderTools(tools || []);
+              } catch (error) {
+                console.error('Error loading tools:', error);
+              }
+            }
+            
+            try {
+              const schedules = await maintenanceApiService.getStaffSchedulesByWorkOrder(workOrder.id);
+              setStaffSchedules(schedules || []);
+            } catch (error) {
+              console.error('Error loading schedules:', error);
+            }
+            
+            try {
+              const expensesData = await maintenanceApiService.getWorkOrderExpenses(workOrder.id);
+              setExpenses(expensesData || []);
+            } catch (error) {
+              console.error('Error loading expenses:', error);
+            }
+            
+            try {
+              const validation = await qualityControlService.getValidationByWorkOrder(workOrder.id);
+              if (validation) {
+                setQualityValidation({ [workOrder.id]: validation });
+              }
+            } catch (error) {
+              console.error('Error loading quality validation:', error);
+            }
+          } catch (error) {
+            console.error('Error fetching work order details:', error);
+          } finally {
+            setLoadingTasks(false);
+            setLoadingParts(false);
+            setLoadingTools(false);
+          }
+        };
+        
+        fetchDetails();
+      }
+    }
+  }, [searchParams, workOrders, isViewDialogOpen]);
 
   useEffect(() => {
     let filtered = workOrders;

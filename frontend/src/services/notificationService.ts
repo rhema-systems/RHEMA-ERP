@@ -2,35 +2,44 @@ import axios from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
-// Notification interfaces
+// Notification interfaces - Aligned with unified backend API
 export interface Notification {
   id: string;
-  userId: string;
+  recipientId: string;
+  notificationType: 'Email' | 'SMS' | 'Push' | 'InApp';
   title: string;
   message: string;
-  type: 'Info' | 'Warning' | 'Error' | 'Success';
-  category: 'JobCard' | 'WorkOrder' | 'Quality' | 'Asset' | 'System';
-  entityId?: string;
-  entityType?: string;
+  priority: 'Low' | 'Normal' | 'High' | 'Critical';
+  status: 'Pending' | 'Sent' | 'Failed' | 'Expired' | 'Cancelled';
+  entityId: string;
+  entityType: string;
   actionUrl?: string;
   isRead: boolean;
   readAt?: string;
-  createdAt: string;
+  dismissedAt?: string;
+  timestamp: string; // Backend sends this as the creation timestamp
+  createdAt?: string; // For backwards compatibility
+  scheduledFor?: string;
+  sentAt?: string;
   expiresAt?: string;
-  metadata?: Record<string, any>;
+  attemptCount: number;
+  lastError?: string;
+  deliveryMethods?: string[];
+  emailAddress?: string;
+  phoneNumber?: string;
+  additionalData?: Record<string, any>;
+  tenantId: string;
 }
 
 export interface CreateNotificationRequest {
-  userIds?: string[];
-  roles?: string[];
+  recipientId: string;
+  type: 'Email' | 'SMS' | 'Push' | 'InApp';
   title: string;
   message: string;
-  type: 'Info' | 'Warning' | 'Error' | 'Success';
-  category: 'JobCard' | 'WorkOrder' | 'Quality' | 'Asset' | 'System';
-  entityId?: string;
-  entityType?: string;
+  priority: 'Low' | 'Normal' | 'High' | 'Critical';
+  entityType: string; // Required - e.g., 'JobCard', 'WorkOrder'
+  entityId: string; // Required - specific entity instance ID
   actionUrl?: string;
-  expiresAt?: string;
   metadata?: Record<string, any>;
 }
 
@@ -61,18 +70,24 @@ class NotificationService {
     };
   }
 
-  // Notifications CRUD
+  // Notifications CRUD - Uses unified endpoint
   async getNotifications(params: {
     page?: number;
     pageSize?: number;
-    category?: string;
-    type?: string;
+    status?: string;
+    priority?: string;
+    notificationType?: string;
     isRead?: boolean;
     fromDate?: string;
     toDate?: string;
+    entityType?: string;
   } = {}): Promise<PagedResult<Notification>> {
     const response = await axios.get(`${API_URL}/notifications`, {
-      params,
+      params: {
+        pageNumber: params.page || 1,
+        pageSize: params.pageSize || 10,
+        ...params
+      },
       headers: this.getAuthHeaders()
     });
     return response.data;
@@ -144,223 +159,87 @@ class NotificationService {
     return response.data;
   }
 
-  // Workflow-specific notification methods
-  async notifyJobCardSubmission(jobCardId: string, jobCardNumber: string): Promise<void> {
+  // Generic notification methods using unified API
+  // For specific domain workflows, use generic methods with appropriate entityType/entityId
+  
+  async sendNotification(type: 'Email' | 'SMS' | 'Push' | 'InApp', recipientId: string, title: string, message: string, options?: {
+    priority?: 'Low' | 'Normal' | 'High' | 'Critical';
+    entityType?: string;
+    entityId?: string;
+    actionUrl?: string;
+    metadata?: Record<string, any>;
+  }): Promise<void> {
     await this.createNotification({
-      roles: ['MaintenanceManager', 'MaintenanceSupervisor'],
-      title: 'New Job Card Submitted',
-      message: `Job Card ${jobCardNumber} has been submitted and requires approval.`,
-      type: 'Info',
-      category: 'JobCard',
-      entityId: jobCardId,
-      entityType: 'JobCard',
-      actionUrl: `/maintenance/job-cards?id=${jobCardId}`
+      recipientId,
+      type,
+      title,
+      message,
+      priority: options?.priority || 'Normal',
+      entityType: options?.entityType || 'General',
+      entityId: options?.entityId || 'system',
+      actionUrl: options?.actionUrl,
+      metadata: options?.metadata
     });
   }
 
-  async notifyJobCardApproval(jobCardId: string, jobCardNumber: string, requesterId: string, approved: boolean): Promise<void> {
-    await this.createNotification({
-      userIds: [requesterId],
-      title: `Job Card ${approved ? 'Approved' : 'Rejected'}`,
-      message: `Your Job Card ${jobCardNumber} has been ${approved ? 'approved' : 'rejected'}.`,
-      type: approved ? 'Success' : 'Warning',
-      category: 'JobCard',
-      entityId: jobCardId,
-      entityType: 'JobCard',
-      actionUrl: `/maintenance/job-cards?id=${jobCardId}`
-    });
-  }
-
-  async notifyWorkOrderGenerated(workOrderId: string, workOrderNumber: string, jobCardNumber: string, technicianId?: string): Promise<void> {
-    const recipients: string[] = [];
-    if (technicianId) recipients.push(technicianId);
-
-    await this.createNotification({
-      userIds: recipients,
-      roles: ['MaintenanceTechnician'],
-      title: 'New Work Order Generated',
-      message: `Work Order ${workOrderNumber} has been generated from Job Card ${jobCardNumber}.`,
-      type: 'Info',
-      category: 'WorkOrder',
-      entityId: workOrderId,
-      entityType: 'WorkOrder',
-      actionUrl: `/maintenance/work-orders?id=${workOrderId}`
-    });
-  }
-
-  async notifyAssetAdmission(admissionId: string, admissionNumber: string, assetName: string, technicianId?: string): Promise<void> {
-    const recipients: string[] = [];
-    if (technicianId) recipients.push(technicianId);
-
-    await this.createNotification({
-      userIds: recipients,
-      roles: ['MaintenanceTechnician', 'MaintenanceManager'],
-      title: 'Asset Admitted for Maintenance',
-      message: `${assetName} has been admitted for maintenance (${admissionNumber}).`,
-      type: 'Info',
-      category: 'Asset',
-      entityId: admissionId,
-      entityType: 'AssetAdmission',
-      actionUrl: `/maintenance/asset-admission?id=${admissionId}`
-    });
-  }
-
-  async notifyQualityControlRequired(workOrderId: string, workOrderNumber: string, assetName: string): Promise<void> {
-    await this.createNotification({
-      roles: ['QualityInspector', 'MaintenanceManager'],
-      title: 'Quality Control Required',
-      message: `Work Order ${workOrderNumber} for ${assetName} requires quality control inspection.`,
-      type: 'Warning',
-      category: 'Quality',
-      entityId: workOrderId,
-      entityType: 'WorkOrder',
-      actionUrl: `/maintenance/quality-control?workOrderId=${workOrderId}`
-    });
-  }
-
-  async notifyWorkOrderCompletion(workOrderId: string, workOrderNumber: string, assetName: string, requesterId?: string): Promise<void> {
-    const recipients: string[] = [];
-    if (requesterId) recipients.push(requesterId);
-
-    await this.createNotification({
-      userIds: recipients,
-      roles: ['MaintenanceManager'],
-      title: 'Work Order Completed',
-      message: `Work Order ${workOrderNumber} for ${assetName} has been completed successfully.`,
-      type: 'Success',
-      category: 'WorkOrder',
-      entityId: workOrderId,
-      entityType: 'WorkOrder',
-      actionUrl: `/maintenance/work-orders?id=${workOrderId}`
-    });
-  }
-
-  async notifyAssetDischarge(dischargeId: string, dischargeNumber: string, assetName: string, requesterId?: string): Promise<void> {
-    const recipients: string[] = [];
-    if (requesterId) recipients.push(requesterId);
-
-    await this.createNotification({
-      userIds: recipients,
-      roles: ['MaintenanceManager'],
-      title: 'Asset Discharged',
-      message: `${assetName} has been discharged from maintenance (${dischargeNumber}).`,
-      type: 'Success',
-      category: 'Asset',
-      entityId: dischargeId,
-      entityType: 'AssetDischarge',
-      actionUrl: `/maintenance/asset-admission?dischargeId=${dischargeId}`
-    });
-  }
-
-  async notifyOverdueWorkOrder(workOrderId: string, workOrderNumber: string, assetName: string, technicianId?: string): Promise<void> {
-    const recipients: string[] = [];
-    if (technicianId) recipients.push(technicianId);
-
-    await this.createNotification({
-      userIds: recipients,
-      roles: ['MaintenanceManager', 'MaintenanceSupervisor'],
-      title: 'Work Order Overdue',
-      message: `Work Order ${workOrderNumber} for ${assetName} is overdue and requires attention.`,
-      type: 'Error',
-      category: 'WorkOrder',
-      entityId: workOrderId,
-      entityType: 'WorkOrder',
-      actionUrl: `/maintenance/work-orders?id=${workOrderId}`
-    });
-  }
-
-  // Real-time notifications (if WebSocket is available)
-  private socket: WebSocket | null = null;
-  private notificationHandlers: Array<(notification: Notification) => void> = [];
-
-  connectToRealTimeNotifications(): void {
-    const token = localStorage.getItem('authToken');
-    if (!token) return;
-
-    try {
-      const wsUrl = `ws://localhost:5000/notifications?token=${token}`;
-      this.socket = new WebSocket(wsUrl);
-
-      this.socket.onopen = () => {
-        console.log('Connected to notification service');
-      };
-
-      this.socket.onmessage = (event) => {
-        try {
-          const notification: Notification = JSON.parse(event.data);
-          this.notificationHandlers.forEach(handler => handler(notification));
-        } catch (error) {
-          console.error('Error parsing notification:', error);
-        }
-      };
-
-      this.socket.onclose = () => {
-        console.log('Disconnected from notification service');
-        // Attempt to reconnect after 5 seconds
-        setTimeout(() => this.connectToRealTimeNotifications(), 5000);
-      };
-
-      this.socket.onerror = (error) => {
-        console.error('WebSocket error:', error);
-      };
-    } catch (error) {
-      console.error('Failed to connect to notification service:', error);
-    }
-  }
-
-  disconnectFromRealTimeNotifications(): void {
-    if (this.socket) {
-      this.socket.close();
-      this.socket = null;
-    }
-  }
-
-  onNotification(handler: (notification: Notification) => void): () => void {
-    this.notificationHandlers.push(handler);
-    
-    // Return unsubscribe function
-    return () => {
-      const index = this.notificationHandlers.indexOf(handler);
-      if (index > -1) {
-        this.notificationHandlers.splice(index, 1);
-      }
-    };
-  }
+  // Real-time notifications are handled by SignalR service
+  // See useSignalR hook and signalRService for real-time functionality
 
   // Utility methods
-  getNotificationIcon(type: Notification['type']): string {
+  getNotificationIcon(priority: Notification['priority']): string {
     const icons = {
-      'Info': '🔔',
-      'Warning': '⚠️',
-      'Error': '🚨',
-      'Success': '✅'
+      'Low': '📝',
+      'Normal': '🔔',
+      'High': '⚠️',
+      'Critical': '🚨'
     };
-    return icons[type] || '🔔';
+    return icons[priority] || '🔔';
   }
 
-  getNotificationColor(type: Notification['type']): string {
+  getNotificationColor(priority: Notification['priority']): string {
     const colors = {
-      'Info': 'blue',
-      'Warning': 'yellow',
-      'Error': 'red',
-      'Success': 'green'
+      'Low': 'gray',
+      'Normal': 'blue',
+      'High': 'yellow',
+      'Critical': 'red'
     };
-    return colors[type] || 'gray';
+    return colors[priority] || 'gray';
   }
 
-  formatNotificationTime(createdAt: string): string {
-    const date = new Date(createdAt);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
+  getStatusColor(status: Notification['status']): string {
+    const colors = {
+      'Pending': 'yellow',
+      'Sent': 'green',
+      'Failed': 'red',
+      'Expired': 'gray',
+      'Cancelled': 'gray'
+    };
+    return colors[status] || 'gray';
+  }
 
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
+  formatNotificationTime(dateString?: string): string {
+    try {
+      // Handle missing date
+      if (!dateString) return 'Unknown';
+      
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return 'Unknown';
+      
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMins / 60);
+      const diffDays = Math.floor(diffHours / 24);
+
+      if (diffMins < 1) return 'Just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (diffDays < 7) return `${diffDays}d ago`;
+      return date.toLocaleDateString();
+    } catch (error) {
+      console.error('Error formatting notification time:', error);
+      return 'Unknown';
+    }
   }
 }
 

@@ -742,6 +742,22 @@ public class WorkOrderService : IWorkOrderService
             _logger.LogDebug("CreateWorkOrderDto: Title={Title}, AssetId={AssetId}, WorkOrderTypeId={WorkOrderTypeId}, MaintenanceTypeId={MaintenanceTypeId}, PriorityLevelId={PriorityLevelId}",
                 createDto.Title, createDto.AssetId, createDto.WorkOrderTypeId, createDto.MaintenanceTypeId, createDto.PriorityLevelId);
             
+            // Determine RequestedById - use current user's employee ID, or fall back to assigned technician for background service context
+            Guid? requestedById = _currentUserService.EmployeeId;
+            if (!requestedById.HasValue || requestedById.Value == Guid.Empty)
+            {
+                // Try user ID
+                if (_currentUserService.UserId != null && Guid.TryParse(_currentUserService.UserId, out var userId) && userId != Guid.Empty)
+                {
+                    requestedById = userId;
+                }
+                // Fall back to assigned technician (for background service context)
+                else if (createDto.AssignedTechnicianId.HasValue && createDto.AssignedTechnicianId.Value != Guid.Empty)
+                {
+                    requestedById = createDto.AssignedTechnicianId.Value;
+                }
+            }
+
             var workOrder = new WorkOrder
             {
                 Title = createDto.Title,
@@ -750,13 +766,13 @@ public class WorkOrderService : IWorkOrderService
                 WorkOrderTypeId = createDto.WorkOrderTypeId,
                 MaintenanceTypeId = createDto.MaintenanceTypeId,
                 PriorityLevelId = createDto.PriorityLevelId,
-                TenantId = _currentUserService.TenantId ?? Guid.Empty,
+                TenantId = createDto.TenantId ?? _currentUserService.TenantId ?? Guid.Empty,
                 WorkOrderNumber = await GenerateWorkOrderNumberAsync(),
-                RequestedById = _currentUserService.EmployeeId ?? 
-                    ((_currentUserService.UserId != null && Guid.TryParse(_currentUserService.UserId, out var userId)) ? userId : Guid.Empty),
+                RequestedById = requestedById ?? Guid.Empty,
                 AssignedTechnicianId = createDto.AssignedTechnicianId, // Assign technician if provided
                 AssignedTeamId = createDto.AssignedTeamId, // Assign team if provided
                 JobCardId = createDto.JobCardId, // Link to job card if generated from one
+                MaintenanceScheduleId = createDto.MaintenanceScheduleId, // Link to maintenance schedule if auto-generated
                 Status = "Draft",
                 MaintenanceLocation = createDto.MaintenanceLocation ?? "Internal",
                 RequestedStartDate = createDto.RequestedStartDate,

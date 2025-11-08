@@ -35,6 +35,7 @@ import {
   AlertTriangle,
   Clock,
   CheckSquare,
+  Activity,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -164,6 +165,7 @@ const navigationItems: NavItem[] = [
           { title: 'Technicians', href: '/maintenance/technicians', icon: Users },
           { title: 'Quality Control', href: '/maintenance/quality-control', icon: ClipboardCheck },
           { title: 'Scheduled Maintenance', href: '/maintenance/scheduled', icon: Calendar },
+          { title: 'Condition Monitoring', href: '/maintenance/condition-monitoring', icon: Activity },
           { title: 'Emergency Maintenance', href: '/maintenance/emergency', icon: AlertTriangle },
           { title: 'Inspections', href: '/maintenance/inspections', icon: ClipboardCheck },
           { title: 'Maintenance History', href: '/maintenance/history', icon: Clock },

@@ -65,6 +65,7 @@ interface MaintenanceHistory {
 
 
 export default function AssetsPage() {
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -148,19 +149,19 @@ export default function AssetsPage() {
       try {
         const token = localStorage.getItem('authToken');
         const [assetsResponse, historyResponse, categoriesResponse] = await Promise.all([
-          fetch('http://localhost:5000/api/maintenance/assets', {
+          fetch(`${API_URL}/maintenance/assets`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'
             }
           }),
-          fetch('http://localhost:5000/api/maintenance/assets/history', {
+          fetch(`${API_URL}/maintenance/assets/history`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'
             }
           }),
-          fetch('http://localhost:5000/api/maintenance/asset-categories', {
+          fetch(`${API_URL}/maintenance/asset-categories`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'
@@ -313,7 +314,7 @@ export default function AssetsPage() {
       
       // Basic API connectivity test
       try {
-        const testResponse = await fetch('http://localhost:5000/api/maintenance/assets', {
+        const testResponse = await fetch(`${API_URL}/maintenance/assets`, {
           method: 'GET',
           headers: {
             'Authorization': token ? `Bearer ${token}` : '',
@@ -357,9 +358,9 @@ export default function AssetsPage() {
       
       console.log('Sending payload:', payload);
       console.log('Token available:', !!token);
-      console.log('Request URL:', 'http://localhost:5000/api/maintenance/assets');
+      console.log('Request URL:', `${API_URL}/maintenance/assets`);
       
-      const response = await fetch('http://localhost:5000/api/maintenance/assets', {
+      const response = await fetch(`${API_URL}/maintenance/assets`, {
         method: 'POST',
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
@@ -414,7 +415,7 @@ export default function AssetsPage() {
       }
       
       // Refresh the list
-      const assetsResponse = await fetch('http://localhost:5000/api/maintenance/assets', {
+      const assetsResponse = await fetch(`${API_URL}/maintenance/assets`, {
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json'
@@ -471,7 +472,7 @@ export default function AssetsPage() {
     
     try {
       const token = localStorage.getItem('authToken');
-      const response = await fetch(`http://localhost:5000/api/maintenance/assets/${selectedAsset.id}`, {
+      const response = await fetch(`${API_URL}/maintenance/assets/${selectedAsset.id}`, {
         method: 'PUT',
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
@@ -498,7 +499,7 @@ export default function AssetsPage() {
       }
       
       // Refresh the list
-      const assetsResponse = await fetch('http://localhost:5000/api/maintenance/assets', {
+      const assetsResponse = await fetch(`${API_URL}/maintenance/assets`, {
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json'
@@ -537,7 +538,7 @@ export default function AssetsPage() {
     
     try {
       const token = localStorage.getItem('authToken');
-      const response = await fetch(`http://localhost:5000/api/maintenance/assets/${id}`, {
+      const response = await fetch(`${API_URL}/maintenance/assets/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
@@ -550,7 +551,7 @@ export default function AssetsPage() {
       }
       
       // Refresh the list
-      const assetsResponse = await fetch('http://localhost:5000/api/maintenance/assets', {
+      const assetsResponse = await fetch(`${API_URL}/maintenance/assets`, {
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json'

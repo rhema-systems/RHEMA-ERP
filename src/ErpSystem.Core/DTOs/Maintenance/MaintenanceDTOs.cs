@@ -1433,6 +1433,15 @@ public class MaintenanceScheduleDto
     public TechnicianDto? DefaultTechnician { get; set; }
     public TechnicianTeamDto? DefaultTeam { get; set; }
     public PriorityLevelDto? PriorityLevel { get; set; }
+    
+    // Multi-criteria scheduling fields
+    public string? PrimaryTriggerType { get; set; }
+    public string? SecondaryTriggerType { get; set; }
+    public string? TriggerLogic { get; set; }
+    public decimal? MileageTrigger { get; set; }
+    public decimal? OperatingHoursTrigger { get; set; }
+    public decimal? CycleTrigger { get; set; }
+    public string? ConditionCriteria { get; set; }
 }
 
 public class CreateMaintenanceScheduleDto
@@ -1553,6 +1562,19 @@ public class MaintenanceScheduleFilterDto
     public Guid? AssignedTeamId { get; set; }
     public DateTime? DueDateFrom { get; set; }
     public DateTime? DueDateTo { get; set; }
+}
+
+public class MaintenanceScheduleHistoryDto
+{
+    public Guid Id { get; set; }
+    public Guid ScheduleId { get; set; }
+    public string ChangeType { get; set; } = string.Empty;
+    public string? PreviousValues { get; set; }
+    public string? NewValues { get; set; }
+    public string? ChangeReason { get; set; }
+    public Guid ChangedById { get; set; }
+    public string? ChangedByName { get; set; }
+    public DateTime CreatedAt { get; set; }
 }
 
 // Technical Skills DTOs
@@ -2445,6 +2467,9 @@ public class CreateWorkOrderDto
     public Guid? MaintenanceScheduleId { get; set; }
     public Guid? JobCardId { get; set; }
     
+    // Tenant ID for background service context (when current user tenant is null)
+    public Guid? TenantId { get; set; }
+    
     // Custom field values (JSON serialized)
     public Dictionary<string, object>? CustomFieldValues { get; set; }
 }
@@ -2874,6 +2899,110 @@ public class DatePeriodDto
     public string Period { get; set; } = string.Empty;
 }
 
+
+#endregion
+
+#region Usage Tracking DTOs
+
+/// <summary>
+/// DTO for asset usage tracking records
+/// </summary>
+public class AssetUsageTrackingDto
+{
+    public Guid Id { get; set; }
+    public Guid AssetId { get; set; }
+    public string? AssetName { get; set; }
+    public string? AssetNumber { get; set; }
+    public DateTime RecordedAt { get; set; }
+    public decimal? Mileage { get; set; }
+    public string? MileageUnit { get; set; }
+    public decimal? OperatingHours { get; set; }
+    public int? Cycles { get; set; }
+    public decimal? FuelConsumed { get; set; }
+    public string? FuelUnit { get; set; }
+    public string DataSource { get; set; } = "Manual";
+    public string? ExternalReferenceId { get; set; }
+    public string? AdditionalMetrics { get; set; }
+    public string? Notes { get; set; }
+    public Guid? RecordedById { get; set; }
+    public string? RecordedByName { get; set; }
+    public bool TriggeredMaintenance { get; set; }
+    public bool IsValidated { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>
+/// DTO for creating asset usage tracking records
+/// </summary>
+public class CreateAssetUsageTrackingDto
+{
+    [Required]
+    public Guid AssetId { get; set; }
+    
+    [Required]
+    public DateTime RecordedAt { get; set; }
+    
+    public decimal? Mileage { get; set; }
+    
+    [MaxLength(10)]
+    public string? MileageUnit { get; set; }
+    
+    public decimal? OperatingHours { get; set; }
+    
+    public int? Cycles { get; set; }
+    
+    public decimal? FuelConsumed { get; set; }
+    
+    [MaxLength(10)]
+    public string? FuelUnit { get; set; }
+    
+    [Required]
+    [MaxLength(50)]
+    public string DataSource { get; set; } = "Manual";
+    
+    [MaxLength(100)]
+    public string? ExternalReferenceId { get; set; }
+    
+    public string? AdditionalMetrics { get; set; }
+    
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+    
+    public bool IsValidated { get; set; } = true;
+}
+
+/// <summary>
+/// DTO for bulk import of usage data
+/// </summary>
+public class BulkUsageImportDto
+{
+    [Required]
+    public List<CreateAssetUsageTrackingDto> UsageRecords { get; set; } = new();
+    
+    public string DataSource { get; set; } = "Import";
+    public bool ValidateAll { get; set; } = true;
+}
+
+/// <summary>
+/// DTO for usage tracking summary by asset
+/// </summary>
+public class AssetUsageSummaryDto
+{
+    public Guid AssetId { get; set; }
+    public string AssetName { get; set; } = string.Empty;
+    public string AssetNumber { get; set; } = string.Empty;
+    public decimal? CurrentMileage { get; set; }
+    public decimal? CurrentOperatingHours { get; set; }
+    public int? CurrentCycles { get; set; }
+    public decimal? AverageDailyMileage { get; set; }
+    public decimal? AverageDailyOperatingHours { get; set; }
+    public decimal? TotalFuelConsumed { get; set; }
+    public DateTime? LastRecordedAt { get; set; }
+    public int TotalRecords { get; set; }
+    public DateTime? NextMaintenanceDue { get; set; }
+    public decimal? MileageUntilMaintenance { get; set; }
+    public decimal? HoursUntilMaintenance { get; set; }
+}
 
 #endregion
 

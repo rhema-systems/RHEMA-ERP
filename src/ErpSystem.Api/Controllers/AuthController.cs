@@ -10,6 +10,8 @@ using ErpSystem.Shared;
 using ErpSystem.Data;
 using System.IdentityModel.Tokens.Jwt;
 using Microsoft.EntityFrameworkCore;
+using ErpSystem.Core.DTOs.Auth;
+using ErpSystem.Core.Interfaces.Common;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -30,7 +32,10 @@ namespace ErpSystem.Api.Controllers
         private readonly ISettingsService _settingsService;
         private readonly IUserSessionService _userSessionService;
         private readonly ITwoFactorAuthService _twoFactorService;
+        private readonly IPasswordResetService _passwordResetService;
+        private readonly IEmailService _emailService;
         private readonly ApplicationDbContext _context;
+        private readonly IConfiguration _configuration;
         private readonly ILogger<AuthController> _logger;
 
         public AuthController(
@@ -47,7 +52,10 @@ namespace ErpSystem.Api.Controllers
             ISettingsService settingsService,
             IUserSessionService userSessionService,
             ITwoFactorAuthService twoFactorService,
+            IPasswordResetService passwordResetService,
+            IEmailService emailService,
             ApplicationDbContext context,
+            IConfiguration configuration,
             ILogger<AuthController> logger)
         {
             _userManager = userManager;
@@ -63,7 +71,10 @@ namespace ErpSystem.Api.Controllers
             _settingsService = settingsService;
             _userSessionService = userSessionService;
             _twoFactorService = twoFactorService;
+            _passwordResetService = passwordResetService;
+            _emailService = emailService;
             _context = context;
+            _configuration = configuration;
             _logger = logger;
         }
 
@@ -1357,6 +1368,196 @@ namespace ErpSystem.Api.Controllers
             }
         }
         
+        /// <summary>
+        /// Request password reset email
+        /// </summary>
+        [HttpPost("forgot-password")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ForgotPassword([FromBody] ErpSystem.Core.DTOs.Auth.ForgotPasswordRequest request)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+
+                _logger.LogInformation("Password reset requested for email: {Email}", request.Email);
+
+                // Find user by email - use normalized email for case-insensitive search
+                var normalizedEmail = request.Email.ToUpper();
+                var user = await _userManager.Users.FirstOrDefaultAsync(u => u.NormalizedEmail == normalizedEmail);
+                if (user == null)
+                {
+                    // Don't reveal if email exists (security best practice)
+                    _logger.LogWarning("Password reset requested for non-existent email: {Email}", request.Email);
+                    return Ok(new ErpSystem.Core.DTOs.Auth.ForgotPasswordResponse 
+                    { 
+                        Success = true, 
+                        Message = "If an account with this email exists, you will receive password reset instructions" 
+                    });
+                }
+
+                // Generate reset token
+                var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
+                var userAgent = Request.Headers["User-Agent"].FirstOrDefault() ?? "Unknown";
+                
+                string resetToken;
+                try
+                {
+                    resetToken = await _passwordResetService.GeneratePasswordResetTokenAsync(
+                        user.Id, ipAddress, userAgent);
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("LDAP"))
+                {
+                    _logger.LogWarning("LDAP user attempted password reset: {Email}", request.Email);
+                    // Return generic message to not reveal LDAP authentication method
+                    return Ok(new ErpSystem.Core.DTOs.Auth.ForgotPasswordResponse
+                    {
+                        Success = false,
+                        Message = "Your account is managed through your organization's directory service. Please contact your system administrator to reset your password."
+                    });
+                }
+
+                // Send email with reset link
+                try
+                {
+                    // Read frontend URL from configuration
+                    var frontendUrl = _configuration["FrontendUrl"] ?? "http://localhost:3000";
+                    var resetUrl = $"{frontendUrl}/reset-password?token={Uri.EscapeDataString(resetToken)}&email={Uri.EscapeDataString(user.Email)}";
+                    
+                    _logger.LogInformation("Generated password reset URL: {ResetUrl}", resetUrl);
+                    
+                    var emailDto = new ErpSystem.Core.Interfaces.Common.EmailDto
+                    {
+                        To = user.Email,
+                        Subject = "Password Reset Request",
+                        Body = GeneratePasswordResetEmailBody(user.FirstName, resetUrl),
+                        IsHtml = true
+                    };
+
+                    var emailSent = await _emailService.SendEmailAsync(emailDto);
+                    if (emailSent)
+                    {
+                        _logger.LogInformation("Password reset email sent to {Email}", user.Email);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Failed to send password reset email to {Email} - email service returned false", user.Email);
+                    }
+                }
+                catch (Exception emailEx)
+                {
+                    _logger.LogError(emailEx, "Exception occurred while sending password reset email to {Email}", user.Email);
+                    // Don't fail the request - token was generated, email might be resent
+                }
+
+                return Ok(new ErpSystem.Core.DTOs.Auth.ForgotPasswordResponse
+                {
+                    Success = true,
+                    Message = "If an account with this email exists, you will receive password reset instructions"
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during forgot password request");
+                return StatusCode(500, new { message = "An error occurred during password reset request" });
+            }
+        }
+
+        /// <summary>
+        /// Reset password with token
+        /// </summary>
+        [HttpPost("reset-password")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ResetPassword([FromBody] ErpSystem.Core.DTOs.Auth.ResetPasswordRequest request)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+
+                _logger.LogInformation("Password reset attempt for email: {Email}", request.Email);
+
+                // Find user by email
+                var user = await _userManager.FindByEmailAsync(request.Email);
+                if (user == null)
+                {
+                    return BadRequest(new { message = "Invalid email or reset token" });
+                }
+
+                // Reset password
+                var success = await _passwordResetService.ResetPasswordAsync(
+                    user.Id, request.ResetToken, request.NewPassword);
+
+                if (!success)
+                {
+                    _logger.LogWarning("Password reset failed for user {UserId}", user.Id);
+                    return BadRequest(new { message = "Invalid or expired reset token" });
+                }
+
+                _logger.LogInformation("Password successfully reset for user {UserId}", user.Id);
+
+                return Ok(new ErpSystem.Core.DTOs.Auth.ResetPasswordResponse
+                {
+                    Success = true,
+                    Message = "Password has been reset successfully. You can now login with your new password."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during password reset");
+                return StatusCode(500, new { message = "An error occurred during password reset" });
+            }
+        }
+
+        /// <summary>
+        /// Validate password reset token
+        /// </summary>
+        [HttpPost("validate-reset-token")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ValidateResetToken([FromBody] ErpSystem.Core.DTOs.Auth.ValidateResetTokenRequest request)
+        {
+            try
+            {
+                var user = await _userManager.FindByEmailAsync(request.Email);
+                if (user == null)
+                {
+                    return Ok(new ErpSystem.Core.DTOs.Auth.ValidateResetTokenResponse
+                    {
+                        IsValid = false,
+                        Message = "Invalid email or token"
+                    });
+                }
+
+                var isValid = await _passwordResetService.ValidateResetTokenAsync(user.Id, request.ResetToken);
+                
+                if (isValid)
+                {
+                    return Ok(new ErpSystem.Core.DTOs.Auth.ValidateResetTokenResponse
+                    {
+                        IsValid = true,
+                        Message = "Token is valid"
+                    });
+                }
+                else
+                {
+                    return Ok(new ErpSystem.Core.DTOs.Auth.ValidateResetTokenResponse
+                    {
+                        IsValid = false,
+                        Message = "Token is invalid or has expired"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error validating reset token");
+                return StatusCode(500, new { message = "An error occurred during token validation" });
+            }
+        }
+
         private string GenerateDeviceFingerprint(string ipAddress, string userAgent)
         {
             // Create a simple device fingerprint using IP and User Agent
@@ -1364,6 +1565,46 @@ namespace ErpSystem.Api.Controllers
             using var sha256 = System.Security.Cryptography.SHA256.Create();
             var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(combined));
             return Convert.ToBase64String(hashBytes)[..16]; // Take first 16 characters
+        }
+
+        private string GeneratePasswordResetEmailBody(string firstName, string resetUrl)
+        {
+            return $@"
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; }}
+                        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                        .header {{ background-color: #f8f9fa; padding: 20px; text-align: center; }}
+                        .content {{ padding: 20px; }}
+                        .button {{ background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block; }}
+                        .footer {{ background-color: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #666; }}
+                    </style>
+                </head>
+                <body>
+                    <div class='container'>
+                        <div class='header'>
+                            <h2>Password Reset Request</h2>
+                        </div>
+                        <div class='content'>
+                            <p>Hello {firstName},</p>
+                            <p>We received a request to reset your password. Click the button below to set a new password:</p>
+                            <p style='text-align: center; margin: 30px 0;'>
+                                <a href='{resetUrl}' class='button'>Reset Password</a>
+                            </p>
+                            <p>Or copy and paste this link in your browser:</p>
+                            <p><code>{resetUrl}</code></p>
+                            <p><strong>This link will expire in 15 minutes.</strong></p>
+                            <p>If you did not request a password reset, you can ignore this email.</p>
+                        </div>
+                        <div class='footer'>
+                            <p>&copy; {DateTime.Now.Year} Your Company. All rights reserved.</p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+            ";
         }
     }
 }

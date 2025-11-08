@@ -72,6 +72,41 @@ public interface IMaintenanceNotificationService
     /// Sends critical asset alert notification
     /// </summary>
     Task SendAssetCriticalAlertAsync(Guid assetId, string alertMessage);
+
+    /// <summary>
+    /// Notifies approvers when a job card is submitted for approval
+    /// </summary>
+    Task NotifyJobCardSubmittedAsync(Guid jobCardId);
+
+    /// <summary>
+    /// Notifies requestor when their job card is approved
+    /// </summary>
+    Task NotifyJobCardApprovedAsync(Guid jobCardId);
+
+    /// <summary>
+    /// Notifies requestor when their job card is rejected
+    /// </summary>
+    Task NotifyJobCardRejectedAsync(Guid jobCardId, string? reason);
+
+    /// <summary>
+    /// Notifies requestor when changes are requested for their job card
+    /// </summary>
+    Task NotifyJobCardChangesRequestedAsync(Guid jobCardId, string? comments);
+
+    /// <summary>
+    /// Sends work order assignment notification to technician
+    /// </summary>
+    Task SendWorkOrderAssignmentNotificationAsync(Guid workOrderId, Guid technicianId);
+
+    /// <summary>
+    /// Sends work order status change notification
+    /// </summary>
+    Task SendWorkOrderStatusChangeNotificationAsync(Guid workOrderId, string previousStatus, string newStatus);
+
+    /// <summary>
+    /// Sends work order completion notification
+    /// </summary>
+    Task SendWorkOrderCompletionNotificationAsync(Guid workOrderId);
 }
 
 /// <summary>

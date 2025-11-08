@@ -103,8 +103,10 @@ public class TaskTemplateService : ITaskTemplateService
             }
 
             // 3. Get asset-specific templates (highest priority, loaded last)
+            // Asset templates supersede all others, so we get ALL active templates for the asset
+            // regardless of maintenance type
             var assetTemplates = await _assetTaskTemplateRepository
-                .GetOrderedBySequenceAsync(assetId, maintenanceTypeId);
+                .GetActiveByAssetIdAsync(assetId);
 
             if (assetTemplates?.Any() == true)
             {
@@ -117,7 +119,7 @@ public class TaskTemplateService : ITaskTemplateService
                     })
                     .ToList();
                 
-                _logger.LogInformation("Found {Count} asset-specific templates", mappedTemplates.Count);
+                _logger.LogInformation("Found {Count} asset-specific templates (any maintenance type)", mappedTemplates.Count);
                 allTasks.AddRange(mappedTemplates);
             }
 

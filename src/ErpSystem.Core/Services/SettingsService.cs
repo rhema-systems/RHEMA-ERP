@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using System.Net.Mail;
 using System.Net;
+using System.Reflection;
 
 namespace ErpSystem.Core.Services;
 
@@ -50,8 +51,11 @@ public class SettingsService : ISettingsService
     {
         try
         {
-            var settings = await _unitOfWork.Repository<EmailSettings>().GetAllAsync();
-            var emailSettings = settings.FirstOrDefault();
+            // Retrieve email settings without tenant filter
+            // Using a simple query that gets the first non-deleted record
+            // This works even for anonymous requests where TenantId is not available
+            var emailSettings = await _unitOfWork.Repository<EmailSettings>()
+                .FirstOrDefaultAsync(e => true); // Simple predicate to get first record
             
             if (emailSettings != null && !string.IsNullOrEmpty(emailSettings.SmtpPassword))
             {

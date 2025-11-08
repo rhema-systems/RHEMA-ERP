@@ -1,119 +1,94 @@
 "use client"
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useMemo } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
-import { Switch } from '../ui/switch'
-import { Label } from '../ui/label'
 import { 
   Bell, 
-  Search, 
-  Filter, 
-  MoreHorizontal, 
+  Search,
   Check,
   CheckCheck,
   X,
-  Star,
-  StarOff,
-  Eye,
-  EyeOff,
   Clock,
   AlertCircle,
   Info,
   CheckCircle,
   XCircle,
-  Users,
-  Building,
-  DollarSign,
+  Wrench,
+  FileText,
+  Shield,
   Package,
   Settings,
   RefreshCw,
-  Wrench,
-  FileText,
-  Shield
+  Trash2
 } from 'lucide-react'
-import { 
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger
-} from '../ui/dropdown-menu'
 import { 
   Notification as NotificationModel,
   notificationService
 } from '../../services/notificationService'
+import { useNotifications } from '../../hooks/useNotifications'
 
 const NotificationCenter: React.FC = () => {
-  const [notifications, setNotifications] = useState<NotificationModel[]>([])
-  const [loading, setLoading] = useState(true)
+  const {
+    notifications,
+    unreadCount,
+    loading,
+    error,
+    markAsRead,
+    markAllAsRead,
+    deleteNotification,
+    fetchNotifications,
+    filterNotifications
+  } = useNotifications({ autoFetch: true, enableRealTime: true })
+
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedFilter, setSelectedFilter] = useState('all')
-  const [selectedCategory, setSelectedCategory] = useState('all')
+  const [filterPriority, setFilterPriority] = useState<'all' | 'Low' | 'Normal' | 'High' | 'Critical'>('all')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'Pending' | 'Sent' | 'Failed'>('all')
   const [showUnreadOnly, setShowUnreadOnly] = useState(false)
-  const [isRealTimeEnabled, setIsRealTimeEnabled] = useState(true)
 
-  // Load notifications from API
-  useEffect(() => {
-    loadNotifications()
-  }, [])
+  // Filter notifications with new unified API fields
+  const filteredNotifications = useMemo(() => {
+    let result = notifications
 
-  // Setup real-time notifications
-  useEffect(() => {
-    if (!isRealTimeEnabled) {
-      notificationService.disconnectFromRealTimeNotifications()
-      return
+    if (showUnreadOnly) {
+      result = result.filter(n => !n.isRead)
     }
 
-    notificationService.connectToRealTimeNotifications()
-    
-    const unsubscribe = notificationService.onNotification((notification) => {
-      setNotifications(prev => [notification, ...prev])
-      
-      // Show browser notification if permission granted
-      if ('Notification' in window && Notification.permission === 'granted') {
-        new window.Notification(notification.title, {
-          body: notification.message,
-          icon: '/favicon.ico'
-        })
-      }
-    })
-
-    return () => {
-      unsubscribe()
-      notificationService.disconnectFromRealTimeNotifications()
+    if (filterPriority !== 'all') {
+      result = result.filter(n => n.priority === filterPriority)
     }
-  }, [isRealTimeEnabled])
 
-  const loadNotifications = async () => {
-    setLoading(true)
-    try {
-      const result = await notificationService.getNotifications({
-        page: 1,
-        pageSize: 50
-      })
-      setNotifications(result.items)
-    } catch (error) {
-      console.error('Failed to load notifications:', error)
-    } finally {
-      setLoading(false)
+    if (filterStatus !== 'all') {
+      result = result.filter(n => n.status === filterStatus)
     }
-  }
 
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case 'Success': return <CheckCircle className="h-4 w-4 text-green-600" />
-      case 'Warning': return <AlertCircle className="h-4 w-4 text-yellow-600" />
-      case 'Error': return <XCircle className="h-4 w-4 text-red-600" />
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      result = result.filter(n =>
+        n.title.toLowerCase().includes(query) ||
+        n.message.toLowerCase().includes(query) ||
+        n.entityType.toLowerCase().includes(query)
+      )
+    }
+
+    return result
+  }, [notifications, showUnreadOnly, filterPriority, filterStatus, searchQuery, filterNotifications])
+
+  const getTypeIcon = (priority: string) => {
+    switch (priority) {
+      case 'Critical': return <XCircle className="h-4 w-4 text-red-600" />
+      case 'High': return <AlertCircle className="h-4 w-4 text-yellow-600" />
+      case 'Normal': return <Info className="h-4 w-4 text-blue-600" />
+      case 'Low': return <CheckCircle className="h-4 w-4 text-green-600" />
       default: return <Info className="h-4 w-4 text-blue-600" />
     }
   }
 
-  const getCategoryIcon = (category: string) => {
-    switch (category) {
+  const getEntityIcon = (entityType: string) => {
+    switch (entityType) {
       case 'JobCard': return <FileText className="h-4 w-4" />
       case 'WorkOrder': return <Wrench className="h-4 w-4" />
       case 'Quality': return <Shield className="h-4 w-4" />
@@ -127,55 +102,14 @@ const NotificationCenter: React.FC = () => {
     return notificationService.formatNotificationTime(dateString)
   }
 
-  const filteredNotifications = notifications.filter(notification => {
-    const matchesSearch = notification.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         notification.message.toLowerCase().includes(searchQuery.toLowerCase())
-    
-    const matchesFilter = selectedFilter === 'all' || notification.type === selectedFilter
-    const matchesCategory = selectedCategory === 'all' || notification.category === selectedCategory
-    const matchesUnread = !showUnreadOnly || !notification.isRead
-    
-    return matchesSearch && matchesFilter && matchesCategory && matchesUnread
-  })
-
-  const markAsRead = async (id: string) => {
-    try {
-      await notificationService.markAsRead(id)
-      setNotifications(prev => prev.map(n => 
-        n.id === id ? { ...n, isRead: true } : n
-      ))
-    } catch (error) {
-      console.error('Failed to mark as read:', error)
+  const handleNotificationClick = async (notification: NotificationModel) => {
+    if (!notification.isRead) {
+      await markAsRead(notification.id)
+    }
+    if (notification.actionUrl) {
+      window.location.href = notification.actionUrl
     }
   }
-
-  const deleteNotification = async (id: string) => {
-    try {
-      await notificationService.deleteNotification(id)
-      setNotifications(prev => prev.filter(n => n.id !== id))
-    } catch (error) {
-      console.error('Failed to delete notification:', error)
-    }
-  }
-
-  const markAllAsRead = async () => {
-    try {
-      await notificationService.markAllAsRead()
-      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })))
-    } catch (error) {
-      console.error('Failed to mark all as read:', error)
-    }
-  }
-
-  const clearAllRead = () => {
-    setNotifications(prev => prev.filter(n => !n.isRead))
-  }
-
-  const refreshNotifications = () => {
-    loadNotifications()
-  }
-
-  const unreadCount = notifications.filter(n => !n.isRead).length
 
   return (
     <div className="space-y-6">
@@ -197,26 +131,14 @@ const NotificationCenter: React.FC = () => {
             </div>
             
             <div className="flex items-center gap-2">
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="real-time"
-                  checked={isRealTimeEnabled}
-                  onCheckedChange={setIsRealTimeEnabled}
-                />
-                <Label htmlFor="real-time" className="text-sm">Real-time</Label>
-              </div>
+              {unreadCount > 0 && (
+                <Button variant="outline" size="sm" onClick={() => markAllAsRead()}>
+                  <CheckCheck className="h-4 w-4 mr-2" />
+                  Mark All Read
+                </Button>
+              )}
               
-              <Button variant="outline" size="sm" onClick={markAllAsRead}>
-                <CheckCheck className="h-4 w-4 mr-2" />
-                Mark All Read
-              </Button>
-              
-              <Button variant="outline" size="sm" onClick={clearAllRead}>
-                <X className="h-4 w-4 mr-2" />
-                Clear Read
-              </Button>
-              
-              <Button variant="outline" size="sm" onClick={refreshNotifications}>
+              <Button variant="outline" size="sm" onClick={() => fetchNotifications()}>
                 <RefreshCw className="h-4 w-4" />
               </Button>
             </div>
@@ -236,44 +158,43 @@ const NotificationCenter: React.FC = () => {
               />
             </div>
             
-            {/* Type Filter */}
-            <Select value={selectedFilter} onValueChange={setSelectedFilter}>
+            {/* Priority Filter */}
+            <Select value={filterPriority} onValueChange={(value: any) => setFilterPriority(value)}>
               <SelectTrigger className="w-48">
-                <SelectValue />
+                <SelectValue placeholder="Priority" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="Info">Info</SelectItem>
-                <SelectItem value="Success">Success</SelectItem>
-                <SelectItem value="Warning">Warning</SelectItem>
-                <SelectItem value="Error">Error</SelectItem>
+                <SelectItem value="all">All Priorities</SelectItem>
+                <SelectItem value="Low">Low</SelectItem>
+                <SelectItem value="Normal">Normal</SelectItem>
+                <SelectItem value="High">High</SelectItem>
+                <SelectItem value="Critical">Critical</SelectItem>
               </SelectContent>
             </Select>
             
-            {/* Category Filter */}
-            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+            {/* Status Filter */}
+            <Select value={filterStatus} onValueChange={(value: any) => setFilterStatus(value)}>
               <SelectTrigger className="w-48">
-                <SelectValue />
+                <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                <SelectItem value="JobCard">Job Cards</SelectItem>
-                <SelectItem value="WorkOrder">Work Orders</SelectItem>
-                <SelectItem value="Quality">Quality Control</SelectItem>
-                <SelectItem value="Asset">Assets</SelectItem>
-                <SelectItem value="System">System</SelectItem>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="Pending">Pending</SelectItem>
+                <SelectItem value="Sent">Sent</SelectItem>
+                <SelectItem value="Failed">Failed</SelectItem>
               </SelectContent>
             </Select>
             
-            {/* Unread Only Toggle */}
-            <div className="flex items-center space-x-2">
-              <Switch
-                id="unread-only"
-                checked={showUnreadOnly}
-                onCheckedChange={setShowUnreadOnly}
-              />
-              <Label htmlFor="unread-only" className="text-sm">Unread only</Label>
-            </div>
+            {/* Unread Only Toggle - convert to a simpler select */}
+            <Select value={showUnreadOnly ? 'unread' : 'all'} onValueChange={(value) => setShowUnreadOnly(value === 'unread')}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="unread">Unread</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </CardContent>
       </Card>
@@ -293,7 +214,7 @@ const NotificationCenter: React.FC = () => {
               <Bell className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-lg font-medium mb-2">No notifications found</h3>
               <p className="text-muted-foreground">
-                {searchQuery || selectedFilter !== 'all' || selectedCategory !== 'all' || showUnreadOnly
+                {searchQuery || filterPriority !== 'all' || filterStatus !== 'all' || showUnreadOnly
                   ? 'Try adjusting your filters'
                   : 'You\'re all caught up!'}
               </p>
@@ -303,34 +224,41 @@ const NotificationCenter: React.FC = () => {
           filteredNotifications.map((notification) => (
             <Card
               key={notification.id}
-              className={`hover:shadow-md transition-shadow ${
-                !notification.isRead ? 'bg-blue-50/50 border-l-4 border-l-blue-500' : ''
+              className={`hover:shadow-md transition-shadow cursor-pointer ${
+                !notification.isRead ? 'bg-blue-50/50 border-l-4 border-l-blue-500 dark:bg-blue-950/20' : ''
               }`}
+              onClick={() => handleNotificationClick(notification)}
             >
               <CardContent className="p-4">
                 <div className="flex items-start gap-4">
-                  {/* Type Icon */}
+                  {/* Priority Icon */}
                   <div className="flex-shrink-0 pt-1">
-                    {getTypeIcon(notification.type)}
+                    {getTypeIcon(notification.priority)}
                   </div>
                   
                   {/* Content */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <h4 className={`font-medium ${!notification.isRead ? 'font-semibold' : ''}`}>
                             {notification.title}
                           </h4>
                           
-                          {/* Type Badge */}
-                          <Badge variant="outline" className={`${notificationService.getNotificationColor(notification.type)}`}>
-                            {notification.type}
+                          {/* Priority Badge */}
+                          <Badge variant="outline" className={`${notificationService.getNotificationColor(notification.priority)}`}>
+                            {notification.priority}
+                          </Badge>
+
+                          {/* Status Badge */}
+                          <Badge variant="secondary" className="text-xs">
+                            {notification.status}
                           </Badge>
                           
+                          {/* Entity Type Icon and Label */}
                           <div className="flex items-center gap-1 text-muted-foreground">
-                            {getCategoryIcon(notification.category)}
-                            <span className="text-xs">{notification.category}</span>
+                            {getEntityIcon(notification.entityType)}
+                            <span className="text-xs">{notification.entityType}</span>
                           </div>
                         </div>
                         
@@ -338,20 +266,26 @@ const NotificationCenter: React.FC = () => {
                           {notification.message}
                         </p>
                         
-                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
                           <div className="flex items-center gap-1">
                             <Clock className="h-3 w-3" />
-                            {formatTimeAgo(notification.createdAt)}
+                            {formatTimeAgo(notification.timestamp || notification.createdAt || '')}
                           </div>
+
+                          {notification.attemptCount > 0 && (
+                            <div className="text-xs">
+                              Attempts: {notification.attemptCount}
+                            </div>
+                          )}
                           
                           {notification.actionUrl && (
                             <Button
                               variant="link"
                               size="sm"
                               className="h-auto p-0 text-xs"
-                              onClick={() => {
-                                markAsRead(notification.id)
-                                window.location.href = notification.actionUrl || ''
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleNotificationClick(notification)
                               }}
                             >
                               View Details →
@@ -361,7 +295,7 @@ const NotificationCenter: React.FC = () => {
                       </div>
                       
                       {/* Actions */}
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                         {/* Mark as Read */}
                         {!notification.isRead && (
                           <Button
@@ -379,10 +313,10 @@ const NotificationCenter: React.FC = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => deleteNotification(notification.id)}
-                          className="text-red-600 hover:text-red-800"
+                          className="text-red-600 hover:text-red-800 hover:bg-red-50"
                           title="Delete notification"
                         >
-                          <X className="h-4 w-4" />
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>
