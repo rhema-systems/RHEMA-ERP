@@ -23,6 +23,9 @@ using StackExchange.Redis;
 using ErpSystem.Api.Services;
 using ErpSystem.Core.Models;
 using static ErpSystem.Core.Services.StorageServiceExtensions;
+using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data.Repositories.HR;
+using ErpSystem.Core.Services.HR;
 
 namespace ErpSystem.Api.Extensions
 {
@@ -136,19 +139,23 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<IUserReportFavoriteRepository, UserReportFavoriteRepository>();
             services.AddScoped<IReportExportRepository, ReportExportRepository>();
             services.AddScoped<IReportRoleAssignmentRepository, ReportRoleAssignmentRepository>();
-            
+
             // Data source repositories
             services.AddScoped<IDataSourceRepository, DataSourceRepository>();
             
+            #region HR Repositories
+            
             // HR repositories using consolidated HR namespace interfaces
-            services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeRepository, ErpSystem.Data.Repositories.EmployeeRepository>();
-            services.AddScoped<ErpSystem.Core.Interfaces.HR.IDepartmentRepository, ErpSystem.Data.Repositories.DepartmentRepository>();
-            services.AddScoped<ErpSystem.Core.Interfaces.HR.ISectionRepository, ErpSystem.Data.Repositories.SectionRepository>();
-            services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeSkillRepository, ErpSystem.Data.Repositories.EmployeeSkillRepository>();
-            
+            services.AddScoped<IEmployeeRepository, EmployeeRepository>();
+            services.AddScoped<IDepartmentRepository, DepartmentRepository>();
+            services.AddScoped<ISectionRepository, SectionRepository>();
+            services.AddScoped<IEmployeeSkillRepository, EmployeeSkillRepository>();
+
             // Additional HR repositories
-            services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeePositionRepository, ErpSystem.Data.Repositories.EmployeePositionRepository>();
-            
+            services.AddScoped<IEmployeePositionRepository, EmployeePositionRepository>();
+
+            services.AddScoped<ILeaveRepository, LeaveRepository>();
+
             // TODO: Additional HR repositories to be implemented as needed:
             // - SkillRepository: needs implementation
             // - CountryRepository: needs implementation
@@ -167,6 +174,8 @@ namespace ErpSystem.Api.Extensions
             // services.AddScoped<ErpSystem.Core.Interfaces.HR.IShiftRepository, ErpSystem.Data.Repositories.ShiftRepository>();
             // services.AddScoped<ErpSystem.Core.Interfaces.HR.IAttendanceRecordRepository, ErpSystem.Data.Repositories.AttendanceRecordRepository>();
             // services.AddScoped<ErpSystem.Core.Interfaces.HR.IWorkStationRepository, ErpSystem.Data.Repositories.WorkStationRepository>();
+            
+            #endregion HR Repositories
             
             // Procurement repositories
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderRepository>();
@@ -408,15 +417,21 @@ namespace ErpSystem.Api.Extensions
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetInspectionService, ErpSystem.Core.Services.Maintenance.AssetInspectionService>();
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianTeamService, ErpSystem.Core.Services.Maintenance.TechnicianTeamService>();
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetDowntimeService, ErpSystem.Core.Services.Maintenance.AssetDowntimeService>();
-            
+
             // Technician Scheduling services
             // TODO: Create missing maintenance services
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianSchedulingService, ErpSystem.Core.Services.Maintenance.TechnicianSchedulingService>();
             // services.AddScoped<ErpSystem.Core.Services.Maintenance.WorkOrderSchedulingService>();
             // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceInventoryService, ErpSystem.Core.Services.Maintenance.MaintenanceInventoryService>();
-            
+
+            #region HR Services
+
             // HR Services - NOW ENABLED
             services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeService, ErpSystem.Core.Services.HR.EmployeeService>();
+
+            services.AddScoped<ILeaveService, LeaveService>();
+            
+            #endregion HR Services
             
             // Maintenance background services - temporarily disabled to get API running
             // services.AddHostedService<ErpSystem.Api.Services.Maintenance.MaintenanceBackgroundService>();

@@ -9,6 +9,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data.Configuration;
+using ErpSystem.Core.Entities.HR.StaffLeave;
 
 namespace ErpSystem.Data;
 
@@ -208,6 +209,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     // Misc
     public DbSet<Country> Countries { get; set; }
+
+    // Leave Management
+    public DbSet<LeaveType> LeaveTypes { get; set; }
+    public DbSet<LeaveSubType> LeaveSubTypes { get; set; }
+    public DbSet<LeaveCategoryAllocation> LeaveCategoryAllocations { get; set; }
+    public DbSet<LeaveBalance> LeaveBalances { get; set; }
+    public DbSet<LeavePlan> LeavePlans { get; set; }
+    public DbSet<LeaveRequest> LeaveRequests { get; set; }
+    public DbSet<PublicHoliday> PublicHolidays { get; set; }
 
     #endregion HR Entities
 
@@ -1889,6 +1899,123 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(p => p.PositionHistories)
                 .HasForeignKey(h => h.PositionId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure Leave Balance entity
+        builder.Entity<LeaveBalance>(entity =>
+        {
+            entity.HasIndex(x => new { x.EmployeeId, x.LeaveTypeId, x.Year }).IsUnique();
+            entity.HasIndex(x => x.Year);
+
+            entity.HasOne(x => x.LeaveType)
+                .WithMany(x => x.LeaveBalances)
+                .HasForeignKey(x => x.LeaveTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+            
+            entity.HasOne(x => x.Employee)
+                .WithMany(e => e.LeaveBalances)
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure Leave Request entity
+        builder.Entity<LeaveRequest>(entity =>
+        {
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.LeaveTypeId);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => new { x.StartDate, x.EndDate });
+
+            // Relationship with Employee
+            entity.HasOne(x => x.Employee)
+                .WithMany(x => x.LeaveRequests)
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Relationship with Reliever
+            entity.HasOne(x => x.RelieverEmployee)
+                .WithMany()
+                .HasForeignKey(x => x.RelieverEmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Relationship with Approver
+            entity.HasOne(x => x.ApprovedByEmployee)
+                .WithMany()
+                .HasForeignKey(x => x.ApprovedByEmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Relationship with Leave Type
+            entity.HasOne(x => x.LeaveType)
+                .WithMany(x => x.LeaveRequests)
+                .HasForeignKey(x => x.LeaveTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Relationship with Leave Plan
+            entity.HasOne(x => x.LeavePlan)
+                .WithMany()
+                .HasForeignKey(x => x.LeavePlanId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure Leave Plan entity
+        builder.Entity<LeavePlan>(entity =>
+        {
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.LeaveTypeId);
+            entity.HasIndex(x => x.DepartmentId);
+            entity.HasIndex(x => x.PlannedBy);
+
+            // Relationship with Reliever
+            entity.HasOne(x => x.RelieverEmployee)
+                .WithMany()
+                .HasForeignKey(x => x.RelieverId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Relationship with Planner
+            entity.HasOne(x => x.PlannedByEmployee)
+                .WithMany()
+                .HasForeignKey(x => x.PlannedBy)
+                .OnDelete(DeleteBehavior.Restrict);
+            
+            entity.HasOne(x => x.Employee)
+                .WithMany(e => e.LeavePlans)
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Department)
+                .WithMany()
+                .HasForeignKey(x => x.DepartmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.LeaveType)
+                .WithMany()
+                .HasForeignKey(x => x.LeaveTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure Leave Sub Type entity
+        builder.Entity<LeaveSubType>(entity =>
+        {
+            entity.HasOne(x => x.LeaveType)
+                .WithMany(x => x.LeaveSubTypes)
+                .HasForeignKey(x => x.LeaveTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure Leave Category Allocation entity
+        builder.Entity<LeaveCategoryAllocation>(entity =>
+        {
+            entity.HasOne(x => x.LeaveType)
+                .WithMany(x => x.LeaveCategoryAllocations)
+                .HasForeignKey(x => x.LeaveTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure Public Holiday entity
+        builder.Entity<PublicHoliday>(entity =>
+        {
+            entity.HasIndex(x => x.Date);
+            entity.HasIndex(x => x.Year);
         });
     }
 

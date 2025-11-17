@@ -268,7 +268,11 @@ public class Employee : TenantEntity
     public virtual ICollection<EmployeeShiftPreference> ShiftPreferences { get; set; } = new List<EmployeeShiftPreference>();
     public virtual ICollection<ExpatriateAssignment> ExpatriateAssignments { get; set; } = new List<ExpatriateAssignment>();
     public virtual ICollection<EmployeePositionHistory> PositionHistories { get; set; } = new List<EmployeePositionHistory>();
-    // public virtual ICollection<LeaveRequest> LeaveRequests { get; set; } = new List<LeaveRequest>();
+    
+    // Leave Management
+    public virtual ICollection<LeaveRequest> LeaveRequests { get; set; } = new List<LeaveRequest>();
+    public virtual ICollection<LeaveBalance> LeaveBalances { get; set; } = new List<LeaveBalance>();
+    public virtual ICollection<LeavePlan> LeavePlans { get; set; } = new List<LeavePlan>();
 
     // Manager/Employee relationship
     public virtual ICollection<Employee> DirectReports { get; set; } = new List<Employee>(); // Employees who report to this manager
