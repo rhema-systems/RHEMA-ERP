@@ -227,5 +227,49 @@ namespace ErpSystem.Data.Repositories
 
             return $"{currentYear}{nextSequence:D4}";
         }
+
+        public async Task<IEnumerable<Employee>> GetByStationAsync(Guid stationId)
+        {
+            return await _dbSet
+                .Include(e => e.Position)
+                .Include(e => e.Section)
+                .Include(e => e.Manager)
+                .Where(e => e.StationId == stationId && !e.IsDeleted)
+                .OrderBy(e => e.LastName)
+                .ThenBy(e => e.FirstName)
+                .ToListAsync();
+        }
+
+        public async Task<IEnumerable<Employee>> GetByDivisionAsync(Guid divisionId)
+        {
+            return await _dbSet
+                .Include(e => e.Position)
+                .Include(e => e.Section)
+                .Include(e => e.Manager)
+                .Where(e => e.DivisionId == divisionId && !e.IsDeleted)
+                .OrderBy(e => e.LastName)
+                .ThenBy(e => e.FirstName)
+                .ToListAsync();
+        }
+
+        public async Task<IEnumerable<Employee>> GetByUnitAsync(Guid unitId)
+        {
+            return await _dbSet
+                .Include(e => e.Position)
+                .Include(e => e.Section)
+                .Include(e => e.Manager)
+                .Where(e => e.UnitId == unitId && !e.IsDeleted)
+                .OrderBy(e => e.LastName)
+                .ThenBy(e => e.FirstName)
+                .ToListAsync();
+        }
+
+        public async Task<Employee?> GetEmployeeWithPositionHistoryAsync(Guid employeeId)
+        {
+            return await _dbSet
+                .Include(e => e.PositionHistories)
+                    .ThenInclude(ph => ph.Position)
+                .FirstOrDefaultAsync(e => e.Id == employeeId);
+        }
     }
 }

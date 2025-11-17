@@ -17,6 +17,7 @@ namespace ErpSystem.Api.Controllers
         private readonly IEmployeeRepository _employeeRepository;
         private readonly IDepartmentRepository _departmentRepository;
         private readonly IEmployeePositionRepository _positionRepository;
+        private readonly IEmployeeService _employeeService;
         private readonly IMapper _mapper;
         private readonly ILogger<EmployeesController> _logger;
 
@@ -25,13 +26,15 @@ namespace ErpSystem.Api.Controllers
             IDepartmentRepository departmentRepository,
             IEmployeePositionRepository positionRepository,
             IMapper mapper,
-            ILogger<EmployeesController> logger)
+            ILogger<EmployeesController> logger,
+            IEmployeeService employeeService)
         {
             _employeeRepository = employeeRepository;
             _departmentRepository = departmentRepository;
             _positionRepository = positionRepository;
             _mapper = mapper;
             _logger = logger;
+            _employeeService = employeeService;
         }
 
         /// <summary>
@@ -97,12 +100,12 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var employee = await _employeeRepository.GetByIdAsync(id, 
-                    e => e.Department, 
-                    e => e.Position, 
-                    e => e.Section, 
-                    e => e.Manager, 
-                    e => e.Country, 
+                var employee = await _employeeRepository.GetByIdAsync(id,
+                    e => e.Department,
+                    e => e.Position,
+                    e => e.Section,
+                    e => e.Manager,
+                    e => e.Country,
                     e => e.Shift);
 
                 if (employee == null)
@@ -148,6 +151,36 @@ namespace ErpSystem.Api.Controllers
         }
 
         /// <summary>
+        /// Get employees by department
+        /// </summary>
+        /// <param name="departmentId">Department ID</param>
+        /// <returns>List of employees in the department</returns>
+        /// <response code="200">Employees retrieved</response>
+        [HttpGet("by-department/{departmentId}")]
+        [ProducesResponseType(typeof(IEnumerable<EmployeeDto>), StatusCodes.Status200OK)]
+        public async Task<ActionResult<IEnumerable<EmployeeDto>>> GetEmployeesByDepartment(
+            Guid departmentId,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20)
+        {
+            IEnumerable<EmployeeDto> employees;
+
+            employees = await _employeeService.GetByDepartmentAsync(departmentId);
+
+            var paginatedEmployees = employees
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize);
+
+            var employeeDtos = _mapper.Map<IEnumerable<EmployeeDto>>(paginatedEmployees);
+
+            Response.Headers.Add("X-Total-Count", employees.Count().ToString());
+            Response.Headers.Add("X-Page", page.ToString());
+            Response.Headers.Add("X-Page-Size", pageSize.ToString());
+
+            return Ok(employeeDtos);
+        }
+
+        /// <summary>
         /// Create new employee
         /// </summary>
         [HttpPost]
@@ -184,15 +217,15 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var employee = _mapper.Map<Employee>(createEmployeeDto);
-                
+
                 var createdEmployee = await _employeeRepository.AddAsync(employee);
                 await _employeeRepository.SaveChangesAsync();
 
                 // Retrieve the created employee with related data
                 var employeeWithRelations = await _employeeRepository.GetByIdAsync(createdEmployee.Id,
-                    e => e.Department, 
-                    e => e.Position, 
-                    e => e.Section, 
+                    e => e.Department,
+                    e => e.Position,
+                    e => e.Section,
                     e => e.Manager);
 
                 var employeeDto = _mapper.Map<EmployeeDetailDto>(employeeWithRelations);
@@ -230,15 +263,15 @@ namespace ErpSystem.Api.Controllers
                 // For now, skip these validations during updates
 
                 _mapper.Map(updateEmployeeDto, existingEmployee);
-                
+
                 await _employeeRepository.UpdateAsync(existingEmployee);
                 await _employeeRepository.SaveChangesAsync();
 
                 // Retrieve updated employee with related data
                 var updatedEmployee = await _employeeRepository.GetByIdAsync(id,
-                    e => e.Department, 
-                    e => e.Position, 
-                    e => e.Section, 
+                    e => e.Department,
+                    e => e.Position,
+                    e => e.Section,
                     e => e.Manager);
 
                 var employeeDto = _mapper.Map<EmployeeDetailDto>(updatedEmployee);
@@ -297,6 +330,40 @@ namespace ErpSystem.Api.Controllers
             {
                 _logger.LogError(ex, "Error retrieving maintenance employees");
                 return StatusCode(500, "An error occurred while retrieving maintenance employees");
+            }
+        }
+
+        /// <summary>
+        /// Terminate an employee
+        /// </summary>
+        /// <param name="id">Employee ID</param>
+        /// <param name="dto">Termination details</param>
+        /// <returns>Success status</returns>
+        /// <response code="200">Employee terminated successfully</response>
+        /// <response code="400">Invalid request</response>
+        /// <response code="404">Employee not found</response>
+        [HttpPost("{id}/terminate")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> TerminateEmployee(Guid id, [FromBody] TerminateEmployeeDto dto)
+        {
+            try
+            {
+                await _employeeService.TerminateEmployeeAsync(id, dto);
+                return Ok(new { message = "Employee terminated successfully" });
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error terminating employee {EmployeeId}", id);
+                return StatusCode(500, "An error occurred while terminating the employee");
             }
         }
 

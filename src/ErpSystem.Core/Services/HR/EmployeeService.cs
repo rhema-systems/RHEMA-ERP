@@ -1,10 +1,10 @@
 using ErpSystem.Core.DTOs.HR;
 using MaintenanceDTOs = ErpSystem.Core.DTOs.Maintenance;
-using ErpSystem.Core.Entities;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.Extensions.Logging;
 using ErpSystem.Core.Entities.HR;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.HR;
 
@@ -166,6 +166,7 @@ public class EmployeeService : IEmployeeService
             City = createDto.City,
             State = createDto.State,
             PostalCode = createDto.PostalCode,
+            DigitalAddress = createDto.DigitalAddress,
             CountryId = createDto.CountryId,
             EmailAddress = createDto.EmailAddress,
             TelephoneNumber = createDto.TelephoneNumber,
@@ -176,16 +177,21 @@ public class EmployeeService : IEmployeeService
             ProbationPeriodDays = createDto.ProbationPeriodDays,
             ConfirmationDate = createDto.ConfirmationDate,
             RetirementDate = createDto.RetirementDate,
+            DivisionId = createDto.DivisionId,
             DepartmentId = createDto.DepartmentId,
             SectionId = createDto.SectionId,
+            UnitId = createDto.UnitId,
             PositionId = createDto.PositionId,
             StaffStatus = createDto.StaffStatus,
             StationId = createDto.StationId,
             TaxNumber = createDto.TaxNumber,
+            SocialSecurityNumber = createDto.SocialSecurityNumber,
             BloodType = createDto.BloodType,
             ShiftId = createDto.ShiftId,
             Salary = createDto.Salary,
             BadgeNumber = createDto.BadgeNumber,
+            PicturePath = createDto.PicturePath,
+            IsExpatriate = createDto.IsExpatriate,
             IsActive = true
         };
 
@@ -245,9 +251,12 @@ public class EmployeeService : IEmployeeService
         
         if (updateDto.State != null)
             employee.State = updateDto.State;
-        
+
         if (updateDto.PostalCode != null)
             employee.PostalCode = updateDto.PostalCode;
+        
+        if (updateDto.DigitalAddress != null)
+            employee.DigitalAddress = updateDto.DigitalAddress;
         
         if (updateDto.CountryId.HasValue)
             employee.CountryId = updateDto.CountryId;
@@ -276,10 +285,16 @@ public class EmployeeService : IEmployeeService
         
         if (updateDto.RetirementDate.HasValue)
             employee.RetirementDate = updateDto.RetirementDate;
-        
+
+        if (updateDto.DivisionId.HasValue)
+            employee.DivisionId = updateDto.DivisionId.Value;
+
         if (updateDto.DepartmentId.HasValue)
             employee.DepartmentId = updateDto.DepartmentId.Value;
-        
+
+        if (updateDto.UnitId.HasValue)
+            employee.UnitId = updateDto.UnitId.Value;
+
         if (updateDto.SectionId.HasValue)
             employee.SectionId = updateDto.SectionId;
         
@@ -291,10 +306,13 @@ public class EmployeeService : IEmployeeService
         
         if (updateDto.StationId.HasValue)
             employee.StationId = updateDto.StationId;
-        
+
         if (updateDto.TaxNumber != null)
             employee.TaxNumber = updateDto.TaxNumber;
-        
+
+        if (updateDto.SocialSecurityNumber != null)
+            employee.SocialSecurityNumber = updateDto.SocialSecurityNumber;
+
         if (updateDto.BloodType.HasValue)
             employee.BloodType = updateDto.BloodType;
         
@@ -303,19 +321,37 @@ public class EmployeeService : IEmployeeService
         
         if (updateDto.Salary.HasValue)
             employee.Salary = updateDto.Salary;
-        
+
         if (updateDto.BadgeNumber != null)
             employee.BadgeNumber = updateDto.BadgeNumber;
-        
+
+        if (updateDto.Notes != null)
+            employee.Notes = updateDto.Notes;
+
+        if (updateDto.Notes != null)
+            employee.Notes = updateDto.Notes;
+
         if (updateDto.LastPromotionDate.HasValue)
             employee.LastPromotionDate = updateDto.LastPromotionDate;
         
         if (updateDto.LastReviewDate.HasValue)
             employee.LastReviewDate = updateDto.LastReviewDate;
-        
+
         if (updateDto.NextReviewDate.HasValue)
             employee.NextReviewDate = updateDto.NextReviewDate;
-        
+
+        if (updateDto.TerminationDate.HasValue)
+            employee.TerminationDate = updateDto.TerminationDate;
+
+        if (updateDto.TerminationReason != null)
+            employee.TerminationReason = updateDto.TerminationReason;
+
+        if (updateDto.TerminationNotes != null)
+            employee.TerminationNotes = updateDto.TerminationNotes;
+
+        if (updateDto.IsExpatriate.HasValue)
+            employee.IsExpatriate = updateDto.IsExpatriate.Value;
+
         if (updateDto.IsActive.HasValue)
             employee.IsActive = updateDto.IsActive.Value;
 
@@ -360,8 +396,48 @@ public class EmployeeService : IEmployeeService
         employee.StaffStatus = StaffStatus.Active;
         await _employeeRepository.UpdateAsync(employee);
 
-        _logger.LogInformation("Employee activated: {EmployeeNumber} - {FullName}", 
+        _logger.LogInformation("Employee activated: {EmployeeNumber} - {FullName}",
             employee.EmployeeNumber, employee.FullName);
+        return true;
+    }
+
+    public async Task<bool> TerminateEmployeeAsync(Guid id, TerminateEmployeeDto dto)
+    {
+        var employee = await _employeeRepository.GetByIdAsync(id);
+
+        if (employee == null)
+        {
+            throw new ArgumentException($"Employee with ID '{id}' not found.");
+        }
+
+        if (employee.StaffStatus == StaffStatus.Terminated)
+        {
+            throw new InvalidOperationException("Employee is already terminated.");
+        }
+
+        employee.StaffStatus = StaffStatus.Terminated;
+        employee.TerminationDate = dto.TerminationDate;
+        employee.TerminationReason = dto.TerminationReason;
+        employee.TerminationNotes = dto.TerminationNotes;
+
+        // Close current position history
+        var currentPositionHistory = await _employeeRepository
+            .GetQueryable()
+            .Where(e => e.Id == id)
+            .SelectMany(e => e.PositionHistories)
+            .FirstOrDefaultAsync(ph => ph.EndDate == null);
+
+        if (currentPositionHistory != null)
+        {
+            currentPositionHistory.EndDate = dto.TerminationDate;
+            currentPositionHistory.ChangeReason = "Termination";
+        }
+
+        await _employeeRepository.UpdateAsync(employee);
+        await _employeeRepository.SaveChangesAsync();
+
+        _logger.LogInformation("Employee terminated successfully: {EmployeeId}", id);
+
         return true;
     }
 
@@ -397,6 +473,24 @@ public class EmployeeService : IEmployeeService
     {
         var employees = await _employeeRepository.GetAllAsync();
         return employees.Where(e => e.ContractType == contractType).Select(MapToDto);
+    }
+
+    public async Task<IEnumerable<EmployeeDto>> GetByStationAsync(Guid stationId)
+    {
+        var employees = await _employeeRepository.GetByStationAsync(stationId);
+        return employees.Select(MapToDto);
+    }
+
+    public async Task<IEnumerable<EmployeeDto>> GetByDivisionAsync(Guid divisionId)
+    {
+        var employees = await _employeeRepository.GetByDivisionAsync(divisionId);
+        return employees.Select(MapToDto);
+    }
+
+    public async Task<IEnumerable<EmployeeDto>> GetByUnitAsync(Guid unitId)
+    {
+        var employees = await _employeeRepository.GetByUnitAsync(unitId);
+        return employees.Select(MapToDto);
     }
 
     #endregion
@@ -520,13 +614,16 @@ public class EmployeeService : IEmployeeService
             Gender = employee.Gender,
             EmailAddress = employee.EmailAddress,
             MobileNumber = employee.MobileNumber,
+            DivisionName = employee.Division?.Name ?? string.Empty,
             DepartmentName = employee.Department?.Name ?? string.Empty,
-            SectionName = employee.Section?.Name,
+            SectionName = employee.Section?.Name ?? string.Empty,
+            UnitName = employee.Unit?.Name ?? string.Empty,
             PositionTitle = employee.Position?.Title ?? string.Empty,
             StaffStatus = employee.StaffStatus,
             ContractType = employee.ContractType,
             IsActive = employee.IsActive,
             IsFullTime = employee.IsFullTime,
+            IsExpatriate = employee.IsExpatriate,
             DateEmployed = employee.DateEmployed,
             YearsOfService = employee.YearsOfService,
             CanBeAssignedToMaintenance = employee.CanBeAssignedToMaintenance,
@@ -571,6 +668,7 @@ public class EmployeeService : IEmployeeService
             City = employee.City,
             State = employee.State,
             PostalCode = employee.PostalCode,
+            DigitalAddress = employee.DigitalAddress,
             CountryName = employee.Country?.Name,
             TelephoneNumber = employee.TelephoneNumber,
             BusinessNumber = employee.BusinessNumber,
@@ -583,10 +681,14 @@ public class EmployeeService : IEmployeeService
             ShiftName = employee.Shift?.Name,
             Salary = employee.Salary,
             BadgeNumber = employee.BadgeNumber,
+            Notes = employee.Notes,
             LastPromotionDate = employee.LastPromotionDate,
             LastReviewDate = employee.LastReviewDate,
             NextReviewDate = employee.NextReviewDate,
             StationName = employee.Station?.Name,
+            TerminationDate = employee.TerminationDate,
+            TerminationReason = employee.TerminationReason,
+            TerminationNotes = employee.TerminationNotes,
 
             // Related collections would be mapped here
             EmergencyContacts = employee.EmergencyContacts?.Select(ec => new EmployeeEmergencyContactDto

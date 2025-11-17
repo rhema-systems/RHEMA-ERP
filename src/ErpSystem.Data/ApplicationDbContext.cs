@@ -12,10 +12,10 @@ using ErpSystem.Data.Configuration;
 
 namespace ErpSystem.Data;
 
-public class ApplicationDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, Guid, 
-    Microsoft.AspNetCore.Identity.IdentityUserClaim<Guid>, ApplicationUserRole, 
+public class ApplicationDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, Guid,
+    Microsoft.AspNetCore.Identity.IdentityUserClaim<Guid>, ApplicationUserRole,
     Microsoft.AspNetCore.Identity.IdentityUserLogin<Guid>,
-    Microsoft.AspNetCore.Identity.IdentityRoleClaim<Guid>, 
+    Microsoft.AspNetCore.Identity.IdentityRoleClaim<Guid>,
     Microsoft.AspNetCore.Identity.IdentityUserToken<Guid>>
 {
     private readonly Guid? _tenantId;
@@ -28,13 +28,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     {
         _tenantId = tenantId;
     }
-    
+
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, IServiceProvider serviceProvider) : base(options)
     {
         // Try to get tenant ID from ICurrentUserProvider
-        var currentUserProvider = serviceProvider?.GetService(typeof(ErpSystem.Core.Interfaces.ICurrentUserProvider)) 
+        var currentUserProvider = serviceProvider?.GetService(typeof(ErpSystem.Core.Interfaces.ICurrentUserProvider))
             as ErpSystem.Core.Interfaces.ICurrentUserProvider;
-            
+
         if (currentUserProvider != null)
         {
             try
@@ -57,17 +57,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<Tenant> Tenants { get; set; }
     public DbSet<TenantModule> TenantModules { get; set; }
     public DbSet<UserTenant> UserTenants { get; set; }
-    
+
     // Settings entities
     public DbSet<EmailSettings> EmailSettings { get; set; }
     public DbSet<EmailTemplate> EmailTemplates { get; set; }
     public DbSet<SystemSettings> SystemSettings { get; set; }
     public DbSet<Security> Securities { get; set; }
-    
+
     // Logging entities
     public DbSet<AuditLog> AuditLogs { get; set; }
     public DbSet<SecurityLog> SecurityLogs { get; set; }
-    
+
     // Security entities
     public DbSet<SecurityAlert> SecurityAlerts { get; set; }
     public DbSet<SecurityMetrics> SecurityMetricsSet { get; set; }
@@ -75,16 +75,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ThreatIndicator> ThreatIndicators { get; set; }
     public DbSet<SecurityPolicy> SecurityPolicies { get; set; }
     public DbSet<SecurityPolicyViolation> SecurityPolicyViolations { get; set; }
-    
+
     // Token management entities
     public DbSet<RefreshToken> RefreshTokens { get; set; }
     public DbSet<BlacklistedToken> BlacklistedTokens { get; set; }
     public DbSet<UserSession> UserSessions { get; set; }
-    
+
     // Permission entities
     public DbSet<Permission> Permissions { get; set; }
     public DbSet<RolePermission> RolePermissions { get; set; }
-    
+
     // Report entities
     public DbSet<Report> Reports { get; set; }
     public DbSet<ReportSchedule> ReportSchedules { get; set; }
@@ -93,11 +93,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<UserReportFavorite> UserReportFavorites { get; set; }
     public DbSet<ReportExport> ReportExports { get; set; }
     public DbSet<ReportRoleAssignment> ReportRoleAssignments { get; set; }
-    
+
     // Report data source entities
     public DbSet<DataSource> ReportDataSources { get; set; }
     public DbSet<DataSourceUsageLog> ReportDataSourceUsageLogs { get; set; }
-    
+
     // Maintenance Management entities
     public DbSet<MaintenanceAsset> MaintenanceAssets { get; set; }
     public DbSet<MaintenanceAssetCategory> MaintenanceAssetCategories { get; set; }
@@ -112,12 +112,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<WorkOrderLabor> WorkOrderLabor { get; set; }
     public DbSet<WorkOrderDocument> WorkOrderDocuments { get; set; }
     public DbSet<WorkOrderComment> WorkOrderComments { get; set; }
-    
+
     // Task Template entities
     public DbSet<AssetTaskTemplate> AssetTaskTemplates { get; set; }
     public DbSet<AssetTypeTaskTemplate> AssetTypeTaskTemplates { get; set; }
     public DbSet<MaintenanceTaskTemplate> MaintenanceTaskTemplates { get; set; }
-    
+
     public DbSet<MaintenanceSchedule> MaintenanceSchedules { get; set; }
     public DbSet<InspectionTemplate> InspectionTemplates { get; set; }
     public DbSet<AssetInspection> AssetInspections { get; set; }
@@ -128,7 +128,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<UserTechnicianSkill> UserTechnicianSkills { get; set; }
     public DbSet<AssetDowntime> AssetDowntimes { get; set; }
     public DbSet<MaintenanceAttachment> MaintenanceAttachments { get; set; }
-    
+
     // Quality Control entities
     public DbSet<QualityControlChecklist> QualityControlChecklists { get; set; }
     public DbSet<WorkOrderQualityCheck> WorkOrderQualityChecks { get; set; }
@@ -142,26 +142,26 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<InspectionChecklistTemplate> InspectionChecklistTemplates { get; set; }
     public DbSet<InspectionChecklistItem> InspectionChecklistItems { get; set; }
     public DbSet<QualityMetrics> QualityMetrics { get; set; }
-    
+
     // Technician Scheduling entities
     public DbSet<TechnicianSchedule> TechnicianSchedules { get; set; }
     public DbSet<TechnicianAvailability> TechnicianAvailabilities { get; set; }
     public DbSet<TechnicianShift> TechnicianShifts { get; set; }
-    
+
     // Job Card Management entities
     public DbSet<JobCard> JobCards { get; set; }
     public DbSet<JobCardComment> JobCardComments { get; set; }
     public DbSet<JobCardDocument> JobCardDocuments { get; set; }
     public DbSet<JobCardApprovalStep> JobCardApprovalSteps { get; set; }
     public DbSet<JobCardCertificate> JobCardCertificates { get; set; }
-    
+
     // New Maintenance Management entities
     public DbSet<TechnicalSkill> TechnicalSkills { get; set; }
     public DbSet<TechnicianSkillAssignment> TechnicianSkillAssignments { get; set; }
     public DbSet<SafetyProtocol> SafetyProtocols { get; set; }
     public DbSet<SafetyComplianceRecord> SafetyComplianceRecords { get; set; }
     public DbSet<Technician> Technicians { get; set; }
-    
+
     // Additional Maintenance entities
     public DbSet<TechnicianCertification> TechnicianCertifications { get; set; }
     public DbSet<ProtocolAdherence> ProtocolAdherences { get; set; }
@@ -169,28 +169,48 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProtocolTraining> ProtocolTrainings { get; set; }
     public DbSet<SafetyAudit> SafetyAudits { get; set; }
     public DbSet<ProtocolAuditDetail> ProtocolAuditDetails { get; set; }
-    
-    // HR entities
-    public DbSet<Employee> Employees { get; set; }
+
+    #region HR Entities
+
+    // Company Setup
+    public DbSet<Division> Divisions { get; set; }
     public DbSet<Department> Departments { get; set; }
     public DbSet<Section> Sections { get; set; }
+    public DbSet<Unit> Units { get; set; }
     public DbSet<EmployeePosition> EmployeePositions { get; set; }
-    public DbSet<Country> Countries { get; set; }
+    public DbSet<BenefitPolicy> BenefitPolicies { get; set; }
+    public DbSet<EmployeePositionBenefit> EmployeePositionBenefits { get; set; }
+    public DbSet<Skill> Skills { get; set; }
+    public DbSet<PositionSkillRequirement> PositionSkillRequirements { get; set; }
+    public DbSet<StaffCategory> StaffCategories { get; set; }
     public DbSet<Shift> Shifts { get; set; }
     public DbSet<WorkStation> WorkStations { get; set; }
+    public DbSet<EmployeeContractType> EmployeeContractTypes { get; set; }
+
+    // Employee
+    public DbSet<Employee> Employees { get; set; }
     public DbSet<EmployeeEmergencyContact> EmployeeEmergencyContacts { get; set; }
     public DbSet<EmployeeDependent> EmployeeDependents { get; set; }
+    public DbSet<EmployeeDependentBenefit> EmployeeDependentBenefits { get; set; }
     public DbSet<EmployeeQualification> EmployeeQualifications { get; set; }
     public DbSet<EmployeeIdentificationCard> EmployeeIdentificationCards { get; set; }
     public DbSet<EmployeeWorkHistory> EmployeeWorkHistories { get; set; }
     public DbSet<EmployeeContractDetail> EmployeeContractDetails { get; set; }
-    public DbSet<Skill> Skills { get; set; }
+    public DbSet<ExpatriateAssignment> ExpatriateAssignments { get; set; }
+    public DbSet<EmployeePositionHistory> EmployeePositionHistories { get; set; }
     public DbSet<EmployeeSkill> EmployeeSkills { get; set; }
-    public DbSet<AttendanceRecord> AttendanceRecords { get; set; }
     public DbSet<EmployeeBiometric> EmployeeBiometrics { get; set; }
-    public DbSet<ShiftAssignment> ShiftAssignments { get; set; }
     public DbSet<EmployeeShiftPreference> EmployeeShiftPreferences { get; set; }
-    
+
+    // Staff Attendance
+    public DbSet<ShiftAssignment> ShiftAssignments { get; set; }
+    public DbSet<AttendanceRecord> AttendanceRecords { get; set; }
+
+    // Misc
+    public DbSet<Country> Countries { get; set; }
+
+    #endregion HR Entities
+
     // Inventory entities
     public DbSet<InventoryItem> InventoryItems { get; set; }
     public DbSet<InventoryCategory> InventoryCategories { get; set; }
@@ -201,7 +221,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<WarehouseLocation> WarehouseLocations { get; set; }
     public DbSet<InventoryLocation> InventoryLocations { get; set; }
     public DbSet<InventoryAllocation> InventoryAllocations { get; set; }
-    
+
     // Procurement entities
     public DbSet<Supplier> Suppliers { get; set; }
     public DbSet<SupplierContact> SupplierContacts { get; set; }
@@ -212,7 +232,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<PurchaseOrderReceiptItem> PurchaseOrderReceiptItems { get; set; }
     public DbSet<PurchaseRequisition> PurchaseRequisitions { get; set; }
     public DbSet<PurchaseRequisitionItem> PurchaseRequisitionItems { get; set; }
-    
+
     // Workflow Engine entities
     public DbSet<WorkflowDefinition> WorkflowDefinitions { get; set; }
     public DbSet<WorkflowStep> WorkflowSteps { get; set; }
@@ -241,7 +261,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.Property(e => e.FirstName).IsRequired().HasMaxLength(100);
             entity.Property(e => e.LastName).IsRequired().HasMaxLength(100);
             entity.HasIndex(e => e.UserName).IsUnique();
-            
+
             // Primary tenant relationship
             entity.HasOne(u => u.Tenant)
                 .WithMany()
@@ -254,7 +274,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithOne(ut => ut.User)
                 .HasForeignKey(ut => ut.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
-            
+
             // Ignore computed helper properties
             entity.Ignore(u => u.FullName);
             entity.Ignore(u => u.DefaultTenant);
@@ -269,12 +289,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasOne(ur => ur.User).WithMany(u => u.UserRoles).HasForeignKey(ur => ur.UserId);
             entity.HasOne(ur => ur.Role).WithMany(r => r.UserRoles).HasForeignKey(ur => ur.RoleId);
         });
-        
+
         // Configure UserTenant junction entity
         builder.Entity<UserTenant>(entity =>
         {
             entity.ToTable("UserTenants");
-            
+
             // Configure properties
             entity.Property(ut => ut.AccessLevel).HasConversion<int>();
             entity.Property(ut => ut.GrantedAt).IsRequired();
@@ -288,7 +308,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithOne(ut => ut.Tenant)
                 .HasForeignKey(ut => ut.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
-            
+
             // Ignore computed helper properties that shouldn't be treated as navigation properties
             entity.Ignore(t => t.Users);
             entity.Ignore(t => t.ActiveUserCount);
@@ -299,14 +319,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.HasIndex(e => new { e.TenantId, e.ModuleName }).IsUnique();
         });
-        
+
         // Configure EmailSettings entity
         builder.Entity<EmailSettings>(entity =>
         {
             entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId);
             entity.HasIndex(e => e.TenantId); // One email setting per tenant
         });
-        
+
         // Configure EmailTemplate entity
         builder.Entity<EmailTemplate>(entity =>
         {
@@ -315,15 +335,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(et => et.Module);
             entity.HasIndex(et => et.Category);
         });
-        
-        
+
+
         // Configure SystemSettings entity
         builder.Entity<SystemSettings>(entity =>
         {
             entity.HasOne(s => s.Tenant).WithMany().HasForeignKey(s => s.TenantId);
             entity.HasIndex(s => new { s.TenantId, s.Key }).IsUnique();
         });
-        
+
         // Configure AuditLog entity
         builder.Entity<AuditLog>(entity =>
         {
@@ -333,7 +353,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(a => a.UserId);
             entity.HasIndex(a => a.Resource);
         });
-        
+
         // Configure SecurityLog entity
         builder.Entity<SecurityLog>(entity =>
         {
@@ -343,14 +363,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(s => s.IpAddress);
             entity.HasIndex(s => s.Action);
         });
-        
+
         // Configure Security entity
         builder.Entity<Security>(entity =>
         {
             entity.HasOne(s => s.Tenant).WithMany().HasForeignKey(s => s.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(s => s.TenantId);
         });
-        
+
         // Configure SecurityAlert entity
         builder.Entity<SecurityAlert>(entity =>
         {
@@ -362,7 +382,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(sa => sa.Category);
             entity.HasIndex(sa => sa.Dismissed);
         });
-        
+
         // Configure SecurityMetrics entity
         builder.Entity<SecurityMetrics>(entity =>
         {
@@ -370,7 +390,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(sm => new { sm.TenantId, sm.MetricDate }).IsUnique();
             entity.HasIndex(sm => sm.MetricDate);
         });
-        
+
         // Configure ThreatDetection entity
         builder.Entity<ThreatDetection>(entity =>
         {
@@ -383,7 +403,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(td => td.Severity);
             entity.HasIndex(td => td.IpAddress);
         });
-        
+
         // Configure ThreatIndicator entity
         builder.Entity<ThreatIndicator>(entity =>
         {
@@ -394,7 +414,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ti => ti.Value);
             entity.HasIndex(ti => ti.IsActive);
         });
-        
+
         // Configure SecurityPolicy entity
         builder.Entity<SecurityPolicy>(entity =>
         {
@@ -405,7 +425,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(sp => sp.IsActive);
             entity.HasIndex(sp => sp.Priority);
         });
-        
+
         // Configure SecurityPolicyViolation entity
         builder.Entity<SecurityPolicyViolation>(entity =>
         {
@@ -419,7 +439,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(spv => spv.Severity);
             entity.HasIndex(spv => spv.IsResolved);
         });
-        
+
         // Configure Permission entity
         builder.Entity<Permission>(entity =>
         {
@@ -427,24 +447,24 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(p => p.Name).IsUnique();
             entity.HasIndex(p => p.Category);
         });
-        
+
         // Configure RolePermission junction entity
         builder.Entity<RolePermission>(entity =>
         {
             entity.ToTable("RolePermissions");
             entity.HasKey(rp => new { rp.RoleId, rp.PermissionId });
-            
+
             entity.HasOne(rp => rp.Role)
                 .WithMany(r => r.RolePermissions)
                 .HasForeignKey(rp => rp.RoleId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(rp => rp.Permission)
                 .WithMany(p => p.RolePermissions)
                 .HasForeignKey(rp => rp.PermissionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-        
+
         // Configure RefreshToken entity
         builder.Entity<RefreshToken>(entity =>
         {
@@ -453,17 +473,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(rt => rt.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(rt => rt.Tenant)
                 .WithMany()
                 .HasForeignKey(rt => rt.TenantId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasIndex(rt => rt.TokenHash).IsUnique();
             entity.HasIndex(rt => rt.UserId);
             entity.HasIndex(rt => rt.ExpiresAt);
         });
-        
+
         // Configure BlacklistedToken entity
         builder.Entity<BlacklistedToken>(entity =>
         {
@@ -472,12 +492,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(bt => bt.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasIndex(bt => bt.Jti).IsUnique();
             entity.HasIndex(bt => bt.UserId);
             entity.HasIndex(bt => bt.ExpiresAt);
         });
-        
+
         // Configure Report entity
         builder.Entity<Report>(entity =>
         {
@@ -491,7 +511,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(r => r.IsScheduled);
             entity.HasIndex(r => r.LastRun);
         });
-        
+
         // Configure ReportSchedule entity
         builder.Entity<ReportSchedule>(entity =>
         {
@@ -503,7 +523,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(s => s.NextExecutionDate);
             entity.HasIndex(s => s.Frequency);
         });
-        
+
         // Configure ReportTemplate entity
         builder.Entity<ReportTemplate>(entity =>
         {
@@ -514,7 +534,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(t => t.Type);
             entity.HasIndex(t => t.UsageCount);
         });
-        
+
         // Configure ReportExecution entity
         builder.Entity<ReportExecution>(entity =>
         {
@@ -527,7 +547,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(e => e.ExecutedAt);
             entity.HasIndex(e => e.Status);
         });
-        
+
         // Configure UserReportFavorite entity
         builder.Entity<UserReportFavorite>(entity =>
         {
@@ -539,7 +559,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(f => f.UserId);
             entity.HasIndex(f => f.FavoritedAt);
         });
-        
+
         // Configure ReportExport entity
         builder.Entity<ReportExport>(entity =>
         {
@@ -552,7 +572,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(e => e.ExportedAt);
             entity.HasIndex(e => e.Format);
         });
-        
+
         // Configure ReportRoleAssignment entity
         builder.Entity<ReportRoleAssignment>(entity =>
         {
@@ -565,7 +585,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(rra => rra.RoleId);
             entity.HasIndex(rra => rra.AssignedAt);
         });
-        
+
         // Configure DataSource entity
         builder.Entity<DataSource>(entity =>
         {
@@ -576,19 +596,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(e => e.IsActive);
             entity.HasIndex(e => e.LastUsed);
             entity.HasIndex(e => e.CreatedAt);
-            
+
             // Configure relationships
             entity.HasOne(d => d.CreatedByUser)
                 .WithMany()
                 .HasForeignKey(d => d.CreatedByUserId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasMany(d => d.UsageLogs)
                 .WithOne(ul => ul.DataSource)
                 .HasForeignKey(ul => ul.DataSourceId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-        
+
         // Configure DataSourceUsageLog entity
         builder.Entity<DataSourceUsageLog>(entity =>
         {
@@ -600,22 +620,22 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(e => e.OperationType);
             entity.HasIndex(e => e.Success);
         });
-        
+
         // Configure decimal precision globally
         ConfigureDecimalPrecision(builder);
-        
+
         // Configure all tenant relationships to avoid cascade conflicts
         ConfigureGlobalTenantRelationships(builder);
-        
+
         // Configure HR Management entities
         ConfigureHREntities(builder);
-        
+
         // Configure Maintenance Management entities
         ConfigureMaintenanceEntities(builder);
-        
+
         // Configure Inventory Management entities
         ConfigureInventoryEntities(builder);
-        
+
         // Configure Workflow Engine entities
         ConfigureWorkflowEntities(builder);
 
@@ -625,7 +645,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // Seed initial data
         SeedData(builder);
     }
-    
+
     private void ConfigureWorkflowEntities(ModelBuilder builder)
     {
         // Configure WorkflowEntityType relationships
@@ -634,15 +654,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(et => et.Name);
             entity.HasIndex(et => et.IsActive);
             entity.HasIndex(et => new { et.TenantId, et.Name }).IsUnique();
-            
+
             entity.HasMany(et => et.WorkflowDefinitions)
                 .WithOne(wd => wd.EntityType)
                 .HasForeignKey(wd => wd.EntityTypeId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             // WorkflowInstances navigation property will be configured in WorkflowInstance entity
         });
-        
+
         // Configure WorkflowDefinition relationships
         builder.Entity<WorkflowDefinition>(entity =>
         {
@@ -650,18 +670,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wd => wd.Name);
             entity.HasIndex(wd => wd.IsActive);
             entity.HasIndex(wd => new { wd.TenantId, wd.Name }).IsUnique();
-            
+
             entity.HasMany(wd => wd.Steps)
                 .WithOne(ws => ws.WorkflowDefinition)
                 .HasForeignKey(ws => ws.WorkflowDefinitionId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasMany(wd => wd.Instances)
                 .WithOne(wi => wi.WorkflowDefinition)
                 .HasForeignKey(wi => wi.WorkflowDefinitionId)
                 .OnDelete(DeleteBehavior.Restrict); // Avoid cascade conflicts
         });
-        
+
         // Configure WorkflowStep relationships
         builder.Entity<WorkflowStep>(entity =>
         {
@@ -671,7 +691,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ws => ws.StepType);
             entity.HasIndex(ws => ws.IsStartStep);
             entity.HasIndex(ws => ws.IsEndStep);
-            
+
             entity.HasMany(ws => ws.StepInstances)
                 .WithOne(si => si.WorkflowStep)
                 .HasForeignKey(si => si.WorkflowStepId)
@@ -687,7 +707,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wt => wt.Priority);
             entity.HasIndex(wt => wt.IsDefault);
             entity.HasIndex(wt => new { wt.FromStepId, wt.ToStepId });
-            
+
             // FromStep (OutgoingTransitions)
             entity.HasOne(t => t.FromStep)
                 .WithMany(s => s.OutgoingTransitions)
@@ -713,12 +733,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             // WorkflowInstance doesn't have DueDate property
             entity.HasIndex(wi => wi.Priority);
             entity.HasIndex(wi => new { wi.EntityTypeId, wi.EntityId });
-            
+
             entity.HasOne(wi => wi.CurrentStep)
                 .WithMany()
                 .HasForeignKey(wi => wi.CurrentStepId)
                 .OnDelete(DeleteBehavior.NoAction); // Avoid cycles
-                
+
             entity.HasOne(wi => wi.InitiatedBy)
                 .WithMany()
                 .HasForeignKey(wi => wi.InitiatedById)
@@ -734,23 +754,23 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(si => si.AssignedToId);
             entity.HasIndex(si => si.StartedDate);
             entity.HasIndex(si => si.DueDate);
-            
+
             entity.HasOne(si => si.WorkflowInstance)
                 .WithMany(wi => wi.StepInstances)
                 .HasForeignKey(si => si.WorkflowInstanceId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(si => si.AssignedTo)
                 .WithMany()
                 .HasForeignKey(si => si.AssignedToId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasMany(si => si.Approvals)
                 .WithOne(wa => wa.StepInstance)
                 .HasForeignKey(wa => wa.StepInstanceId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-        
+
         // Configure WorkflowApproval relationships
         builder.Entity<WorkflowApproval>(entity =>
         {
@@ -759,13 +779,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wa => wa.Status);
             entity.HasIndex(wa => wa.RequestedDate);
             entity.HasIndex(wa => wa.DueDate);
-            
+
             entity.HasOne(wa => wa.Approver)
                 .WithMany()
                 .HasForeignKey(wa => wa.ApproverId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure WorkflowActivityLog relationships
         builder.Entity<WorkflowActivityLog>(entity =>
         {
@@ -774,17 +794,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wal => wal.ActivityType);
             entity.HasIndex(wal => wal.ActivityDate);
             entity.HasIndex(wal => wal.PerformedById);
-            
+
             entity.HasOne(wal => wal.WorkflowInstance)
                 .WithMany(wi => wi.ActivityLogs)
                 .HasForeignKey(wal => wal.WorkflowInstanceId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(wal => wal.StepInstance)
                 .WithMany()
                 .HasForeignKey(wal => wal.StepInstanceId)
                 .OnDelete(DeleteBehavior.NoAction); // Optional relationship
-                
+
             entity.HasOne(wal => wal.PerformedBy)
                 .WithMany()
                 .HasForeignKey(wal => wal.PerformedById)
@@ -803,32 +823,32 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(a => a.Criticality);
             entity.HasIndex(a => a.ParentAssetId);
             entity.HasIndex(a => a.SerialNumber);
-            
+
             entity.HasOne(a => a.AssetCategory)
                 .WithMany(c => c.Assets)
                 .HasForeignKey(a => a.AssetCategoryId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             entity.HasOne(a => a.ParentAsset)
                 .WithMany(pa => pa.ChildAssets)
                 .HasForeignKey(a => a.ParentAssetId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
-        
+
         // Configure MaintenanceAssetCategory entity
         builder.Entity<MaintenanceAssetCategory>(entity =>
         {
             entity.HasIndex(c => c.Code);
             entity.HasIndex(c => c.IsActive);
             entity.HasIndex(c => c.ParentCategoryId);
-            
+
             // Configure parent-child relationship
             entity.HasOne(c => c.ParentCategory)
                 .WithMany(pc => pc.ChildCategories)
                 .HasForeignKey(c => c.ParentCategoryId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
-        
+
         // Configure WorkOrder entity
         builder.Entity<WorkOrder>(entity =>
         {
@@ -841,80 +861,80 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wo => wo.RequestedCompletionDate);
             entity.HasIndex(wo => wo.ParentWorkOrderId);
             entity.HasIndex(wo => wo.MaintenanceScheduleId);
-            
+
             entity.HasOne(wo => wo.Asset)
                 .WithMany(a => a.WorkOrders)
                 .HasForeignKey(wo => wo.AssetId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             entity.HasOne(wo => wo.WorkOrderType)
                 .WithMany(wot => wot.WorkOrders)
                 .HasForeignKey(wo => wo.WorkOrderTypeId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             entity.HasOne(wo => wo.MaintenanceType)
                 .WithMany(mt => mt.WorkOrders)
                 .HasForeignKey(wo => wo.MaintenanceTypeId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             entity.HasOne(wo => wo.PriorityLevel)
                 .WithMany(pl => pl.WorkOrders)
                 .HasForeignKey(wo => wo.PriorityLevelId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             entity.HasOne(wo => wo.AssignedTechnician)
                 .WithMany(e => e.AssignedWorkOrders)
                 .HasForeignKey(wo => wo.AssignedTechnicianId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(wo => wo.AssignedTeam)
                 .WithMany(t => t.WorkOrders)
                 .HasForeignKey(wo => wo.AssignedTeamId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(wo => wo.RequestedBy)
                 .WithMany()
                 .HasForeignKey(wo => wo.RequestedById)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(wo => wo.ApprovedBy)
                 .WithMany()
                 .HasForeignKey(wo => wo.ApprovedById)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(wo => wo.Supervisor)
                 .WithMany()
                 .HasForeignKey(wo => wo.SupervisorId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(wo => wo.CompletedBy)
                 .WithMany()
                 .HasForeignKey(wo => wo.CompletedById)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(wo => wo.QualityCheckedBy)
                 .WithMany()
                 .HasForeignKey(wo => wo.QualityCheckedById)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(wo => wo.ParentWorkOrder)
                 .WithMany(pwo => pwo.ChildWorkOrders)
                 .HasForeignKey(wo => wo.ParentWorkOrderId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             entity.HasOne(wo => wo.MaintenanceSchedule)
                 .WithMany()
                 .HasForeignKey(wo => wo.MaintenanceScheduleId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure WorkOrderType entity
         builder.Entity<WorkOrderType>(entity =>
         {
             entity.HasIndex(wot => wot.Code);
             entity.HasIndex(wot => wot.IsActive);
         });
-        
+
         // Configure MaintenanceType entity
         builder.Entity<MaintenanceType>(entity =>
         {
@@ -922,14 +942,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(mt => mt.Category);
             entity.HasIndex(mt => mt.IsActive);
         });
-        
+
         // Configure PriorityLevel entity
         builder.Entity<PriorityLevel>(entity =>
         {
             entity.HasIndex(pl => pl.Level).IsUnique();
             entity.HasIndex(pl => pl.IsActive);
         });
-        
+
         // Configure WorkOrderTask entity
         builder.Entity<WorkOrderTask>(entity =>
         {
@@ -937,18 +957,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wot => wot.AssignedTechnicianId);
             entity.HasIndex(wot => wot.Status);
             entity.HasIndex(wot => wot.Sequence);
-            
+
             entity.HasOne(wot => wot.WorkOrder)
                 .WithMany(wo => wo.Tasks)
                 .HasForeignKey(wot => wot.WorkOrderId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(wot => wot.AssignedTechnician)
                 .WithMany()
                 .HasForeignKey(wot => wot.AssignedTechnicianId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure WorkOrderPart entity
         builder.Entity<WorkOrderPart>(entity =>
         {
@@ -956,13 +976,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wop => wop.ItemCode);
             entity.HasIndex(wop => wop.Status);
             entity.HasIndex(wop => wop.InventoryItemId);
-            
+
             entity.HasOne(wop => wop.WorkOrder)
                 .WithMany(wo => wo.Parts)
                 .HasForeignKey(wop => wop.WorkOrderId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-        
+
         // Configure WorkOrderLabor entity
         builder.Entity<WorkOrderLabor>(entity =>
         {
@@ -970,18 +990,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wol => wol.TechnicianId);
             entity.HasIndex(wol => wol.StartTime);
             entity.HasIndex(wol => wol.LaborType);
-            
+
             entity.HasOne(wol => wol.WorkOrder)
                 .WithMany(wo => wo.Labor)
                 .HasForeignKey(wol => wol.WorkOrderId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(wol => wol.Technician)
                 .WithMany()
                 .HasForeignKey(wol => wol.TechnicianId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
-        
+
         // Configure WorkOrderDocument entity
         builder.Entity<WorkOrderDocument>(entity =>
         {
@@ -989,18 +1009,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wod => wod.DocumentType);
             entity.HasIndex(wod => wod.UploadedById);
             entity.HasIndex(wod => wod.UploadedAt);
-            
+
             entity.HasOne(wod => wod.WorkOrder)
                 .WithMany(wo => wo.Documents)
                 .HasForeignKey(wod => wod.WorkOrderId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(wod => wod.UploadedBy)
                 .WithMany()
                 .HasForeignKey(wod => wod.UploadedById)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure WorkOrderComment entity
         builder.Entity<WorkOrderComment>(entity =>
         {
@@ -1008,18 +1028,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(woc => woc.EmployeeId);
             entity.HasIndex(woc => woc.CreatedAt);
             entity.HasIndex(woc => woc.CommentType);
-            
+
             entity.HasOne(woc => woc.WorkOrder)
                 .WithMany(wo => wo.Comments)
                 .HasForeignKey(woc => woc.WorkOrderId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(woc => woc.User)
                 .WithMany()
                 .HasForeignKey(woc => woc.EmployeeId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure MaintenanceSchedule entity
         builder.Entity<MaintenanceSchedule>(entity =>
         {
@@ -1029,33 +1049,33 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ms => ms.IsActive);
             entity.HasIndex(ms => ms.NextDueDate);
             entity.HasIndex(ms => ms.LastGeneratedDate);
-            
+
             entity.HasOne(ms => ms.Asset)
                 .WithMany(a => a.MaintenanceSchedules)
                 .HasForeignKey(ms => ms.AssetId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(ms => ms.MaintenanceType)
                 .WithMany()
                 .HasForeignKey(ms => ms.MaintenanceTypeId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             entity.HasOne(ms => ms.DefaultTechnician)
                 .WithMany()
                 .HasForeignKey(ms => ms.DefaultTechnicianId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(ms => ms.DefaultTeam)
                 .WithMany()
                 .HasForeignKey(ms => ms.DefaultTeamId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(ms => ms.PriorityLevel)
                 .WithMany()
                 .HasForeignKey(ms => ms.PriorityLevelId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure InspectionTemplate entity
         builder.Entity<InspectionTemplate>(entity =>
         {
@@ -1063,7 +1083,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(it => it.InspectionType);
             entity.HasIndex(it => it.IsActive);
         });
-        
+
         // Configure AssetInspection entity
         builder.Entity<AssetInspection>(entity =>
         {
@@ -1075,47 +1095,47 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ai => ai.OverallResult);
             entity.HasIndex(ai => ai.NextInspectionDue);
             entity.HasIndex(ai => ai.IsRegulatoryRequired);
-            
+
             entity.HasOne(ai => ai.Asset)
                 .WithMany(a => a.Inspections)
                 .HasForeignKey(ai => ai.AssetId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(ai => ai.InspectionTemplate)
                 .WithMany(it => it.Inspections)
                 .HasForeignKey(ai => ai.InspectionTemplateId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             entity.HasOne(ai => ai.Inspector)
                 .WithMany()
                 .HasForeignKey(ai => ai.InspectorId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure InspectionDocument entity
         builder.Entity<InspectionDocument>(entity =>
         {
             entity.HasIndex(id => id.InspectionId);
             entity.HasIndex(id => id.DocumentType);
-            
+
             entity.HasOne(id => id.Inspection)
                 .WithMany(ai => ai.Documents)
                 .HasForeignKey(id => id.InspectionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-        
+
         // Configure TechnicianTeam entity
         builder.Entity<TechnicianTeam>(entity =>
         {
             entity.HasIndex(tt => tt.TeamLeaderId);
             entity.HasIndex(tt => tt.Status);
-            
+
             entity.HasOne(tt => tt.TeamLeader)
                 .WithMany()
                 .HasForeignKey(tt => tt.TeamLeaderId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure TechnicianTeamMember entity
         builder.Entity<TechnicianTeamMember>(entity =>
         {
@@ -1123,25 +1143,25 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ttm => ttm.TechnicianId);
             entity.HasIndex(ttm => ttm.IsActive);
             entity.HasIndex(ttm => new { ttm.TeamId, ttm.TechnicianId });
-            
+
             entity.HasOne(ttm => ttm.Team)
                 .WithMany(tt => tt.Members)
                 .HasForeignKey(ttm => ttm.TeamId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(ttm => ttm.Technician)
                 .WithMany()
                 .HasForeignKey(ttm => ttm.TechnicianId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
-        
+
         // Configure TechnicianSkill entity
         builder.Entity<TechnicianSkill>(entity =>
         {
             entity.HasIndex(ts => ts.Category);
             entity.HasIndex(ts => ts.IsActive);
         });
-        
+
         // Configure UserTechnicianSkill entity
         builder.Entity<UserTechnicianSkill>(entity =>
         {
@@ -1150,18 +1170,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(uts => uts.ProficiencyLevel);
             entity.HasIndex(uts => uts.CertificationExpiry);
             entity.HasIndex(uts => new { uts.EmployeeId, uts.SkillId }).IsUnique();
-            
+
             entity.HasOne(uts => uts.Employee)
                 .WithMany()
                 .HasForeignKey(uts => uts.EmployeeId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(uts => uts.Skill)
                 .WithMany(ts => ts.UserSkills)
                 .HasForeignKey(uts => uts.SkillId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-        
+
         // Configure AssetDowntime entity
         builder.Entity<AssetDowntime>(entity =>
         {
@@ -1170,25 +1190,25 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ad => ad.Status);
             entity.HasIndex(ad => ad.StartTime);
             entity.HasIndex(ad => ad.Reason);
-            
+
             entity.HasOne(ad => ad.Asset)
                 .WithMany(a => a.Downtimes)
                 .HasForeignKey(ad => ad.AssetId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(ad => ad.WorkOrder)
                 .WithMany()
                 .HasForeignKey(ad => ad.WorkOrderId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure AssetType entity
         builder.Entity<AssetType>(entity =>
         {
             entity.HasIndex(at => at.Code).IsUnique();
             entity.HasIndex(at => at.IsActive);
         });
-        
+
         // Configure AssetTypeField entity
         builder.Entity<AssetTypeField>(entity =>
         {
@@ -1196,13 +1216,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(atf => atf.FieldName);
             entity.HasIndex(atf => atf.DisplayOrder);
             entity.HasIndex(atf => atf.IsActive);
-            
+
             entity.HasOne(atf => atf.AssetType)
                 .WithMany(at => at.CustomFields)
                 .HasForeignKey(atf => atf.AssetTypeId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-        
+
         // Configure TechnicianSchedule entity
         builder.Entity<TechnicianSchedule>(entity =>
         {
@@ -1212,23 +1232,23 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ts => ts.StartDate);
             entity.HasIndex(ts => ts.Status);
             entity.HasIndex(ts => ts.ScheduleType);
-            
+
             entity.HasOne(ts => ts.Technician)
                 .WithMany()
                 .HasForeignKey(ts => ts.TechnicianId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(ts => ts.WorkOrder)
                 .WithMany()
                 .HasForeignKey(ts => ts.WorkOrderId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(ts => ts.Shift)
                 .WithMany(s => s.Schedules)
                 .HasForeignKey(ts => ts.ShiftId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure TechnicianAvailability entity
         builder.Entity<TechnicianAvailability>(entity =>
         {
@@ -1236,22 +1256,22 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ta => ta.StartDate);
             entity.HasIndex(ta => ta.AvailabilityType);
             entity.HasIndex(ta => ta.Reason);
-            
+
             entity.HasOne(ta => ta.Technician)
                 .WithMany()
                 .HasForeignKey(ta => ta.TechnicianId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-        
+
         // Configure TechnicianShift entity
         builder.Entity<TechnicianShift>(entity =>
         {
             entity.HasIndex(ts => ts.IsActive);
             entity.HasIndex(ts => ts.StartTime);
         });
-        
+
         // Configure new maintenance entities
-        
+
         // Configure TechnicalSkill entity
         builder.Entity<TechnicalSkill>(entity =>
         {
@@ -1265,7 +1285,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ts => ts.IsFromHRModule);
             entity.HasIndex(ts => ts.LastSyncDate);
         });
-        
+
         // Configure TechnicianSkillAssignment entity
         builder.Entity<TechnicianSkillAssignment>(entity =>
         {
@@ -1276,18 +1296,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(tsa => tsa.ExpirationDate);
             entity.HasIndex(tsa => tsa.LastAssessmentDate);
             entity.HasIndex(tsa => new { tsa.TechnicianId, tsa.SkillId }).IsUnique();
-            
+
             entity.HasOne(tsa => tsa.Technician)
                 .WithMany()
                 .HasForeignKey(tsa => tsa.TechnicianId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(tsa => tsa.Skill)
                 .WithMany(ts => ts.TechnicianAssignments)
                 .HasForeignKey(tsa => tsa.SkillId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
-        
+
         // Configure SafetyProtocol entity
         builder.Entity<SafetyProtocol>(entity =>
         {
@@ -1300,7 +1320,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(sp => sp.EffectiveDate);
             entity.HasIndex(sp => sp.NextReviewDate);
         });
-        
+
         // Configure SafetyComplianceRecord entity
         builder.Entity<SafetyComplianceRecord>(entity =>
         {
@@ -1310,33 +1330,33 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(scr => scr.ComplianceDate);
             entity.HasIndex(scr => scr.ComplianceStatus);
             entity.HasIndex(scr => scr.InspectorId);
-            
+
             entity.HasOne(scr => scr.SafetyProtocol)
                 .WithMany()
                 .HasForeignKey(scr => scr.SafetyProtocolId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(scr => scr.Technician)
                 .WithMany()
                 .HasForeignKey(scr => scr.TechnicianId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             entity.HasOne(scr => scr.WorkOrder)
                 .WithMany()
                 .HasForeignKey(scr => scr.WorkOrderId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(scr => scr.Inspector)
                 .WithMany()
                 .HasForeignKey(scr => scr.InspectorId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(scr => scr.VerifiedBy)
                 .WithMany()
                 .HasForeignKey(scr => scr.VerifiedById)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure JobCard entity
         builder.Entity<JobCard>(entity =>
         {
@@ -1350,43 +1370,43 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(jc => jc.ApprovalStatus);
             entity.HasIndex(jc => jc.RequestedDate);
             entity.HasIndex(jc => jc.RequiredCompletionDate);
-            
+
             entity.HasOne(jc => jc.Asset)
                 .WithMany()
                 .HasForeignKey(jc => jc.AssetId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             entity.HasOne(jc => jc.MaintenanceType)
                 .WithMany(mt => mt.JobCards)
                 .HasForeignKey(jc => jc.MaintenanceTypeId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             entity.HasOne(jc => jc.PriorityLevel)
                 .WithMany()
                 .HasForeignKey(jc => jc.PriorityLevelId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             entity.HasOne(jc => jc.RequestedBy)
                 .WithMany()
                 .HasForeignKey(jc => jc.RequestedById)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(jc => jc.PreferredTechnician)
                 .WithMany()
                 .HasForeignKey(jc => jc.PreferredTechnicianId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(jc => jc.AssignedTechnician)
                 .WithMany()
                 .HasForeignKey(jc => jc.AssignedTechnicianId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(jc => jc.GeneratedWorkOrder)
                 .WithMany()
                 .HasForeignKey(jc => jc.GeneratedWorkOrderId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure JobCardComment entity
         builder.Entity<JobCardComment>(entity =>
         {
@@ -1395,18 +1415,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(jcc => jcc.CommentById);
             entity.HasIndex(jcc => jcc.CommentDate);
             entity.HasIndex(jcc => jcc.CommentType);
-            
+
             entity.HasOne(jcc => jcc.JobCard)
                 .WithMany(jc => jc.Comments)
                 .HasForeignKey(jcc => jcc.JobCardId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(jcc => jcc.CommentBy)
                 .WithMany()
                 .HasForeignKey(jcc => jcc.CommentById)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure JobCardDocument entity
         builder.Entity<JobCardDocument>(entity =>
         {
@@ -1415,18 +1435,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(jcd => jcd.DocumentType);
             entity.HasIndex(jcd => jcd.UploadedById);
             entity.HasIndex(jcd => jcd.UploadedDate);
-            
+
             entity.HasOne(jcd => jcd.JobCard)
                 .WithMany(jc => jc.Documents)
                 .HasForeignKey(jcd => jcd.JobCardId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(jcd => jcd.UploadedBy)
                 .WithMany()
                 .HasForeignKey(jcd => jcd.UploadedById)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure JobCardApprovalStep entity
         builder.Entity<JobCardApprovalStep>(entity =>
         {
@@ -1435,25 +1455,25 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(jcas => jcas.ApproverId);
             entity.HasIndex(jcas => jcas.StepOrder);
             entity.HasIndex(jcas => jcas.Status);
-            
+
             entity.HasOne(jcas => jcas.JobCard)
                 .WithMany(jc => jc.ApprovalSteps)
                 .HasForeignKey(jcas => jcas.JobCardId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(jcas => jcas.Approver)
                 .WithMany()
                 .HasForeignKey(jcas => jcas.ApproverId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure Quality Control entities
         ConfigureQualityControlEntities(builder);
-        
+
         // Configure Technician entity (now using Employee entity directly)
         // Technician-specific configurations are handled in the Employee entity configuration
     }
-    
+
     private void ConfigureQualityControlEntities(ModelBuilder builder)
     {
         // Configure QualityControlChecklist entity
@@ -1466,13 +1486,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(qcc => qcc.IsActive);
             entity.HasIndex(qcc => qcc.IsMandatory);
             entity.HasIndex(qcc => qcc.Version);
-            
+
             entity.HasMany(qcc => qcc.QualityChecks)
                 .WithOne(wqc => wqc.Checklist)
                 .HasForeignKey(wqc => wqc.ChecklistId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
-        
+
         // Configure WorkOrderQualityCheck entity
         builder.Entity<WorkOrderQualityCheck>(entity =>
         {
@@ -1483,13 +1503,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wqc => wqc.OverallResult);
             entity.HasIndex(wqc => wqc.Score);
             entity.HasIndex(wqc => wqc.RequiresFollowUp);
-            
+
             entity.HasMany(wqc => wqc.RelatedRework)
                 .WithOne()
                 .HasForeignKey("WorkOrderQualityCheckId")
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure WorkOrderQualitySignOff entity
         builder.Entity<WorkOrderQualitySignOff>(entity =>
         {
@@ -1501,28 +1521,28 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wqso => wqso.SignOffDate);
             entity.HasIndex(wqso => wqso.IsRequired);
             entity.HasIndex(wqso => wqso.SortOrder);
-            
+
             entity.HasOne(wqso => wqso.WorkOrder)
                 .WithMany()
                 .HasForeignKey(wqso => wqso.WorkOrderId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(wqso => wqso.SignOffBy)
                 .WithMany()
                 .HasForeignKey(wqso => wqso.SignOffById)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(wqso => wqso.DelegatedTo)
                 .WithMany()
                 .HasForeignKey(wqso => wqso.DelegatedToId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasMany(wqso => wqso.ChecklistItems)
                 .WithOne(qscl => qscl.SignOff)
                 .HasForeignKey(qscl => qscl.SignOffId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-        
+
         // Configure QualitySignOffChecklist entity
         builder.Entity<QualitySignOffChecklist>(entity =>
         {
@@ -1533,13 +1553,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(qscl => qscl.SortOrder);
             entity.HasIndex(qscl => qscl.CheckedDate);
             entity.HasIndex(qscl => qscl.CheckedById);
-            
+
             entity.HasOne(qscl => qscl.CheckedBy)
                 .WithMany()
                 .HasForeignKey(qscl => qscl.CheckedById)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure WorkOrderRework entity
         builder.Entity<WorkOrderRework>(entity =>
         {
@@ -1551,18 +1571,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wor => wor.AssignedTechnicianId);
             entity.HasIndex(wor => wor.IdentifiedDate);
             entity.HasIndex(wor => wor.TargetCompletionDate);
-            
+
             entity.HasOne(wor => wor.WorkOrder)
                 .WithMany()
                 .HasForeignKey(wor => wor.WorkOrderId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasMany(wor => wor.ReworkTasks)
                 .WithOne(wort => wort.WorkOrderRework)
                 .HasForeignKey(wort => wort.WorkOrderReworkId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-        
+
         // Configure WorkOrderReworkTask entity
         builder.Entity<WorkOrderReworkTask>(entity =>
         {
@@ -1572,7 +1592,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wort => wort.CompletedDate);
             entity.HasIndex(wort => wort.CompletedById);
         });
-        
+
         // Configure InspectionApproval entity
         builder.Entity<InspectionApproval>(entity =>
         {
@@ -1585,23 +1605,23 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ia => ia.ApprovedDate);
             entity.HasIndex(ia => ia.Priority);
             entity.HasIndex(ia => ia.DelegatedToId);
-            
+
             entity.HasOne(ia => ia.Inspection)
                 .WithMany()
                 .HasForeignKey(ia => ia.InspectionId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(ia => ia.Approver)
                 .WithMany()
                 .HasForeignKey(ia => ia.ApproverId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(ia => ia.DelegatedTo)
                 .WithMany()
                 .HasForeignKey(ia => ia.DelegatedToId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure WorkOrderRejection entity
         builder.Entity<WorkOrderRejection>(entity =>
         {
@@ -1614,43 +1634,43 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wor => wor.ReworkAssignedToId);
             entity.HasIndex(wor => wor.RequiresReinspection);
             entity.HasIndex(wor => wor.IsEscalated);
-            
+
             entity.HasOne(wor => wor.WorkOrder)
                 .WithMany()
                 .HasForeignKey(wor => wor.WorkOrderId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(wor => wor.RejectedBy)
                 .WithMany()
                 .HasForeignKey(wor => wor.RejectedById)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(wor => wor.ReworkAssignedTo)
                 .WithMany()
                 .HasForeignKey(wor => wor.ReworkAssignedToId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(wor => wor.ResolvedBy)
                 .WithMany()
                 .HasForeignKey(wor => wor.ResolvedById)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(wor => wor.ReinspectedBy)
                 .WithMany()
                 .HasForeignKey(wor => wor.ReinspectedById)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(wor => wor.EscalatedTo)
                 .WithMany()
                 .HasForeignKey(wor => wor.EscalatedToId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasMany(wor => wor.FollowUps)
                 .WithOne(rfu => rfu.Rejection)
                 .HasForeignKey(rfu => rfu.RejectionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-        
+
         // Configure RejectionFollowUp entity
         builder.Entity<RejectionFollowUp>(entity =>
         {
@@ -1661,18 +1681,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(rfu => rfu.CompletedDate);
             entity.HasIndex(rfu => rfu.CompletedById);
             entity.HasIndex(rfu => rfu.Priority);
-            
+
             entity.HasOne(rfu => rfu.AssignedTo)
                 .WithMany()
                 .HasForeignKey(rfu => rfu.AssignedToId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(rfu => rfu.CompletedBy)
                 .WithMany()
                 .HasForeignKey(rfu => rfu.CompletedById)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure InspectionChecklistTemplate entity
         builder.Entity<InspectionChecklistTemplate>(entity =>
         {
@@ -1682,13 +1702,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ict => ict.IsDefault);
             entity.HasIndex(ict => ict.SortOrder);
             entity.HasIndex(ict => ict.Version);
-            
+
             entity.HasMany(ict => ict.ChecklistItems)
                 .WithOne(ici => ici.Template)
                 .HasForeignKey(ici => ici.TemplateId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-        
+
         // Configure InspectionChecklistItem entity
         builder.Entity<InspectionChecklistItem>(entity =>
         {
@@ -1700,7 +1720,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ici => ici.SortOrder);
             entity.HasIndex(ici => ici.RequiresPhoto);
         });
-        
+
         // Configure QualityMetrics entity
         builder.Entity<QualityMetrics>(entity =>
         {
@@ -1711,7 +1731,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(qm => qm.CalculatedDate);
         });
     }
-    
+
     private void ConfigureHREntities(ModelBuilder builder)
     {
         // Configure Employee entity
@@ -1726,50 +1746,62 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(e => e.ManagerId);
             entity.HasIndex(e => e.DateEmployed);
             entity.HasIndex(e => e.IsActive);
-            
+
             // Self-referencing relationship for Manager/DirectReports
             entity.HasOne(e => e.Manager)
                 .WithMany(m => m.DirectReports)
                 .HasForeignKey(e => e.ManagerId)
-                .OnDelete(DeleteBehavior.Restrict); // Prevent cascading deletes
-            
+                .OnDelete(DeleteBehavior.NoAction); // Prevent cascading deletes
+
+            // Division relationship
+            entity.HasOne(e => e.Division)
+                .WithMany(d => d.Employees)
+                .HasForeignKey(e => e.DivisionId)
+                .OnDelete(DeleteBehavior.NoAction);
+
             // Department relationship
             entity.HasOne(e => e.Department)
                 .WithMany(d => d.Employees)
                 .HasForeignKey(e => e.DepartmentId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             // Position relationship
             entity.HasOne(e => e.Position)
                 .WithMany(p => p.Employees)
                 .HasForeignKey(e => e.PositionId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             // Section relationship
             entity.HasOne(e => e.Section)
                 .WithMany(s => s.Employees)
                 .HasForeignKey(e => e.SectionId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
+            // Unit relationship
+            entity.HasOne(e => e.Unit)
+                .WithMany(u => u.Employees)
+                .HasForeignKey(e => e.UnitId)
+                .OnDelete(DeleteBehavior.NoAction);
+
             // Country relationship
             entity.HasOne(e => e.Country)
                 .WithMany(c => c.Employees)
                 .HasForeignKey(e => e.CountryId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             // Shift relationship
             entity.HasOne(e => e.Shift)
                 .WithMany(s => s.Employees)
                 .HasForeignKey(e => e.ShiftId)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             // Station relationship
             entity.HasOne(e => e.Station)
                 .WithMany(ws => ws.Employees)
                 .HasForeignKey(e => e.StationId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure Department entity
         builder.Entity<Department>(entity =>
         {
@@ -1779,20 +1811,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(d => d.ParentDepartmentId);
             entity.HasIndex(d => d.DepartmentHeadId);
             entity.HasIndex(d => d.IsActive);
-            
+
             // Self-referencing relationship for parent/child departments
             entity.HasOne(d => d.ParentDepartment)
                 .WithMany(pd => pd.SubDepartments)
                 .HasForeignKey(d => d.ParentDepartmentId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             // Department head relationship
             entity.HasOne(d => d.DepartmentHead)
                 .WithMany()
                 .HasForeignKey(d => d.DepartmentHeadId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // Configure Section entity
         builder.Entity<Section>(entity =>
         {
@@ -1800,18 +1832,63 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(s => s.DepartmentId);
             entity.HasIndex(s => s.SectionHeadId);
             entity.HasIndex(s => s.IsActive);
-            
+
             // Department relationship
             entity.HasOne(s => s.Department)
                 .WithMany(d => d.Sections)
                 .HasForeignKey(s => s.DepartmentId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             // Section head relationship
             entity.HasOne(s => s.SectionHead)
                 .WithMany()
                 .HasForeignKey(s => s.SectionHeadId)
                 .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure Section entity
+        builder.Entity<Unit>(entity =>
+        {
+            entity.HasIndex(u => u.Name);
+            entity.HasIndex(u => u.Code);
+            entity.HasIndex(u => u.UnitHeadId);
+            entity.HasIndex(u => u.IsActive);
+
+            // Section relationship
+            entity.HasOne(u => u.Section)
+                .WithMany(s => s.Units)
+                .HasForeignKey(u => u.SectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Unit head relationship
+            entity.HasOne(u => u.UnitHead)
+                .WithMany()
+                .HasForeignKey(u => u.UnitHeadId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure Division entity
+        builder.Entity<Division>(entity =>
+        {
+            entity.HasIndex(d => d.Name);
+            entity.HasIndex(d => d.Code);
+            entity.HasIndex(d => d.DivisionHeadId);
+            entity.HasIndex(d => d.IsActive);
+
+            // Division head relationship
+            entity.HasOne(d => d.DivisionHead)
+                .WithMany()
+                .HasForeignKey(d => d.DivisionHeadId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure Position History entity
+        builder.Entity<EmployeePositionHistory>(entity =>
+        {
+            entity.HasOne(h => h.Position)
+                .WithMany(p => p.PositionHistories)
+                .HasForeignKey(h => h.PositionId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 
@@ -1913,16 +1990,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 }
             );
         }
-        
+
         // Seed permissions
         SeedPermissions(builder);
     }
-    
+
     private void SeedPermissions(ModelBuilder builder)
     {
         var permissions = new List<Permission>();
         var permissionId = 1;
-        
+
         // User Management permissions
         var userPermissions = new[]
         {
@@ -1931,7 +2008,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             ("users.update", "Update Users", "Edit existing user accounts"),
             ("users.delete", "Delete Users", "Delete user accounts")
         };
-        
+
         foreach (var (name, displayName, description) in userPermissions)
         {
             permissions.Add(new Permission
@@ -1946,7 +2023,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             });
             permissionId++;
         }
-        
+
         // Role Management permissions
         var rolePermissions = new[]
         {
@@ -1955,7 +2032,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             ("roles.update", "Update Roles", "Edit existing roles"),
             ("roles.delete", "Delete Roles", "Delete roles")
         };
-        
+
         foreach (var (name, displayName, description) in rolePermissions)
         {
             permissions.Add(new Permission
@@ -1970,7 +2047,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             });
             permissionId++;
         }
-        
+
         // Dashboard & Reports permissions
         var dashboardPermissions = new[]
         {
@@ -1979,7 +2056,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             ("reports.create", "Create Reports", "Generate custom reports"),
             ("analytics.read", "View Analytics", "Access analytics data")
         };
-        
+
         foreach (var (name, displayName, description) in dashboardPermissions)
         {
             permissions.Add(new Permission
@@ -1994,7 +2071,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             });
             permissionId++;
         }
-        
+
         // System Administration permissions
         var adminPermissions = new[]
         {
@@ -2003,7 +2080,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             ("settings.update", "Update Settings", "Modify system settings"),
             ("audit.read", "View Audit Logs", "Access audit trail")
         };
-        
+
         foreach (var (name, displayName, description) in adminPermissions)
         {
             permissions.Add(new Permission
@@ -2018,17 +2095,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             });
             permissionId++;
         }
-        
+
         builder.Entity<Permission>().HasData(permissions.ToArray());
-        
+
         // Seed role-permission relationships
         SeedRolePermissions(builder, permissions);
     }
-    
+
     private void SeedRolePermissions(ModelBuilder builder, List<Permission> permissions)
     {
         var rolePermissions = new List<RolePermission>();
-        
+
         // SuperAdmin gets all permissions
         var superAdminRoleId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         foreach (var permission in permissions)
@@ -2041,13 +2118,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 GrantedBy = "System"
             });
         }
-        
+
         // TenantAdmin gets most permissions except user management of SuperAdmin
         var tenantAdminRoleId = Guid.Parse("00000000-0000-0000-0000-000000000002");
-        var tenantAdminPermissions = permissions.Where(p => 
-            p.Category != "System Administration" || 
+        var tenantAdminPermissions = permissions.Where(p =>
+            p.Category != "System Administration" ||
             (p.Category == "System Administration" && p.Name != "admin.read")).ToList();
-            
+
         foreach (var permission in tenantAdminPermissions)
         {
             rolePermissions.Add(new RolePermission
@@ -2058,14 +2135,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 GrantedBy = "System"
             });
         }
-        
+
         // Manager gets read permissions and basic management
         var managerRoleId = Guid.Parse("00000000-0000-0000-0000-000000000003");
-        var managerPermissions = permissions.Where(p => 
-            p.Name.EndsWith(".read") || 
-            p.Name == "users.update" || 
+        var managerPermissions = permissions.Where(p =>
+            p.Name.EndsWith(".read") ||
+            p.Name == "users.update" ||
             p.Name == "reports.create").ToList();
-            
+
         foreach (var permission in managerPermissions)
         {
             rolePermissions.Add(new RolePermission
@@ -2076,14 +2153,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 GrantedBy = "System"
             });
         }
-        
+
         // Employee gets basic read permissions
         var employeeRoleId = Guid.Parse("00000000-0000-0000-0000-000000000004");
-        var employeePermissions = permissions.Where(p => 
-            p.Name == "dashboard.read" || 
-            p.Name == "reports.read" || 
+        var employeePermissions = permissions.Where(p =>
+            p.Name == "dashboard.read" ||
+            p.Name == "reports.read" ||
             p.Name == "users.read").ToList();
-            
+
         foreach (var permission in employeePermissions)
         {
             rolePermissions.Add(new RolePermission
@@ -2094,7 +2171,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 GrantedBy = "System"
             });
         }
-        
+
         builder.Entity<RolePermission>().HasData(rolePermissions.ToArray());
     }
 
@@ -2132,7 +2209,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             }
         }
     }
-    
+
     private void ConfigureDecimalPrecision(ModelBuilder builder)
     {
         // Configure decimal precision for all decimal properties to avoid SQL Server warnings
@@ -2143,7 +2220,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 if (property.ClrType == typeof(decimal) || property.ClrType == typeof(decimal?))
                 {
                     // Use precision 18,4 for most decimal fields, 18,2 for currency
-                    if (property.Name.Contains("Cost") || property.Name.Contains("Price") || 
+                    if (property.Name.Contains("Cost") || property.Name.Contains("Price") ||
                         property.Name.Contains("Amount") || property.Name.Contains("Total") ||
                         property.Name.Contains("Salary"))
                     {
@@ -2157,7 +2234,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             }
         }
     }
-    
+
     private void ConfigureGlobalTenantRelationships(ModelBuilder builder)
     {
         // Configure all TenantEntity relationships to use Restrict instead of Cascade
@@ -2170,13 +2247,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 var tenantForeignKeys = entityType.GetForeignKeys()
                     .Where(fk => fk.PrincipalEntityType.ClrType == typeof(Tenant))
                     .ToList();
-                    
+
                 foreach (var fk in tenantForeignKeys)
                 {
                     // Update the delete behavior to Restrict
                     fk.DeleteBehavior = DeleteBehavior.Restrict;
                 }
-                
+
                 // If no foreign key exists, create one
                 if (!tenantForeignKeys.Any())
                 {
@@ -2193,8 +2270,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             }
         }
     }
-    
-    
+
+
     private void ConfigureInventoryEntities(ModelBuilder builder)
     {
         // InventoryItem entity
@@ -2206,26 +2283,26 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(i => i.ABCClass);
             entity.HasIndex(i => i.IsSerialTracked);
             entity.HasIndex(i => i.IsLotTracked);
-            
+
             entity.HasOne(i => i.Category)
                 .WithMany(c => c.Items)
                 .HasForeignKey(i => i.CategoryId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
-        
+
         // InventoryCategory entity
         builder.Entity<InventoryCategory>(entity =>
         {
             entity.HasIndex(c => c.Code);
             entity.HasIndex(c => c.ParentCategoryId);
             entity.HasIndex(c => c.IsActive);
-            
+
             entity.HasOne(c => c.ParentCategory)
                 .WithMany(pc => pc.SubCategories)
                 .HasForeignKey(c => c.ParentCategoryId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
-        
+
         // Warehouse entity
         builder.Entity<Warehouse>(entity =>
         {
@@ -2233,7 +2310,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(w => w.IsActive);
             entity.HasIndex(w => w.WarehouseType);
         });
-        
+
         // WarehouseLocation entity
         builder.Entity<WarehouseLocation>(entity =>
         {
@@ -2241,20 +2318,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wl => wl.WarehouseId);
             entity.HasIndex(wl => wl.ParentLocationId);
             entity.HasIndex(wl => wl.IsActive);
-            
+
             // Warehouse relationship with Restrict to avoid cascade conflicts
             entity.HasOne(wl => wl.Warehouse)
                 .WithMany(w => w.Locations)
                 .HasForeignKey(wl => wl.WarehouseId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             // Self-referencing relationship for parent/child locations
             entity.HasOne(wl => wl.ParentLocation)
                 .WithMany(pl => pl.ChildLocations)
                 .HasForeignKey(wl => wl.ParentLocationId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
-        
+
         // StockMovement entity
         builder.Entity<StockMovement>(entity =>
         {
@@ -2264,28 +2341,28 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(sm => sm.MovementDate);
             entity.HasIndex(sm => sm.ReferenceType);
             entity.HasIndex(sm => sm.ReferenceNumber);
-            
+
             entity.HasOne(sm => sm.InventoryItem)
                 .WithMany(ii => ii.StockMovements)
                 .HasForeignKey(sm => sm.InventoryItemId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             entity.HasOne(sm => sm.Location)
                 .WithMany()
                 .HasForeignKey(sm => sm.LocationId)
                 .OnDelete(DeleteBehavior.SetNull);
-                
+
             entity.HasOne(sm => sm.ProcessedBy)
                 .WithMany()
                 .HasForeignKey(sm => sm.ProcessedById)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(sm => sm.ApprovedBy)
                 .WithMany()
                 .HasForeignKey(sm => sm.ApprovedById)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // PurchaseOrder entity
         builder.Entity<PurchaseOrder>(entity =>
         {
@@ -2293,31 +2370,31 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(po => po.Status);
             entity.HasIndex(po => po.OrderDate);
             entity.HasIndex(po => po.RequestedById);
-            
+
             entity.HasOne(po => po.RequestedBy)
                 .WithMany()
                 .HasForeignKey(po => po.RequestedById)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // PurchaseOrderItem entity
         builder.Entity<PurchaseOrderItem>(entity =>
         {
             entity.HasIndex(poi => poi.PurchaseOrderId);
             entity.HasIndex(poi => poi.InventoryItemId);
-            
+
             entity.HasOne(poi => poi.PurchaseOrder)
                 .WithMany(po => po.Items)
                 .HasForeignKey(poi => poi.PurchaseOrderId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             // Note: InventoryItem navigation is not configured due to cross-module dependencies
             // entity.HasOne(poi => poi.InventoryItem)
             //     .WithMany(ii => ii.PurchaseOrderItems)
             //     .HasForeignKey(poi => poi.InventoryItemId)
             //     .OnDelete(DeleteBehavior.Restrict);
         });
-        
+
         // PurchaseOrderReceipt entity
         builder.Entity<PurchaseOrderReceipt>(entity =>
         {
@@ -2327,47 +2404,47 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(por => por.Status);
             entity.HasIndex(por => por.ReceivedById);
             entity.HasIndex(por => por.InspectedById);
-            
+
             entity.HasOne(por => por.PurchaseOrder)
                 .WithMany(po => po.Receipts)
                 .HasForeignKey(por => por.PurchaseOrderId)
                 .OnDelete(DeleteBehavior.Restrict); // Changed from Cascade to avoid conflicts
-                
+
             entity.HasOne(por => por.ReceivedBy)
                 .WithMany()
                 .HasForeignKey(por => por.ReceivedById)
                 .OnDelete(DeleteBehavior.NoAction);
-                
+
             entity.HasOne(por => por.InspectedBy)
                 .WithMany()
                 .HasForeignKey(por => por.InspectedById)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // PurchaseOrderReceiptItem entity
         builder.Entity<PurchaseOrderReceiptItem>(entity =>
         {
             entity.HasIndex(pori => pori.ReceiptId);
             entity.HasIndex(pori => pori.PurchaseOrderItemId);
             entity.HasIndex(pori => pori.LocationId);
-            
+
             entity.HasOne(pori => pori.Receipt)
                 .WithMany(por => por.Items)
                 .HasForeignKey(pori => pori.ReceiptId)
                 .OnDelete(DeleteBehavior.Restrict); // Changed from Cascade to avoid conflicts
-                
+
             entity.HasOne(pori => pori.PurchaseOrderItem)
                 .WithMany()
                 .HasForeignKey(pori => pori.PurchaseOrderItemId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             // Note: Location navigation is not configured due to cross-module dependencies
             // entity.HasOne(pori => pori.Location)
             //     .WithMany()
             //     .HasForeignKey(pori => pori.LocationId)
             //     .OnDelete(DeleteBehavior.SetNull);
         });
-        
+
         // StockAdjustment entity
         builder.Entity<StockAdjustment>(entity =>
         {
@@ -2376,54 +2453,54 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(sa => sa.Status);
             entity.HasIndex(sa => sa.ReasonCode);
             entity.HasIndex(sa => sa.ApprovedById);
-            
+
             entity.HasOne(sa => sa.ApprovedBy)
                 .WithMany()
                 .HasForeignKey(sa => sa.ApprovedById)
                 .OnDelete(DeleteBehavior.NoAction);
         });
-        
+
         // StockAdjustmentItem entity
         builder.Entity<StockAdjustmentItem>(entity =>
         {
             entity.HasIndex(sai => sai.AdjustmentId);
             entity.HasIndex(sai => sai.InventoryItemId);
             entity.HasIndex(sai => sai.LocationId);
-            
+
             entity.HasOne(sai => sai.Adjustment)
                 .WithMany(sa => sa.Items)
                 .HasForeignKey(sai => sai.AdjustmentId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
+
             entity.HasOne(sai => sai.InventoryItem)
                 .WithMany()
                 .HasForeignKey(sai => sai.InventoryItemId)
                 .OnDelete(DeleteBehavior.Restrict);
-                
+
             entity.HasOne(sai => sai.Location)
                 .WithMany()
                 .HasForeignKey(sai => sai.LocationId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
     }
-    
+
     private void SeedMaintenanceData(ModelBuilder builder, Guid tenantId)
     {
         var now = DateTime.UtcNow;
         var baseDate = new DateTime(2025, 10, 1, 0, 0, 0, DateTimeKind.Utc);
-        
+
         // Seed Employees (Maintenance Team)
         var maintenanceManagerId = Guid.Parse("11111111-1111-1111-1111-111111111111");
         var technicianId = Guid.Parse("22222222-2222-2222-2222-222222222222");
         var qualityCheckerId = Guid.Parse("33333333-3333-3333-3333-333333333333");
         var supervisorId = Guid.Parse("44444444-4444-4444-4444-444444444444");
-        
+
         // Note: Employees would typically be seeded in HR module, but adding minimal data here for maintenance workflow
-        
+
         // Seed Asset Categories
         var vehicleCategoryId = Guid.Parse("aaaa1111-1111-1111-1111-111111111111");
         var equipmentCategoryId = Guid.Parse("aaaa2222-2222-2222-2222-222222222222");
-        
+
         builder.Entity<MaintenanceAssetCategory>().HasData(
             new MaintenanceAssetCategory
             {
@@ -2450,12 +2527,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 CreatedBy = "System"
             }
         );
-        
+
         // Seed Maintenance Assets
         var forkliftId = Guid.Parse("bbbb1111-1111-1111-1111-111111111111");
         var truckId = Guid.Parse("bbbb2222-2222-2222-2222-222222222222");
         var generatorId = Guid.Parse("bbbb3333-3333-3333-3333-333333333333");
-        
+
         builder.Entity<MaintenanceAsset>().HasData(
             new MaintenanceAsset
             {
@@ -2518,12 +2595,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 CreatedBy = "System"
             }
         );
-        
+
         // Seed Maintenance Types
         var preventiveId = Guid.Parse("cccc1111-1111-1111-1111-111111111111");
         var correctiveId = Guid.Parse("cccc2222-2222-2222-2222-222222222222");
         var inspectionId = Guid.Parse("cccc3333-3333-3333-3333-333333333333");
-        
+
         builder.Entity<MaintenanceType>().HasData(
             new MaintenanceType
             {
@@ -2589,12 +2666,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 CreatedBy = "System"
             }
         );
-        
+
         // Seed Priority Levels
         var criticalPriorityId = Guid.Parse("dddd1111-1111-1111-1111-111111111111");
         var highPriorityId = Guid.Parse("dddd2222-2222-2222-2222-222222222222");
         var mediumPriorityId = Guid.Parse("dddd3333-3333-3333-3333-333333333333");
-        
+
         builder.Entity<PriorityLevel>().HasData(
             new PriorityLevel
             {
@@ -2636,9 +2713,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 CreatedBy = "System"
             }
         );
-        
+
         // Seed Job Cards with Complete Workflow
-        
+
         // Job Card 1: Completed workflow with certificate (CLOSED)
         var jobCard1Id = Guid.Parse("eeee1111-1111-1111-1111-111111111111");
         builder.Entity<JobCard>().HasData(
@@ -2703,7 +2780,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 CreatedBy = "System"
             }
         );
-        
+
         // Job Card 2: Accepted but no certificate yet
         var jobCard2Id = Guid.Parse("eeee2222-2222-2222-2222-222222222222");
         builder.Entity<JobCard>().HasData(
@@ -2759,7 +2836,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 CreatedBy = "System"
             }
         );
-        
+
         // Job Card 3: Quality checked, awaiting acceptance
         var jobCard3Id = Guid.Parse("eeee3333-3333-3333-3333-333333333333");
         builder.Entity<JobCard>().HasData(
@@ -2807,7 +2884,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 CreatedBy = "System"
             }
         );
-        
+
         // Job Card 4: Just completed, awaiting quality check
         var jobCard4Id = Guid.Parse("eeee4444-4444-4444-4444-444444444444");
         builder.Entity<JobCard>().HasData(
@@ -2853,7 +2930,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 CreatedBy = "System"
             }
         );
-        
+
         // Job Card 5: In progress (no completion yet)
         var jobCard5Id = Guid.Parse("eeee5555-5555-5555-5555-555555555555");
         builder.Entity<JobCard>().HasData(
@@ -2892,7 +2969,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 CreatedBy = "System"
             }
         );
-        
+
         // Seed Certificate for Job Card 1 (completed workflow)
         var certificate1Id = Guid.Parse("ffff1111-1111-1111-1111-111111111111");
         builder.Entity<JobCardCertificate>().HasData(
@@ -2915,7 +2992,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 CreatedBy = "System"
             }
         );
-        
+
         // Seed Comments for Job Cards (Audit Trail)
         builder.Entity<JobCardComment>().HasData(
             // Job Card 1 Comments

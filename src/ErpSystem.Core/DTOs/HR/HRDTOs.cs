@@ -23,13 +23,16 @@ public class EmployeeDto
     public Gender? Gender { get; set; }
     public string EmailAddress { get; set; } = string.Empty;
     public string? MobileNumber { get; set; }
+    public string? DivisionName { get; set; }
     public string DepartmentName { get; set; } = string.Empty;
     public string? SectionName { get; set; }
+    public string? UnitName { get; set; }
     public string PositionTitle { get; set; } = string.Empty;
     public StaffStatus StaffStatus { get; set; }
     public ContractType ContractType { get; set; }
     public bool IsActive { get; set; }
     public bool IsFullTime { get; set; }
+    public bool IsExpatriate { get; set; }
     public DateOnly? DateEmployed { get; set; }
     public int? YearsOfService { get; set; }
     public bool CanBeAssignedToMaintenance { get; set; }
@@ -48,6 +51,7 @@ public class EmployeeDetailDto : EmployeeDto
     public string? City { get; set; }
     public string? State { get; set; }
     public string? PostalCode { get; set; }
+    public string? DigitalAddress { get; set; }
     public string? CountryName { get; set; }
     public string? TelephoneNumber { get; set; }
     public string? BusinessNumber { get; set; }
@@ -60,10 +64,14 @@ public class EmployeeDetailDto : EmployeeDto
     public string? ShiftName { get; set; }
     public decimal? Salary { get; set; }
     public string? BadgeNumber { get; set; }
+    public string? Notes { get; set; }
     public DateTime? LastPromotionDate { get; set; }
     public DateTime? LastReviewDate { get; set; }
     public DateTime? NextReviewDate { get; set; }
     public string? StationName { get; set; }
+    public DateTime? TerminationDate { get; set; }
+    public string? TerminationReason { get; set; }
+    public string? TerminationNotes { get; set; }
 
     // Related collections
     public List<EmployeeEmergencyContactDto> EmergencyContacts { get; set; } = new();
@@ -109,6 +117,7 @@ public class CreateEmployeeDto
     public string? City { get; set; }
     public string? State { get; set; }
     public string? PostalCode { get; set; }
+    public string? DigitalAddress { get; set; }
     public Guid? CountryId { get; set; }
 
     [Required]
@@ -126,10 +135,14 @@ public class CreateEmployeeDto
     public DateOnly? ConfirmationDate { get; set; }
     public DateOnly? RetirementDate { get; set; }
 
+    public Guid? DivisionId { get; set; }
+
     [Required]
     public Guid DepartmentId { get; set; }
 
     public Guid? SectionId { get; set; }
+
+    public Guid? UnitId { get; set; }
 
     [Required]
     public Guid PositionId { get; set; }
@@ -137,10 +150,15 @@ public class CreateEmployeeDto
     public StaffStatus StaffStatus { get; set; } = StaffStatus.Active;
     public Guid? StationId { get; set; }
     public string? TaxNumber { get; set; }
+    public string? SocialSecurityNumber { get; set; }
     public BloodType? BloodType { get; set; }
     public Guid? ShiftId { get; set; }
     public decimal? Salary { get; set; }
     public string? BadgeNumber { get; set; }
+    public string? PicturePath { get; set; }
+    public string? Notes { get; set; }
+
+    public bool IsExpatriate { get; set; }
 }
 
 /// <summary>
@@ -162,6 +180,7 @@ public class UpdateEmployeeDto
     public string? City { get; set; }
     public string? State { get; set; }
     public string? PostalCode { get; set; }
+    public string? DigitalAddress { get; set; }
     public Guid? CountryId { get; set; }
     public string? EmailAddress { get; set; }
     public string? TelephoneNumber { get; set; }
@@ -174,19 +193,27 @@ public class UpdateEmployeeDto
     public int? ProbationPeriodDays { get; set; }
     public DateOnly? ConfirmationDate { get; set; }
     public DateOnly? RetirementDate { get; set; }
+    public Guid? DivisionId { get; set; }
     public Guid? DepartmentId { get; set; }
     public Guid? SectionId { get; set; }
     public Guid? PositionId { get; set; }
     public StaffStatus? StaffStatus { get; set; }
     public Guid? StationId { get; set; }
+    public Guid? UnitId { get; set; }
+    public bool? IsExpatriate { get; set; }
     public string? TaxNumber { get; set; }
+    public string? SocialSecurityNumber { get; set; }
     public BloodType? BloodType { get; set; }
     public Guid? ShiftId { get; set; }
     public decimal? Salary { get; set; }
     public string? BadgeNumber { get; set; }
+    public string? Notes { get; set; }
     public DateTime? LastPromotionDate { get; set; }
     public DateTime? LastReviewDate { get; set; }
     public DateTime? NextReviewDate { get; set; }
+    public DateTime? TerminationDate { get; set; }
+    public string? TerminationReason { get; set; }
+    public string? TerminationNotes { get; set; }
     public bool? IsActive { get; set; }
 }
 
@@ -196,9 +223,11 @@ public class UpdateEmployeeDto
 public class EmployeeSearchDto
 {
     public string? SearchTerm { get; set; }
+    public Guid? DivisionId { get; set; }
     public Guid? DepartmentId { get; set; }
     public Guid? SectionId { get; set; }
     public Guid? PositionId { get; set; }
+    public Guid? UnitId { get; set; }
     public StaffStatus? StaffStatus { get; set; }
     public ContractType? ContractType { get; set; }
     public bool? IsActive { get; set; }
@@ -208,6 +237,13 @@ public class EmployeeSearchDto
     public DateOnly? HiredBefore { get; set; }
     public int? MinYearsOfService { get; set; }
     public int? MaxYearsOfService { get; set; }
+}
+
+public class TerminateEmployeeDto
+{
+    public DateTime TerminationDate { get; set; }
+    public string TerminationReason { get; set; } = string.Empty;
+    public string? TerminationNotes { get; set; }
 }
 
 #endregion
@@ -224,10 +260,12 @@ public class EmployeeEmergencyContactDto
     public string FirstName { get; set; } = string.Empty;
     public string? LastName { get; set; }
     public string Relationship { get; set; } = string.Empty;
+    public EmergencyContactType ContactType { get; set; }
     public string PhoneNumber { get; set; } = string.Empty;
     public string? AlternatePhoneNumber { get; set; }
     public string? EmailAddress { get; set; }
     public string? Address { get; set; }
+    public string? DigitalAddress { get; set; }
     public bool IsPrimary { get; set; }
 }
 
@@ -247,12 +285,15 @@ public class CreateEmployeeEmergencyContactDto
     [Required]
     public string Relationship { get; set; } = string.Empty;
 
+    public EmergencyContactType ContactType { get; set; }
+
     [Required]
     public string PhoneNumber { get; set; } = string.Empty;
 
     public string? AlternatePhoneNumber { get; set; }
     public string? EmailAddress { get; set; }
     public string? Address { get; set; }
+    public string? DigitalAddress { get; set; }
     public bool IsPrimary { get; set; }
 }
 
@@ -264,13 +305,16 @@ public class EmployeeDependentDto
     public Guid Id { get; set; }
     public Guid EmployeeId { get; set; }
     public string FirstName { get; set; } = string.Empty;
+    public string? MiddleName { get; set; }
     public string? LastName { get; set; }
     public string Relationship { get; set; } = string.Empty;
     public DateOnly? DateOfBirth { get; set; }
     public Gender? Gender { get; set; }
     public string? Occupation { get; set; }
     public bool IsStudentDependent { get; set; }
+    public bool IsEligibleForBenefits { get; set; }
     public int? Age { get; set; }
+    public bool IsDeceased { get; set; }
 }
 
 /// <summary>
@@ -284,6 +328,8 @@ public class CreateEmployeeDependentDto
     [Required]
     public string FirstName { get; set; } = string.Empty;
 
+    public string? MiddleName { get; set; }
+
     public string? LastName { get; set; }
 
     [Required]
@@ -291,8 +337,15 @@ public class CreateEmployeeDependentDto
 
     public DateOnly? DateOfBirth { get; set; }
     public Gender? Gender { get; set; }
+    public string? GhanaCardNumber { get; set; }
+    public string? DigitalAddress { get; set; }
     public string? Occupation { get; set; }
     public bool IsStudentDependent { get; set; }
+    public bool IsEmergencyContact { get; set; }
+    public bool IsEligibleForBenefits { get; set; }
+    public bool IsDeceased { get; set; }
+    public string? PicturePath { get; set; }
+    public string? Notes { get; set; }
 }
 
 /// <summary>
@@ -331,6 +384,7 @@ public class CreateEmployeeQualificationDto
     public DateOnly? CompletionDate { get; set; }
     public string? Grade { get; set; }
     public string? Description { get; set; }
+    public string? Notes { get; set; }
 }
 
 /// <summary>
@@ -393,6 +447,8 @@ public class EmployeeContractDetailDto
     public string? Terms { get; set; }
     public bool IsActive { get; set; }
     public string? ContractPath { get; set; }
+    public DateOnly? TerminationDate { get; set; }
+    public string? TerminationReason { get; set; }
 }
 
 #endregion

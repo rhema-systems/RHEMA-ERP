@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Entities.HR.StaffLeave;
 
 namespace ErpSystem.Core.Entities.HR;
 
@@ -60,6 +61,9 @@ public class Employee : TenantEntity
     [MaxLength(20)]
     public string? PostalCode { get; set; }
 
+    [MaxLength(50)]
+    public string? DigitalAddress { get; set; }
+
     public Guid? CountryId { get; set; }
 
     [Required]
@@ -91,10 +95,14 @@ public class Employee : TenantEntity
     [MaxLength(500)]
     public string? PicturePath { get; set; }
 
+    public Guid? DivisionId { get; set; }
+
     [Required]
     public Guid DepartmentId { get; set; }
 
     public Guid? SectionId { get; set; }
+
+    public Guid? UnitId { get; set; }
 
     [Required]
     public Guid PositionId { get; set; }
@@ -103,8 +111,13 @@ public class Employee : TenantEntity
 
     public Guid? StationId { get; set; }
 
+    public bool IsExpatriate { get; set; }
+
     [MaxLength(50)]
     public string? TaxNumber { get; set; }
+
+    [MaxLength(50)]
+    public string? SocialSecurityNumber { get; set; }
 
     public BloodType? BloodType { get; set; }
 
@@ -126,6 +139,14 @@ public class Employee : TenantEntity
     public DateTime? LastReviewDate { get; set; }
 
     public DateTime? NextReviewDate { get; set; }
+
+    public DateTime? TerminationDate { get; set; }
+
+    [MaxLength(50)]
+    public string? TerminationReason { get; set; }
+
+    [MaxLength(1000)]
+    public string? TerminationNotes { get; set; }
 
     // Maintenance-specific properties (for employees who are technicians)
     /// <summary>
@@ -171,23 +192,23 @@ public class Employee : TenantEntity
 
     // Computed Properties
     [NotMapped]
-    public string FullName => string.IsNullOrEmpty(MiddleName) 
-        ? $"{FirstName} {LastName}" 
+    public string FullName => string.IsNullOrEmpty(MiddleName)
+        ? $"{FirstName} {LastName}"
         : $"{FirstName} {MiddleName} {LastName}";
 
     [NotMapped]
     public string DisplayName => $"{FullName} ({EmployeeNumber})";
 
     [NotMapped]
-    public int? YearsOfService => DateEmployed.HasValue 
-        ? DateTime.Today.Year - DateEmployed.Value.Year 
+    public int? YearsOfService => DateEmployed.HasValue
+        ? DateTime.Today.Year - DateEmployed.Value.Year
         : null;
 
     [NotMapped]
     public bool IsOnProbation => StaffStatus == StaffStatus.Probation;
 
     [NotMapped]
-    public bool CanBeAssignedToMaintenance => IsActive && 
+    public bool CanBeAssignedToMaintenance => IsActive &&
         (StaffStatus == StaffStatus.Active || StaffStatus == StaffStatus.Probation) &&
         Department?.DepartmentType == DepartmentType.Maintenance;
 
@@ -223,8 +244,10 @@ public class Employee : TenantEntity
     }
 
     // Navigation Properties
+    public virtual Division? Division { get; set; }
     public virtual Department Department { get; set; } = null!;
     public virtual Section? Section { get; set; }
+    public virtual Unit? Unit { get; set; }
     public virtual EmployeePosition Position { get; set; } = null!;
     public virtual Country? Country { get; set; }
     public virtual Shift? Shift { get; set; }
@@ -243,6 +266,9 @@ public class Employee : TenantEntity
     public virtual ICollection<EmployeeBiometric> Biometrics { get; set; } = new List<EmployeeBiometric>();
     public virtual ICollection<ShiftAssignment> ShiftAssignments { get; set; } = new List<ShiftAssignment>();
     public virtual ICollection<EmployeeShiftPreference> ShiftPreferences { get; set; } = new List<EmployeeShiftPreference>();
+    public virtual ICollection<ExpatriateAssignment> ExpatriateAssignments { get; set; } = new List<ExpatriateAssignment>();
+    public virtual ICollection<EmployeePositionHistory> PositionHistories { get; set; } = new List<EmployeePositionHistory>();
+    // public virtual ICollection<LeaveRequest> LeaveRequests { get; set; } = new List<LeaveRequest>();
 
     // Manager/Employee relationship
     public virtual ICollection<Employee> DirectReports { get; set; } = new List<Employee>(); // Employees who report to this manager
@@ -275,6 +301,8 @@ public class Department : TenantEntity
 
     public DepartmentType DepartmentType { get; set; } = DepartmentType.Operations;
 
+    public Guid? DivisionId { get; set; }
+
     public Guid? ParentDepartmentId { get; set; }
 
     public Guid? DepartmentHeadId { get; set; }
@@ -291,6 +319,7 @@ public class Department : TenantEntity
     public string? Icon { get; set; }
 
     // Navigation Properties
+    public virtual Division? Division { get; set; }
     public virtual Department? ParentDepartment { get; set; }
     public virtual Employee? DepartmentHead { get; set; }
     public virtual ICollection<Department> SubDepartments { get; set; } = new List<Department>();
@@ -325,6 +354,35 @@ public class Section : TenantEntity
     public virtual Department Department { get; set; } = null!;
     public virtual Employee? SectionHead { get; set; }
     public virtual ICollection<Employee> Employees { get; set; } = new List<Employee>();
+    public virtual ICollection<Unit> Units { get; set; } = new List<Unit>();
+}
+
+/// <summary>
+/// Represents an organizational unit (smallest subdivision)
+/// </summary>
+public class Unit : TenantEntity
+{
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(20)]
+    public string Code { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    public Guid SectionId { get; set; }
+
+    public Guid? UnitHeadId { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    public virtual Section Section { get; set; } = null!;
+
+    public virtual Employee? UnitHead { get; set; }
+
+    public virtual ICollection<Employee> Employees { get; set; } = new List<Employee>();
 }
 
 /// <summary>
@@ -345,7 +403,25 @@ public class EmployeePosition : TenantEntity
     [Required]
     public Guid DepartmentId { get; set; }
 
+    public Guid? SectionId { get; set; }
+
+    public Guid? UnitId { get; set; }
+
+    public Guid? StaffCategoryId { get; set; }
+
+    // Position hierarchy
+    public Guid? ReportsToPositionId { get; set; }
+
     public int Level { get; set; } = 1; // Organizational level (1 = entry level, higher = senior)
+
+    public int? MinimumExperienceYears { get; set; }
+
+    public int? MinimumAge { get; set; }
+
+    public int? MaximumAge { get; set; }
+
+    // Capacity planning
+    public int ExpectedHeadcount { get; set; } = 1;
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal? MinSalary { get; set; }
@@ -354,6 +430,10 @@ public class EmployeePosition : TenantEntity
     public decimal? MaxSalary { get; set; }
 
     public bool RequiresCertification { get; set; } = false;
+
+    public bool RequiresGuarantor { get; set; }
+
+    public bool RequiresLicense { get; set; }
 
     public bool IsActive { get; set; } = true;
 
@@ -364,9 +444,60 @@ public class EmployeePosition : TenantEntity
     public string? Requirements { get; set; }
 
     // Navigation Properties
+    [ForeignKey(nameof(ReportsToPositionId))]
+    public virtual EmployeePosition? ReportsToPosition { get; set; }
+
     public virtual Department Department { get; set; } = null!;
+    public virtual Section? Section { get; set; }
+    public virtual Unit? Unit { get; set; }
+    public virtual StaffCategory? StaffCategory { get; set; }
     public virtual ICollection<Employee> Employees { get; set; } = new List<Employee>();
+    public virtual ICollection<EmployeePositionHistory> PositionHistories { get; set; } = new List<EmployeePositionHistory>();
     public virtual ICollection<PositionSkillRequirement> SkillRequirements { get; set; } = new List<PositionSkillRequirement>();
+    public virtual List<EmployeePositionBenefit> PositionBenefits { get; set; } = new List<EmployeePositionBenefit>();
+}
+
+public class BenefitPolicy : TenantEntity
+{
+    public BenefitPolicyType PolicyType { get; set; } = BenefitPolicyType.Medical;
+
+    [Required]
+    [MaxLength(100)]
+    public string PolicyName { get; set; } = string.Empty;
+
+    [MaxLength(50)]
+    public string? PolicyCode { get; set; }
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    public BenefitRecipient Recipient { get; set; } = BenefitRecipient.Staff;
+
+    public string? RelationType { get; set; }
+
+    public int? MaxDependents { get; set; }
+
+    public int? MinAge { get; set; }
+
+    public int? MaxAge { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal FinancialLimit { get; set; }
+
+    public virtual List<EmployeePositionBenefit> PositionBenefits { get; set; } = new List<EmployeePositionBenefit>();
+}
+
+public class EmployeePositionBenefit : TenantEntity
+{
+    public Guid PositionId { get; set; }
+    
+    public Guid PolicyId { get; set; }
+
+    [ForeignKey("PositionId")]
+    public virtual EmployeePosition Position { get; set; } = null!;
+
+    [ForeignKey("PolicyId")]
+    public virtual BenefitPolicy BenefitPolicy { get; set; } = null!;
 }
 
 /// <summary>
@@ -375,7 +506,7 @@ public class EmployeePosition : TenantEntity
 public class WorkStation : TenantEntity
 {
     [Required]
-    [MaxLength(100)]
+    [MaxLength(200)]
     public string Name { get; set; } = string.Empty;
 
     [MaxLength(20)]
@@ -387,13 +518,81 @@ public class WorkStation : TenantEntity
     [MaxLength(500)]
     public string? Location { get; set; }
 
+    [MaxLength(50)]
+    public string? DigitalAddress { get; set; }
+
+    public StationType StationType { get; set; } = StationType.Branch;
+
     public Guid? DepartmentId { get; set; }
+
+    [MaxLength(50)]
+    public string? Phone { get; set; }
+
+    [MaxLength(100)]
+    public string? Email { get; set; }
+
+    // Contact person - Foreign key to Employee
+    public Guid? ContactPersonId { get; set; }
 
     public bool IsActive { get; set; } = true;
 
     // Navigation Properties
+    public virtual Employee? ContactPerson { get; set; }
     public virtual Department? Department { get; set; }
     public virtual ICollection<Employee> Employees { get; set; } = new List<Employee>();
+}
+
+/// <summary>
+/// Represents an organizational division (highest level after company)
+/// </summary>
+public class Division : TenantEntity
+{
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(20)]
+    public string Code { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    public Guid? DivisionHeadId { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    // Navigation properties
+    public virtual Employee? DivisionHead { get; set; }
+
+    public virtual ICollection<Department> Departments { get; set; } = new List<Department>();
+
+    public virtual ICollection<Employee> Employees { get; set; } = new List<Employee>();
+}
+
+public class StaffCategory : TenantEntity
+{
+    [Required]
+    [MaxLength(100)]
+    public string CategoryName { get; set; } = string.Empty;
+
+    [MaxLength(20)]
+    public string CategoryCode { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+}
+
+public class EmployeeContractType : TenantEntity
+{
+    public string? TypeCode { get; set; }
+
+    [Required]
+    [MaxLength(100)]
+    public string TypeName { get; set; } = string.Empty;
+
+    public string? TypeDescription { get; set; }
+
+    public int Duration { get; set; }
 }
 
 #endregion
@@ -419,6 +618,8 @@ public class EmployeeEmergencyContact : TenantEntity
     [MaxLength(50)]
     public string Relationship { get; set; } = string.Empty;
 
+    public EmergencyContactType ContactType { get; set; } = EmergencyContactType.EmergencyContact;
+
     [Required]
     [MaxLength(50)]
     public string PhoneNumber { get; set; } = string.Empty;
@@ -432,6 +633,9 @@ public class EmployeeEmergencyContact : TenantEntity
 
     [MaxLength(500)]
     public string? Address { get; set; }
+
+    [MaxLength(50)]
+    public string? DigitalAddress { get; set; }
 
     public bool IsPrimary { get; set; } = false;
 
@@ -452,6 +656,9 @@ public class EmployeeDependent : TenantEntity
     public string FirstName { get; set; } = string.Empty;
 
     [MaxLength(100)]
+    public string? MiddleName { get; set; }
+
+    [MaxLength(100)]
     public string? LastName { get; set; }
 
     [Required]
@@ -462,13 +669,51 @@ public class EmployeeDependent : TenantEntity
 
     public Gender? Gender { get; set; }
 
+    [MaxLength(50)]
+    public string? GhanaCardNumber { get; set; }
+
+    [MaxLength(50)]
+    public string? Phone { get; set; }
+
+    [MaxLength(50)]
+    public string? DigitalAddress { get; set; }
+
     [MaxLength(100)]
     public string? Occupation { get; set; }
 
     public bool IsStudentDependent { get; set; } = false;
 
+    public bool IsEmergencyContact { get; set; }
+
+    public bool IsEligibleForBenefits { get; set; }
+
+    public bool IsDeceased { get; set; }
+
+    [MaxLength(500)]
+    public string? PicturePath { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+
     // Navigation Properties
     public virtual Employee Employee { get; set; } = null!;
+
+    public virtual List<EmployeeDependentBenefit> EmployeeDependentBenefits { get; set; } = new List<EmployeeDependentBenefit>();
+}
+
+public class EmployeeDependentBenefit : TenantEntity
+{
+    public Guid EmployeeDependentId { get; set; }
+
+    public Guid PolicyId { get; set; }
+
+    public DateOnly EnrolledDate { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal BenefitAmountUsed { get; set; }
+
+    [ForeignKey("EmployeeDependentId")]
+    public virtual EmployeeDependent EmployeeDependent { get; set; } = null!;
 }
 
 /// <summary>
@@ -502,6 +747,9 @@ public class EmployeeQualification : TenantEntity
 
     public bool IsVerified { get; set; } = false;
 
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+
     // Navigation Properties
     public virtual Employee Employee { get; set; } = null!;
 }
@@ -533,6 +781,9 @@ public class EmployeeIdentificationCard : TenantEntity
     public string? DocumentPath { get; set; } // Path to scanned document
 
     public bool IsVerified { get; set; } = false;
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
 
     // Navigation Properties
     public virtual Employee Employee { get; set; } = null!;
@@ -617,8 +868,75 @@ public class EmployeeContractDetail : TenantEntity
     [MaxLength(500)]
     public string? ContractPath { get; set; } // Path to contract document
 
+    public ContractStatus ContractStatus { get; set; } = ContractStatus.Active;
+
+    public DateOnly? TerminationDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? TerminationReason { get; set; }
+
     // Navigation Properties
     public virtual Employee Employee { get; set; } = null!;
+}
+
+public class ExpatriateAssignment : TenantEntity
+{
+    public Guid EmployeeId { get; set; }
+
+    public Guid HomeCountryId { get; set; }
+
+    public DateOnly StartDate { get; set; }
+
+    public DateOnly? EndDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? AssignmentObjective { get; set; } // e.g., Project, Training
+
+    [MaxLength(100)]
+    public string? VisaType { get; set; }
+
+    public DateOnly? VisaExpiryDate { get; set; }
+
+    [MaxLength(100)]
+    public string? WorkPermitNumber { get; set; }
+
+    public DateOnly? WorkPermitExpiryDate { get; set; }
+
+    // Navigation Properties
+    public virtual Employee Employee { get; set; } = null!;
+
+    [ForeignKey(nameof(HomeCountryId))]
+    public virtual Country Country { get; set; } = null!;
+}
+
+/// <summary>
+/// Tracks employee position/career progression history
+/// </summary>
+public class EmployeePositionHistory : TenantEntity
+{
+    public Guid EmployeeId { get; set; }
+
+    public Guid DepartmentId { get; set; }
+
+    public Guid PositionId { get; set; }
+
+    public DateTime StartDate { get; set; }
+
+    public DateTime? EndDate { get; set; }
+
+    [MaxLength(100)]
+    public string? ChangeReason { get; set; } // Promotion, Transfer, Demotion, etc.
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+
+    public bool IsCurrent => EndDate == null || EndDate > DateTime.Today;
+
+    public virtual Employee Employee { get; set; } = null!;
+
+    public virtual Department Department { get; set; } = null!;
+
+    public virtual EmployeePosition Position { get; set; } = null!;
 }
 
 #endregion

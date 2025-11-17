@@ -21,10 +21,14 @@ public interface IEmployeeService
     Task<bool> DeleteEmployeeAsync(Guid id);
     Task<bool> DeactivateEmployeeAsync(Guid id);
     Task<bool> ActivateEmployeeAsync(Guid id);
+    Task<bool> TerminateEmployeeAsync(Guid id, TerminateEmployeeDto dto);
 
     // Employee filtering and grouping
+    Task<IEnumerable<EmployeeDto>> GetByStationAsync(Guid stationId);
+    Task<IEnumerable<EmployeeDto>> GetByDivisionAsync(Guid divisionId);
     Task<IEnumerable<EmployeeDto>> GetByDepartmentAsync(Guid departmentId);
     Task<IEnumerable<EmployeeDto>> GetBySectionAsync(Guid sectionId);
+    Task<IEnumerable<EmployeeDto>> GetByUnitAsync(Guid unitId);
     Task<IEnumerable<EmployeeDto>> GetByPositionAsync(Guid positionId);
     Task<IEnumerable<EmployeeDto>> GetByStatusAsync(StaffStatus status);
     Task<IEnumerable<EmployeeDto>> GetByContractTypeAsync(ContractType contractType);
