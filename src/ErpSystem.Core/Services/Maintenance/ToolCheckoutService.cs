@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Interfaces.Inventory;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Maintenance;
@@ -13,17 +14,20 @@ public class ToolCheckoutService : IToolCheckoutService
 {
     private readonly IMaintenanceToolRepository _toolRepository;
     private readonly IToolCheckoutRepository _checkoutRepository;
+    private readonly IInventoryItemRepository _inventoryItemRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<ToolCheckoutService> _logger;
 
     public ToolCheckoutService(
         IMaintenanceToolRepository toolRepository,
         IToolCheckoutRepository checkoutRepository,
+        IInventoryItemRepository inventoryItemRepository,
         IUnitOfWork unitOfWork,
         ILogger<ToolCheckoutService> logger)
     {
         _toolRepository = toolRepository;
         _checkoutRepository = checkoutRepository;
+        _inventoryItemRepository = inventoryItemRepository;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -39,6 +43,7 @@ public class ToolCheckoutService : IToolCheckoutService
         {
             _logger.LogInformation("Starting tool checkout for tool {ToolId} to employee {EmployeeId}", toolId, employeeId);
 
+            // Legacy MaintenanceTool record (deprecated, used only for status/metadata)
             var tool = await _toolRepository.GetByIdAsync(toolId);
             if (tool == null)
                 throw new ArgumentException($"Tool {toolId} not found");
@@ -49,8 +54,18 @@ public class ToolCheckoutService : IToolCheckoutService
             if (tool.Status != "Available")
                 throw new InvalidOperationException($"Tool {tool.ToolCode} is not available (current status: {tool.Status})");
 
-            // Check if there's already an active checkout for this tool
-            var activeCheckout = await _checkoutRepository.GetActiveCheckoutByToolIdAsync(toolId);
+            // Resolve the underlying InventoryItem that represents this tool (ItemType = 4) by ToolCode/ItemCode
+            var inventoryItem = await _inventoryItemRepository.GetByItemCodeAsync(tool.ToolCode);
+            if (inventoryItem == null)
+            {
+                throw new InvalidOperationException(
+                    $"No inventory item found for tool code {tool.ToolCode}. " +
+                    "Tools must exist as InventoryItems (ItemType = 4)."
+                );
+            }
+
+            // Check if there's already an active checkout for this tool (by InventoryItem Id)
+            var activeCheckout = await _checkoutRepository.GetActiveCheckoutByToolIdAsync(inventoryItem.Id);
             if (activeCheckout != null)
                 throw new InvalidOperationException($"Tool {tool.ToolCode} is already checked out");
 
@@ -58,7 +73,7 @@ public class ToolCheckoutService : IToolCheckoutService
             var checkout = new ToolCheckout
             {
                 Id = Guid.NewGuid(),
-                ToolId = toolId,
+                ToolId = inventoryItem.Id,
                 CheckedOutById = employeeId,
                 WorkOrderId = dto.WorkOrderId,
                 JobCardId = dto.JobCardId,
@@ -87,7 +102,7 @@ public class ToolCheckoutService : IToolCheckoutService
             return new ToolCheckoutResult
             {
                 CheckoutId = checkout.Id,
-                ToolId = toolId,
+                ToolId = inventoryItem.Id,
                 ToolName = tool.Name,
                 ToolCode = tool.ToolCode,
                 CheckoutDate = checkout.CheckoutDate,
@@ -106,7 +121,7 @@ public class ToolCheckoutService : IToolCheckoutService
     /// <summary>
     /// Return a checked-out tool
     /// </summary>
-    public async Task<ToolReturnResult> ReturnToolAsync(Guid checkoutId, Guid returnedByEmployeeId, ReturnToolDto dto)
+    public async Task<ToolReturnResult> ReturnToolAsync(Guid checkoutId, Guid returnedByUserId, ReturnToolDto dto)
     {
         try
         {
@@ -126,7 +141,7 @@ public class ToolCheckoutService : IToolCheckoutService
 
             // Update checkout record
             checkout.ActualReturnDate = returnDate;
-            checkout.CheckedInById = returnedByEmployeeId;
+            checkout.CheckedInById = returnedByUserId;
             checkout.Status = isOverdue ? "Overdue" : "Returned";
             checkout.ConditionOnReturn = dto.ConditionOnReturn;
             checkout.ReturnNotes = dto.ReturnNotes;
@@ -134,7 +149,7 @@ public class ToolCheckoutService : IToolCheckoutService
             checkout.DamageDescription = dto.DamageDescription;
             checkout.DamageCost = dto.DamageCost;
             checkout.UpdatedAt = returnDate;
-            checkout.UpdatedBy = returnedByEmployeeId.ToString();
+            checkout.UpdatedBy = returnedByUserId.ToString();
 
             await _checkoutRepository.UpdateAsync(checkout);
 

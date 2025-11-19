@@ -40,7 +40,6 @@ public class MaintenanceExpenseService : IMaintenanceExpenseService
             {
                 WorkOrderId = createDto.WorkOrderId,
                 ScheduleId = createDto.ScheduleId,
-                TechnicianId = createDto.TechnicianId ?? _currentUserService.EmployeeId,
                 ExpenseType = createDto.ExpenseType,
                 Description = createDto.Description,
                 Amount = createDto.Amount,
@@ -248,22 +247,6 @@ public class MaintenanceExpenseService : IMaintenanceExpenseService
 
     private async Task<MaintenanceExpenseDto> MapToDto(MaintenanceExpense expense)
     {
-        string technicianName = string.Empty;
-        if (expense.Technician != null)
-        {
-            technicianName = $"{expense.Technician.FirstName} {expense.Technician.LastName}";
-        }
-        else if (expense.TechnicianId.HasValue)
-        {
-            try
-            {
-                var technician = await _employeeRepository.GetByIdAsync(expense.TechnicianId.Value);
-                if (technician != null)
-                    technicianName = $"{technician.FirstName} {technician.LastName}";
-            }
-            catch { }
-        }
-
         string approvedByName = string.Empty;
         if (expense.ApprovedBy != null)
         {
@@ -286,8 +269,6 @@ public class MaintenanceExpenseService : IMaintenanceExpenseService
             WorkOrderId = expense.WorkOrderId,
             WorkOrderNumber = expense.WorkOrder?.WorkOrderNumber ?? string.Empty,
             ScheduleId = expense.ScheduleId,
-            TechnicianId = expense.TechnicianId,
-            TechnicianName = technicianName,
             ExpenseType = expense.ExpenseType,
             Description = expense.Description,
             Amount = expense.Amount,

@@ -157,42 +157,41 @@ class MaintenanceDataService {
     }
   }
 
-  // Fetch technicians (employees available for maintenance assignments)
+  // Fetch technicians (users available for maintenance assignments)
   async getTechnicians(): Promise<Employee[]> {
     try {
-      console.log('🔧 Fetching maintenance technicians from /api/employees/maintenance-available...');
+      console.log('🔧 Fetching technicians from /user endpoint (ApplicationUser)...');
       
-      // Try the specific maintenance technician endpoint first
       try {
-        const response = await apiService.get('/employees/maintenance-available');
-        console.log('🔧 SUCCESS! Maintenance technicians response:', response);
+        const response = await apiService.get('/user');
+        console.log('🔧 SUCCESS! Users response:', response);
         
-        const technicians = Array.isArray(response) ? response : [];
+        const users = Array.isArray(response) ? response : [];
         
-        if (technicians.length > 0) {
-          const mappedTechnicians = technicians.map((emp: any) => ({
-            id: emp.id,
-            firstName: emp.firstName,
-            lastName: emp.lastName,
-            email: emp.emailAddress,
-            department: emp.departmentName,
-            position: emp.positionTitle,
-            isActive: emp.isActive
+        if (users.length > 0) {
+          const mappedTechnicians = users.map((user: any) => ({
+            id: user.id, // This is the UserId (ApplicationUser ID)
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            department: user.department || '',
+            position: user.position || '',
+            isActive: user.isActive
           }));
           
-          console.log(`✅ Successfully loaded ${mappedTechnicians.length} maintenance technicians`);
+          console.log(`✅ Successfully loaded ${mappedTechnicians.length} users from /user endpoint`);
           return mappedTechnicians;
         }
-      } catch (maintenanceError) {
-        console.warn('⚠️ Maintenance-available endpoint failed, falling back to all employees:', maintenanceError);
+      } catch (userError) {
+        console.warn('⚠️ /user endpoint failed:', userError);
       }
       
-      // Fallback to all employees and filter active ones
-      console.log('🔧 Falling back to all employees...');
+      // Fallback to all employees if users endpoint fails
+      console.log('🔧 Falling back to employees endpoint...');
       const employees = await this.getEmployees();
       const activeTechnicians = employees.filter(emp => emp.isActive);
       
-      console.log(`🔧 Using ${activeTechnicians.length} active employees as technicians`);
+      console.log(`🔧 Using ${activeTechnicians.length} active employees as fallback technicians`);
       return activeTechnicians;
       
     } catch (error) {

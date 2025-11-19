@@ -12,6 +12,7 @@ public interface IEmployeeRepository : IGenericRepository<Employee>
 {
     Task<Employee?> GetByEmployeeNumberAsync(string employeeNumber);
     Task<Employee?> GetByIdWithDetailsAsync(Guid id);
+    Task<Employee?> GetByApplicationUserIdAsync(Guid applicationUserId);
     Task<IEnumerable<Employee>> GetActiveEmployeesAsync();
     Task<IEnumerable<Employee>> GetByDepartmentAsync(Guid departmentId);
     Task<IEnumerable<Employee>> GetBySectionAsync(Guid sectionId);

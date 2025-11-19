@@ -214,6 +214,17 @@ const workOrderPartService = {
   },
 
   /**
+   * Get inventory items filtered by itemType=4 (Tools)
+   */
+  getToolInventoryItems: async (): Promise<InventoryItemDto[]> => {
+    const response = await axios.get(
+      `${API_BASE_URL}/InventoryItems?itemType=4`,
+      { headers: getHeaders() }
+    );
+    return response.data || [];
+  },
+
+  /**
    * Get all active warehouses
    */
   getWarehouses: async (): Promise<WarehouseDto[]> => {

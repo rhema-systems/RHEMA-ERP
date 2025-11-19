@@ -198,7 +198,18 @@ public class MaintenanceTriggerEvaluationService
             
             try
             {
+                // Try to deserialize as a list first
                 criteria = JsonSerializer.Deserialize<List<ConditionCriterion>>(schedule.ConditionCriteria);
+                
+                // If that fails, try as a single object and wrap it in a list
+                if (criteria == null)
+                {
+                    var singleCriterion = JsonSerializer.Deserialize<ConditionCriterion>(schedule.ConditionCriteria);
+                    if (singleCriterion != null)
+                    {
+                        criteria = new List<ConditionCriterion> { singleCriterion };
+                    }
+                }
             }
             catch (JsonException jsonEx)
             {

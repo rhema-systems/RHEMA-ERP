@@ -640,13 +640,39 @@ public class QualityControlController : ControllerBase
             qualityCheck.Notes = request.Notes;
             qualityCheck.InspectionDate = DateTime.UtcNow;
 
-            // Update work order status
+            // Update work order status and completion details
             var workOrder = await _context.WorkOrders.FindAsync(qualityCheck.WorkOrderId);
             if (workOrder != null)
             {
                 workOrder.Status = overallResult == "Pass" ? "Completed" : "QCFailed";
+
+                // Ensure completion date is set so certificates show the correct date
+                if (overallResult == "Pass" && !workOrder.ActualCompletionDate.HasValue)
+                {
+                    workOrder.ActualCompletionDate = DateTime.UtcNow;
+                }
+
                 workOrder.UpdatedAt = DateTime.UtcNow;
                 workOrder.UpdatedBy = _currentUserService?.UserId ?? "System";
+
+                // Release any scheduled technicians for this work order
+                var staffSchedules = await _context.MaintenanceStaffSchedules
+                    .Where(s => s.WorkOrderId == workOrder.Id && (s.Status == "Scheduled" || s.Status == "InProgress"))
+                    .ToListAsync();
+
+                if (staffSchedules.Any())
+                {
+                    var now = DateTime.UtcNow;
+                    foreach (var schedule in staffSchedules)
+                    {
+                        schedule.Status = "Completed";
+                        if (!schedule.ActualEndTime.HasValue)
+                        {
+                            schedule.ActualEndTime = now;
+                        }
+                        schedule.UpdatedAt = now;
+                    }
+                }
             }
 
             await _context.SaveChangesAsync();

@@ -10,7 +10,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, ChevronDown, User, ClipboardList, History, FileText, Wrench, Package, Trash2, Pencil, FlaskConical, CalendarClock, DollarSign, HelpCircle, ExternalLink } from 'lucide-react';
+import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, ChevronDown, User, ClipboardList, History, FileText, Wrench, Package, Trash2, Pencil, FlaskConical, CalendarClock, DollarSign, HelpCircle, ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, CalendarIcon } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { DateRange } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -32,6 +35,7 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import maintenanceApiService, { Employee, Asset, WorkOrderType, PriorityLevel, MaintenanceStaffSchedule, MaintenanceExpense } from '@/services/maintenanceApiService';
+import { maintenanceDataService } from '@/services/maintenanceDataService';
 import qualityControlService, { QualityValidationResult } from '@/services/qualityControlService';
 import workOrderToolService, { WorkOrderToolDto, WorkOrderToolSummaryDto, AllocateWorkOrderToolDto, CheckoutWorkOrderToolDto, ReturnWorkOrderToolDto } from '@/services/workOrderToolService';
 import { toolCheckoutService, MaintenanceToolDto } from '@/services/toolCheckoutService';
@@ -101,6 +105,9 @@ export default function WorkOrdersPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
+  const [dateRange, setDateRange] = useState<DateRange | undefined>();
+  const [sortColumn, setSortColumn] = useState<string>('createdAt');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<WorkOrder | null>(null);
@@ -231,13 +238,17 @@ export default function WorkOrdersPage() {
     requiredTools: [] as string[],
   });
 
+  // Deep-link handling state
+  const [deepLinkHandled, setDeepLinkHandled] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>('details');
+
   // Load data on component mount
   useEffect(() => {
     const loadData = async () => {
       setLoadingData(true);
       try {
         const [techniciansList, assetsResponse, workOrderTypesList, maintenanceTypesList, priorityLevelsList, toolsList] = await Promise.all([
-          maintenanceApiService.getTechnicians(),
+          maintenanceDataService.getTechnicians(),
           maintenanceApiService.getAssets(),
           maintenanceApiService.getWorkOrderTypes(),
           maintenanceApiService.getMaintenanceTypes(),
@@ -312,7 +323,18 @@ export default function WorkOrdersPage() {
         for (const order of workOrdersResponse.items) {
           try {
             const schedules = await maintenanceApiService.getStaffSchedulesByWorkOrder(order.id);
-            schedulesMap[order.id] = schedules;
+            // Enrich schedules with full technician names from technicians list
+            const enrichedSchedules = schedules.map(schedule => {
+              const technician = techniciansList.find(t => t.id === schedule.technicianId);
+              if (technician && !schedule.technicianFullName) {
+                return {
+                  ...schedule,
+                  technicianFullName: `${technician.firstName} ${technician.lastName}`
+                };
+              }
+              return schedule;
+            });
+            schedulesMap[order.id] = enrichedSchedules;
           } catch (error) {
             console.error(`Error loading schedules for work order ${order.id}:`, error);
             schedulesMap[order.id] = [];
@@ -329,97 +351,119 @@ export default function WorkOrdersPage() {
     loadData();
   }, []);
 
-  // Handle URL parameter to auto-open work order
+  // Handle URL parameters to auto-open a work order (by id or workOrderNumber)
   useEffect(() => {
-    const workOrderId = searchParams.get('id');
-    if (workOrderId && workOrders.length > 0 && !isViewDialogOpen) {
-      const workOrder = workOrders.find(wo => wo.id === workOrderId);
-      if (workOrder) {
-        // Simulate clicking on the work order to open it
-        setSelectedOrder(workOrder);
-        setIsViewDialogOpen(true);
-        
-        // Fetch work order details
-        const fetchDetails = async () => {
-          setLoadingTasks(true);
-          setLoadingParts(true);
-          setLoadingTools(true);
-          setSelectedOrderTasks([]);
-          setWorkOrderParts([]);
-          setWorkOrderTools([]);
-          setWorkOrderLabor([]);
-          setStaffSchedules([]);
-          setExpenses([]);
-          
-          try {
-            const workOrderDetails = await maintenanceApiService.getWorkOrderById(workOrder.id);
-            
-            if (workOrderDetails.labor && Array.isArray(workOrderDetails.labor)) {
-              setWorkOrderLabor(workOrderDetails.labor);
-            }
-            
-            if (workOrderDetails.tasks && Array.isArray(workOrderDetails.tasks)) {
-              setSelectedOrderTasks(workOrderDetails.tasks);
-            }
-            
-            if (workOrder.status === 'Completed' || workOrder.status === 'Cancelled') {
-              if (workOrderDetails.parts && Array.isArray(workOrderDetails.parts)) {
-                setWorkOrderParts(workOrderDetails.parts);
-              }
-              if (workOrderDetails.tools && Array.isArray(workOrderDetails.tools)) {
-                setWorkOrderTools(workOrderDetails.tools);
-              }
-            } else {
-              try {
-                const parts = await workOrderPartService.getWorkOrderParts(workOrder.id);
-                setWorkOrderParts(parts || []);
-              } catch (error) {
-                console.error('Error loading parts:', error);
-              }
-              
-              try {
-                const tools = await workOrderToolService.getWorkOrderTools(workOrder.id);
-                setWorkOrderTools(tools || []);
-              } catch (error) {
-                console.error('Error loading tools:', error);
-              }
-            }
-            
-            try {
-              const schedules = await maintenanceApiService.getStaffSchedulesByWorkOrder(workOrder.id);
-              setStaffSchedules(schedules || []);
-            } catch (error) {
-              console.error('Error loading schedules:', error);
-            }
-            
-            try {
-              const expensesData = await maintenanceApiService.getWorkOrderExpenses(workOrder.id);
-              setExpenses(expensesData || []);
-            } catch (error) {
-              console.error('Error loading expenses:', error);
-            }
-            
-            try {
-              const validation = await qualityControlService.getValidationByWorkOrder(workOrder.id);
-              if (validation) {
-                setQualityValidation({ [workOrder.id]: validation });
-              }
-            } catch (error) {
-              console.error('Error loading quality validation:', error);
-            }
-          } catch (error) {
-            console.error('Error fetching work order details:', error);
-          } finally {
-            setLoadingTasks(false);
-            setLoadingParts(false);
-            setLoadingTools(false);
-          }
-        };
-        
-        fetchDetails();
-      }
+    const urlWorkOrderId = searchParams.get('id');
+    const urlWorkOrderNumber = searchParams.get('workOrderNumber');
+
+    if (deepLinkHandled || (!urlWorkOrderId && !urlWorkOrderNumber) || workOrders.length === 0) {
+      return;
     }
-  }, [searchParams, workOrders, isViewDialogOpen]);
+
+    let workOrder: WorkOrder | undefined;
+
+    if (urlWorkOrderId) {
+      workOrder = workOrders.find((wo) => wo.id === urlWorkOrderId);
+    }
+
+    if (!workOrder && urlWorkOrderNumber) {
+      workOrder = workOrders.find((wo) => wo.workOrderNumber === urlWorkOrderNumber);
+    }
+
+    if (!workOrder) {
+      setDeepLinkHandled(true);
+      return;
+    }
+
+    // If we navigated via workOrderNumber, also filter the list and default to Tools tab
+    if (urlWorkOrderNumber) {
+      setSearchTerm(urlWorkOrderNumber);
+      setActiveTab('tools');
+    }
+
+    setSelectedOrder(workOrder);
+    setIsViewDialogOpen(true);
+    setDeepLinkHandled(true);
+
+    const fetchDetails = async () => {
+      setLoadingTasks(true);
+      setLoadingParts(true);
+      setLoadingTools(true);
+      setSelectedOrderTasks([]);
+      setWorkOrderParts([]);
+      setWorkOrderTools([]);
+      setWorkOrderLabor([]);
+      setStaffSchedules([]);
+      setExpenses([]);
+
+      try {
+        const workOrderDetails = await maintenanceApiService.getWorkOrderById(workOrder!.id);
+
+        if (workOrderDetails.labor && Array.isArray(workOrderDetails.labor)) {
+          setWorkOrderLabor(workOrderDetails.labor);
+        }
+
+        if (workOrderDetails.tasks && Array.isArray(workOrderDetails.tasks)) {
+          setSelectedOrderTasks(workOrderDetails.tasks);
+        }
+
+        if (workOrder.status === 'Completed' || workOrder.status === 'Cancelled') {
+          if (workOrderDetails.parts && Array.isArray(workOrderDetails.parts)) {
+            setWorkOrderParts(workOrderDetails.parts);
+          }
+          if (workOrderDetails.tools && Array.isArray(workOrderDetails.tools)) {
+            setWorkOrderTools(workOrderDetails.tools);
+          }
+        } else {
+          try {
+            const parts = await workOrderPartService.getWorkOrderParts(workOrder.id);
+            setWorkOrderParts(parts || []);
+          } catch (error) {
+            console.error('Error loading parts:', error);
+          }
+
+          try {
+            const tools = await workOrderToolService.getWorkOrderTools(workOrder.id);
+            setWorkOrderTools(tools || []);
+          } catch (error) {
+            console.error('Error loading tools:', error);
+          }
+        }
+
+        try {
+          const schedules = await maintenanceApiService.getStaffSchedulesByWorkOrder(workOrder.id);
+          const enrichedSchedules = enrichSchedulesWithFullNames(schedules || []);
+          setStaffSchedules(enrichedSchedules);
+        } catch (error) {
+          console.error('Error loading schedules:', error);
+        }
+
+        try {
+          const expensesData = await maintenanceApiService.getExpensesByWorkOrder(workOrder.id);
+          setExpenses(expensesData || []);
+        } catch (error) {
+          console.error('Error loading expenses:', error);
+        }
+
+        try {
+          const validation = await qualityControlService.getValidationByWorkOrder(workOrder.id);
+          if (validation) {
+            setQualityValidation({ [workOrder.id]: validation });
+          }
+        } catch (error) {
+          console.error('Error loading quality validation:', error);
+        }
+      } catch (error) {
+        console.error('Error fetching work order details:', error);
+      } finally {
+        setLoadingTasks(false);
+        setLoadingParts(false);
+        setLoadingTools(false);
+      }
+    };
+
+    fetchDetails();
+  }, [searchParams, workOrders, deepLinkHandled]);
 
   useEffect(() => {
     let filtered = workOrders;
@@ -440,8 +484,32 @@ export default function WorkOrdersPage() {
       filtered = filtered.filter(order => order.priority === priorityFilter);
     }
 
+    if (dateRange?.from) {
+      filtered = filtered.filter(order => new Date(order.createdAt) >= dateRange.from!);
+    }
+
+    if (dateRange?.to) {
+      const end = new Date(dateRange.to);
+      end.setHours(23, 59, 59, 999);
+      filtered = filtered.filter(order => new Date(order.createdAt) <= end);
+    }
+
     setFilteredOrders(filtered);
-  }, [workOrders, searchTerm, statusFilter, priorityFilter]);
+  }, [workOrders, searchTerm, statusFilter, priorityFilter, dateRange]);
+
+  // Helper function to enrich schedules with full technician names
+  const enrichSchedulesWithFullNames = (schedules: MaintenanceStaffSchedule[]): MaintenanceStaffSchedule[] => {
+    return schedules.map(schedule => {
+      const technician = technicians.find(t => t.id === schedule.technicianId);
+      if (technician && !schedule.technicianFullName) {
+        return {
+          ...schedule,
+          technicianFullName: `${technician.firstName} ${technician.lastName}`
+        };
+      }
+      return schedule;
+    });
+  };
 
   // Helper function to get technician names from schedules
   const getTechnicianNamesFromSchedules = (workOrderId: string): string => {
@@ -450,9 +518,12 @@ export default function WorkOrdersPage() {
       return 'No technicians assigned';
     }
     
-    // Get unique technician names from schedules
-    const technicianNames = schedules
-      .map(s => s.technicianName)
+    // Enrich schedules with full names
+    const enrichedSchedules = enrichSchedulesWithFullNames(schedules);
+    
+    // Get unique technician names from schedules (prefer full name if available)
+    const technicianNames = enrichedSchedules
+      .map(s => s.technicianFullName || s.technicianName)
       .filter((name, index, self) => name && self.indexOf(name) === index);
     
     if (technicianNames.length === 0) {
@@ -832,6 +903,57 @@ export default function WorkOrdersPage() {
     setTaskCompletionNotes('');
   };
 
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  };
+
+  const getSortedOrders = () => {
+    const sorted = [...filteredOrders].sort((a, b) => {
+      let aVal: any = a[sortColumn as keyof WorkOrder];
+      let bVal: any = b[sortColumn as keyof WorkOrder];
+
+      if (aVal === null || aVal === undefined) aVal = '';
+      if (bVal === null || bVal === undefined) bVal = '';
+
+      if (typeof aVal === 'string') {
+        aVal = aVal.toLowerCase();
+        bVal = bVal.toLowerCase();
+      }
+
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  };
+
+  const SortHeader = ({ label, column }: { label: string; column: string }) => {
+    return (
+      <TableHead className="cursor-pointer hover:bg-gray-100 select-none">
+        <div 
+          className="flex items-center gap-1"
+          onClick={() => handleSort(column)}
+        >
+          <span>{label}</span>
+          {sortColumn === column ? (
+            sortDirection === 'asc' ? (
+              <ArrowUp className="h-4 w-4" />
+            ) : (
+              <ArrowDown className="h-4 w-4" />
+            )
+          ) : (
+            <ArrowUpDown className="h-4 w-4 opacity-30" />
+          )}
+        </div>
+      </TableHead>
+    );
+  };
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -866,8 +988,8 @@ export default function WorkOrdersPage() {
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
-          <div className="flex items-center space-x-4">
-            <div className="flex-1 max-w-sm">
+          <div className="flex items-center space-x-4 flex-wrap gap-4">
+            <div className="flex-1 min-w-[200px] max-w-sm">
               <Label htmlFor="search" className="sr-only">Search</Label>
               <div className="relative">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -880,9 +1002,7 @@ export default function WorkOrdersPage() {
                 />
               </div>
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="status-filter" className="text-sm">Status</Label>
-              <ClientOnly>
+            <ClientOnly>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger className="w-[140px]">
                   <SelectValue placeholder="All Status" />
@@ -898,11 +1018,8 @@ export default function WorkOrdersPage() {
                   <SelectItem value="Cancelled">Cancelled</SelectItem>
                 </SelectContent>
               </Select>
-              </ClientOnly>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="priority-filter" className="text-sm">Priority</Label>
-              <ClientOnly>
+            </ClientOnly>
+            <ClientOnly>
               <Select value={priorityFilter} onValueChange={setPriorityFilter}>
                 <SelectTrigger className="w-[140px]">
                   <SelectValue placeholder="All Priority" />
@@ -915,8 +1032,37 @@ export default function WorkOrdersPage() {
                   <SelectItem value="Critical">Critical</SelectItem>
                 </SelectContent>
               </Select>
-              </ClientOnly>
-            </div>
+            </ClientOnly>
+            <ClientOnly>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="justify-start text-left font-normal w-[250px]">
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {dateRange?.from ? (
+                      dateRange.to ? (
+                        <>
+                          {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")}
+                        </>
+                      ) : (
+                        format(dateRange.from, "LLL dd, y")
+                      )
+                    ) : (
+                      <span>Pick a date range</span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    initialFocus
+                    mode="range"
+                    defaultMonth={dateRange?.from}
+                    selected={dateRange}
+                    onSelect={setDateRange}
+                    numberOfMonths={2}
+                  />
+                </PopoverContent>
+              </Popover>
+            </ClientOnly>
           </div>
         </CardContent>
       </Card>
@@ -930,19 +1076,21 @@ export default function WorkOrdersPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Title</TableHead>
-                <TableHead>Asset</TableHead>
+                <SortHeader label="Work Order #" column="workOrderNumber" />
+                <SortHeader label="Created Date" column="createdAt" />
+                <SortHeader label="Asset" column="assetName" />
                 <TableHead>Job Card</TableHead>
                 <TableHead>Technician</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Priority</TableHead>
+                <SortHeader label="Status" column="status" />
+                <SortHeader label="Priority" column="priority" />
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredOrders.map((order) => (
+              {getSortedOrders().map((order) => (
                 <TableRow key={order.id}>
-                  <TableCell className="font-medium">{order.title}</TableCell>
+                  <TableCell className="font-medium font-mono">{order.workOrderNumber}</TableCell>
+                  <TableCell className="text-sm">{format(new Date(order.createdAt), 'MMM dd, yyyy HH:mm')}</TableCell>
                   <TableCell>
                     {order.assetId ? (
                       <button
@@ -1007,6 +1155,9 @@ export default function WorkOrdersPage() {
                             console.log('Tasks in response:', workOrderDetails.tasks);
                             console.log('Parts in response:', workOrderDetails.parts);
                             console.log('Labor in response:', workOrderDetails.labor);
+                            
+                            // Update selectedOrder with full details to ensure assignedTechnicianId is available
+                            setSelectedOrder(prev => prev ? { ...prev, ...workOrderDetails } : workOrderDetails);
                             
                             // Set labor data
                             if (workOrderDetails.labor && Array.isArray(workOrderDetails.labor)) {
@@ -1099,8 +1250,9 @@ export default function WorkOrdersPage() {
                             // Load schedules for this work order
                             try {
                               const schedulesData = await maintenanceApiService.getStaffSchedulesByWorkOrder(order.id);
-                              setStaffSchedules(schedulesData);
-                              console.log('Set schedules with', schedulesData.length, 'records');
+                              const enrichedSchedules = enrichSchedulesWithFullNames(schedulesData || []);
+                              setStaffSchedules(enrichedSchedules);
+                              console.log('Set schedules with', enrichedSchedules.length, 'records');
                             } catch (error) {
                               console.error('Error loading schedules:', error);
                               setStaffSchedules([]);
@@ -1258,8 +1410,8 @@ export default function WorkOrdersPage() {
             </DialogDescription>
           </DialogHeader>
           {selectedOrder && (
-            <Tabs defaultValue="details" className="w-full flex flex-col flex-1 overflow-hidden">
-              <TabsList className="grid w-full grid-cols-8 flex-shrink-0 bg-muted/50 p-1 rounded-lg gap-1">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col flex-1 overflow-hidden">
+              <TabsList className="grid w-full grid-cols-7 flex-shrink-0 bg-muted/50 p-1 rounded-lg gap-1">
                 <TabsTrigger value="details">
                   <FileText className="h-4 w-4 mr-2" />
                   Details
@@ -1284,10 +1436,7 @@ export default function WorkOrdersPage() {
                   <DollarSign className="h-4 w-4 mr-2" />
                   Expenses
                 </TabsTrigger>
-                <TabsTrigger value="labor">
-                  <User className="h-4 w-4 mr-2" />
-                  Labor ({workOrderLabor.length})
-                </TabsTrigger>
+                {/* Labor tab temporarily hidden as requested */}
                 <TabsTrigger value="history">
                   <History className="h-4 w-4 mr-2" />
                   Workflow History
@@ -1676,7 +1825,7 @@ export default function WorkOrdersPage() {
                             {/* Action Buttons - Hide if tool has been returned */}
                             {selectedOrder.status !== 'Completed' && selectedOrder.status !== 'Cancelled' && !tool.actualReturnDate && (
                               <div className="flex gap-2 mt-3 pl-8">
-                                {!tool.isCheckedOut && selectedOrder.assignedTechnicianId && (
+                                {!tool.isCheckedOut && staffSchedules.length > 0 && (
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -1688,6 +1837,11 @@ export default function WorkOrdersPage() {
                                     <CheckCircle className="h-4 w-4 mr-1" />
                                     Checkout
                                   </Button>
+                                )}
+                                {!tool.isCheckedOut && staffSchedules.length === 0 && (
+                                  <div className="text-xs text-muted-foreground italic">
+                                    Create a technician schedule for this work order before checking out tools.
+                                  </div>
                                 )}
                                 {tool.isCheckedOut && (
                                   <Button
@@ -1857,7 +2011,7 @@ export default function WorkOrdersPage() {
                   <div className="flex items-center justify-between">
                     <h3 className="text-lg font-semibold flex items-center gap-2">
                       <CalendarClock className="h-5 w-5" />
-                      Staff Schedule
+                      Technician Schedule
                     </h3>
                   </div>
                   
@@ -1881,9 +2035,9 @@ export default function WorkOrdersPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {staffSchedules.map((schedule, index) => (
+                          {enrichSchedulesWithFullNames(staffSchedules).map((schedule, index) => (
                             <TableRow key={schedule.id || index}>
-                              <TableCell className="font-medium">{schedule.technicianName || 'N/A'}</TableCell>
+                              <TableCell className="font-medium">{schedule.technicianFullName || schedule.technicianName || 'N/A'}</TableCell>
                               <TableCell>
                                 <Badge variant="outline">{schedule.scheduleType}</Badge>
                               </TableCell>
@@ -1973,81 +2127,7 @@ export default function WorkOrdersPage() {
                 </div>
               </TabsContent>
 
-              {/* Labor Tab */}
-              <TabsContent value="labor" className="flex-1 overflow-y-auto mt-4">
-                <div className="space-y-4">
-                  {workOrderLabor.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-8 text-center border-2 border-dashed rounded-lg">
-                      <User className="h-12 w-12 text-muted-foreground/50 mb-2" />
-                      <p className="text-sm text-muted-foreground">No labor records for this work order</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {workOrderLabor.map((labor, index) => (
-                        <div key={labor.id} className="border rounded-lg p-4 hover:bg-accent/50 transition-colors">
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex items-start gap-3 flex-1">
-                              <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary font-semibold text-sm flex-shrink-0">
-                                {index + 1}
-                              </div>
-                              <div className="flex-1">
-                                <h4 className="font-semibold text-base mb-1">Technician #{labor.technicianId.substring(0, 8)}</h4>
-                                {labor.notes && (
-                                  <p className="text-sm text-muted-foreground">{labor.notes}</p>
-                                )}
-                              </div>
-                            </div>
-                            <Badge variant="outline" className="ml-2 flex-shrink-0">
-                              {labor.laborType || 'Regular'}
-                            </Badge>
-                          </div>
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pl-11">
-                            <div>
-                              <span className="text-muted-foreground">Hours:</span>
-                              <span className="ml-2 font-medium">{labor.hours.toFixed(2)} hrs</span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Rate:</span>
-                              <span className="ml-2 font-medium">${labor.hourlyRate.toFixed(2)}/hr</span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Total Cost:</span>
-                              <span className="ml-2 font-medium text-green-600">${labor.totalCost.toFixed(2)}</span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Period:</span>
-                              <span className="ml-2 font-medium text-xs">
-                                {labor.startTime && format(new Date(labor.startTime), 'MMM dd, HH:mm')}
-                                {labor.endTime && ` - ${format(new Date(labor.endTime), 'HH:mm')}`}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                      
-                      {/* Total Summary */}
-                      <div className="border-t pt-4 mt-4">
-                        <div className="bg-muted/50 rounded-lg p-4">
-                          <div className="grid grid-cols-3 gap-4 text-center">
-                            <div>
-                              <p className="text-sm text-muted-foreground mb-1">Total Hours</p>
-                              <p className="text-2xl font-bold">{workOrderLabor.reduce((sum, l) => sum + l.hours, 0).toFixed(2)}</p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-muted-foreground mb-1">Total Labor Cost</p>
-                              <p className="text-2xl font-bold text-green-600">${workOrderLabor.reduce((sum, l) => sum + l.totalCost, 0).toFixed(2)}</p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-muted-foreground mb-1">Labor Records</p>
-                              <p className="text-2xl font-bold">{workOrderLabor.length}</p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </TabsContent>
+              {/* Labor Tab temporarily removed as requested */}
 
               {/* Workflow History Tab */}
               <TabsContent value="history" className="flex-1 overflow-y-auto mt-4">
@@ -2745,7 +2825,7 @@ export default function WorkOrdersPage() {
                   <div className="flex items-center justify-between">
                     <h3 className="text-lg font-semibold flex items-center gap-2">
                       <CalendarClock className="h-5 w-5" />
-                      Staff Schedule
+                      Technician Schedule
                     </h3>
                     <div className="flex gap-2">
                       <Button
@@ -2755,7 +2835,8 @@ export default function WorkOrdersPage() {
                           setLoadingSchedules(true);
                           try {
                             const schedules = await maintenanceApiService.getStaffSchedulesByWorkOrder(selectedOrder.id);
-                            setStaffSchedules(schedules);
+                            const enrichedSchedules = enrichSchedulesWithFullNames(schedules || []);
+                            setStaffSchedules(enrichedSchedules);
                           } catch (error) {
                             console.error('Error loading schedules:', error);
                             toast({
@@ -2822,9 +2903,9 @@ export default function WorkOrdersPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {staffSchedules.map((schedule, index) => (
+                          {enrichSchedulesWithFullNames(staffSchedules).map((schedule, index) => (
                             <TableRow key={schedule.id || index}>
-                              <TableCell className="font-medium">{schedule.technicianName || 'N/A'}</TableCell>
+                              <TableCell className="font-medium">{schedule.technicianFullName || schedule.technicianName || 'N/A'}</TableCell>
                               <TableCell>
                                 <Badge variant="outline">{schedule.scheduleType}</Badge>
                               </TableCell>
@@ -2988,7 +3069,6 @@ export default function WorkOrdersPage() {
                             <TableHead>Date</TableHead>
                             <TableHead>Type</TableHead>
                             <TableHead>Description</TableHead>
-                            <TableHead>Technician</TableHead>
                             <TableHead>Amount</TableHead>
                             <TableHead>Status</TableHead>
                             <TableHead>Actions</TableHead>
@@ -3004,7 +3084,6 @@ export default function WorkOrdersPage() {
                                 <Badge variant="outline">{expense.expenseType}</Badge>
                               </TableCell>
                               <TableCell>{expense.description}</TableCell>
-                              <TableCell>{expense.technicianName || 'N/A'}</TableCell>
                               <TableCell className="font-semibold">${expense.amount.toFixed(2)}</TableCell>
                               <TableCell>
                                 <Badge 
@@ -3135,8 +3214,8 @@ export default function WorkOrdersPage() {
             <Button onClick={async () => {
               await handleEditWorkOrder();
               
-              let successMessages = [];
-              let errors = [];
+              const successMessages = [];
+              const errors = [];
               
               // Allocate selected tools in bulk (check for existing allocations first)
               if (selectedTools.length > 0 && selectedOrder?.id) {
@@ -3507,9 +3586,22 @@ export default function WorkOrdersPage() {
               onClick={async () => {
                 if (selectedWorkOrderTool && selectedOrder?.id) {
                   try {
+                    // Get technician ID from staff schedules (ApplicationUser.Id)
+                    const technicianId = staffSchedules[0]?.technicianId;
+                    
+                    if (!technicianId) {
+                      toast({
+                        title: 'Error',
+                        description: 'No technician assigned to this work order',
+                        variant: 'destructive',
+                      });
+                      return;
+                    }
+                    
                     await workOrderToolService.checkoutTool({
                       workOrderId: selectedOrder.id,
                       toolId: selectedWorkOrderTool.toolId,
+                      technicianId: technicianId,
                       expectedReturnDate: selectedWorkOrderTool.expectedReturnDate,
                       conditionOnCheckout: 'Good',
                     });

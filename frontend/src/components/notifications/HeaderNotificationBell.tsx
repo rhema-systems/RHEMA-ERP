@@ -108,19 +108,23 @@ const HeaderNotificationBell: React.FC<HeaderNotificationBellProps> = ({ classNa
         ref={buttonRef}
         variant="ghost"
         size="sm"
+        aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : 'No new notifications'}
+        title={unreadCount > 0 ? `${unreadCount} unread notifications` : 'Notifications'}
         onClick={() => {
           setIsOpen(!isOpen);
           requestNotificationPermission();
         }}
         className={cn(
-          'relative h-9 w-9 p-0 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800',
+          'relative h-9 w-9 p-0 rounded-full flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60',
           className
         )}
       >
-        <Bell className="h-4 w-4 text-slate-600 dark:text-slate-400" />
+        <Bell className="h-5 w-5 text-slate-700 dark:text-slate-200" />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 text-white text-xs font-medium rounded-full flex items-center justify-center border-2 border-white dark:border-slate-900">
-            {unreadCount > 9 ? '9+' : unreadCount}
+          <span
+            className="absolute -top-1 -right-1 min-w-[18px] h-5 px-1.5 bg-red-500 text-white text-[10px] leading-none font-semibold rounded-full flex items-center justify-center shadow-sm ring-2 ring-white dark:ring-slate-900"
+          >
+            {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </Button>

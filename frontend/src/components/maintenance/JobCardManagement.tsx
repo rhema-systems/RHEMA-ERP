@@ -10,7 +10,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, Send, XCircle } from 'lucide-react';
+import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, Send, XCircle, ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { DateRange } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import {
   Dialog,
@@ -21,7 +24,7 @@ import {
   DialogTrigger,
   DialogFooter,
 } from '@/components/ui/dialog';
-import {
+import { 
   Table,
   TableBody,
   TableCell,
@@ -29,9 +32,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import maintenanceApiService, { Employee, Asset, WorkOrderType, PriorityLevel } from '@/services/maintenanceApiService';
+import maintenanceApiService, { Employee, Asset, WorkOrderType, PriorityLevel, MaintenanceStaffSchedule, MaintenanceExpense } from '@/services/maintenanceApiService';
 import jobCardService, { JobCard as JobCardType, JobCardDetails, CreateJobCardRequest, JobCardApprovalAction } from '@/services/jobCardService';
 import workOrderService, { WorkOrder } from '@/services/workOrderService';
+import workOrderToolService, { WorkOrderToolDto } from '@/services/workOrderToolService';
 import qualityControlService from '@/services/qualityControlService';
 import workflowApiService from '@/services/workflow-api.service';
 import { notificationService } from '@/services/notificationService';
@@ -76,6 +80,7 @@ export default function JobCardsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
+  const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [selectedCard, setSelectedCard] = useState<JobCard | null>(null);
   const [selectedCardDetails, setSelectedCardDetails] = useState<JobCardDetails | null>(null);
@@ -84,6 +89,8 @@ export default function JobCardsPage() {
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [sortColumn, setSortColumn] = useState<string>('createdAt');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   
   // Testing mode - set to true to use mock data and bypass API calls
   const TESTING_MODE = false; // Using real API calls
@@ -94,6 +101,9 @@ export default function JobCardsPage() {
   const [priorityLevels, setPriorityLevels] = useState<PriorityLevel[]>([]);
   const [maintenanceTypes, setMaintenanceTypes] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(true);
+  const [workOrderStaffSchedules, setWorkOrderStaffSchedules] = useState<MaintenanceStaffSchedule[]>([]);
+  const [workOrderExpenses, setWorkOrderExpenses] = useState<MaintenanceExpense[]>([]);
+  const [workOrderTools, setWorkOrderTools] = useState<WorkOrderToolDto[]>([]);
   
   const [newJobCard, setNewJobCard] = useState({
     title: '',
@@ -206,19 +216,22 @@ export default function JobCardsPage() {
         console.log('🔑 Token preview:', authToken ? `${authToken.substring(0, 20)}...` : 'N/A');
         
         try {
-          const [assetsResponse, priorityLevelsList, maintenanceTypesList] = await Promise.all([
+          const [assetsResponse, priorityLevelsList, maintenanceTypesList, techniciansList] = await Promise.all([
             maintenanceApiService.getAssets(),
             maintenanceApiService.getPriorityLevels(),
-            maintenanceApiService.getMaintenanceTypes()
+            maintenanceApiService.getMaintenanceTypes(),
+            maintenanceApiService.getTechnicians(),
           ]);
           
           console.log('Loaded assets:', assetsResponse);
           console.log('Loaded priority levels:', priorityLevelsList);
           console.log('Loaded maintenance types:', maintenanceTypesList);
+          console.log('Loaded technicians:', techniciansList);
           
           setAssets(assetsResponse.items || []);
           setPriorityLevels(priorityLevelsList || []);
           setMaintenanceTypes(maintenanceTypesList || []);
+          setTechnicians(techniciansList || []);
           
           // Load job cards from real API
           try {
@@ -331,8 +344,18 @@ export default function JobCardsPage() {
       filtered = filtered.filter(card => card.priority === priorityFilter);
     }
 
+    if (dateRange?.from) {
+      filtered = filtered.filter(card => new Date(card.createdAt) >= dateRange.from!);
+    }
+
+    if (dateRange?.to) {
+      const end = new Date(dateRange.to);
+      end.setHours(23, 59, 59, 999);
+      filtered = filtered.filter(card => new Date(card.createdAt) <= end);
+    }
+
     setFilteredCards(filtered);
-  }, [jobCards, searchTerm, statusFilter, priorityFilter]);
+  }, [jobCards, searchTerm, statusFilter, priorityFilter, dateRange]);
 
   // Handle opening job card from URL parameter
   useEffect(() => {
@@ -357,6 +380,36 @@ export default function JobCardsPage() {
               try {
                 const workOrder = await workOrderService.getWorkOrderById(details.generatedWorkOrderId);
                 setSelectedWorkOrder(workOrder);
+
+                // Load technician schedules, tools, and expenses for this work order
+                try {
+                  const [schedules, expenses, tools] = await Promise.all([
+                    maintenanceApiService.getStaffSchedulesByWorkOrder(workOrder.id),
+                    maintenanceApiService.getExpensesByWorkOrder(workOrder.id),
+                    workOrderToolService.getWorkOrderTools(workOrder.id),
+                  ]);
+
+                  const enrichedSchedules = (Array.isArray(schedules) ? schedules : []).map((schedule) => {
+                    const technician = technicians.find(t => t.id === schedule.technicianId);
+                    if (technician && !schedule.technicianFullName && !schedule.technicianName) {
+                      return {
+                        ...schedule,
+                        technicianFullName: `${technician.firstName} ${technician.lastName}`,
+                        technicianName: `${technician.firstName} ${technician.lastName}`,
+                      };
+                    }
+                    return schedule;
+                  });
+
+                  setWorkOrderStaffSchedules(enrichedSchedules);
+                  setWorkOrderExpenses(Array.isArray(expenses) ? expenses : []);
+                  setWorkOrderTools(Array.isArray(tools) ? tools : []);
+                } catch (resourceError) {
+                  console.error('Error loading schedules/tools/expenses for job card work order:', resourceError);
+                  setWorkOrderStaffSchedules([]);
+                  setWorkOrderExpenses([]);
+                  setWorkOrderTools([]);
+                }
                 
                 // Load QC inspection if work order is completed
                 if (workOrder.status === 'Completed') {
@@ -501,6 +554,55 @@ export default function JobCardsPage() {
     }
   };
 
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  };
+
+  const getSortedCards = () => {
+    const sorted = [...filteredCards].sort((a, b) => {
+      let aVal: any = a[sortColumn as keyof JobCard];
+      let bVal: any = b[sortColumn as keyof JobCard];
+
+      if (aVal === null || aVal === undefined) aVal = '';
+      if (bVal === null || bVal === undefined) bVal = '';
+
+      if (typeof aVal === 'string') {
+        aVal = aVal.toLowerCase();
+        bVal = bVal.toLowerCase();
+      }
+
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  };
+
+  const SortHeader = ({ label, column }: { label: string; column: string }) => (
+    <TableHead className="h-12 px-4">
+      <div 
+        className="cursor-pointer hover:bg-gray-100 select-none p-2 rounded inline-flex items-center gap-2"
+        onClick={() => handleSort(column)}
+      >
+        <span>{label}</span>
+        {sortColumn === column ? (
+          sortDirection === 'asc' ? (
+            <ArrowUp className="h-4 w-4" />
+          ) : (
+            <ArrowDown className="h-4 w-4" />
+          )
+        ) : (
+          <ArrowUpDown className="h-4 w-4 opacity-30" />
+        )}
+      </div>
+    </TableHead>
+  );
+
   const getStatusBadge = (jobCardStatus: JobCard['jobCardStatus'], approvalStatus: JobCard['approvalStatus']) => {
     const statusColors = {
       'Draft': 'bg-gray-100 text-gray-800',
@@ -562,11 +664,6 @@ export default function JobCardsPage() {
       
       await jobCardService.submitJobCard(cardId, { confirmReadiness: true });
       
-      // Send notification for job card submission
-      if (jobCard) {
-        await notificationService.notifyJobCardSubmission(cardId, jobCard.jobCardNumber);
-      }
-      
       // Refresh job cards list
       await refreshJobCards();
       
@@ -613,11 +710,6 @@ export default function JobCardsPage() {
         comments: 'Approved via job card management'
       };
       await jobCardService.processApproval(cardId, approvalAction);
-      
-      // Send notification for job card approval
-      if (jobCard) {
-        await notificationService.notifyJobCardApproval(cardId, jobCard.jobCardNumber, 'requester-user-id', true);
-      }
       
       // Refresh job cards list
       await refreshJobCards();
@@ -666,11 +758,6 @@ export default function JobCardsPage() {
       };
       await jobCardService.processApproval(cardId, approvalAction);
       
-      // Send notification for job card rejection
-      if (jobCard) {
-        await notificationService.notifyJobCardApproval(cardId, jobCard.jobCardNumber, 'requester-user-id', false);
-      }
-      
       // Refresh job cards list
       await refreshJobCards();
       
@@ -709,7 +796,7 @@ export default function JobCardsPage() {
             : card
         ));
         
-        // Store work order in localStorage so WorkOrderManagement can access it
+        // Create mock work order for testing
         const newWorkOrder = {
           id: `mock-wo-${Date.now()}`,
           workOrderNumber: mockWorkOrderId,
@@ -741,7 +828,7 @@ export default function JobCardsPage() {
         localStorage.setItem('mockWorkOrders', JSON.stringify(existingWorkOrders));
         
         console.log(`✅ Mock work order generated: ${mockWorkOrderId}`);
-        console.log('🏥 Work order stored in localStorage for WorkOrderManagement!');
+        console.log('✅ Mock work order created for testing');
         return;
       }
       
@@ -954,8 +1041,8 @@ export default function JobCardsPage() {
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
-          <div className="flex items-center space-x-4">
-            <div className="flex-1 max-w-sm">
+          <div className="flex items-center space-x-4 flex-wrap gap-4">
+            <div className="flex-1 min-w-[200px] max-w-sm">
               <Label htmlFor="search" className="sr-only">Search</Label>
               <div className="relative">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -969,40 +1056,62 @@ export default function JobCardsPage() {
               </div>
             </div>
             <ClientOnly fallback={<div className="w-[140px] h-10 bg-gray-100 rounded animate-pulse"></div>}>
-              <div className="space-y-1">
-                <Label htmlFor="status-filter" className="text-sm">Status</Label>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-[140px]">
-                    <SelectValue placeholder="All Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="Draft">Draft</SelectItem>
-                    <SelectItem value="Submitted">Submitted</SelectItem>
-                    <SelectItem value="UnderReview">Under Review</SelectItem>
-                    <SelectItem value="Approved">Approved</SelectItem>
-                    <SelectItem value="Rejected">Rejected</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue placeholder="All Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="Draft">Draft</SelectItem>
+                  <SelectItem value="Submitted">Submitted</SelectItem>
+                  <SelectItem value="UnderReview">Under Review</SelectItem>
+                  <SelectItem value="Approved">Approved</SelectItem>
+                  <SelectItem value="Rejected">Rejected</SelectItem>
+                </SelectContent>
+              </Select>
             </ClientOnly>
             <ClientOnly fallback={<div className="w-[140px] h-10 bg-gray-100 rounded animate-pulse"></div>}>
-              <div className="space-y-1">
-                <Label htmlFor="priority-filter" className="text-sm">Priority</Label>
-                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                  <SelectTrigger className="w-[140px]">
-                    <SelectValue placeholder="All Priority" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Priority</SelectItem>
-                    <SelectItem value="Low">Low</SelectItem>
-                    <SelectItem value="Medium">Medium</SelectItem>
-                    <SelectItem value="High">High</SelectItem>
-                    <SelectItem value="Critical">Critical</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue placeholder="All Priority" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Priority</SelectItem>
+                  <SelectItem value="Low">Low</SelectItem>
+                  <SelectItem value="Medium">Medium</SelectItem>
+                  <SelectItem value="High">High</SelectItem>
+                  <SelectItem value="Critical">Critical</SelectItem>
+                </SelectContent>
+              </Select>
             </ClientOnly>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="justify-start text-left font-normal w-[250px]">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {dateRange?.from ? (
+                    dateRange.to ? (
+                      <>
+                        {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")}
+                      </>
+                    ) : (
+                      format(dateRange.from, "LLL dd, y")
+                    )
+                  ) : (
+                    <span>Pick a date range</span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <CalendarComponent
+                  initialFocus
+                  mode="range"
+                  defaultMonth={dateRange?.from}
+                  selected={dateRange}
+                  onSelect={setDateRange}
+                  numberOfMonths={2}
+                />
+              </PopoverContent>
+            </Popover>
           </div>
         </CardContent>
       </Card>
@@ -1016,18 +1125,18 @@ export default function JobCardsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Job Card #</TableHead>
-                <TableHead>Title</TableHead>
-                <TableHead>Asset</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Priority</TableHead>
-                <TableHead>Requested By</TableHead>
-                <TableHead>Created</TableHead>
+                <SortHeader label="Job Card #" column="jobCardNumber" />
+                <SortHeader label="Title" column="title" />
+                <SortHeader label="Asset" column="assetName" />
+                <SortHeader label="Status" column="jobCardStatus" />
+                <SortHeader label="Priority" column="priority" />
+                <SortHeader label="Requested By" column="requestedBy" />
+                <SortHeader label="Created" column="createdAt" />
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredCards.map((card) => (
+              {getSortedCards().map((card) => (
                 <TableRow key={card.id}>
                   <TableCell className="font-medium">{card.jobCardNumber}</TableCell>
                   <TableCell>{card.title}</TableCell>
@@ -1035,7 +1144,7 @@ export default function JobCardsPage() {
                   <TableCell>{getStatusBadge(card.jobCardStatus, card.approvalStatus)}</TableCell>
                   <TableCell>{getPriorityBadge(card.priority)}</TableCell>
                   <TableCell>{card.requestedBy}</TableCell>
-                  <TableCell>{new Date(card.createdAt).toLocaleDateString()}</TableCell>
+                  <TableCell>{format(new Date(card.createdAt), 'MMM dd, yyyy HH:mm')}</TableCell>
                   <TableCell>
                     <div className="flex items-center space-x-2">
                       <Button
@@ -1054,6 +1163,36 @@ export default function JobCardsPage() {
                               try {
                                 const workOrder = await workOrderService.getWorkOrderById(details.generatedWorkOrderId);
                                 setSelectedWorkOrder(workOrder);
+
+                                // Load technician schedules, tools, and expenses for this work order
+                                try {
+                                  const [schedules, expenses, tools] = await Promise.all([
+                                    maintenanceApiService.getStaffSchedulesByWorkOrder(workOrder.id),
+                                    maintenanceApiService.getExpensesByWorkOrder(workOrder.id),
+                                    workOrderToolService.getWorkOrderTools(workOrder.id),
+                                  ]);
+
+                                  const enrichedSchedules = (Array.isArray(schedules) ? schedules : []).map((schedule) => {
+                                    const technician = technicians.find(t => t.id === schedule.technicianId);
+                                    if (technician && !schedule.technicianFullName && !schedule.technicianName) {
+                                      return {
+                                        ...schedule,
+                                        technicianFullName: `${technician.firstName} ${technician.lastName}`,
+                                        technicianName: `${technician.firstName} ${technician.lastName}`,
+                                      };
+                                    }
+                                    return schedule;
+                                  });
+
+                                  setWorkOrderStaffSchedules(enrichedSchedules);
+                                  setWorkOrderExpenses(Array.isArray(expenses) ? expenses : []);
+                                  setWorkOrderTools(Array.isArray(tools) ? tools : []);
+                                } catch (resourceError) {
+                                  console.error('Error loading schedules/tools/expenses for job card work order:', resourceError);
+                                  setWorkOrderStaffSchedules([]);
+                                  setWorkOrderExpenses([]);
+                                  setWorkOrderTools([]);
+                                }
                                 
                                 // Load QC inspection if work order is completed
                                 if (workOrder.status === 'Completed') {
@@ -1381,6 +1520,9 @@ export default function JobCardsPage() {
           setSelectedCardDetails(null);
           setSelectedWorkOrder(null);
           setSelectedQCInspection(null);
+          setWorkOrderStaffSchedules([]);
+          setWorkOrderExpenses([]);
+          setWorkOrderTools([]);
         }
       }}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -1416,7 +1558,7 @@ export default function JobCardsPage() {
                     <div className="grid grid-cols-3 gap-4">
                       <div>
                         <Label className="text-sm font-medium text-muted-foreground">Status</Label>
-                        <div className="pt-1">{getStatusBadge(selectedCardDetails.jobCardStatus)}</div>
+                        <div className="pt-1">{getStatusBadge(selectedCardDetails.jobCardStatus, selectedCardDetails.approvalStatus)}</div>
                       </div>
                       <div>
                         <Label className="text-sm font-medium text-muted-foreground">Approval Status</Label>
@@ -1771,6 +1913,144 @@ export default function JobCardsPage() {
                                 <Badge>{task.status}</Badge>
                               </div>
                             ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Scheduled Technicians */}
+                    {workOrderStaffSchedules.length > 0 && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-lg">Scheduled Technicians</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="overflow-x-auto">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Technician</TableHead>
+                                  <TableHead>Schedule Type</TableHead>
+                                  <TableHead>Start</TableHead>
+                                  <TableHead>End</TableHead>
+                                  <TableHead>Status</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {workOrderStaffSchedules.map((schedule, index) => (
+                                  <TableRow key={schedule.id || index}>
+                                    <TableCell>{schedule.technicianFullName || schedule.technicianName || 'N/A'}</TableCell>
+                                    <TableCell>{schedule.scheduleType}</TableCell>
+                                    <TableCell>{schedule.startDateTime ? format(new Date(schedule.startDateTime), 'MMM dd, yyyy HH:mm') : 'N/A'}</TableCell>
+                                    <TableCell>{schedule.endDateTime ? format(new Date(schedule.endDateTime), 'MMM dd, yyyy HH:mm') : 'N/A'}</TableCell>
+                                    <TableCell>
+                                      <Badge variant={schedule.status === 'Completed' ? 'default' : schedule.status === 'InProgress' ? 'secondary' : 'outline'}>
+                                        {schedule.status}
+                                      </Badge>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Parts */}
+                    {selectedWorkOrder.parts && selectedWorkOrder.parts.length > 0 && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-lg">Parts Used</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="overflow-x-auto">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Item</TableHead>
+                                  <TableHead>Quantity Used</TableHead>
+                                  <TableHead>Unit Cost</TableHead>
+                                  <TableHead>Total Cost</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {selectedWorkOrder.parts.map((part: any, index: number) => (
+                                  <TableRow key={part.id || index}>
+                                    <TableCell>{part.itemName || part.itemCode || 'N/A'}</TableCell>
+                                    <TableCell>{part.quantityUsed ?? 0}</TableCell>
+                                    <TableCell>{part.unitCost != null ? `$${part.unitCost.toFixed(2)}` : '-'}</TableCell>
+                                    <TableCell>{part.totalCost != null ? `$${part.totalCost.toFixed(2)}` : '-'}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Tools */}
+                    {workOrderTools.length > 0 && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-lg">Tools</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="overflow-x-auto">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Tool</TableHead>
+                                  <TableHead>Required</TableHead>
+                                  <TableHead>Allocated</TableHead>
+                                  <TableHead>Notes</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {workOrderTools.map((tool, index) => (
+                                  <TableRow key={tool.id || index}>
+                                    <TableCell>{tool.toolName || tool.toolCode || 'N/A'}</TableCell>
+                                    <TableCell>{tool.isRequired ? 'Yes' : 'No'}</TableCell>
+                                    <TableCell>{tool.isAllocated ? 'Yes' : 'No'}</TableCell>
+                                    <TableCell>{tool.notes || '-'}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Expenses */}
+                    {workOrderExpenses.length > 0 && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-lg">Expenses</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="overflow-x-auto">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Type</TableHead>
+                                  <TableHead>Description</TableHead>
+                                  <TableHead>Date</TableHead>
+                                  <TableHead>Amount</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {workOrderExpenses.map((expense, index) => (
+                                  <TableRow key={expense.id || index}>
+                                    <TableCell>{expense.expenseType}</TableCell>
+                                    <TableCell>{expense.description}</TableCell>
+                                    <TableCell>{expense.expenseDate ? format(new Date(expense.expenseDate), 'MMM dd, yyyy') : 'N/A'}</TableCell>
+                                    <TableCell>${expense.amount.toFixed(2)}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
                           </div>
                         </CardContent>
                       </Card>

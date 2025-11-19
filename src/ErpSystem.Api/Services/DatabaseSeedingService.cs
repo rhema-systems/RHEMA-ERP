@@ -57,6 +57,10 @@ namespace ErpSystem.Web.Services
                 else
                 {
                     _logger.LogInformation("Basic data already exists, skipping basic seeding");
+                    
+                    // But always ensure tenant modules are seeded
+                    _logger.LogInformation("Ensuring tenant modules are seeded...");
+                    await SeedDefaultTenantModulesAsync();
                 }
 
                 // Always seed/update test users in development to ensure correct passwords
@@ -343,38 +347,43 @@ namespace ErpSystem.Web.Services
                 return;
             }
 
+            // Check if any modules already exist for this tenant
+            var existingModuleCount = await _context.TenantModules
+                .Where(tm => tm.TenantId == defaultTenant.Id)
+                .CountAsync();
+
+            if (existingModuleCount > 0)
+            {
+                _logger.LogInformation("Tenant modules already exist for {TenantName}. Skipping module seeding.", defaultTenant.Name);
+                return;
+            }
+
             var modules = new[]
             {
-                new { ModuleName = "Financial", Description = "Financial reports and analytics" },
+                new { ModuleName = "Finance", Description = "Financial reports and analytics" },
                 new { ModuleName = "Sales", Description = "Sales performance and CRM reports" },
-                new { ModuleName = "Human Resources", Description = "HR and employee reports" },
+                new { ModuleName = "HR", Description = "HR and employee reports" },
                 new { ModuleName = "Inventory", Description = "Stock and inventory reports" },
-                new { ModuleName = "Operations", Description = "Operational efficiency reports" },
                 new { ModuleName = "Procurement", Description = "Purchasing and supplier reports" },
-                new { ModuleName = "Marketing", Description = "Marketing campaigns and analytics" }
+                new { ModuleName = "Marketing", Description = "Marketing campaigns and analytics" },
+                new { ModuleName = "WorkflowEngine", Description = "Workflow automation and BPM" }
             };
 
             foreach (var moduleInfo in modules)
             {
-                var existingModule = await _context.TenantModules
-                    .FirstOrDefaultAsync(tm => tm.TenantId == defaultTenant.Id && tm.ModuleName == moduleInfo.ModuleName);
-                    
-                if (existingModule == null)
+                var module = new TenantModule
                 {
-                    var module = new TenantModule
-                    {
-                        TenantId = defaultTenant.Id,
-                        ModuleName = moduleInfo.ModuleName,
-                        Description = moduleInfo.Description,
-                        Status = ModuleStatus.Enabled,
-                        EnabledDate = DateTime.UtcNow,
-                        CreatedAt = DateTime.UtcNow,
-                        CreatedBy = "System"
-                    };
+                    TenantId = defaultTenant.Id,
+                    ModuleName = moduleInfo.ModuleName,
+                    Description = moduleInfo.Description,
+                    Status = ModuleStatus.Enabled,
+                    EnabledDate = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "System"
+                };
 
-                    _context.TenantModules.Add(module);
-                    _logger.LogDebug("Created tenant module: {ModuleName} for tenant {TenantName}", moduleInfo.ModuleName, defaultTenant.Name);
-                }
+                _context.TenantModules.Add(module);
+                _logger.LogDebug("Created tenant module: {ModuleName} for tenant {TenantName}", moduleInfo.ModuleName, defaultTenant.Name);
             }
 
             await _context.SaveChangesAsync();

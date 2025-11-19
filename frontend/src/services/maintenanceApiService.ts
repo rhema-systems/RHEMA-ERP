@@ -184,6 +184,7 @@ export interface MaintenanceStaffSchedule {
   id?: string;
   technicianId: string;
   technicianName?: string;
+  technicianFullName?: string;
   startDateTime: string;
   endDateTime: string;
   scheduleType: string;
@@ -211,6 +212,7 @@ export interface MaintenanceStaffSchedule {
   actualEndTime?: string;
   createdAt?: string;
   updatedAt?: string;
+  assignedVehicleName?: string;
 }
 
 export interface MaintenanceExpense {

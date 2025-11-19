@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.Extensions.Logging;
+using ErpSystem.Core.Services;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -15,6 +16,7 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
     private readonly ICurrentUserService _currentUserService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<MaintenanceStaffScheduleService> _logger;
+    private readonly IUserService _userService;
 
     public MaintenanceStaffScheduleService(
         IMaintenanceStaffScheduleRepository scheduleRepository,
@@ -22,7 +24,8 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
         IWorkOrderRepository workOrderRepository,
         ICurrentUserService currentUserService,
         IUnitOfWork unitOfWork,
-        ILogger<MaintenanceStaffScheduleService> logger)
+        ILogger<MaintenanceStaffScheduleService> logger,
+        IUserService userService)
     {
         _scheduleRepository = scheduleRepository;
         _employeeRepository = employeeRepository;
@@ -30,6 +33,7 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
         _currentUserService = currentUserService;
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _userService = userService;
     }
 
     public async Task<MaintenanceStaffScheduleDto> CreateScheduleAsync(CreateMaintenanceStaffScheduleDto createDto)
@@ -162,7 +166,15 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
         try
         {
             var schedules = await _scheduleRepository.GetByTechnicianIdAsync(technicianId);
-            return await Task.WhenAll(schedules.Select(s => MapToDto(s)));
+
+            // Map sequentially to avoid concurrent DbContext operations from parallel MapToDto calls
+            var result = new List<MaintenanceStaffScheduleDto>();
+            foreach (var schedule in schedules)
+            {
+                result.Add(await MapToDto(schedule));
+            }
+
+            return result;
         }
         catch (Exception ex)
         {
@@ -176,7 +188,15 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
         try
         {
             var schedules = await _scheduleRepository.GetByWorkOrderIdAsync(workOrderId);
-            return await Task.WhenAll(schedules.Select(s => MapToDto(s)));
+
+            // Map sequentially to avoid concurrent DbContext operations from parallel MapToDto calls
+            var result = new List<MaintenanceStaffScheduleDto>();
+            foreach (var schedule in schedules)
+            {
+                result.Add(await MapToDto(schedule));
+            }
+
+            return result;
         }
         catch (Exception ex)
         {
@@ -190,7 +210,15 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
         try
         {
             var schedules = await _scheduleRepository.GetByDateRangeAsync(startDate, endDate);
-            return await Task.WhenAll(schedules.Select(s => MapToDto(s)));
+
+            // Map sequentially to avoid concurrent DbContext operations from parallel MapToDto calls
+            var result = new List<MaintenanceStaffScheduleDto>();
+            foreach (var schedule in schedules)
+            {
+                result.Add(await MapToDto(schedule));
+            }
+
+            return result;
         }
         catch (Exception ex)
         {
@@ -252,20 +280,18 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
     private async Task<MaintenanceStaffScheduleDto> MapToDto(MaintenanceStaffSchedule schedule)
     {
         string technicianName = string.Empty;
-        if (schedule.Technician != null)
+
+        // TechnicianId now references ApplicationUser (Users table) instead of Employee.
+        // Resolve via IUserService (which queries identity users) so we get names from the Users table.
+        try
         {
-            technicianName = $"{schedule.Technician.FirstName} {schedule.Technician.LastName}";
-        }
-        else
-        {
-            try
+            var user = await _userService.GetUserByIdAsync(schedule.TechnicianId);
+            if (user != null)
             {
-                var technician = await _employeeRepository.GetByIdAsync(schedule.TechnicianId);
-                if (technician != null)
-                    technicianName = $"{technician.FirstName} {technician.LastName}";
+                technicianName = $"{user.FirstName} {user.LastName}";
             }
-            catch { }
         }
+        catch { }
 
         return new MaintenanceStaffScheduleDto
         {

@@ -82,7 +82,7 @@ export function TriggerProximityIndicator({ schedule }: TriggerProximityIndicato
         let percentage = 0;
         let status: 'safe' | 'warning' | 'critical' = 'safe';
         let message = '';
-        let icon: React.ReactNode = <Gauge className="h-4 w-4" />;
+        const icon: React.ReactNode = <Gauge className="h-4 w-4" />;
 
         if (schedule.mileageTrigger && summary.currentMileage) {
           const progress = (summary.currentMileage / schedule.mileageTrigger) * 100;

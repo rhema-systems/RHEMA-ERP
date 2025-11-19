@@ -485,8 +485,8 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.WorkOrders, opt => opt.Ignore());
 
         CreateMap<TechnicianTeamMember, TechnicianTeamMemberDto>()
-            .ForMember(dest => dest.Team, opt => opt.MapFrom(src => src.Team))
-            .ForMember(dest => dest.Technician, opt => opt.MapFrom(src => src.Technician));
+            .ForMember(dest => dest.Team, opt => opt.MapFrom(src => src.Team));
+            // TechnicianId now references ApplicationUser (Users table) instead of Employee
 
         CreateMap<CreateTechnicianTeamMemberDto, TechnicianTeamMember>()
             .ForMember(dest => dest.Id, opt => opt.Ignore())
@@ -496,8 +496,7 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.UpdatedAt, opt => opt.Ignore())
             .ForMember(dest => dest.IsDeleted, opt => opt.Ignore())
             .ForMember(dest => dest.DeletedAt, opt => opt.Ignore())
-            .ForMember(dest => dest.Team, opt => opt.Ignore())
-            .ForMember(dest => dest.Technician, opt => opt.Ignore());
+            .ForMember(dest => dest.Team, opt => opt.Ignore());
 
         CreateMap<UpdateTechnicianTeamMemberDto, TechnicianTeamMember>()
             .ForMember(dest => dest.Id, opt => opt.Ignore())
@@ -509,8 +508,7 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.UpdatedAt, opt => opt.Ignore())
             .ForMember(dest => dest.IsDeleted, opt => opt.Ignore())
             .ForMember(dest => dest.DeletedAt, opt => opt.Ignore())
-            .ForMember(dest => dest.Team, opt => opt.Ignore())
-            .ForMember(dest => dest.Technician, opt => opt.Ignore());
+            .ForMember(dest => dest.Team, opt => opt.Ignore());
 
         CreateMap<TechnicianSkill, TechnicianSkillDto>()
             .ForMember(dest => dest.UserCount, opt => opt.MapFrom(src => src.UserSkills.Count));

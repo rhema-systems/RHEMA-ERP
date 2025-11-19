@@ -187,11 +187,11 @@ public class ToolCheckoutController : ControllerBase
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var employeeId = _currentUserService.EmployeeId;
-            if (!employeeId.HasValue)
-                return BadRequest("Current user is not linked to an employee");
+            // Use current application user (Users table) as the person performing the return
+            if (string.IsNullOrEmpty(_currentUserService.UserId) || !Guid.TryParse(_currentUserService.UserId, out var userId))
+                return BadRequest("Current user is not linked to an application user");
 
-            var result = await _toolCheckoutService.ReturnToolAsync(checkoutId, employeeId.Value, dto);
+            var result = await _toolCheckoutService.ReturnToolAsync(checkoutId, userId, dto);
             return Ok(result);
         }
         catch (ArgumentException ex)

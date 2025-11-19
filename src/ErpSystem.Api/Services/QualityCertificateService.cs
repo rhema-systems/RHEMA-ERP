@@ -156,7 +156,11 @@ public class QualityCertificateService
                 AddRow(table, "Work Order Type:", workOrder.WorkOrderType?.Name ?? "Unknown");
                 AddRow(table, "Maintenance Type:", workOrder.MaintenanceType?.Name ?? "Unknown");
                 AddRow(table, "Priority:", workOrder.PriorityLevel?.Name ?? "Unknown");
-                AddRow(table, "Completed Date:", workOrder.ActualCompletionDate?.ToString("yyyy-MM-dd") ?? "N/A");
+
+                // Prefer the work order's actual completion date, but fall back to inspection date so the certificate never shows N/A
+                var completedDate = workOrder.ActualCompletionDate ?? (qualityCheck.InspectionDate == default ? (DateTime?)null : qualityCheck.InspectionDate);
+                // Format the completed date the same way as the inspection date (e.g. 18-Nov-25 14:23:45)
+                AddRow(table, "Completed Date:", completedDate?.ToString("dd-MMM-yy HH:mm:ss") ?? "N/A");
             }));
 
             column.Item().PaddingTop(10).Element(c => ComposeSection(c, "Inspection Details", table =>

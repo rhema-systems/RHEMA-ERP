@@ -77,6 +77,12 @@ public class CheckoutWorkOrderToolDto
     [Required]
     public Guid ToolId { get; set; }
     
+    /// <summary>
+    /// Technician ID performing the checkout (from staff schedule)
+    /// </summary>
+    [Required]
+    public Guid TechnicianId { get; set; }
+    
     [Required]
     [StringLength(20)]
     public string ConditionOnCheckout { get; set; } = "Good"; // Good, Fair, Damaged

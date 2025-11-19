@@ -200,6 +200,20 @@ namespace ErpSystem.Data.Repositories
                 .ToListAsync();
         }
 
+        public async Task<Employee?> GetByApplicationUserIdAsync(Guid applicationUserId)
+        {
+            // Query ApplicationUser table via the context's IdentityUsers table
+            var context = _context as ApplicationDbContext;
+            if (context == null)
+                return null;
+                
+            var user = await context.Users.FirstOrDefaultAsync(u => u.Id == applicationUserId);
+            if (user?.EmployeeId == null)
+                return null;
+            
+            return await GetByIdWithDetailsAsync(user.EmployeeId.Value);
+        }
+
         public async Task<string> GenerateEmployeeNumberAsync()
         {
             var currentYear = DateTime.Now.Year.ToString();

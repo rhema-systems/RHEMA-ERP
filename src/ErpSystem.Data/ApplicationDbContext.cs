@@ -1148,11 +1148,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(tt => tt.Members)
                 .HasForeignKey(ttm => ttm.TeamId)
                 .OnDelete(DeleteBehavior.Cascade);
-                
-            entity.HasOne(ttm => ttm.Technician)
-                .WithMany()
-                .HasForeignKey(ttm => ttm.TechnicianId)
-                .OnDelete(DeleteBehavior.Restrict);
+            // TechnicianId now references ApplicationUser (Users table) instead of Employee
         });
         
         // Configure TechnicianSkill entity
@@ -1233,11 +1229,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ts => ts.Status);
             entity.HasIndex(ts => ts.ScheduleType);
             
-            entity.HasOne(ts => ts.Technician)
-                .WithMany()
-                .HasForeignKey(ts => ts.TechnicianId)
-                .OnDelete(DeleteBehavior.Cascade);
-                
+            // TechnicianId now references ApplicationUser (Users table) instead of Employee
             entity.HasOne(ts => ts.WorkOrder)
                 .WithMany()
                 .HasForeignKey(ts => ts.WorkOrderId)
@@ -1257,10 +1249,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ta => ta.AvailabilityType);
             entity.HasIndex(ta => ta.Reason);
             
-            entity.HasOne(ta => ta.Technician)
-                .WithMany()
-                .HasForeignKey(ta => ta.TechnicianId)
-                .OnDelete(DeleteBehavior.Cascade);
+            // TechnicianId now references ApplicationUser (Users table) instead of Employee
         });
         
         // Configure TechnicianShift entity

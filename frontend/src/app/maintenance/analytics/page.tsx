@@ -1,5 +1,13 @@
 'use client';
 
+import { redirect } from 'next/navigation';
+
+export default function AssetAnalyticsDashboard() {
+  // Temporarily hide this page and redirect back to Maintenance home
+  redirect('/maintenance');
+}
+
+// Original implementation preserved below for future re-enable
 import React, { useState, useCallback, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -99,7 +107,7 @@ const defaultFilters: AnalyticsFilters = {
 
 // #region Asset Analytics Dashboard Component
 
-export default function AssetAnalyticsDashboard() {
+function AssetAnalyticsDashboardOriginal() {
   const [dashboardState, setDashboardState] = useState<DashboardState>({
     selectedAssetId: '1',
     filters: defaultFilters,

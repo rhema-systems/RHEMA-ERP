@@ -103,12 +103,10 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
     
     public async Task<IEnumerable<Employee>> GetTechniciansByTeamAsync(Guid teamId)
     {
-        return await _context.TechnicianTeamMembers
-            .Where(ttm => ttm.TeamId == teamId && !ttm.IsDeleted)
-            .Select(ttm => ttm.Technician)
-            .Where(e => e != null)
-            .Cast<Employee>()
-            .ToListAsync();
+        // TechnicianId now references ApplicationUser (Users table) instead of Employee
+        // This method returns an empty list as technician info is now in Users table
+        await Task.CompletedTask;
+        return new List<Employee>();
     }
     
     public async Task<double> GetTechnicianWorkloadAsync(Guid technicianId, DateTime startDate, DateTime endDate)

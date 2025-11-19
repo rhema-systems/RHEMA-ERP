@@ -137,18 +137,6 @@ public class JobCardController : ControllerBase
                 return BadRequest(ModelState);
 
             var jobCard = await _jobCardService.CreateJobCardAsync(createDto);
-            
-            // Send notification when job card is created
-            try
-            {
-                await _notificationService.NotifyJobCardSubmittedAsync(jobCard.Id);
-            }
-            catch (Exception notifEx)
-            {
-                _logger.LogWarning(notifEx, "Failed to send job card creation notification for {JobCardId}", jobCard.Id);
-                // Don't fail the request if notification fails
-            }
-            
             return CreatedAtAction(nameof(GetJobCard), new { id = jobCard.Id }, jobCard);
         }
         catch (ArgumentException ex)

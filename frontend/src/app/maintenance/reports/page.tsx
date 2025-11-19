@@ -1,5 +1,13 @@
 'use client';
 
+import { redirect } from 'next/navigation';
+
+export default function MaintenanceReportsPage() {
+  // Temporarily hide this page and redirect back to Maintenance home
+  redirect('/maintenance');
+}
+
+// Original implementation preserved below for future re-enable
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -60,7 +68,7 @@ interface ReportsData {
   }>;
 }
 
-export default function MaintenanceReportsPage() {
+function MaintenanceReportsPageOriginal() {
   const [loading, setLoading] = useState(true);
   const [reportsData, setReportsData] = useState<ReportsData>({
     workOrdersByMonth: [],

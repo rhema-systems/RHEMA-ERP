@@ -331,8 +331,8 @@ public class ToolCheckout : TenantEntity
     // Navigation properties
     [ForeignKey(nameof(ToolId))]
     public virtual ErpSystem.Core.Entities.Inventory.InventoryItem Tool { get; set; } = null!;
-    public virtual Employee CheckedOutBy { get; set; } = null!;
-    public virtual Employee? CheckedInBy { get; set; }
+    public virtual ApplicationUser CheckedOutBy { get; set; } = null!;
+    public virtual ApplicationUser? CheckedInBy { get; set; }
     public virtual WorkOrder? WorkOrder { get; set; }
     public virtual JobCard? JobCard { get; set; }
 }
@@ -424,7 +424,7 @@ public class MaintenanceStaffSchedule : TenantEntity
     public DateTime? ActualEndTime { get; set; }
 
     // Navigation properties
-    public virtual Employee Technician { get; set; } = null!;
+    // TechnicianId now references ApplicationUser (Users table) instead of Employee
     public virtual WorkOrder? WorkOrder { get; set; }
     public virtual JobCard? JobCard { get; set; }
     public virtual TechnicianTeam? Team { get; set; }

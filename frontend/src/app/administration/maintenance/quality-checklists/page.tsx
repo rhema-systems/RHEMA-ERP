@@ -351,7 +351,10 @@ export default function QualityChecklistsPage() {
       id: editingItem.id || `temp-${Date.now()}`
     } as QualityChecklistItem;
 
-    if (editingItem.id && editingItem.id.startsWith('temp-')) {
+    // If the item doesn't exist in the current list (new item), append it; otherwise update it
+    const isExistingItem = !!editingItem.id && formData.items.some(item => item.id === editingItem.id);
+
+    if (!isExistingItem) {
       // Adding new item
       setFormData({
         ...formData,

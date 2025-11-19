@@ -1704,7 +1704,7 @@ public class TechnicianTeamMember : TenantEntity
 
     // Navigation properties
     public virtual TechnicianTeam Team { get; set; } = null!;
-    public virtual Employee Technician { get; set; } = null!;
+    // TechnicianId now references ApplicationUser (Users table) instead of Employee
 }
 
 public class TechnicianSkill : TenantEntity
@@ -1801,7 +1801,7 @@ public class TechnicianSchedule : TenantEntity
     public double ActualHours { get; set; } = 0;
 
     // Navigation properties
-    public virtual Employee Technician { get; set; } = null!;
+    // TechnicianId now references ApplicationUser (Users table) instead of Employee
     public virtual WorkOrder? WorkOrder { get; set; }
     public virtual TechnicianShift? Shift { get; set; }
 }
@@ -1838,7 +1838,7 @@ public class TechnicianAvailability : TenantEntity
     public double? CapacityPercentage { get; set; } = 100;
 
     // Navigation properties
-    public virtual Employee Technician { get; set; } = null!;
+    // TechnicianId now references ApplicationUser (Users table) instead of Employee
 }
 
 public class TechnicianShift : TenantEntity

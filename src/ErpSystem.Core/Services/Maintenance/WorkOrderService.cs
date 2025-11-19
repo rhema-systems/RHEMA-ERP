@@ -290,6 +290,21 @@ public class WorkOrderService : IWorkOrderService
             // Release vehicles back to Active status
             await UpdateVehicleStatusOnWorkOrderCompleteAsync(completionDto.WorkOrderId);
 
+            // Ensure any active staff schedules for this work order are marked as completed
+            var staffSchedules = await _scheduleRepository.GetByWorkOrderIdAsync(completionDto.WorkOrderId);
+            if (staffSchedules != null)
+            {
+                var now = DateTime.UtcNow;
+                foreach (var schedule in staffSchedules.Where(s => s.Status == "Scheduled" || s.Status == "InProgress"))
+                {
+                    schedule.Status = "Completed";
+                    if (!schedule.ActualEndTime.HasValue)
+                        schedule.ActualEndTime = now;
+                    schedule.UpdatedAt = now;
+                    await _scheduleRepository.UpdateAsync(schedule);
+                }
+            }
+
             // Update work order completion
             workOrder.Status = "Completed";
             workOrder.ActualCompletionDate = result.CompletionDate;
@@ -1103,6 +1118,21 @@ public class WorkOrderService : IWorkOrderService
 
             // Release vehicles back to Active status
             await UpdateVehicleStatusOnWorkOrderCompleteAsync(id);
+
+            // Ensure any active staff schedules for this work order are marked as completed
+            var staffSchedules = await _scheduleRepository.GetByWorkOrderIdAsync(id);
+            if (staffSchedules != null)
+            {
+                var now = DateTime.UtcNow;
+                foreach (var schedule in staffSchedules.Where(s => s.Status == "Scheduled" || s.Status == "InProgress"))
+                {
+                    schedule.Status = "Completed";
+                    if (!schedule.ActualEndTime.HasValue)
+                        schedule.ActualEndTime = now;
+                    schedule.UpdatedAt = now;
+                    await _scheduleRepository.UpdateAsync(schedule);
+                }
+            }
 
             workOrder.Status = "Completed";
             workOrder.ActualCompletionDate = DateTime.UtcNow;

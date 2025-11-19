@@ -13,7 +13,6 @@ public class MaintenanceStaffScheduleRepository : GenericRepository<MaintenanceS
     public async Task<IEnumerable<MaintenanceStaffSchedule>> GetByTechnicianIdAsync(Guid technicianId)
     {
         return await _context.MaintenanceStaffSchedules
-            .Include(s => s.Technician)
             .Include(s => s.WorkOrder)
             .Include(s => s.JobCard)
             .Include(s => s.Team)
@@ -26,7 +25,6 @@ public class MaintenanceStaffScheduleRepository : GenericRepository<MaintenanceS
     public async Task<IEnumerable<MaintenanceStaffSchedule>> GetByWorkOrderIdAsync(Guid workOrderId)
     {
         return await _context.MaintenanceStaffSchedules
-            .Include(s => s.Technician)
             .Include(s => s.WorkOrder)
             .Include(s => s.AssignedVehicle)
             .Where(s => s.WorkOrderId == workOrderId)
@@ -37,7 +35,6 @@ public class MaintenanceStaffScheduleRepository : GenericRepository<MaintenanceS
     public async Task<IEnumerable<MaintenanceStaffSchedule>> GetByDateRangeAsync(DateTime startDate, DateTime endDate)
     {
         return await _context.MaintenanceStaffSchedules
-            .Include(s => s.Technician)
             .Include(s => s.WorkOrder)
             .Include(s => s.AssignedVehicle)
             .Where(s => s.StartDateTime >= startDate && s.StartDateTime <= endDate)
@@ -49,7 +46,6 @@ public class MaintenanceStaffScheduleRepository : GenericRepository<MaintenanceS
         Guid technicianId, DateTime startDate, DateTime endDate)
     {
         return await _context.MaintenanceStaffSchedules
-            .Include(s => s.Technician)
             .Include(s => s.WorkOrder)
             .Include(s => s.AssignedVehicle)
             .Where(s => s.TechnicianId == technicianId 
@@ -62,7 +58,6 @@ public class MaintenanceStaffScheduleRepository : GenericRepository<MaintenanceS
     public async Task<MaintenanceStaffSchedule?> GetByIdWithDetailsAsync(Guid id)
     {
         return await _context.MaintenanceStaffSchedules
-            .Include(s => s.Technician)
             .Include(s => s.WorkOrder)
             .Include(s => s.JobCard)
             .Include(s => s.Team)

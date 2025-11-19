@@ -166,12 +166,16 @@ const navigationItems: NavItem[] = [
           { title: 'Quality Control', href: '/maintenance/quality-control', icon: ClipboardCheck },
           { title: 'Scheduled Maintenance', href: '/maintenance/scheduled', icon: Calendar },
           { title: 'Condition Monitoring', href: '/maintenance/condition-monitoring', icon: Activity },
-          { title: 'Emergency Maintenance', href: '/maintenance/emergency', icon: AlertTriangle },
-          { title: 'Inspections', href: '/maintenance/inspections', icon: ClipboardCheck },
+          // Emergency Maintenance temporarily hidden
+          // { title: 'Emergency Maintenance', href: '/maintenance/emergency', icon: AlertTriangle },
+          // Inspections temporarily hidden
+          // { title: 'Inspections', href: '/maintenance/inspections', icon: ClipboardCheck },
           { title: 'Maintenance History', href: '/maintenance/history', icon: Clock },
           { title: 'Tool Management', href: '/maintenance/tools', icon: Wrench },
-          { title: 'Reports', href: '/maintenance/reports', icon: BarChart3 },
-          { title: 'Asset Analytics', href: '/maintenance/analytics', icon: BarChart3 },
+          // Reports temporarily hidden
+          // { title: 'Reports', href: '/maintenance/reports', icon: BarChart3 },
+          // Asset Analytics temporarily hidden
+          // { title: 'Asset Analytics', href: '/maintenance/analytics', icon: BarChart3 },
         ],
       },
     ],
@@ -337,11 +341,12 @@ const navigationItems: NavItem[] = [
               { title: 'Priority Levels', href: '/administration/maintenance/priorities', icon: AlertTriangle },
               { title: 'Task Templates', href: '/administration/maintenance/task-templates', icon: FileText },
               { title: 'Quality Checklists', href: '/administration/maintenance/quality-checklists', icon: CheckSquare },
-              { title: 'Inspection Templates', href: '/administration/maintenance/inspection-templates', icon: ClipboardCheck },
-              { title: 'Inspectors', href: '/administration/maintenance/inspectors', icon: Users },
-              { title: 'Maintenance Schedules', href: '/administration/maintenance/schedules', icon: Calendar },
-              { title: 'Technician Skills', href: '/administration/maintenance/skills', icon: Users },
-              { title: 'Safety Protocols', href: '/administration/maintenance/safety', icon: Shield },
+              // The following advanced maintenance admin menus are temporarily hidden:
+              // { title: 'Inspection Templates', href: '/administration/maintenance/inspection-templates', icon: ClipboardCheck },
+              // { title: 'Inspectors', href: '/administration/maintenance/inspectors', icon: Users },
+              // { title: 'Maintenance Schedules', href: '/administration/maintenance/schedules', icon: Calendar },
+              // { title: 'Technician Skills', href: '/administration/maintenance/skills', icon: Users },
+              // { title: 'Safety Protocols', href: '/administration/maintenance/safety', icon: Shield },
             ],
           },
         ],
@@ -581,10 +586,10 @@ export function Sidebar({ className }: SidebarProps) {
         setIsMovingToChild(true);
         // Give more time when moving toward child
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        timeoutRef.current = setTimeout(() => {
-          if (!mouseInMenu) clearMenus();
-          setIsMovingToChild(false);
-        }, 800);
+    timeoutRef.current = setTimeout(() => {
+      if (!mouseInMenu) clearMenus();
+      setIsMovingToChild(false);
+    }, 1200);
         return;
       }
     }
@@ -614,7 +619,7 @@ export function Sidebar({ className }: SidebarProps) {
     }
     timeoutRef.current = setTimeout(() => {
       clearMenus();
-    }, 400);
+    }, 900);
   };
 
   const handleSidebarMouseLeave = () => {
@@ -624,7 +629,7 @@ export function Sidebar({ className }: SidebarProps) {
     }
     timeoutRef.current = setTimeout(() => {
       clearMenus();
-    }, 500);
+    }, 1000);
   };
 
   const toggleSection = (title: string) => {
@@ -744,9 +749,9 @@ export function Sidebar({ className }: SidebarProps) {
           className="fixed z-40"
           style={{
             left: Math.min(collapsed ? 64 : 288, menuPositions[hoveredItem].x),
-            top: menuPositions[hoveredItem].y,
-            width: Math.abs(menuPositions[hoveredItem].x - (collapsed ? 64 : 288)) + 8,
-            height: 40,
+            top: menuPositions[hoveredItem].y - 20,
+            width: Math.abs(menuPositions[hoveredItem].x - (collapsed ? 64 : 288)) + 16,
+            height: 120,
             pointerEvents: 'auto',
             backgroundColor: 'transparent'
           }}
@@ -812,9 +817,9 @@ export function Sidebar({ className }: SidebarProps) {
           className="fixed z-40"
           style={{
             left: Math.min(menuPositions[hoveredItem].x + 224, menuPositions[`${hoveredItem}-${hoveredChild}`].x),
-            top: menuPositions[`${hoveredItem}-${hoveredChild}`].y,
-            width: Math.abs(menuPositions[`${hoveredItem}-${hoveredChild}`].x - (menuPositions[hoveredItem].x + 224)) + 8,
-            height: 40,
+            top: menuPositions[`${hoveredItem}-${hoveredChild}`].y - 20,
+            width: Math.abs(menuPositions[`${hoveredItem}-${hoveredChild}`].x - (menuPositions[hoveredItem].x + 224)) + 16,
+            height: 120,
             pointerEvents: 'auto',
             backgroundColor: 'transparent'
           }}
@@ -881,9 +886,9 @@ export function Sidebar({ className }: SidebarProps) {
           className="fixed z-40"
           style={{
             left: Math.min(menuPositions[`${hoveredItem}-${hoveredChild}`].x + 224, menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].x),
-            top: menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].y,
-            width: Math.abs(menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].x - (menuPositions[`${hoveredItem}-${hoveredChild}`].x + 224)) + 8,
-            height: 40,
+            top: menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].y - 20,
+            width: Math.abs(menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].x - (menuPositions[`${hoveredItem}-${hoveredChild}`].x + 224)) + 16,
+            height: 120,
             pointerEvents: 'auto',
             backgroundColor: 'transparent'
           }}

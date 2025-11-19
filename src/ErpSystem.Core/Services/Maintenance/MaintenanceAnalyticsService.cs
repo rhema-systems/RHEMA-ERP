@@ -44,22 +44,14 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         {
             _logger.LogInformation("Generating maintenance dashboard data");
 
-            var tasks = new List<Task>
-            {
-                GetAssetMetricsAsync(),
-                GetWorkOrderMetricsAsync(),
-                GetScheduleMetricsAsync(),
-                GetTechnicianMetricsAsync(),
-                GetSafetyMetricsAsync()
-            };
-
-            await Task.WhenAll(tasks);
-
-            var assetMetrics = await (tasks[0] as Task<AssetMetricsDto>);
-            var workOrderMetrics = await (tasks[1] as Task<WorkOrderMetricsDto>);
-            var scheduleMetrics = await (tasks[2] as Task<ScheduleMetricsDto>);
-            var technicianMetrics = await (tasks[3] as Task<TechnicianMetricsDto>);
-            var safetyMetrics = await (tasks[4] as Task<SafetyMetricsDto>);
+            // IMPORTANT: run analytics sequentially to avoid concurrent DbContext usage across services.
+            // Each underlying service (assets, work orders, schedules, technicians, safety) uses the same scoped DbContext,
+            // so parallel execution would trigger EF Core's concurrency detector.
+            var assetMetrics = await GetAssetMetricsAsync();
+            var workOrderMetrics = await GetWorkOrderMetricsAsync();
+            var scheduleMetrics = await GetScheduleMetricsAsync();
+            var technicianMetrics = await GetTechnicianMetricsAsync();
+            var safetyMetrics = await GetSafetyMetricsAsync();
 
             var dashboard = new MaintenanceDashboardDto
             {
@@ -580,17 +572,87 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
     {
         _logger.LogInformation("Generating work order trends from {StartDate} to {EndDate}", startDate, endDate);
 
-        // Mock implementation - would analyze actual trends
+        // Fetch all work orders in the requested period using the existing service (EF-safe)
         var workOrders = await GetWorkOrdersInPeriodAsync(startDate, endDate);
-        
+
+        // Normalize to month buckets so the UI can display a clean "Monthly" trend.
+        // We use the first day of each month as the representative date for that bucket.
+        var monthStart = new DateTime(startDate.Year, startDate.Month, 1);
+        var finalEnd = new DateTime(endDate.Year, endDate.Month, 1).AddMonths(1).AddTicks(-1);
+
+        var creationTrend = new List<TrendDataPointDto>();
+        var completionTrend = new List<TrendDataPointDto>();
+        var costTrend = new List<TrendDataPointDto>();
+
+        while (monthStart <= finalEnd)
+        {
+            var monthEnd = monthStart.AddMonths(1).AddTicks(-1);
+
+            var createdInMonth = workOrders.Where(wo => wo.CreatedAt >= monthStart && wo.CreatedAt <= monthEnd).ToList();
+            var completedInMonth = workOrders.Where(wo =>
+                wo.Status == "Completed" &&
+                wo.ActualCompletionDate.HasValue &&
+                wo.ActualCompletionDate.Value >= monthStart &&
+                wo.ActualCompletionDate.Value <= monthEnd).ToList();
+
+            var costInMonth = completedInMonth.Sum(wo => (double)wo.ActualCost);
+
+            creationTrend.Add(new TrendDataPointDto
+            {
+                Date = monthStart,
+                Value = createdInMonth.Count,
+                MetricType = "Created",
+                Label = monthStart.ToString("MMM yyyy")
+            });
+
+            completionTrend.Add(new TrendDataPointDto
+            {
+                Date = monthStart,
+                Value = completedInMonth.Count,
+                MetricType = "Completed",
+                Label = monthStart.ToString("MMM yyyy")
+            });
+
+            costTrend.Add(new TrendDataPointDto
+            {
+                Date = monthStart,
+                Value = costInMonth,
+                MetricType = "Cost",
+                Label = monthStart.ToString("MMM yyyy")
+            });
+
+            monthStart = monthStart.AddMonths(1);
+        }
+
+        // Work order type distribution over the entire period
+        var totalWorkOrders = workOrders.Count;
+        var typeDistribution = workOrders
+            .GroupBy(wo => string.IsNullOrWhiteSpace(wo.MaintenanceTypeName)
+                ? "Unspecified"
+                : wo.MaintenanceTypeName)
+            .Select(g => new WorkOrderTypeMetricDto
+            {
+                WorkOrderType = g.Key,
+                Count = g.Count(),
+                Percentage = totalWorkOrders > 0 ? (double)g.Count() / totalWorkOrders * 100 : 0,
+                AverageCost = g.Any() ? g.Average(wo => wo.ActualCost) : 0,
+                AverageCompletionTime = g
+                    .Where(wo => wo.ActualStartDate.HasValue && wo.ActualEndDate.HasValue)
+                    .Select(wo => (wo.ActualEndDate!.Value - wo.ActualStartDate!.Value).TotalHours)
+                    .DefaultIfEmpty(0)
+                    .Average()
+            })
+            .OrderByDescending(x => x.Count)
+            .ToList();
+
         return new WorkOrderTrendsDto
         {
             StartDate = startDate,
             EndDate = endDate,
-            CreationTrend = GenerateMockTrendData(startDate, endDate, "Created"),
-            CompletionTrend = GenerateMockTrendData(startDate, endDate, "Completed"),
-            CostTrend = GenerateMockTrendData(startDate, endDate, "Cost"),
-            TypeDistribution = GenerateMockTypeDistribution()
+            CreationTrend = creationTrend,
+            CompletionTrend = completionTrend,
+            CostTrend = costTrend,
+            TypeDistribution = typeDistribution
         };
     }
 
@@ -708,8 +770,15 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
 
     private async Task<List<WorkOrderListDto>> GetWorkOrdersInPeriodAsync(DateTime startDate, DateTime endDate)
     {
-        // Mock implementation - would fetch actual work orders
-        return new List<WorkOrderListDto>();
+        var result = await _workOrderService.GetWorkOrdersPagedAsync(new WorkOrderFilterDto
+        {
+            StartDate = startDate,
+            EndDate = endDate,
+            Page = 1,
+            PageSize = int.MaxValue
+        });
+
+        return result.Data.ToList();
     }
 
     #endregion

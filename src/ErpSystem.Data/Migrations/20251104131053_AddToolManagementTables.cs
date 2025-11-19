@@ -135,16 +135,16 @@ namespace ErpSystem.Data.Migrations
                 {
                     table.PrimaryKey("PK_ToolCheckouts", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_ToolCheckouts_Employees_CheckedInById",
+                        name: "FK_ToolCheckouts_Users_CheckedInById",
                         column: x => x.CheckedInById,
-                        principalTable: "Employees",
+                        principalTable: "Users",
                         principalColumn: "Id");
                     table.ForeignKey(
-                        name: "FK_ToolCheckouts_Employees_CheckedOutById",
+                        name: "FK_ToolCheckouts_Users_CheckedOutById",
                         column: x => x.CheckedOutById,
-                        principalTable: "Employees",
+                        principalTable: "Users",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.NoAction);
                     table.ForeignKey(
                         name: "FK_ToolCheckouts_JobCard_JobCardId",
                         column: x => x.JobCardId,

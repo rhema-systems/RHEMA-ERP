@@ -3,7 +3,9 @@ using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.HR;
 using Microsoft.Extensions.Logging;
+using ErpSystem.Core.Entities;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -13,6 +15,7 @@ public class WorkOrderToolService : IWorkOrderToolService
     private readonly IMaintenanceToolRepository _toolRepository;
     private readonly IToolCheckoutRepository _checkoutRepository;
     private readonly IWorkOrderRepository _workOrderRepository;
+    private readonly IMaintenanceStaffScheduleRepository _scheduleRepository;
     private readonly IWarehouseQuantityRepository _warehouseQuantityRepository;
     private readonly ILogger<WorkOrderToolService> _logger;
     private readonly ICurrentUserService _currentUserService;
@@ -23,6 +26,7 @@ public class WorkOrderToolService : IWorkOrderToolService
         IMaintenanceToolRepository toolRepository,
         IToolCheckoutRepository checkoutRepository,
         IWorkOrderRepository workOrderRepository,
+        IMaintenanceStaffScheduleRepository scheduleRepository,
         IWarehouseQuantityRepository warehouseQuantityRepository,
         ILogger<WorkOrderToolService> logger,
         ICurrentUserService currentUserService,
@@ -32,6 +36,7 @@ public class WorkOrderToolService : IWorkOrderToolService
         _toolRepository = toolRepository;
         _checkoutRepository = checkoutRepository;
         _workOrderRepository = workOrderRepository;
+        _scheduleRepository = scheduleRepository;
         _warehouseQuantityRepository = warehouseQuantityRepository;
         _logger = logger;
         _currentUserService = currentUserService;
@@ -215,8 +220,8 @@ public class WorkOrderToolService : IWorkOrderToolService
     {
         try
         {
-            _logger.LogInformation("Checking out tool {ToolId} for work order {WorkOrderId}", 
-                checkoutDto.ToolId, checkoutDto.WorkOrderId);
+            _logger.LogInformation("Checking out tool {ToolId} for work order {WorkOrderId} by technician {TechnicianId}", 
+                checkoutDto.ToolId, checkoutDto.WorkOrderId, checkoutDto.TechnicianId);
 
             // Get work order tool allocation
             var workOrderTool = await _workOrderToolRepository.GetByWorkOrderAndToolIdAsync(
@@ -229,13 +234,19 @@ public class WorkOrderToolService : IWorkOrderToolService
             if (workOrderTool.CheckoutId.HasValue)
                 throw new InvalidOperationException("Tool is already checked out");
 
-            // Get work order to find assigned technician
+            // Get work order to verify it exists
             var workOrder = await _workOrderRepository.GetByIdAsync(checkoutDto.WorkOrderId);
             if (workOrder == null)
                 throw new ArgumentException("Work order not found");
 
-            if (!workOrder.AssignedTechnicianId.HasValue)
-                throw new InvalidOperationException("Work order must have an assigned technician to checkout tools");
+            // Validate that the technician is assigned to this work order via schedules
+            var schedules = await _scheduleRepository.GetByWorkOrderIdAsync(checkoutDto.WorkOrderId);
+            var technicianSchedule = schedules.FirstOrDefault(s => s.TechnicianId == checkoutDto.TechnicianId);
+            
+            if (technicianSchedule == null)
+                throw new InvalidOperationException(
+                    $"Technician {checkoutDto.TechnicianId} is not assigned to this work order. " +
+                    $"Only technicians with active schedules for this work order can checkout tools.");
 
             // Get tool (InventoryItem) to verify it exists
             var inventoryItemRepo = _unitOfWork.Repository<ErpSystem.Core.Entities.Inventory.InventoryItem>();
@@ -248,7 +259,7 @@ public class WorkOrderToolService : IWorkOrderToolService
             {
                 Id = Guid.NewGuid(),
                 ToolId = checkoutDto.ToolId,
-                CheckedOutById = workOrder.AssignedTechnicianId.Value,
+                CheckedOutById = Guid.Parse(checkoutDto.TechnicianId.ToString()),
                 WorkOrderId = checkoutDto.WorkOrderId,
                 CheckoutDate = DateTime.UtcNow,
                 ExpectedReturnDate = checkoutDto.ExpectedReturnDate,
@@ -268,8 +279,8 @@ public class WorkOrderToolService : IWorkOrderToolService
 
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Successfully checked out tool {ToolId} for work order {WorkOrderId}", 
-                checkoutDto.ToolId, checkoutDto.WorkOrderId);
+            _logger.LogInformation("Successfully checked out tool {ToolId} for work order {WorkOrderId} by technician {TechnicianId}", 
+                checkoutDto.ToolId, checkoutDto.WorkOrderId, checkoutDto.TechnicianId);
 
             // Reload to get checkout details
             workOrderTool = await _workOrderToolRepository.GetByWorkOrderAndToolIdAsync(
@@ -314,7 +325,7 @@ public class WorkOrderToolService : IWorkOrderToolService
             checkout.DamageDescription = returnDto.DamageDescription;
             checkout.DamageCost = returnDto.DamageCost;
             checkout.Status = "Returned";
-            checkout.CheckedInById = _currentUserService.EmployeeId; // Use EmployeeId instead of UserId
+            checkout.CheckedInById = !string.IsNullOrEmpty(_currentUserService.UserId) ? Guid.Parse(_currentUserService.UserId) : null;
             await _checkoutRepository.UpdateAsync(checkout);
 
             // Release warehouse allocation if exists
@@ -646,6 +657,11 @@ public class WorkOrderToolService : IWorkOrderToolService
                 workOrderTool.WorkOrderId, workOrderTool.ToolId) ?? workOrderTool;
         }
 
+        // Get the technician name from Employee
+        string? checkedOutByName = workOrderTool.Checkout?.CheckedOutBy != null 
+            ? $"{workOrderTool.Checkout.CheckedOutBy.FirstName} {workOrderTool.Checkout.CheckedOutBy.LastName}" 
+            : null;
+
         return new WorkOrderToolDto
         {
             Id = workOrderTool.Id,
@@ -666,9 +682,7 @@ public class WorkOrderToolService : IWorkOrderToolService
             ActualReturnDate = workOrderTool.Checkout?.ActualReturnDate,
             CheckoutStatus = workOrderTool.Checkout?.Status,
             CheckedOutById = workOrderTool.Checkout?.CheckedOutById,
-            CheckedOutByName = workOrderTool.Checkout?.CheckedOutBy != null 
-                ? $"{workOrderTool.Checkout.CheckedOutBy.FirstName} {workOrderTool.Checkout.CheckedOutBy.LastName}" 
-                : null,
+            CheckedOutByName = checkedOutByName,
             DailyRentalRate = 0,  // InventoryItem doesn't have DailyRentalRate
             RequiresCertification = false,  // InventoryItem doesn't have RequiresCertification
             RequiresTraining = false,  // InventoryItem doesn't have RequiresTraining

@@ -20,10 +20,6 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
             
         return await _dbSet
             .Where(ts => ts.TechnicianId == technicianId && !ts.IsDeleted)
-            .Include(ts => ts.Technician)
-                .ThenInclude(t => t.Department)
-            .Include(ts => ts.Technician)
-                .ThenInclude(t => t.Position)
             .Include(ts => ts.WorkOrder)
                 .ThenInclude(wo => wo!.Asset)
             .Include(ts => ts.WorkOrder)
@@ -40,7 +36,6 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
             
         return await _dbSet
             .Where(ts => ts.WorkOrderId == workOrderId && !ts.IsDeleted)
-            .Include(ts => ts.Technician)
             .Include(ts => ts.WorkOrder)
             .OrderBy(ts => ts.StartDate)
             .ToListAsync();
@@ -54,7 +49,6 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
         return await _dbSet
             .Where(ts => !ts.IsDeleted &&
                 ts.StartDate >= startDate && ts.StartDate <= endDate)
-            .Include(ts => ts.Technician)
             .Include(ts => ts.WorkOrder)
             .OrderBy(ts => ts.StartDate)
             .ToListAsync();
@@ -70,7 +64,6 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
         return await _dbSet
             .Where(ts => ts.TechnicianId == technicianId && !ts.IsDeleted &&
                 ts.StartDate >= startDate && ts.StartDate <= endDate)
-            .Include(ts => ts.Technician)
             .Include(ts => ts.WorkOrder)
             .Include(ts => ts.Shift)
             .OrderBy(ts => ts.StartDate)
@@ -84,7 +77,6 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
             
         return await _dbSet
             .Where(ts => ts.Status == status && !ts.IsDeleted)
-            .Include(ts => ts.Technician)
             .Include(ts => ts.WorkOrder)
             .OrderBy(ts => ts.StartDate)
             .ToListAsync();
@@ -97,7 +89,6 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
             .Where(ts => !ts.IsDeleted && 
                 (ts.Status == "Scheduled" || ts.Status == "InProgress") &&
                 ts.EndDate < currentDate)
-            .Include(ts => ts.Technician)
             .Include(ts => ts.WorkOrder)
             .OrderBy(ts => ts.EndDate)
             .ToListAsync();
@@ -133,7 +124,6 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
     {
         return await _dbSet
             .Where(ts => ts.TechnicianId == technicianId && !ts.IsDeleted)
-            .Include(ts => ts.Technician) // Only technician, no nested properties
             .OrderBy(ts => ts.StartDate)
             .ToListAsync();
     }
@@ -145,10 +135,6 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
     {
         return await _dbSet
             .Where(ts => ts.TechnicianId == technicianId && !ts.IsDeleted)
-            .Include(ts => ts.Technician)
-                .ThenInclude(t => t.Department)
-            .Include(ts => ts.Technician)
-                .ThenInclude(t => t.Position)
             .Include(ts => ts.WorkOrder)
                 .ThenInclude(wo => wo!.Asset)
             .Include(ts => ts.WorkOrder)
@@ -172,7 +158,6 @@ public class TechnicianAvailabilityRepository : GenericRepository<TechnicianAvai
             
         return await _dbSet
             .Where(ta => ta.TechnicianId == technicianId && !ta.IsDeleted)
-            .Include(ta => ta.Technician)
             .OrderBy(ta => ta.StartDate)
             .ToListAsync();
     }
@@ -187,7 +172,6 @@ public class TechnicianAvailabilityRepository : GenericRepository<TechnicianAvai
         return await _dbSet
             .Where(ta => ta.TechnicianId == technicianId && !ta.IsDeleted &&
                 ta.StartDate <= endDate && ta.EndDate >= startDate)
-            .Include(ta => ta.Technician)
             .OrderBy(ta => ta.StartDate)
             .ToListAsync();
     }
@@ -199,7 +183,6 @@ public class TechnicianAvailabilityRepository : GenericRepository<TechnicianAvai
             
         return await _dbSet
             .Where(ta => ta.AvailabilityType == availabilityType && !ta.IsDeleted)
-            .Include(ta => ta.Technician)
             .OrderBy(ta => ta.StartDate)
             .ToListAsync();
     }
@@ -208,7 +191,6 @@ public class TechnicianAvailabilityRepository : GenericRepository<TechnicianAvai
     {
         return await _dbSet
             .Where(ta => ta.Reason == reason && !ta.IsDeleted)
-            .Include(ta => ta.Technician)
             .OrderBy(ta => ta.StartDate)
             .ToListAsync();
     }
@@ -217,7 +199,6 @@ public class TechnicianAvailabilityRepository : GenericRepository<TechnicianAvai
     {
         return await _dbSet
             .Where(ta => ta.IsRecurring && !ta.IsDeleted)
-            .Include(ta => ta.Technician)
             .OrderBy(ta => ta.StartDate)
             .ToListAsync();
     }
@@ -228,7 +209,6 @@ public class TechnicianAvailabilityRepository : GenericRepository<TechnicianAvai
             .Where(ta => ta.TechnicianId == technicianId && !ta.IsDeleted &&
                 ta.AvailabilityType == "Unavailable" &&
                 ta.StartDate <= endDate && ta.EndDate >= startDate)
-            .Include(ta => ta.Technician)
             .OrderBy(ta => ta.StartDate)
             .ToListAsync();
     }

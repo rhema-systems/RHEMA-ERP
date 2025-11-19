@@ -4215,8 +4215,6 @@ public class MaintenanceExpenseDto
     public Guid WorkOrderId { get; set; }
     public string WorkOrderNumber { get; set; } = string.Empty;
     public Guid? ScheduleId { get; set; }
-    public Guid? TechnicianId { get; set; }
-    public string? TechnicianName { get; set; }
     
     public string ExpenseType { get; set; } = "Travel"; // Travel, Fuel, Accommodation, Meals, Tools, Parts, Other
     public string Description { get; set; } = string.Empty;
@@ -4266,7 +4264,6 @@ public class CreateMaintenanceExpenseDto
     public Guid WorkOrderId { get; set; }
     
     public Guid? ScheduleId { get; set; }
-    public Guid? TechnicianId { get; set; }
     
     [Required]
     [StringLength(50)]

@@ -53,6 +53,8 @@ export interface AllocateWorkOrderToolDto {
 export interface CheckoutWorkOrderToolDto {
   workOrderId: string;
   toolId: string;
+  // Technician performing the checkout (ApplicationUser.Id from the Users table)
+  technicianId: string;
   expectedReturnDate?: string;
   conditionOnCheckout?: string;
   checkoutNotes?: string;

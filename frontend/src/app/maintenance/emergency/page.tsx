@@ -1,5 +1,13 @@
 'use client';
 
+import { redirect } from 'next/navigation';
+
+export default function EmergencyMaintenancePage() {
+  // Temporarily hide this page and redirect back to Maintenance home
+  redirect('/maintenance');
+}
+
+// Original implementation preserved below for future re-enable
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -50,7 +58,7 @@ interface EmergencyMaintenanceItem {
   priority: string;
 }
 
-export default function EmergencyMaintenancePage() {
+function EmergencyMaintenancePageOriginal() {
   const [emergencyMaintenanceData, setEmergencyMaintenanceData] = useState<EmergencyMaintenanceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
