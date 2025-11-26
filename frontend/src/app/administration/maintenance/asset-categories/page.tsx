@@ -31,6 +31,7 @@ interface AssetCategory {
   description?: string;
   parentCategory?: string | number | null;
   isActive: boolean;
+  autoGenerateSchedules?: boolean;
   maintenanceFrequency?: string;
   assetCount?: number;
   color?: string;
@@ -65,6 +66,7 @@ export default function AssetCategoriesPage() {
     description: '',
     parentCategory: '',
     isActive: true,
+    autoGenerateSchedules: true,
     assetType: 'Equipment', // Default asset type
     maintenanceScheduleType: 'single', // 'single' or 'multi'
     maintenanceType: 'Time', // 'Time', 'Usage', 'Distance', 'Cycles'
@@ -201,6 +203,7 @@ export default function AssetCategoriesPage() {
         description: formData.description || '',
         parentCategoryId: formData.parentCategory || null,
         isActive: formData.isActive,
+        autoGenerateSchedules: formData.autoGenerateSchedules,
         assetType: formData.assetType, // Add asset type classification
         color: formData.color,
         icon: formData.icon,
@@ -254,6 +257,7 @@ export default function AssetCategoriesPage() {
       description: category.description || '',
       parentCategory: category.parentCategory?.toString() || '',
       isActive: category.isActive ?? true,
+      autoGenerateSchedules: category.autoGenerateSchedules ?? true,
       assetType: category.assetType || 'Equipment',
       maintenanceScheduleType: category.maintenanceScheduleType || 'single',
       maintenanceType: category.maintenanceType || 'Time',
@@ -282,6 +286,7 @@ export default function AssetCategoriesPage() {
         description: formData.description || '',
         parentCategoryId: formData.parentCategory || null,
         isActive: formData.isActive,
+        autoGenerateSchedules: formData.autoGenerateSchedules,
         assetType: formData.assetType, // Add asset type classification
         color: formData.color,
         icon: formData.icon,
@@ -368,6 +373,7 @@ export default function AssetCategoriesPage() {
       description: '',
       parentCategory: '',
       isActive: true,
+      autoGenerateSchedules: true,
       assetType: 'Equipment',
       maintenanceScheduleType: 'single',
       maintenanceType: 'Time',
@@ -450,14 +456,15 @@ export default function AssetCategoriesPage() {
               Add Category
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[600px]">
+<DialogContent className="sm:max-w-[900px]">
             <DialogHeader>
               <DialogTitle>Add Asset Category</DialogTitle>
               <DialogDescription>
                 Create a new asset category to organize and classify your assets.
               </DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
+            <div className="max-h-[70vh] overflow-y-auto pr-2">
+              <div className="grid gap-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">Category Name</Label>
@@ -761,9 +768,9 @@ export default function AssetCategoriesPage() {
                 </div>
               )}
               
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-6 items-center">
                 <div className="space-y-2">
-                  <Label htmlFor="color">Color</Label>
+                  <Label htmlFor="color">Category Color</Label>
                   <div className="flex items-center space-x-2">
                     <Input
                       id="color"
@@ -776,22 +783,30 @@ export default function AssetCategoriesPage() {
                       value={formData.color}
                       onChange={(e) => setFormData({...formData, color: e.target.value})}
                       placeholder="#000000"
-                      className="flex-1"
+                      className="w-24"
                     />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      checked={formData.isActive}
-                      onChange={(e) => setFormData({...formData, isActive: e.target.checked})}
-                      className="rounded border-gray-300"
-                    />
-                    <span>Active</span>
-                  </Label>
+                <div className="flex items-center space-x-2">
+                  <Label className="text-sm font-medium">Active</Label>
+                  <input
+                    type="checkbox"
+                    checked={formData.isActive}
+                    onChange={(e) => setFormData({...formData, isActive: e.target.checked})}
+                    className="rounded border-gray-300"
+                  />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Label className="text-sm font-medium">Auto-generate schedules</Label>
+                  <input
+                    type="checkbox"
+                    checked={formData.autoGenerateSchedules}
+                    onChange={(e) => setFormData({...formData, autoGenerateSchedules: e.target.checked})}
+                    className="rounded border-gray-300"
+                  />
                 </div>
               </div>
+            </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -988,10 +1003,22 @@ export default function AssetCategoriesPage() {
                         <span className="font-medium">Maintenance:</span> {getMaintenanceScheduleDisplay(category)}
                       </div>
                       <div>
-                        <span className="font-medium">Assets:</span> {category.assetCount || 0}
+                        <a
+                          href={`/maintenance/assets?category=${encodeURIComponent(category.name)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline font-medium"
+                        >
+                          <span className="font-medium">Assets:</span>{' '}
+                          {typeof category.assetCount === 'number' ? category.assetCount : 0}
+                        </a>
                       </div>
                       <div>
                         <span className="font-medium">Icon:</span> {category.icon}
+                      </div>
+                      <div>
+                        <span className="font-medium">Auto-Scheduling:</span>{' '}
+                        {category.autoGenerateSchedules === false ? 'Disabled' : 'Enabled'}
                       </div>
                     </div>
                     
@@ -1026,14 +1053,15 @@ export default function AssetCategoriesPage() {
 
       {/* Edit Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[600px]">
+<DialogContent className="sm:max-w-[900px]">
           <DialogHeader>
             <DialogTitle>Edit Asset Category</DialogTitle>
             <DialogDescription>
               Update the asset category information.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="max-h-[70vh] overflow-y-auto pr-2">
+            <div className="grid gap-4 py-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="edit-name">Category Name</Label>
@@ -1337,7 +1365,7 @@ export default function AssetCategoriesPage() {
               </div>
             )}
             
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid grid-cols-3 gap-6 items-center">
               <div className="space-y-2">
                 <Label htmlFor="edit-color">Category Color</Label>
                 <Input
@@ -1345,18 +1373,27 @@ export default function AssetCategoriesPage() {
                   type="color"
                   value={formData.color}
                   onChange={(e) => setFormData({...formData, color: e.target.value})}
+                  className="w-16 h-10"
+                />
+              </div>
+              <div className="flex items-center space-x-2">
+                <Label className="text-sm font-medium" htmlFor="edit-active">Active</Label>
+                <Switch
+                  id="edit-active"
+                  checked={formData.isActive}
+                  onCheckedChange={(checked) => setFormData({...formData, isActive: checked})}
+                />
+              </div>
+              <div className="flex items-center space-x-2">
+                <Label className="text-sm font-medium" htmlFor="edit-auto-generate">Auto-generate schedules</Label>
+                <Switch
+                  id="edit-auto-generate"
+                  checked={formData.autoGenerateSchedules}
+                  onCheckedChange={(checked) => setFormData({...formData, autoGenerateSchedules: checked})}
                 />
               </div>
             </div>
-            
-            <div className="flex items-center space-x-2">
-              <Switch
-                id="edit-active"
-                checked={formData.isActive}
-                onCheckedChange={(checked) => setFormData({...formData, isActive: checked})}
-              />
-              <Label htmlFor="edit-active">Active</Label>
-            </div>
+          </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>

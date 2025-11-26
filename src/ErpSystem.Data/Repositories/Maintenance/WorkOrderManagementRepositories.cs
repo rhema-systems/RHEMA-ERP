@@ -11,12 +11,11 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
 {
     public WorkOrderRepository(ApplicationDbContext context) : base(context) { }
 
-    public override async Task<WorkOrder?> GetByIdAsync(Guid id)
+    private static IQueryable<WorkOrder> ApplyIncludes(IQueryable<WorkOrder> query)
     {
-        return await _dbSet
-            .Where(wo => wo.Id == id && !wo.IsDeleted)
+        return query
             .Include(wo => wo.JobCard)
-            .Include(wo => wo.Asset)
+            .Include(wo => wo.Asset)!.ThenInclude(a => a.AssetCategory)
             .Include(wo => wo.PriorityLevel)
             .Include(wo => wo.MaintenanceType)
             .Include(wo => wo.WorkOrderType)
@@ -24,6 +23,13 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
             .Include(wo => wo.Parts)
             .Include(wo => wo.Labor)
             .Include(wo => wo.Tools)
+            .Include(wo => wo.QualityChecks)!.ThenInclude(qc => qc.Checklist);
+    }
+
+    public override async Task<WorkOrder?> GetByIdAsync(Guid id)
+    {
+        return await ApplyIncludes(_dbSet
+                .Where(wo => wo.Id == id && !wo.IsDeleted))
             .FirstOrDefaultAsync();
     }
 
@@ -45,13 +51,8 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
         if (string.IsNullOrWhiteSpace(workOrderNumber))
             throw new ArgumentException("Work order number cannot be null or empty", nameof(workOrderNumber));
             
-        return await _dbSet
-            .Where(wo => wo.WorkOrderNumber == workOrderNumber && !wo.IsDeleted)
-            .Include(wo => wo.JobCard)
-            .Include(wo => wo.Asset)
-            .Include(wo => wo.PriorityLevel)
-            .Include(wo => wo.MaintenanceType)
-            .Include(wo => wo.WorkOrderType)
+        return await ApplyIncludes(_dbSet
+                .Where(wo => wo.WorkOrderNumber == workOrderNumber && !wo.IsDeleted))
             .FirstOrDefaultAsync();
     }
 
@@ -72,13 +73,8 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
         if (assetId == Guid.Empty)
             throw new ArgumentException("Asset ID cannot be empty", nameof(assetId));
             
-        return await _dbSet
-            .Where(wo => wo.AssetId == assetId && !wo.IsDeleted)
-            .Include(wo => wo.JobCard)
-            .Include(wo => wo.Asset)
-            .Include(wo => wo.PriorityLevel)
-            .Include(wo => wo.MaintenanceType)
-            .Include(wo => wo.WorkOrderType)
+        return await ApplyIncludes(_dbSet
+                .Where(wo => wo.AssetId == assetId && !wo.IsDeleted))
             .OrderByDescending(wo => wo.CreatedAt)
             .ToListAsync();
     }
@@ -88,12 +84,8 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
         if (string.IsNullOrWhiteSpace(status))
             throw new ArgumentException("Status cannot be null or empty", nameof(status));
             
-        return await _dbSet
-            .Where(wo => wo.Status == status && !wo.IsDeleted)
-            .Include(wo => wo.JobCard)
-            .Include(wo => wo.Asset)
-            .Include(wo => wo.PriorityLevel)
-            .Include(wo => wo.MaintenanceType)
+        return await ApplyIncludes(_dbSet
+                .Where(wo => wo.Status == status && !wo.IsDeleted))
             .OrderBy(wo => wo.RequestedStartDate)
             .ToListAsync();
     }
@@ -103,12 +95,8 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
         if (priorityLevelId == Guid.Empty)
             throw new ArgumentException("Priority Level ID cannot be empty", nameof(priorityLevelId));
             
-        return await _dbSet
-            .Where(wo => wo.PriorityLevelId == priorityLevelId && !wo.IsDeleted)
-            .Include(wo => wo.JobCard)
-            .Include(wo => wo.Asset)
-            .Include(wo => wo.PriorityLevel)
-            .Include(wo => wo.MaintenanceType)
+        return await ApplyIncludes(_dbSet
+                .Where(wo => wo.PriorityLevelId == priorityLevelId && !wo.IsDeleted))
             .OrderBy(wo => wo.RequestedStartDate)
             .ToListAsync();
     }
@@ -118,12 +106,8 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
         if (technicianId == Guid.Empty)
             throw new ArgumentException("Technician ID cannot be empty", nameof(technicianId));
             
-        return await _dbSet
-            .Where(wo => wo.AssignedTechnicianId == technicianId && !wo.IsDeleted)
-            .Include(wo => wo.JobCard)
-            .Include(wo => wo.Asset)
-            .Include(wo => wo.PriorityLevel)
-            .Include(wo => wo.MaintenanceType)
+        return await ApplyIncludes(_dbSet
+                .Where(wo => wo.AssignedTechnicianId == technicianId && !wo.IsDeleted))
             .OrderBy(wo => wo.RequestedStartDate)
             .ToListAsync();
     }
@@ -133,12 +117,8 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
         if (teamId == Guid.Empty)
             throw new ArgumentException("Team ID cannot be empty", nameof(teamId));
             
-        return await _dbSet
-            .Where(wo => wo.AssignedTeamId == teamId && !wo.IsDeleted)
-            .Include(wo => wo.JobCard)
-            .Include(wo => wo.Asset)
-            .Include(wo => wo.PriorityLevel)
-            .Include(wo => wo.MaintenanceType)
+        return await ApplyIncludes(_dbSet
+                .Where(wo => wo.AssignedTeamId == teamId && !wo.IsDeleted))
             .OrderBy(wo => wo.RequestedStartDate)
             .ToListAsync();
     }

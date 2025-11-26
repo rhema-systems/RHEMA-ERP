@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { CheckCircle, XCircle, AlertTriangle, ArrowLeft, FileText } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import axios from 'axios';
+import maintenanceApiService from '@/services/maintenanceApiService';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
@@ -183,9 +184,35 @@ export default function InspectionExecutionPage() {
       });
 
       setShowCompleteDialog(false);
-      
-      // If passed, show certificate preview
+
+      // If passed, attempt to complete the work order via the standard completion flow
       if (response.data.overallResult === 'Pass') {
+        try {
+          await maintenanceApiService.updateWorkOrderStatus(inspectionData.workOrder.id, 'Completed', generalNotes);
+
+          toast({
+            title: 'Work Order Completed',
+            description: 'Work order has been completed following successful inspection.',
+          });
+        } catch (error: any) {
+          console.error('Error completing work order after inspection:', error);
+
+          const validationFailures =
+            error?.response?.validationFailures ||
+            error?.response?.errors ||
+            (typeof error.message === 'string' ? [error.message] : []);
+
+          toast({
+            title: 'Work Order Completion Blocked',
+            description:
+              validationFailures && validationFailures.length > 0
+                ? validationFailures.join(', ')
+                : 'Work order could not be completed. Please check required tasks and QC requirements.',
+            variant: 'destructive',
+          });
+        }
+
+        // After attempting completion, show certificate preview
         await previewCertificate();
       } else {
         router.push('/maintenance/quality-control');
@@ -457,7 +484,7 @@ export default function InspectionExecutionPage() {
           <DialogHeader>
             <DialogTitle>Complete Inspection</DialogTitle>
             <DialogDescription>
-              Are you sure you want to complete this inspection? This will calculate the final score and update the work order status.
+              Are you sure you want to complete this inspection? This will calculate the final score and then attempt to complete the work order through the standard completion process.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

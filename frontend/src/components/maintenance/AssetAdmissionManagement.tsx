@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,9 +28,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import assetAdmissionService, { 
-  AssetAdmission, 
-  CreateAdmissionRequest, 
+import assetAdmissionService, {
+  AssetAdmission,
+  CreateAdmissionRequest,
   CreateDischargeRequest,
   AssetDischarge
 } from '@/services/assetAdmissionService';
@@ -37,6 +38,7 @@ import maintenanceApiService, { Asset } from '@/services/maintenanceApiService';
 import { ClientOnly } from '@/components/ClientOnly';
 
 export default function AssetAdmissionManagement() {
+  const searchParams = useSearchParams();
   const [admissions, setAdmissions] = useState<AssetAdmission[]>([]);
   const [discharges, setDischarges] = useState<AssetDischarge[]>([]);
   const [filteredAdmissions, setFilteredAdmissions] = useState<AssetAdmission[]>([]);
@@ -44,14 +46,14 @@ export default function AssetAdmissionManagement() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'admissions' | 'discharges'>('admissions');
-  
+
   // Dialog states
   const [isAdmissionDialogOpen, setIsAdmissionDialogOpen] = useState(false);
   const [isDischargeDialogOpen, setIsDischargeDialogOpen] = useState(false);
   const [selectedAdmission, setSelectedAdmission] = useState<AssetAdmission | null>(null);
   const [selectedDischarge, setSelectedDischarge] = useState<AssetDischarge | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  
+
   // Data from services
   const [assets, setAssets] = useState<Asset[]>([]);
   const [workOrders, setWorkOrders] = useState<any[]>([]);
@@ -61,10 +63,12 @@ export default function AssetAdmissionManagement() {
     totalCompleted: 0,
     averageStayDays: 0
   });
+  const [initialFilter, setInitialFilter] = useState<{ assetId?: string; workOrderId?: string; jobCardId?: string } | null>(null);
 
   // Form states
   const [newAdmission, setNewAdmission] = useState({
     assetId: '',
+    jobCardId: '',
     workOrderId: '',
     admissionType: 'Scheduled' as const,
     assetConditionOnAdmission: 'Good' as const,
@@ -106,12 +110,12 @@ export default function AssetAdmissionManagement() {
       try {
         const [assetsResponse, admissionsResponse, dischargesResponse, statsResponse, workOrdersResponse] = await Promise.all([
           maintenanceApiService.getAssets(),
-          assetAdmissionService.getAdmissions(),
+          assetAdmissionService.getAdmissions(initialFilter || {}),
           assetAdmissionService.getDischarges(),
           assetAdmissionService.getAdmissionStats(),
           maintenanceApiService.getWorkOrders().catch(() => ({ items: [] }))
         ]);
-        
+
         setAssets(assetsResponse.items || []);
         setAdmissions(admissionsResponse.items || []);
         setDischarges(dischargesResponse.items || []);
@@ -129,16 +133,49 @@ export default function AssetAdmissionManagement() {
         setLoadingData(false);
       }
     };
-    
+
     loadData();
-  }, []);
+  }, [initialFilter]);
+
+  // Apply initial query-parameter-based filters and form defaults
+  useEffect(() => {
+    const assetId = searchParams.get('assetId') || undefined;
+    const workOrderId = searchParams.get('workOrderId') || undefined;
+    const jobCardId = searchParams.get('jobCardId') || undefined;
+    const view = searchParams.get('view');
+
+    // Pre-select view mode if provided
+    if (view === 'discharges') {
+      setViewMode('discharges');
+    }
+
+    // Capture initial filter so that the first data load can use it
+    if (assetId || workOrderId || jobCardId) {
+      setInitialFilter({ assetId, workOrderId, jobCardId });
+    }
+
+    // If an assetId is supplied, default the form asset
+    if (assetId) {
+      setNewAdmission(prev => ({ ...prev, assetId }));
+    }
+
+    // If a workOrderId is supplied, default the form work order
+    if (workOrderId) {
+      setNewAdmission(prev => ({ ...prev, workOrderId }));
+    }
+
+    // If a jobCardId is supplied, default the form job card
+    if (jobCardId) {
+      setNewAdmission(prev => ({ ...prev, jobCardId }));
+    }
+  }, [searchParams]);
 
   // Filter admissions based on search and filters
   useEffect(() => {
     let filtered = admissions;
 
     if (searchTerm) {
-      filtered = filtered.filter(admission => 
+      filtered = filtered.filter(admission =>
         admission.assetName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         admission.admissionNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
         admission.assetNumber.toLowerCase().includes(searchTerm.toLowerCase())
@@ -166,6 +203,7 @@ export default function AssetAdmissionManagement() {
 
       const createRequest: CreateAdmissionRequest = {
         assetId: newAdmission.assetId,
+        jobCardId: newAdmission.jobCardId || undefined,
         workOrderId: newAdmission.workOrderId || undefined,
         admissionType: newAdmission.admissionType,
         assetConditionOnAdmission: newAdmission.assetConditionOnAdmission,
@@ -181,10 +219,10 @@ export default function AssetAdmissionManagement() {
       };
 
       await assetAdmissionService.createAdmission(createRequest);
-      
+
       // Refresh admissions list
       await refreshData();
-      
+
       setIsAdmissionDialogOpen(false);
       resetAdmissionForm();
     } catch (error) {
@@ -215,10 +253,10 @@ export default function AssetAdmissionManagement() {
       };
 
       await assetAdmissionService.createDischarge(createRequest);
-      
+
       // Refresh data
       await refreshData();
-      
+
       setIsDischargeDialogOpen(false);
       resetDischargeForm();
     } catch (error) {
@@ -233,7 +271,7 @@ export default function AssetAdmissionManagement() {
         assetAdmissionService.getDischarges(),
         assetAdmissionService.getAdmissionStats()
       ]);
-      
+
       setAdmissions(admissionsResponse.items || []);
       setDischarges(dischargesResponse.items || []);
       setFilteredAdmissions(admissionsResponse.items || []);
@@ -246,6 +284,7 @@ export default function AssetAdmissionManagement() {
   const resetAdmissionForm = () => {
     setNewAdmission({
       assetId: '',
+      jobCardId: '',
       workOrderId: '',
       admissionType: 'Scheduled',
       assetConditionOnAdmission: 'Good',
@@ -412,7 +451,7 @@ export default function AssetAdmissionManagement() {
             Discharges
           </Button>
         </div>
-        
+
         <div className="flex items-center space-x-2">
           <ClientOnly>
             <Dialog open={isAdmissionDialogOpen} onOpenChange={setIsAdmissionDialogOpen}>
@@ -463,7 +502,7 @@ export default function AssetAdmissionManagement() {
                       </Select>
                     </div>
                   </div>
-                  
+
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="admissionType">Admission Type</Label>
@@ -711,7 +750,7 @@ export default function AssetAdmissionManagement() {
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
-                        
+
                         {admission.status === 'Active' && (
                           <Button
                             size="sm"
@@ -809,7 +848,7 @@ export default function AssetAdmissionManagement() {
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
-                        
+
                         {!discharge.certificateGenerated && (
                           <Button
                             size="sm"

@@ -16,168 +16,65 @@ public class QualityControlController : ControllerBase
     private readonly ILogger<QualityControlController> _logger;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly Services.QualityCertificateService _certificateService;
+    private readonly Core.Services.Maintenance.IQualityControlService _qualityControlService;
 
     public QualityControlController(
         ApplicationDbContext context,
         ICurrentUserService currentUserService,
         ILogger<QualityControlController> logger,
         IHttpContextAccessor httpContextAccessor,
-        Services.QualityCertificateService certificateService)
+        Services.QualityCertificateService certificateService,
+        Core.Services.Maintenance.IQualityControlService qualityControlService)
     {
         _context = context;
         _currentUserService = currentUserService;
         _logger = logger;
         _httpContextAccessor = httpContextAccessor;
         _certificateService = certificateService;
+        _qualityControlService = qualityControlService;
     }
 
     /// <summary>
-    /// Validates if a work order can be completed based on quality control requirements
+    /// Validates if a work order can be completed based on quality control requirements.
+    /// Delegates to the core QualityControlService so the same rules are used by APIs and services.
     /// </summary>
     [HttpGet("validate-work-order/{workOrderId}")]
     public async Task<ActionResult<QualityValidationResult>> ValidateWorkOrderCompletion(string workOrderId)
     {
         try
         {
-            var tenantId = _currentUserService?.TenantId;
             _logger.LogInformation("Validating work order {WorkOrderId} for completion", workOrderId);
 
-            // Parse the ID to Guid
             if (!Guid.TryParse(workOrderId, out var woId))
             {
                 return BadRequest("Invalid work order ID format");
             }
 
-            // Get work order from database
-            var workOrder = await _context.WorkOrders
-                .Include(wo => wo.Tasks)
-                .Include(wo => wo.JobCard)
-                .Include(wo => wo.Asset)
-                    .ThenInclude(a => a.AssetCategory)
-                .Include(wo => wo.WorkOrderType)
-                .Include(wo => wo.MaintenanceType)
-                .FirstOrDefaultAsync(wo => wo.Id == woId);
+            // Use the core quality control service for validation logic
+            var coreResult = await _qualityControlService.ValidateWorkOrderCompletionAsync(woId);
 
-            if (workOrder == null)
+            var apiResult = new QualityValidationResult
             {
-                return NotFound($"Work order with ID {workOrderId} not found");
-            }
-
-            var validationResult = new QualityValidationResult
-            {
-                WorkOrderId = workOrderId,
-                CanComplete = true,
-                ValidationDate = DateTime.UtcNow.ToString("O"),
-                RequiredInspections = new List<RequiredInspection>(),
-                ValidationMessages = new List<string>(),
-                ValidationFailures = new List<string>(),
-                RequiresInspectionOfficerApproval = false
+                WorkOrderId = coreResult.WorkOrderId.ToString(),
+                CanComplete = coreResult.CanComplete,
+                ValidationDate = coreResult.ValidationDate.ToString("O"),
+                RequiresInspectionOfficerApproval = coreResult.RequiresInspectionOfficerApproval,
+                ValidationMessages = coreResult.ValidationMessages.ToList(),
+                ValidationFailures = coreResult.ValidationFailures.ToList(),
+                RequiredInspections = coreResult.RequiredInspections.Select(ri => new RequiredInspection
+                {
+                    InspectionTemplateId = ri.InspectionTemplateId.ToString(),
+                    InspectionType = ri.InspectionType,
+                    InspectionName = ri.InspectionName,
+                    IsRegulatory = ri.IsRegulatory,
+                    Description = ri.Description ?? string.Empty,
+                    IsCompleted = ri.IsCompleted,
+                    CompletedDate = ri.CompletedDate?.ToString("O"),
+                    Result = ri.Result
+                }).ToList()
             };
 
-            // Check if all required tasks are completed
-            var incompleteTasks = workOrder.Tasks?.Where(t => t.IsRequired && t.Status != "Completed").ToList();
-            if (incompleteTasks?.Any() == true)
-            {
-                validationResult.CanComplete = false;
-                validationResult.ValidationFailures.Add($"{incompleteTasks.Count} required task(s) not completed");
-            }
-
-            // Find applicable quality checklists based on asset category, work order type, and maintenance type
-            var assetCategory = workOrder.Asset?.AssetCategory?.Name;
-            var workOrderTypeName = workOrder.WorkOrderType?.Name;
-            var maintenanceTypeName = workOrder.MaintenanceType?.Name;
-
-            var applicableChecklists = await _context.QualityControlChecklists
-                .Where(c => c.IsActive && 
-                    (c.WorkOrderType == workOrderTypeName || string.IsNullOrEmpty(c.WorkOrderType)) &&
-                    (c.AssetCategory == assetCategory || string.IsNullOrEmpty(c.AssetCategory)) &&
-                    (c.MaintenanceType == maintenanceTypeName || string.IsNullOrEmpty(c.MaintenanceType)))
-                .ToListAsync();
-
-            var mandatoryChecklists = applicableChecklists.Where(c => c.IsMandatory).ToList();
-
-            // Add required inspections to the result
-            validationResult.RequiredInspections = mandatoryChecklists.Select(c => new RequiredInspection
-            {
-                InspectionTemplateId = c.Id.ToString(),
-                InspectionType = c.WorkOrderType ?? "General",
-                InspectionName = c.Name,
-                IsRegulatory = c.IsMandatory,
-                Description = c.Description ?? "",
-                IsCompleted = false
-            }).ToList();
-
-            // Check if quality check is passed (if job card exists)
-            if (workOrder.JobCard != null)
-            {
-                // Only block if quality check date is set but not passed
-                if (workOrder.JobCard.QualityCheckDate.HasValue && !workOrder.JobCard.QualityCheckPassed)
-                {
-                    validationResult.CanComplete = false;
-                    validationResult.ValidationFailures.Add("Quality check performed but not passed");
-                    validationResult.RequiresInspectionOfficerApproval = true;
-                }
-
-                if (!workOrder.JobCard.CustomerAcceptance)
-                {
-                    validationResult.ValidationMessages.Add("Customer acceptance pending");
-                }
-            }
-
-            // Get any quality checklists already performed for this work order
-            var performedQualityChecks = await _context.WorkOrderQualityChecks
-                .Include(qc => qc.Checklist)
-                .Where(qc => qc.WorkOrderId == woId)
-                .ToListAsync();
-
-            // Check performed quality checks for failures
-            foreach (var check in performedQualityChecks)
-            {
-                // Mark this checklist as completed in required inspections
-                var requiredInspection = validationResult.RequiredInspections
-                    .FirstOrDefault(ri => ri.InspectionTemplateId == check.ChecklistId.ToString());
-                if (requiredInspection != null)
-                {
-                    requiredInspection.IsCompleted = true;
-                    requiredInspection.CompletedDate = check.InspectionDate.ToString("O");
-                    requiredInspection.Result = check.OverallResult;
-                }
-
-                if (check.OverallResult == "Fail")
-                {
-                    validationResult.CanComplete = false;
-                    validationResult.ValidationFailures.Add($"Quality check '{check.Checklist?.Name ?? "Unknown"}' failed");
-                    validationResult.RequiresInspectionOfficerApproval = true;
-                }
-                else if (check.Score < (check.Checklist?.MinimumPassingScore ?? 80))
-                {
-                    validationResult.CanComplete = false;
-                    validationResult.ValidationFailures.Add($"Quality check '{check.Checklist?.Name ?? "Unknown"}' score below minimum");
-                    validationResult.RequiresInspectionOfficerApproval = true;
-                }
-            }
-
-            // Check if any mandatory checklists have not been performed
-            var missingMandatoryChecklists = validationResult.RequiredInspections
-                .Where(ri => ri.IsRegulatory && ri.IsCompleted != true)
-                .ToList();
-
-            if (missingMandatoryChecklists.Any())
-            {
-                validationResult.CanComplete = false;
-                foreach (var missing in missingMandatoryChecklists)
-                {
-                    validationResult.ValidationFailures.Add($"Mandatory quality checklist '{missing.InspectionName}' not completed");
-                }
-                validationResult.RequiresInspectionOfficerApproval = true;
-            }
-
-            if (validationResult.CanComplete)
-            {
-                validationResult.ValidationMessages.Add("All quality control requirements met");
-            }
-
-            return Ok(validationResult);
+            return Ok(apiResult);
         }
         catch (Exception ex)
         {
@@ -640,47 +537,18 @@ public class QualityControlController : ControllerBase
             qualityCheck.Notes = request.Notes;
             qualityCheck.InspectionDate = DateTime.UtcNow;
 
-            // Update work order status and completion details
-            var workOrder = await _context.WorkOrders.FindAsync(qualityCheck.WorkOrderId);
-            if (workOrder != null)
-            {
-                workOrder.Status = overallResult == "Pass" ? "Completed" : "QCFailed";
-
-                // Ensure completion date is set so certificates show the correct date
-                if (overallResult == "Pass" && !workOrder.ActualCompletionDate.HasValue)
-                {
-                    workOrder.ActualCompletionDate = DateTime.UtcNow;
-                }
-
-                workOrder.UpdatedAt = DateTime.UtcNow;
-                workOrder.UpdatedBy = _currentUserService?.UserId ?? "System";
-
-                // Release any scheduled technicians for this work order
-                var staffSchedules = await _context.MaintenanceStaffSchedules
-                    .Where(s => s.WorkOrderId == workOrder.Id && (s.Status == "Scheduled" || s.Status == "InProgress"))
-                    .ToListAsync();
-
-                if (staffSchedules.Any())
-                {
-                    var now = DateTime.UtcNow;
-                    foreach (var schedule in staffSchedules)
-                    {
-                        schedule.Status = "Completed";
-                        if (!schedule.ActualEndTime.HasValue)
-                        {
-                            schedule.ActualEndTime = now;
-                        }
-                        schedule.UpdatedAt = now;
-                    }
-                }
-            }
+            // NOTE:
+            // We no longer complete the work order directly here.
+            // The centralized completion flow in WorkOrdersController + WorkOrderService
+            // (which calls IQualityControlService.ValidateWorkOrderCompletionAsync)
+            // is responsible for setting the final work order status and completion dates.
 
             await _context.SaveChangesAsync();
 
-            return Ok(new { 
+            return Ok(new {
                 overallResult,
                 score,
-                message = "Inspection completed successfully"
+                message = "Inspection completed successfully. Use the standard work order completion flow to complete the work order."
             });
         }
         catch (Exception ex)

@@ -36,6 +36,8 @@ import {
   Clock,
   CheckSquare,
   Activity,
+  FolderTree,
+  FileCheck,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -85,6 +87,8 @@ const navigationItems: NavItem[] = [
     href: '/procurement',
     icon: Briefcase,
     children: [
+      { title: 'Business Partners', href: '/procurement/business-partners', icon: Users },
+      { title: 'Registrations', href: '/administration/procurement/registrations', icon: FileText },
       { title: 'Suppliers', href: '/procurement/suppliers', icon: Briefcase },
       { title: 'Purchase Orders', href: '/procurement/purchase-orders', icon: ShoppingCart },
       { title: 'Purchase Requests', href: '/procurement/requests', icon: FileText },
@@ -263,9 +267,12 @@ const navigationItems: NavItem[] = [
         href: '/administration/procurement',
         icon: Briefcase,
         children: [
+          { title: 'Partner Categories', href: '/administration/procurement/partner-categories', icon: FolderTree },
+          { title: 'Contractor Specializations', href: '/administration/procurement/contractor-specializations', icon: Wrench },
+          { title: 'License Types', href: '/administration/procurement/license-types', icon: FileCheck },
+          { title: 'Approval Workflows', href: '/administration/procurement/approval-workflows', icon: Workflow },
           { title: 'Supplier Categories', href: '/administration/procurement/supplier-categories', icon: Briefcase },
           { title: 'Purchase Categories', href: '/administration/procurement/purchase-categories', icon: Package },
-          { title: 'Approval Workflows', href: '/administration/procurement/workflows', icon: Workflow },
           { title: 'Terms & Conditions', href: '/administration/procurement/terms', icon: FileText },
         ],
       },

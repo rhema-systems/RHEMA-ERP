@@ -31,16 +31,25 @@ export interface WorkOrderType {
   color?: string;
   icon?: string;
   isActive: boolean;
+  requiresApproval?: boolean;
+  defaultPriority?: number;
 }
 
 export interface PriorityLevel {
   id: string;
   name: string;
-  level: number;
+  code: string;
   description?: string;
-  color?: string;
-  responseTimeHours: number;
+  level: number;
   isActive: boolean;
+  color?: string;
+  icon?: string;
+  responseTime: number;
+  escalationTime: number;
+  requiresApproval?: boolean;
+  notificationRules?: string;
+  slaHours: number;
+  autoAssign: boolean;
 }
 
 export interface Employee {

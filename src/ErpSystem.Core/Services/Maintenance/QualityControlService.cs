@@ -68,13 +68,14 @@ public class QualityControlService : IQualityControlService
     }
 
     /// <summary>
-    /// Validates if a work order can be completed based on quality control requirements
+    /// Validates if a work order can be completed based on quality control requirements.
+    /// Phase 1.3/P1-E3 implementation: uses real tasks, QC checklists and inspections.
     /// </summary>
     public async Task<QualityValidationResult> ValidateWorkOrderCompletionAsync(Guid workOrderId)
     {
         try
         {
-            _logger.LogInformation("Starting quality validation for work order {WorkOrderId}", workOrderId);
+            _logger.LogInformation("Validating work order {WorkOrderId} for completion", workOrderId);
 
             var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
             if (workOrder == null)
@@ -84,60 +85,110 @@ public class QualityControlService : IQualityControlService
             {
                 WorkOrderId = workOrderId,
                 CanComplete = true,
-                ValidationDate = DateTime.UtcNow
+                ValidationDate = DateTime.UtcNow,
+                RequiredInspections = new List<RequiredInspectionDto>(),
+                ValidationMessages = new List<string>(),
+                ValidationFailures = new List<string>(),
+                RequiresInspectionOfficerApproval = false
             };
 
-            // Check if asset requires regulatory inspections
-            if (workOrder.AssetId != Guid.Empty)
+            // 1) Required tasks must be completed
+            var incompleteTasks = workOrder.Tasks?
+                .Where(t => t.IsRequired && t.Status != "Completed")
+                .ToList();
+            if (incompleteTasks?.Any() == true)
             {
-                var asset = await _assetRepository.GetByIdAsync(workOrder.AssetId);
-                if (asset != null)
+                result.CanComplete = false;
+                result.ValidationFailures.Add($"{incompleteTasks.Count} required task(s) not completed");
+            }
+
+            // 2) Determine applicable QC checklists based on work order context
+            var assetCategory = workOrder.Asset?.AssetCategory?.Name;
+            var workOrderTypeName = workOrder.WorkOrderType?.Name;
+            var maintenanceTypeName = workOrder.MaintenanceType?.Name;
+
+            // 3) Enforce mandatory QualityControlChecklists + WorkOrderQualityCheck results
+            // NOTE: The detailed checklist selection and scoring logic lives in the API layer
+            // (QualityControlController.SubmitForInspection/CompleteInspection).
+            // Here we only enforce the high-level rule that if any mandatory checklist exists
+            // for this work order context, there must be at least one completed WorkOrderQualityCheck
+            // with a passing result before the work order can be completed.
+
+            if (workOrder.QualityChecks != null && workOrder.QualityChecks.Any())
+            {
+                var mandatoryChecks = workOrder.QualityChecks
+                    .Where(qc => qc.Checklist != null && qc.Checklist.IsMandatory)
+                    .ToList();
+
+                if (mandatoryChecks.Any())
                 {
-                    // Check for required inspections
-                    var requiredInspections = await GetRequiredInspectionsAsync(asset.Id, workOrder.MaintenanceType?.Name ?? "General");
-                    result.RequiredInspections = requiredInspections.ToList();
+                    var passedMandatoryChecks = mandatoryChecks
+                        .Where(qc => string.Equals(qc.OverallResult, "Pass", StringComparison.OrdinalIgnoreCase) &&
+                                     qc.Score >= (qc.Checklist?.MinimumPassingScore ?? 0))
+                        .ToList();
 
-                    // TODO: Phase 2 - Check if all required inspections have passed using actual inspection service
-                    // For Phase 1.4, we assume inspections pass basic validation
-                    foreach (var requiredInspection in requiredInspections)
-                    {
-                        // Stub implementation - in Phase 2 this will use actual inspection service
-                        // var latestInspection = await _inspectionService.GetLatestInspectionByAssetAsync(asset.Id);
-                        
-                        // For now, we add a validation message but allow completion
-                        result.ValidationMessages.Add($"Quality control framework established - inspection '{requiredInspection.InspectionType}' will be validated in Phase 2");
-                    }
-
-                    // Check if asset is in critical condition
-                    if (asset.Status == AssetStatus.OutOfService || asset.Status == AssetStatus.Maintenance)
+                    if (!passedMandatoryChecks.Any())
                     {
                         result.CanComplete = false;
-                        result.ValidationFailures.Add($"Asset is in {asset.Status} status and requires inspection officer approval");
-                        result.RequiresInspectionOfficerApproval = true;
+                        result.ValidationFailures.Add("Mandatory quality inspections have not been passed for this work order.");
+
+                        foreach (var check in mandatoryChecks)
+                        {
+                            result.RequiredInspections.Add(new RequiredInspectionDto
+                            {
+                                InspectionTemplateId = check.Checklist!.Id,
+                                InspectionType = check.Checklist.WorkOrderType ?? "Quality",
+                                InspectionName = check.Checklist.Name,
+                                IsRegulatory = check.Checklist.IsMandatory,
+                                Description = check.Checklist.Description,
+                                IsCompleted = string.Equals(check.OverallResult, "Pass", StringComparison.OrdinalIgnoreCase),
+                                CompletedDate = check.InspectionDate,
+                                Result = check.OverallResult
+                            });
+                        }
+                    }
+                    else
+                    {
+                        foreach (var check in mandatoryChecks)
+                        {
+                            result.RequiredInspections.Add(new RequiredInspectionDto
+                            {
+                                InspectionTemplateId = check.Checklist!.Id,
+                                InspectionType = check.Checklist.WorkOrderType ?? "Quality",
+                                InspectionName = check.Checklist.Name,
+                                IsRegulatory = check.Checklist.IsMandatory,
+                                Description = check.Checklist.Description,
+                                IsCompleted = string.Equals(check.OverallResult, "Pass", StringComparison.OrdinalIgnoreCase),
+                                CompletedDate = check.InspectionDate,
+                                Result = check.OverallResult
+                            });
+                        }
                     }
                 }
             }
 
-            // Check maintenance type specific requirements
-            if (workOrder.MaintenanceType?.Name == "Safety" || workOrder.MaintenanceType?.Name == "Regulatory")
+            // 4) If the originating job card has failed QC, block completion
+            if (workOrder.JobCard != null)
             {
-                result.RequiresInspectionOfficerApproval = true;
-                result.ValidationMessages.Add("Safety/Regulatory maintenance requires inspection officer approval");
-            }
+                if (workOrder.JobCard.QualityCheckDate.HasValue && !workOrder.JobCard.QualityCheckPassed)
+                {
+                    result.CanComplete = false;
+                    result.ValidationFailures.Add("Quality check performed but not passed");
+                    result.RequiresInspectionOfficerApproval = true;
+                }
 
-            // Check if work order involves critical safety systems
-            if (workOrder.SafetyRequirements?.Contains("Critical") == true)
-            {
-                result.RequiresInspectionOfficerApproval = true;
-                result.ValidationMessages.Add("Work involving critical safety systems requires inspection officer approval");
+                if (!workOrder.JobCard.CustomerAcceptance)
+                {
+                    result.ValidationMessages.Add("Customer acceptance pending");
+                }
             }
 
             if (result.CanComplete)
             {
-                result.ValidationMessages.Add("Work order meets all quality control requirements");
+                result.ValidationMessages.Add("All core quality control requirements met");
             }
 
-            _logger.LogInformation("Quality validation completed for work order {WorkOrderId}. Can complete: {CanComplete}", 
+            _logger.LogInformation("Quality validation completed for work order {WorkOrderId}. Can complete: {CanComplete}",
                 workOrderId, result.CanComplete);
 
             return result;

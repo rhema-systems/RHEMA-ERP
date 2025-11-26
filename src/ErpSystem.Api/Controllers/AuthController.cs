@@ -488,7 +488,8 @@ namespace ErpSystem.Api.Controllers
                         CurrentTenantCode = tenant?.Code,
                         CurrentTenantName = tenant?.Name,
                         IsActive = user.IsActive,
-                        Roles = (await _userManager.GetRolesAsync(user)).ToList()
+                        Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                        AuthenticationProvider = user.AuthenticationProvider.ToString()
                     }
                 };
 
@@ -540,7 +541,8 @@ namespace ErpSystem.Api.Controllers
                         LastName = user.LastName,
                         CurrentTenantId = user.TenantId,
                         IsActive = user.IsActive,
-                        Roles = (await _userManager.GetRolesAsync(user)).ToList()
+                        Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                        AuthenticationProvider = user.AuthenticationProvider.ToString()
                     }
                 };
 
@@ -849,7 +851,8 @@ namespace ErpSystem.Api.Controllers
                     CurrentTenantName = currentTenant?.Name,
                     AccessibleTenants = accessibleTenants,
                     IsActive = user.IsActive,
-                    Roles = (await _userManager.GetRolesAsync(user)).ToList()
+                    Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                    AuthenticationProvider = user.AuthenticationProvider.ToString()
                 };
 
                 return Ok(userInfo);
@@ -1009,7 +1012,8 @@ namespace ErpSystem.Api.Controllers
                         CurrentTenantName = tenant.Name,
                         AccessibleTenants = accessibleTenants,
                         IsActive = user.IsActive,
-                        Roles = (await _userManager.GetRolesAsync(user)).ToList()
+                        Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                        AuthenticationProvider = user.AuthenticationProvider.ToString()
                     }
                 };
 

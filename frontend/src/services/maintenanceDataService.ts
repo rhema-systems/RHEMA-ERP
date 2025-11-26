@@ -346,6 +346,45 @@ class MaintenanceDataService {
     return this.getAssetTypeForAsset(assetId);
   }
 
+  // Get the maintenance schedule configuration from the asset's category
+  // so that UIs like /maintenance/scheduled can pre-populate default triggers.
+  async getAssetCategorySchedule(assetId: string): Promise<{
+    maintenanceScheduleType: string;
+    maintenanceType: string;
+    maintenanceFrequency?: string | null;
+    maintenanceValue?: number | null;
+    maintenanceUnit?: string | null;
+    secondaryMaintenanceType?: string | null;
+    secondaryMaintenanceFrequency?: string | null;
+    secondaryMaintenanceValue?: number | null;
+    secondaryMaintenanceUnit?: string | null;
+  } | null> {
+    try {
+      const response = await apiService.get(`/maintenance/assets/${assetId}`);
+      const asset = response;
+      const category = asset?.assetCategory;
+
+      if (!category) {
+        return null;
+      }
+
+      return {
+        maintenanceScheduleType: category.maintenanceScheduleType || 'single',
+        maintenanceType: category.maintenanceType || 'Time',
+        maintenanceFrequency: category.maintenanceFrequency ?? null,
+        maintenanceValue: typeof category.maintenanceValue === 'number' ? category.maintenanceValue : null,
+        maintenanceUnit: category.maintenanceUnit ?? null,
+        secondaryMaintenanceType: category.secondaryMaintenanceType ?? null,
+        secondaryMaintenanceFrequency: category.secondaryMaintenanceFrequency ?? null,
+        secondaryMaintenanceValue: typeof category.secondaryMaintenanceValue === 'number' ? category.secondaryMaintenanceValue : null,
+        secondaryMaintenanceUnit: category.secondaryMaintenanceUnit ?? null,
+      };
+    } catch (error) {
+      console.error('Error fetching asset category schedule for asset', assetId, error);
+      return null;
+    }
+  }
+
 }
 
 export const maintenanceDataService = new MaintenanceDataService();

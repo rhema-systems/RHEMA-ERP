@@ -24,7 +24,7 @@ import {
   DialogTrigger,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { 
+import {
   Table,
   TableBody,
   TableCell,
@@ -32,7 +32,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import maintenanceApiService, { Employee, Asset, WorkOrderType, PriorityLevel, MaintenanceStaffSchedule, MaintenanceExpense } from '@/services/maintenanceApiService';
+import maintenanceApiService, { Asset, WorkOrderType, PriorityLevel, MaintenanceStaffSchedule, MaintenanceExpense } from '@/services/maintenanceApiService';
+import { maintenanceDataService } from '@/services/maintenanceDataService';
 import jobCardService, { JobCard as JobCardType, JobCardDetails, CreateJobCardRequest, JobCardApprovalAction } from '@/services/jobCardService';
 import workOrderService, { WorkOrder } from '@/services/workOrderService';
 import workOrderToolService, { WorkOrderToolDto } from '@/services/workOrderToolService';
@@ -42,6 +43,8 @@ import { notificationService } from '@/services/notificationService';
 import ClientOnly from '@/components/ui/client-only';
 import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import assetAdmissionService, { CreateAdmissionRequest, CreateDischargeRequest, AssetAdmission, AssetDischarge } from '@/services/assetAdmissionService';
+import type { Employee } from '@/services/maintenanceDataService';
 
 // Use the JobCard type from service instead of local interface
 interface JobCard {
@@ -91,10 +94,11 @@ export default function JobCardsPage() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [sortColumn, setSortColumn] = useState<string>('createdAt');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  
+  const [hasWorkOrderFilter, setHasWorkOrderFilter] = useState<'all' | 'with' | 'without'>('all');
+
   // Testing mode - set to true to use mock data and bypass API calls
   const TESTING_MODE = false; // Using real API calls
-  
+
   // Data from services
   const [technicians, setTechnicians] = useState<Employee[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -104,7 +108,58 @@ export default function JobCardsPage() {
   const [workOrderStaffSchedules, setWorkOrderStaffSchedules] = useState<MaintenanceStaffSchedule[]>([]);
   const [workOrderExpenses, setWorkOrderExpenses] = useState<MaintenanceExpense[]>([]);
   const [workOrderTools, setWorkOrderTools] = useState<WorkOrderToolDto[]>([]);
-  
+  // Compact cost snapshot state for linked work order (mirrors Work Orders "Actual to Date")
+  const [workOrderLaborForSnapshot, setWorkOrderLaborForSnapshot] = useState<any[]>([]);
+  const [toolSummaryForSnapshot, setToolSummaryForSnapshot] = useState<import('@/services/workOrderToolService').WorkOrderToolSummaryDto | null>(null);
+  const [totalExpensesForSnapshot, setTotalExpensesForSnapshot] = useState<number>(0);
+
+  // Admission dialog state (inline on job cards page)
+  const [isAdmissionDialogOpen, setIsAdmissionDialogOpen] = useState(false);
+  const [admissionForm, setAdmissionForm] = useState({
+    assetId: '',
+    jobCardId: '',
+    workOrderId: '',
+    admissionType: 'Scheduled' as 'Scheduled' | 'Emergency' | 'Breakdown',
+    assetConditionOnAdmission: 'Good' as 'Excellent' | 'Good' | 'Fair' | 'Poor' | 'Critical',
+    admissionNotes: '',
+    observedProblems: '',
+    mileageReading: 0,
+    hoursReading: 0,
+    fuelLevel: 0,
+    admissionLocation: '',
+    bayOrStation: '',
+    estimatedCompletionDate: '',
+    estimatedDischargeDate: '',
+  });
+  const [isSubmittingAdmission, setIsSubmittingAdmission] = useState(false);
+
+  // Discharge dialog state (inline on job cards page)
+  const [isDischargeDialogOpen, setIsDischargeDialogOpen] = useState(false);
+  const [dischargeForm, setDischargeForm] = useState({
+    admissionId: '',
+    assetConditionOnDischarge: 'Good' as 'Excellent' | 'Good' | 'Fair' | 'Poor' | 'Critical',
+    dischargeNotes: '',
+    workCompleted: '',
+    remainingIssues: '',
+    mileageReading: 0,
+    hoursReading: 0,
+    fuelLevel: 0,
+    qualityCheckPassed: true,
+    qualityCheckNotes: '',
+    customerAcceptance: true,
+    acceptanceNotes: '',
+    requiresFollowUp: false,
+    followUpDate: '',
+    followUpInstructions: '',
+    warrantyDays: 0,
+    warrantyTerms: '',
+  });
+  const [isSubmittingDischarge, setIsSubmittingDischarge] = useState(false);
+
+  // Admission/Discharge data for current job card workflow
+  const [activeAdmissionForJobCard, setActiveAdmissionForJobCard] = useState<AssetAdmission | null>(null);
+  const [latestDischargeForAdmission, setLatestDischargeForAdmission] = useState<AssetDischarge | null>(null);
+
   const [newJobCard, setNewJobCard] = useState({
     title: '',
     description: '',
@@ -115,7 +170,7 @@ export default function JobCardsPage() {
     estimatedCost: 0,
     problemDescription: '',
   });
-  
+
   const [editJobCard, setEditJobCard] = useState({
     title: '',
     description: '',
@@ -130,14 +185,53 @@ export default function JobCardsPage() {
     problemDescription: '',
   });
 
+  // Admission/Discharge data loader for current job card
+  const loadAdmissionAndDischargeForJobCard = React.useCallback(
+    async (jobCardId: string) => {
+      try {
+        const admissionsResult = await assetAdmissionService.getAdmissions({
+          jobCardId,
+          status: 'Active',
+          pageNumber: 1,
+          pageSize: 1,
+        });
+
+        const activeAdmission =
+          admissionsResult.items && admissionsResult.items.length > 0
+            ? admissionsResult.items[0]
+            : null;
+
+        setActiveAdmissionForJobCard(activeAdmission);
+
+        if (activeAdmission) {
+          const discharges = await assetAdmissionService.getDischargesByAdmission(
+            activeAdmission.id,
+          );
+          if (discharges && discharges.length > 0) {
+            setLatestDischargeForAdmission(discharges[discharges.length - 1]);
+          } else {
+            setLatestDischargeForAdmission(null);
+          }
+        } else {
+          setLatestDischargeForAdmission(null);
+        }
+      } catch (error) {
+        console.error('Error loading admission/discharge for job card:', error);
+        setActiveAdmissionForJobCard(null);
+        setLatestDischargeForAdmission(null);
+      }
+    },
+    [],
+  );
+
   // Load data on component mount
   useEffect(() => {
     const loadData = async () => {
       setLoadingData(true);
-      
+
       if (TESTING_MODE) {
         console.log('🧪 TESTING MODE: Using mock data');
-        
+
         // Mock data for testing
         const mockAssets = [
           { id: '1', name: 'HVAC Unit 1', assetNumber: 'HVAC-001' },
@@ -145,21 +239,21 @@ export default function JobCardsPage() {
           { id: '3', name: 'Generator Unit 1', assetNumber: 'GEN-001' },
           { id: '4', name: 'Fire Pump System', assetNumber: 'FP-001' }
         ];
-        
+
         const mockPriorityLevels = [
           { id: '1', name: 'Low' },
           { id: '2', name: 'Medium' },
           { id: '3', name: 'High' },
           { id: '4', name: 'Critical' }
         ];
-        
+
         const mockMaintenanceTypes = [
           { id: '1', name: 'Preventive' },
           { id: '2', name: 'Corrective' },
           { id: '3', name: 'Emergency' },
           { id: '4', name: 'Inspection' }
         ];
-        
+
         const mockJobCards: JobCard[] = [
           {
             id: '1',
@@ -198,80 +292,51 @@ export default function JobCardsPage() {
             priorityLevelId: '4'
           }
         ];
-        
+
         // Simulate loading delay
         await new Promise(resolve => setTimeout(resolve, 1000));
-        
+
         setAssets(mockAssets);
         setPriorityLevels(mockPriorityLevels);
         setMaintenanceTypes(mockMaintenanceTypes);
         setJobCards(mockJobCards);
         setFilteredCards(mockJobCards);
-        
+
         console.log('✅ Mock data loaded successfully');
       } else {
         // Debug authentication token
         const authToken = localStorage.getItem('authToken');
         console.log('🔑 Authentication token:', authToken ? 'Present' : 'Missing');
         console.log('🔑 Token preview:', authToken ? `${authToken.substring(0, 20)}...` : 'N/A');
-        
+
         try {
           const [assetsResponse, priorityLevelsList, maintenanceTypesList, techniciansList] = await Promise.all([
             maintenanceApiService.getAssets(),
             maintenanceApiService.getPriorityLevels(),
             maintenanceApiService.getMaintenanceTypes(),
-            maintenanceApiService.getTechnicians(),
+            maintenanceDataService.getTechnicians(),
           ]);
-          
+
           console.log('Loaded assets:', assetsResponse);
           console.log('Loaded priority levels:', priorityLevelsList);
           console.log('Loaded maintenance types:', maintenanceTypesList);
           console.log('Loaded technicians:', techniciansList);
-          
+
           setAssets(assetsResponse.items || []);
           setPriorityLevels(priorityLevelsList || []);
           setMaintenanceTypes(maintenanceTypesList || []);
-          setTechnicians(techniciansList || []);
-          
-          // Load job cards from real API
-          try {
-            const jobCardsResponse = await jobCardService.getJobCards();
-            const mappedJobCards = jobCardsResponse.items.map((card: JobCardType) => ({
-              id: card.id,
-              jobCardNumber: card.jobCardNumber,
-              title: card.title,
-              description: card.description,
-              problemDescription: card.problemDescription,
-              assetName: card.assetName,
-              requestedBy: card.requestedBy,
-              jobCardStatus: card.jobCardStatus as JobCard['jobCardStatus'],
-              approvalStatus: card.approvalStatus as JobCard['approvalStatus'],
-              priority: card.priority as JobCard['priority'],
-              createdAt: card.createdAt,
-              estimatedHours: card.estimatedHours,
-              estimatedCost: card.estimatedCost,
-              maintenanceType: card.maintenanceType,
-              generatedWorkOrderId: card.generatedWorkOrderId,
-              assetId: card.assetId,
-              maintenanceTypeId: card.maintenanceTypeId,
-              priorityLevelId: card.priorityLevelId
-            }));
-            setJobCards(mappedJobCards);
-            setFilteredCards(mappedJobCards);
-          } catch (jobCardError) {
-            console.error('Error loading job cards:', jobCardError);
-            setJobCards([]);
-            setFilteredCards([]);
-          }
+          setTechnicians(Array.isArray(techniciansList) ? techniciansList : []);
+
+          // Job cards are loaded separately based on the current Has Work Order filter
         } catch (error) {
           console.error('❌ Error loading data:', error);
           console.error('Error details:', error instanceof Error ? error.message : error);
-          
+
           // Check if it's an authentication error
           if (error instanceof Error && (error.message.includes('401') || error.message.includes('Unauthorized'))) {
             console.error('🚨 Authentication error detected. Please check your login status.');
           }
-          
+
           setAssets([]);
           setPriorityLevels([]);
           setMaintenanceTypes([]);
@@ -279,23 +344,90 @@ export default function JobCardsPage() {
           setFilteredCards([]);
         }
       }
-      
+
       setLoadingData(false);
     };
-    
+
     loadData();
   }, []);
-  
+
+  const handleCreateAdmissionFromJobCard = async () => {
+    if (!admissionForm.assetId || !admissionForm.jobCardId) {
+      toast({
+        title: "Missing data",
+        description: "Asset or Job Card information is missing for this admission.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSubmittingAdmission(true);
+    try {
+      const request: CreateAdmissionRequest = {
+        assetId: admissionForm.assetId,
+        jobCardId: admissionForm.jobCardId || undefined,
+        workOrderId: admissionForm.workOrderId || undefined,
+        admissionType: admissionForm.admissionType,
+        assetConditionOnAdmission: admissionForm.assetConditionOnAdmission,
+        admissionNotes: admissionForm.admissionNotes || undefined,
+        observedProblems: admissionForm.observedProblems || undefined,
+        mileageReading: admissionForm.mileageReading || undefined,
+        hoursReading: admissionForm.hoursReading || undefined,
+        fuelLevel: admissionForm.fuelLevel || undefined,
+        admissionLocation: admissionForm.admissionLocation || undefined,
+        bayOrStation: admissionForm.bayOrStation || undefined,
+        estimatedCompletionDate: admissionForm.estimatedCompletionDate || undefined,
+        estimatedDischargeDate: admissionForm.estimatedDischargeDate || undefined,
+      };
+
+      await assetAdmissionService.createAdmission(request);
+
+      toast({
+        title: "Admission created",
+        description: "Asset has been admitted for this job card.",
+      });
+
+      setIsAdmissionDialogOpen(false);
+      setAdmissionForm({
+        assetId: '',
+        jobCardId: '',
+        workOrderId: '',
+        admissionType: 'Scheduled',
+        assetConditionOnAdmission: 'Good',
+        admissionNotes: '',
+        observedProblems: '',
+        mileageReading: 0,
+        hoursReading: 0,
+        fuelLevel: 0,
+        admissionLocation: '',
+        bayOrStation: '',
+        estimatedCompletionDate: '',
+        estimatedDischargeDate: '',
+      });
+    } catch (error: any) {
+      console.error('Error creating admission from job card:', error);
+      toast({
+        title: "Error",
+        description: error?.message || "Failed to create admission",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmittingAdmission(false);
+    }
+  };
+
   const refreshJobCards = async () => {
     if (TESTING_MODE) {
       console.log('🧪 TESTING MODE: Skipping job card refresh');
       return;
     }
-    
+
     console.log('🔄 Refreshing job cards from API...');
-    
+
     try {
-      const jobCardsResponse = await jobCardService.getJobCards();
+      const jobCardsResponse = await jobCardService.getJobCards({
+        hasWorkOrder: hasWorkOrderFilter === 'all' ? undefined : hasWorkOrderFilter === 'with'
+      });
       const mappedJobCards = jobCardsResponse.items.map((card: JobCardType) => ({
         id: card.id,
         jobCardNumber: card.jobCardNumber,
@@ -325,11 +457,21 @@ export default function JobCardsPage() {
     }
   };
 
+
+  // Load job cards from API whenever the Has Work Order filter changes (and on initial mount)
+  useEffect(() => {
+    if (TESTING_MODE) {
+      return;
+    }
+
+    refreshJobCards();
+  }, [hasWorkOrderFilter]);
+
   useEffect(() => {
     let filtered = jobCards;
 
     if (searchTerm) {
-      filtered = filtered.filter(card => 
+      filtered = filtered.filter(card =>
         card.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (card.assetName && card.assetName.toLowerCase().includes(searchTerm.toLowerCase())) ||
         card.jobCardNumber.toLowerCase().includes(searchTerm.toLowerCase())
@@ -344,6 +486,13 @@ export default function JobCardsPage() {
       filtered = filtered.filter(card => card.priority === priorityFilter);
     }
 
+    if (hasWorkOrderFilter !== 'all') {
+      filtered = filtered.filter(card => {
+        const hasWO = !!card.generatedWorkOrderId;
+        return hasWorkOrderFilter === 'with' ? hasWO : !hasWO;
+      });
+    }
+
     if (dateRange?.from) {
       filtered = filtered.filter(card => new Date(card.createdAt) >= dateRange.from!);
     }
@@ -355,7 +504,7 @@ export default function JobCardsPage() {
     }
 
     setFilteredCards(filtered);
-  }, [jobCards, searchTerm, statusFilter, priorityFilter, dateRange]);
+  }, [jobCards, searchTerm, statusFilter, priorityFilter, hasWorkOrderFilter, dateRange]);
 
   // Handle opening job card from URL parameter
   useEffect(() => {
@@ -368,13 +517,16 @@ export default function JobCardsPage() {
         setSelectedCard(jobCard);
         setIsViewDialogOpen(true);
         setLoadingDetails(true);
-        
+
         // Load job card details asynchronously
         (async () => {
           try {
             const details = await jobCardService.getJobCardById(jobCard.id);
             setSelectedCardDetails(details);
-            
+            if (details.id) {
+              await loadAdmissionAndDischargeForJobCard(details.id);
+            }
+
             // Load work order if it exists
             if (details.generatedWorkOrderId) {
               try {
@@ -410,7 +562,7 @@ export default function JobCardsPage() {
                   setWorkOrderExpenses([]);
                   setWorkOrderTools([]);
                 }
-                
+
                 // Load QC inspection if work order is completed
                 if (workOrder.status === 'Completed') {
                   try {
@@ -453,7 +605,7 @@ export default function JobCardsPage() {
       const selectedAsset = assets.find(a => a.name === newJobCard.assetName);
       const selectedPriority = priorityLevels.find(pl => pl.name === newJobCard.priority);
       const selectedMaintenanceType = maintenanceTypes.find(mt => mt.name === newJobCard.maintenanceType);
-      
+
       if (!selectedAsset || !selectedPriority || !selectedMaintenanceType) {
         console.error('Missing required selections');
         return;
@@ -461,7 +613,7 @@ export default function JobCardsPage() {
 
       if (TESTING_MODE) {
         console.log('🧪 TESTING MODE: Creating mock job card');
-        
+
         // Create mock job card
         const newMockCard: JobCard = {
           id: `mock-${Date.now()}`,
@@ -481,7 +633,7 @@ export default function JobCardsPage() {
           maintenanceTypeId: selectedMaintenanceType.id,
           priorityLevelId: selectedPriority.id
         };
-        
+
         setJobCards(prev => [newMockCard, ...prev]);
         setFilteredCards(prev => [newMockCard, ...prev]);
         console.log('✅ Mock job card created:', newMockCard.jobCardNumber);
@@ -505,17 +657,16 @@ export default function JobCardsPage() {
         console.log('📤 Creating job card with request:', createRequest);
         const createdJobCard = await jobCardService.createJobCard(createRequest);
         console.log('✅ Job card created successfully:', createdJobCard);
-        
+
         // Refresh job cards list
         await refreshJobCards();
-        
+
         toast({
           title: "Success",
           description: `Job card ${createdJobCard.jobCardNumber} created successfully`,
-          className: "bg-green-50 border-green-200",
         });
       }
-      
+
       setIsCreateDialogOpen(false);
       setNewJobCard({
         title: '',
@@ -529,13 +680,13 @@ export default function JobCardsPage() {
       });
     } catch (error) {
       console.error('❌ Error creating job card:', error);
-      
+
       // Log additional error details for debugging
       if (error instanceof Error) {
         console.error('Error message:', error.message);
         console.error('Error stack:', error.stack);
       }
-      
+
       // Check if it's an Axios error with response data
       let errorMessage = 'Failed to create job card. Please try again.';
       if (error && typeof error === 'object' && 'response' in error) {
@@ -545,7 +696,7 @@ export default function JobCardsPage() {
         console.error('Response headers:', axiosError.response?.headers);
         errorMessage = axiosError.response?.data?.message || axiosError.response?.data || errorMessage;
       }
-      
+
       toast({
         title: "Error",
         description: errorMessage,
@@ -585,7 +736,7 @@ export default function JobCardsPage() {
 
   const SortHeader = ({ label, column }: { label: string; column: string }) => (
     <TableHead className="h-12 px-4">
-      <div 
+      <div
         className="cursor-pointer hover:bg-gray-100 select-none p-2 rounded inline-flex items-center gap-2"
         onClick={() => handleSort(column)}
       >
@@ -613,7 +764,7 @@ export default function JobCardsPage() {
       'Cancelled': 'bg-red-100 text-red-800',
     };
 
-    const displayStatus = jobCardStatus === 'Submitted' && approvalStatus === 'Pending' ? 'Under Review' : 
+    const displayStatus = jobCardStatus === 'Submitted' && approvalStatus === 'Pending' ? 'Under Review' :
                          jobCardStatus === 'Approved' && approvalStatus === 'ChangesRequested' ? 'Changes Requested' :
                          jobCardStatus;
 
@@ -642,35 +793,34 @@ export default function JobCardsPage() {
   const submitJobCard = async (cardId: string) => {
     try {
       const jobCard = jobCards.find(card => card.id === cardId);
-      
+
       if (TESTING_MODE) {
         console.log('🧪 TESTING MODE: Submitting mock job card');
-        
+
         // Update mock job card status
-        setJobCards(prev => prev.map(card => 
-          card.id === cardId 
+        setJobCards(prev => prev.map(card =>
+          card.id === cardId
             ? { ...card, jobCardStatus: 'Submitted', approvalStatus: 'Pending' }
             : card
         ));
-        setFilteredCards(prev => prev.map(card => 
-          card.id === cardId 
+        setFilteredCards(prev => prev.map(card =>
+          card.id === cardId
             ? { ...card, jobCardStatus: 'Submitted', approvalStatus: 'Pending' }
             : card
         ));
-        
+
         console.log('✅ Mock job card submitted for approval');
         return;
       }
-      
+
       await jobCardService.submitJobCard(cardId, { confirmReadiness: true });
-      
+
       // Refresh job cards list
       await refreshJobCards();
-      
+
       toast({
         title: "Success",
         description: `Job card ${jobCard?.jobCardNumber || ''} submitted for approval successfully`,
-        className: "bg-green-50 border-green-200",
       });
     } catch (error) {
       console.error('Error submitting job card:', error);
@@ -685,39 +835,38 @@ export default function JobCardsPage() {
   const approveJobCard = async (cardId: string) => {
     try {
       const jobCard = jobCards.find(card => card.id === cardId);
-      
+
       if (TESTING_MODE) {
         console.log('🧪 TESTING MODE: Approving mock job card');
-        
+
         // Update mock job card status
-        setJobCards(prev => prev.map(card => 
-          card.id === cardId 
+        setJobCards(prev => prev.map(card =>
+          card.id === cardId
             ? { ...card, jobCardStatus: 'Approved', approvalStatus: 'Approved' }
             : card
         ));
-        setFilteredCards(prev => prev.map(card => 
-          card.id === cardId 
+        setFilteredCards(prev => prev.map(card =>
+          card.id === cardId
             ? { ...card, jobCardStatus: 'Approved', approvalStatus: 'Approved' }
             : card
         ));
-        
+
         console.log('✅ Mock job card approved - ready for work order generation');
         return;
       }
-      
+
       const approvalAction: JobCardApprovalAction = {
         action: 'Approve',
         comments: 'Approved via job card management'
       };
       await jobCardService.processApproval(cardId, approvalAction);
-      
+
       // Refresh job cards list
       await refreshJobCards();
-      
+
       toast({
         title: "Success",
         description: `Job card ${jobCard?.jobCardNumber || ''} approved successfully`,
-        className: "bg-green-50 border-green-200",
       });
     } catch (error) {
       console.error('Error approving job card:', error);
@@ -732,39 +881,38 @@ export default function JobCardsPage() {
   const rejectJobCard = async (cardId: string) => {
     try {
       const jobCard = jobCards.find(card => card.id === cardId);
-      
+
       if (TESTING_MODE) {
         console.log('🧪 TESTING MODE: Rejecting mock job card');
-        
+
         // Update mock job card status
-        setJobCards(prev => prev.map(card => 
-          card.id === cardId 
+        setJobCards(prev => prev.map(card =>
+          card.id === cardId
             ? { ...card, jobCardStatus: 'Rejected', approvalStatus: 'Rejected' }
             : card
         ));
-        setFilteredCards(prev => prev.map(card => 
-          card.id === cardId 
+        setFilteredCards(prev => prev.map(card =>
+          card.id === cardId
             ? { ...card, jobCardStatus: 'Rejected', approvalStatus: 'Rejected' }
             : card
         ));
-        
+
         console.log('❌ Mock job card rejected');
         return;
       }
-      
+
       const approvalAction: JobCardApprovalAction = {
         action: 'Reject',
         comments: 'Rejected via job card management'
       };
       await jobCardService.processApproval(cardId, approvalAction);
-      
+
       // Refresh job cards list
       await refreshJobCards();
-      
+
       toast({
         title: "Job Card Rejected",
         description: `Job card ${jobCard?.jobCardNumber || ''} has been rejected`,
-        className: "bg-yellow-50 border-yellow-200",
       });
     } catch (error) {
       console.error('Error rejecting job card:', error);
@@ -776,82 +924,21 @@ export default function JobCardsPage() {
     }
   };
 
-  const generateWorkOrder = async (cardId: string) => {
-    try {
-      if (TESTING_MODE) {
-        console.log('🧪 TESTING MODE: Generating mock work order');
-        
-        // Generate mock work order ID
-        const mockWorkOrderId = `WO-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
-        
-        // Update job card to show work order generated
-        setJobCards(prev => prev.map(card => 
-          card.id === cardId 
-            ? { ...card, generatedWorkOrderId: mockWorkOrderId, generatedWorkOrderNumber: mockWorkOrderId }
-            : card
-        ));
-        setFilteredCards(prev => prev.map(card => 
-          card.id === cardId 
-            ? { ...card, generatedWorkOrderId: mockWorkOrderId, generatedWorkOrderNumber: mockWorkOrderId }
-            : card
-        ));
-        
-        // Create mock work order for testing
-        const newWorkOrder = {
-          id: `mock-wo-${Date.now()}`,
-          workOrderNumber: mockWorkOrderId,
-          title: `Work Order for: ${jobCard?.title}`,
-          description: `Generated from Job Card: ${jobCard?.jobCardNumber}`,
-          jobCardId: cardId,
-          assetId: jobCard?.assetId || '1',
-          assetName: jobCard?.assetName || 'Unknown Asset',
-          workOrderType: 'Scheduled',
-          maintenanceType: jobCard?.maintenanceType || 'Preventive',
-          priority: jobCard?.priority || 'Medium',
-          status: 'Assigned',
-          assignedTechnician: 'Auto Assigned',
-          estimatedHours: jobCard?.estimatedHours || 0,
-          actualHours: 0,
-          estimatedCost: jobCard?.estimatedCost || 0,
-          actualCost: 0,
-          completionPercentage: 0,
-          safetyIncident: false,
-          qualityCheckRequired: true,
-          admissionStatus: 'NotStarted',
-          requiresAdmission: true,
-          createdAt: new Date().toISOString()
-        };
-        
-        // Get existing work orders from localStorage
-        const existingWorkOrders = JSON.parse(localStorage.getItem('mockWorkOrders') || '[]');
-        existingWorkOrders.push(newWorkOrder);
-        localStorage.setItem('mockWorkOrders', JSON.stringify(existingWorkOrders));
-        
-        console.log(`✅ Mock work order generated: ${mockWorkOrderId}`);
-        console.log('✅ Mock work order created for testing');
-        return;
-      }
-      
-      const result = await jobCardService.generateWorkOrder(cardId);
-      console.log('Work order generated:', result);
-      // Refresh job cards list to show updated status
-      await refreshJobCards();
-      
-      toast({
-        title: "Success",
-        description: `Work order generated successfully from job card ${jobCards.find(c => c.id === cardId)?.jobCardNumber || ''}`,
-        className: "bg-green-50 border-green-200",
-      });
-    } catch (error) {
-      console.error('Error generating work order:', error);
-      toast({
-        title: "Error",
-        description: "Failed to generate work order. Please try again.",
-        variant: "destructive",
-      });
-    }
-  };
+  // Work orders are now auto-generated on approval in the backend.
+  // No manual "Generate Work Order" action is exposed in the UI.
 
+  const currentAdmissionJobCard = jobCards.find(card => card.id === admissionForm.jobCardId);
+  const currentAdmissionAsset = assets.find(asset => asset.id === admissionForm.assetId);
+
+  const admissionAssetDisplay =
+    currentAdmissionAsset
+      ? `${currentAdmissionAsset.name} (${currentAdmissionAsset.assetNumber})`
+      : admissionForm.assetId || '';
+
+  const admissionJobCardDisplay =
+    currentAdmissionJobCard
+      ? `${currentAdmissionJobCard.jobCardNumber} - ${currentAdmissionJobCard.title}`
+      : admissionForm.jobCardId || '';
 
   return (
     <div className="space-y-6">
@@ -881,7 +968,7 @@ export default function JobCardsPage() {
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
-      
+
       <div className="flex items-center justify-between">
         <div></div>
         <ClientOnly fallback={<div className="h-10 w-32 bg-gray-100 rounded animate-pulse"></div>}>
@@ -915,7 +1002,7 @@ export default function JobCardsPage() {
                   <Select value={newJobCard.assetName} onValueChange={(value) => setNewJobCard(prev => ({ ...prev, assetName: value }))} disabled={loadingData}>
                     <SelectTrigger>
                       <SelectValue placeholder={
-                        loadingData ? "Loading assets..." : 
+                        loadingData ? "Loading assets..." :
                         assets.length === 0 ? "No assets available" :
                         "Select asset"
                       } />
@@ -1035,6 +1122,138 @@ export default function JobCardsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      {/* Admission dialog inline on Job Cards page */}
+      <Dialog open={isAdmissionDialogOpen} onOpenChange={setIsAdmissionDialogOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Admit Asset for Job Card</DialogTitle>
+            <DialogDescription>
+              Capture the asset condition and details at the point of admission for this job card.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Asset</Label>
+                <Input value={admissionAssetDisplay} disabled className="mt-1" />
+              </div>
+              <div>
+                <Label>Job Card</Label>
+                <Input value={admissionJobCardDisplay} disabled className="mt-1" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <Label>Admission Type</Label>
+                <Select
+                  value={admissionForm.admissionType}
+                  onValueChange={(value) => setAdmissionForm(prev => ({ ...prev, admissionType: value as typeof admissionForm.admissionType }))}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Scheduled">Scheduled</SelectItem>
+                    <SelectItem value="Emergency">Emergency</SelectItem>
+                    <SelectItem value="Breakdown">Breakdown</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Condition on Admission</Label>
+                <Select
+                  value={admissionForm.assetConditionOnAdmission}
+                  onValueChange={(value) => setAdmissionForm(prev => ({ ...prev, assetConditionOnAdmission: value as typeof admissionForm.assetConditionOnAdmission }))}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Excellent">Excellent</SelectItem>
+                    <SelectItem value="Good">Good</SelectItem>
+                    <SelectItem value="Fair">Fair</SelectItem>
+                    <SelectItem value="Poor">Poor</SelectItem>
+                    <SelectItem value="Critical">Critical</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Fuel Level (%)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={admissionForm.fuelLevel}
+                  onChange={(e) => setAdmissionForm(prev => ({ ...prev, fuelLevel: Number(e.target.value) || 0 }))}
+                  className="mt-1"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <Label>Mileage</Label>
+                <Input
+                  type="number"
+                  value={admissionForm.mileageReading}
+                  onChange={(e) => setAdmissionForm(prev => ({ ...prev, mileageReading: Number(e.target.value) || 0 }))}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>Hours</Label>
+                <Input
+                  type="number"
+                  value={admissionForm.hoursReading}
+                  onChange={(e) => setAdmissionForm(prev => ({ ...prev, hoursReading: Number(e.target.value) || 0 }))}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>Bay / Station</Label>
+                <Input
+                  value={admissionForm.bayOrStation}
+                  onChange={(e) => setAdmissionForm(prev => ({ ...prev, bayOrStation: e.target.value }))}
+                  className="mt-1"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Admission Notes</Label>
+                <Textarea
+                  rows={3}
+                  value={admissionForm.admissionNotes}
+                  onChange={(e) => setAdmissionForm(prev => ({ ...prev, admissionNotes: e.target.value }))}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>Observed Problems</Label>
+                <Textarea
+                  rows={3}
+                  value={admissionForm.observedProblems}
+                  onChange={(e) => setAdmissionForm(prev => ({ ...prev, observedProblems: e.target.value }))}
+                  className="mt-1"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setIsAdmissionDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateAdmissionFromJobCard} disabled={isSubmittingAdmission}>
+              {isSubmittingAdmission ? 'Admitting...' : 'Admit Asset'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
         </ClientOnly>
       </div>
 
@@ -1077,13 +1296,30 @@ export default function JobCardsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Priority</SelectItem>
-                  <SelectItem value="Low">Low</SelectItem>
-                  <SelectItem value="Medium">Medium</SelectItem>
-                  <SelectItem value="High">High</SelectItem>
-                  <SelectItem value="Critical">Critical</SelectItem>
+                  {priorityLevels.map((priority) => (
+                    <SelectItem key={priority.id} value={priority.name}>
+                      {priority.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </ClientOnly>
+            <ClientOnly fallback={<div className="w-[160px] h-10 bg-gray-100 rounded animate-pulse"></div>}>
+              <Select
+                value={hasWorkOrderFilter}
+                onValueChange={(value) => setHasWorkOrderFilter(value as 'all' | 'with' | 'without')}
+              >
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue placeholder="Work order link" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All job cards</SelectItem>
+                  <SelectItem value="with">With work order</SelectItem>
+                  <SelectItem value="without">Without work order</SelectItem>
+                </SelectContent>
+              </Select>
+            </ClientOnly>
+
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="outline" className="justify-start text-left font-normal w-[250px]">
@@ -1157,7 +1393,10 @@ export default function JobCardsPage() {
                           try {
                             const details = await jobCardService.getJobCardById(card.id);
                             setSelectedCardDetails(details);
-                            
+                            if (details.id) {
+                              await loadAdmissionAndDischargeForJobCard(details.id);
+                            }
+
                             // Load work order if it exists
                             if (details.generatedWorkOrderId) {
                               try {
@@ -1166,10 +1405,12 @@ export default function JobCardsPage() {
 
                                 // Load technician schedules, tools, and expenses for this work order
                                 try {
-                                  const [schedules, expenses, tools] = await Promise.all([
+                                  const [schedules, expenses, tools, summary, totalExpenses] = await Promise.all([
                                     maintenanceApiService.getStaffSchedulesByWorkOrder(workOrder.id),
                                     maintenanceApiService.getExpensesByWorkOrder(workOrder.id),
                                     workOrderToolService.getWorkOrderTools(workOrder.id),
+                                    workOrderToolService.getToolSummary(workOrder.id),
+                                    maintenanceApiService.getTotalExpensesByWorkOrder(workOrder.id),
                                   ]);
 
                                   const enrichedSchedules = (Array.isArray(schedules) ? schedules : []).map((schedule) => {
@@ -1187,13 +1428,21 @@ export default function JobCardsPage() {
                                   setWorkOrderStaffSchedules(enrichedSchedules);
                                   setWorkOrderExpenses(Array.isArray(expenses) ? expenses : []);
                                   setWorkOrderTools(Array.isArray(tools) ? tools : []);
+                                  // Snapshot data for compact cost strip
+                                  setToolSummaryForSnapshot(summary || null);
+                                  setTotalExpensesForSnapshot(typeof totalExpenses === 'number' ? totalExpenses : 0);
+                                  // If labor is hydrated on the work order, keep a copy for cost snapshot
+                                  setWorkOrderLaborForSnapshot(Array.isArray((workOrder as any).labor) ? (workOrder as any).labor : []);
                                 } catch (resourceError) {
                                   console.error('Error loading schedules/tools/expenses for job card work order:', resourceError);
                                   setWorkOrderStaffSchedules([]);
                                   setWorkOrderExpenses([]);
                                   setWorkOrderTools([]);
+                                  setToolSummaryForSnapshot(null);
+                                  setTotalExpensesForSnapshot(0);
+                                  setWorkOrderLaborForSnapshot([]);
                                 }
-                                
+
                                 // Load QC inspection if work order is completed
                                 if (workOrder.status === 'Completed') {
                                   try {
@@ -1223,7 +1472,27 @@ export default function JobCardsPage() {
                       >
                         <Eye className="h-4 w-4" />
                       </Button>
-                      
+
+                      {/* Admit asset for this job card */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          if (!card.assetId) return;
+                          setAdmissionForm(prev => ({
+                            ...prev,
+                            assetId: card.assetId,
+                            jobCardId: card.id,
+                            admissionNotes: prev.admissionNotes || card.description || '',
+                            observedProblems: prev.observedProblems || card.problemDescription || '',
+                          }));
+                          setIsAdmissionDialogOpen(true);
+                        }}
+                        title="Admit asset for this job card"
+                      >
+                        Admit
+                      </Button>
+
                       {/* Draft status actions */}
                       {card.jobCardStatus === 'Draft' && (
                         <>
@@ -1262,7 +1531,7 @@ export default function JobCardsPage() {
                           </Button>
                         </>
                       )}
-                      
+
                       {/* Submitted/Pending approval actions */}
                       {card.jobCardStatus === 'Submitted' && card.approvalStatus === 'Pending' && (
                         <>
@@ -1286,20 +1555,14 @@ export default function JobCardsPage() {
                           </Button>
                         </>
                       )}
-                      
-                      {/* Approved status actions */}
+
+                      {/* Approved status - work order is generated automatically on approval */}
                       {card.jobCardStatus === 'Approved' && !card.generatedWorkOrderId && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => generateWorkOrder(card.id)}
-                          className="bg-blue-50 hover:bg-blue-100"
-                          title="Generate work order"
-                        >
-                          Generate WO
-                        </Button>
+                        <span className="text-xs text-muted-foreground">
+                          Approved - Work order will be generated automatically
+                        </span>
                       )}
-                      
+
                       {/* Show work order link if generated */}
                       {card.generatedWorkOrderId && (
                         <Button
@@ -1346,8 +1609,8 @@ export default function JobCardsPage() {
                   <Label htmlFor="edit-asset">Asset</Label>
                   <Select value={editJobCard.assetId} onValueChange={(value) => {
                     const asset = assets.find(a => a.id === value);
-                    setEditJobCard(prev => ({ 
-                      ...prev, 
+                    setEditJobCard(prev => ({
+                      ...prev,
                       assetId: value,
                       assetName: asset?.name || ''
                     }));
@@ -1369,8 +1632,8 @@ export default function JobCardsPage() {
                 <Label htmlFor="edit-maintenanceType">Maintenance Type</Label>
                 <Select value={editJobCard.maintenanceTypeId} onValueChange={(value) => {
                   const type = maintenanceTypes.find(t => t.id === value);
-                  setEditJobCard(prev => ({ 
-                    ...prev, 
+                  setEditJobCard(prev => ({
+                    ...prev,
                     maintenanceTypeId: value,
                     maintenanceType: type?.name || ''
                   }));
@@ -1412,8 +1675,8 @@ export default function JobCardsPage() {
                   <Label htmlFor="edit-priority">Priority</Label>
                   <Select value={editJobCard.priorityLevelId} onValueChange={(value) => {
                     const priority = priorityLevels.find(p => p.id === value);
-                    setEditJobCard(prev => ({ 
-                      ...prev, 
+                    setEditJobCard(prev => ({
+                      ...prev,
                       priorityLevelId: value,
                       priority: priority?.name as any
                     }));
@@ -1461,12 +1724,12 @@ export default function JobCardsPage() {
             </Button>
             <Button onClick={async () => {
               if (!selectedCard?.id) return;
-              
+
               try {
                 console.log('Updating job card:', selectedCard.id);
                 console.log('Job card status:', selectedCard.jobCardStatus);
                 console.log('Update data:', editJobCard);
-                
+
                 const updateData = {
                   title: editJobCard.title,
                   description: editJobCard.description,
@@ -1480,21 +1743,18 @@ export default function JobCardsPage() {
                   requiresShutdown: false,
                   requiresSafetyPermit: false
                 };
-                
+
                 console.log('Sending update request...', updateData);
                 const response = await jobCardService.updateJobCard(selectedCard.id, updateData);
                 console.log('Update response:', response);
-                
+
                 // Refresh the job cards list
-                const result = await jobCardService.getJobCards({ page: 1, pageSize: 100 });
-                setJobCards(result.items);
-                setFilteredCards(result.items);
-                
+                await refreshJobCards();
+
                 setIsEditDialogOpen(false);
                 toast({
                   title: "Success",
                   description: `Job card ${selectedCard.jobCardNumber} updated successfully`,
-                  className: "bg-green-50 border-green-200",
                 });
               } catch (error: any) {
                 console.error('Error updating job card:', error);
@@ -1512,7 +1772,7 @@ export default function JobCardsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       {/* View Job Card Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={(open) => {
         setIsViewDialogOpen(open);
@@ -1539,10 +1799,11 @@ export default function JobCardsPage() {
             </div>
           ) : selectedCardDetails && (
             <Tabs defaultValue="overview" className="w-full">
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="workorder" disabled={!selectedWorkOrder}>Work Order</TabsTrigger>
                 <TabsTrigger value="qc" disabled={!selectedQCInspection}>QC Inspection</TabsTrigger>
+                <TabsTrigger value="admission" disabled={!activeAdmissionForJobCard}>Admission</TabsTrigger>
                 <TabsTrigger value="workflow">Workflow</TabsTrigger>
               </TabsList>
 
@@ -1686,6 +1947,203 @@ export default function JobCardsPage() {
               )}
               </TabsContent>
 
+              {/* ADMISSION TAB */}
+              <TabsContent value="admission" className="space-y-4 mt-4">
+                {activeAdmissionForJobCard ? (
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <CardTitle className="text-lg">Asset Admission Details</CardTitle>
+                          <CardDescription>Admission #{activeAdmissionForJobCard.admissionNumber}</CardDescription>
+                        </div>
+                        <Badge style={
+                          activeAdmissionForJobCard.status === 'Active'
+                            ? { backgroundColor: '#dbeafe', color: '#1e40af' }
+                            : activeAdmissionForJobCard.status === 'Completed'
+                            ? { backgroundColor: '#d1fae5', color: '#065f46' }
+                            : { backgroundColor: '#fef3c7', color: '#92400e' }
+                        }>
+                          {activeAdmissionForJobCard.status}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      {/* Basic Information */}
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Asset</Label>
+                          <p className="text-sm font-medium mt-1">{activeAdmissionForJobCard.assetName}</p>
+                          <p className="text-xs text-muted-foreground">{activeAdmissionForJobCard.assetNumber}</p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Admission Date</Label>
+                          <p className="text-sm font-medium mt-1">
+                            {format(new Date(activeAdmissionForJobCard.admissionDate), 'MMM dd, yyyy HH:mm')}
+                          </p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Admitted By</Label>
+                          <p className="text-sm font-medium mt-1">{activeAdmissionForJobCard.admittedBy || 'N/A'}</p>
+                        </div>
+                      </div>
+
+                      {/* Admission Type and Condition */}
+                      <div className="grid grid-cols-3 gap-4 border-t pt-4">
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Admission Type</Label>
+                          <div className="mt-1">
+                            <Badge style={
+                              activeAdmissionForJobCard.admissionType === 'Emergency'
+                                ? { backgroundColor: '#fee2e2', color: '#991b1b' }
+                                : activeAdmissionForJobCard.admissionType === 'Breakdown'
+                                ? { backgroundColor: '#fed7aa', color: '#9a3412' }
+                                : { backgroundColor: '#dbeafe', color: '#1e40af' }
+                            }>
+                              {activeAdmissionForJobCard.admissionType}
+                            </Badge>
+                          </div>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Asset Condition</Label>
+                          <div className="mt-1">
+                            <Badge style={
+                              activeAdmissionForJobCard.assetConditionOnAdmission === 'Excellent'
+                                ? { backgroundColor: '#d1fae5', color: '#065f46' }
+                                : activeAdmissionForJobCard.assetConditionOnAdmission === 'Good'
+                                ? { backgroundColor: '#dbeafe', color: '#1e40af' }
+                                : activeAdmissionForJobCard.assetConditionOnAdmission === 'Fair'
+                                ? { backgroundColor: '#fef3c7', color: '#92400e' }
+                                : activeAdmissionForJobCard.assetConditionOnAdmission === 'Poor'
+                                ? { backgroundColor: '#fed7aa', color: '#9a3412' }
+                                : { backgroundColor: '#fee2e2', color: '#991b1b' }
+                            }>
+                              {activeAdmissionForJobCard.assetConditionOnAdmission}
+                            </Badge>
+                          </div>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Location</Label>
+                          <p className="text-sm font-medium mt-1">
+                            {activeAdmissionForJobCard.bayOrStation || activeAdmissionForJobCard.admissionLocation || 'Not specified'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Readings */}
+                      <div className="grid grid-cols-3 gap-4 border-t pt-4">
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Mileage Reading</Label>
+                          <p className="text-sm font-medium mt-1">
+                            {activeAdmissionForJobCard.mileageReading ? `${activeAdmissionForJobCard.mileageReading.toLocaleString()} km` : 'N/A'}
+                          </p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Hours Reading</Label>
+                          <p className="text-sm font-medium mt-1">
+                            {activeAdmissionForJobCard.hoursReading ? `${activeAdmissionForJobCard.hoursReading.toLocaleString()} hrs` : 'N/A'}
+                          </p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Fuel Level</Label>
+                          <p className="text-sm font-medium mt-1">
+                            {activeAdmissionForJobCard.fuelLevel ? `${activeAdmissionForJobCard.fuelLevel}%` : 'N/A'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Admission Notes */}
+                      {activeAdmissionForJobCard.admissionNotes && (
+                        <div className="border-t pt-4">
+                          <Label className="text-sm font-medium text-muted-foreground">Admission Notes</Label>
+                          <p className="text-sm mt-1 bg-gray-50 p-3 rounded">{activeAdmissionForJobCard.admissionNotes}</p>
+                        </div>
+                      )}
+
+                      {/* Observed Problems */}
+                      {activeAdmissionForJobCard.observedProblems && (
+                        <div className="border-t pt-4">
+                          <Label className="text-sm font-medium text-muted-foreground">Observed Problems</Label>
+                          <p className="text-sm mt-1 bg-yellow-50 p-3 rounded border border-yellow-200">{activeAdmissionForJobCard.observedProblems}</p>
+                        </div>
+                      )}
+
+                      {/* Estimated Dates */}
+                      <div className="grid grid-cols-2 gap-4 border-t pt-4">
+                        {activeAdmissionForJobCard.estimatedCompletionDate && (
+                          <div>
+                            <Label className="text-sm font-medium text-muted-foreground">Estimated Completion</Label>
+                            <p className="text-sm font-medium mt-1">
+                              {format(new Date(activeAdmissionForJobCard.estimatedCompletionDate), 'MMM dd, yyyy')}
+                            </p>
+                          </div>
+                        )}
+                        {activeAdmissionForJobCard.estimatedDischargeDate && (
+                          <div>
+                            <Label className="text-sm font-medium text-muted-foreground">Estimated Discharge</Label>
+                            <p className="text-sm font-medium mt-1">
+                              {format(new Date(activeAdmissionForJobCard.estimatedDischargeDate), 'MMM dd, yyyy')}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Discharge Information if available */}
+                      {latestDischargeForAdmission && (
+                        <div className="border-t pt-4">
+                          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                            <div className="flex items-center gap-2 mb-3">
+                              <CheckCircle className="h-5 w-5 text-green-600" />
+                              <Label className="text-sm font-semibold text-green-900">Asset Discharged</Label>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <Label className="text-xs text-green-700">Discharge Date</Label>
+                                <p className="text-sm font-medium text-green-900">
+                                  {format(new Date(latestDischargeForAdmission.dischargeDate), 'MMM dd, yyyy HH:mm')}
+                                </p>
+                              </div>
+                              <div>
+                                <Label className="text-xs text-green-700">Discharged By</Label>
+                                <p className="text-sm font-medium text-green-900">{latestDischargeForAdmission.dischargedBy || 'N/A'}</p>
+                              </div>
+                              <div>
+                                <Label className="text-xs text-green-700">Condition on Discharge</Label>
+                                <Badge style={{ backgroundColor: '#d1fae5', color: '#065f46' }}>
+                                  {latestDischargeForAdmission.assetConditionOnDischarge}
+                                </Badge>
+                              </div>
+                              <div>
+                                <Label className="text-xs text-green-700">Quality Check</Label>
+                                <Badge style={
+                                  latestDischargeForAdmission.qualityCheckPassed
+                                    ? { backgroundColor: '#d1fae5', color: '#065f46' }
+                                    : { backgroundColor: '#fee2e2', color: '#991b1b' }
+                                }>
+                                  {latestDischargeForAdmission.qualityCheckPassed ? 'Passed' : 'Failed'}
+                                </Badge>
+                              </div>
+                            </div>
+                            {latestDischargeForAdmission.dischargeNotes && (
+                              <div className="mt-3">
+                                <Label className="text-xs text-green-700">Discharge Notes</Label>
+                                <p className="text-sm text-green-900 mt-1">{latestDischargeForAdmission.dischargeNotes}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card>
+                    <CardContent className="py-8 text-center text-muted-foreground">
+                      No admission record found for this job card.
+                    </CardContent>
+                  </Card>
+                )}
+              </TabsContent>
+
               {/* WORKFLOW TAB */}
               <TabsContent value="workflow" className="space-y-4 mt-4">
                 <Card>
@@ -1714,11 +2172,11 @@ export default function JobCardsPage() {
                       <div key={step.id} className="flex gap-4">
                         <div className="flex flex-col items-center">
                           <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                            step.status === 'Approved' ? 'bg-green-100' : 
+                            step.status === 'Approved' ? 'bg-green-100' :
                             step.status === 'Rejected' ? 'bg-red-100' : 'bg-yellow-100'
                           }`}>
-                            {step.status === 'Approved' ? <CheckCircle className="h-5 w-5 text-green-600" /> : 
-                             step.status === 'Rejected' ? <XCircle className="h-5 w-5 text-red-600" /> : 
+                            {step.status === 'Approved' ? <CheckCircle className="h-5 w-5 text-green-600" /> :
+                             step.status === 'Rejected' ? <XCircle className="h-5 w-5 text-red-600" /> :
                              <Clock className="h-5 w-5 text-yellow-600" />}
                           </div>
                           {(selectedCardDetails.generatedWorkOrderId || index < selectedCardDetails.approvalSteps.length - 1) && (
@@ -1779,21 +2237,70 @@ export default function JobCardsPage() {
                             )}
                           </div>
                           <div className="flex-1 pb-6">
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-semibold text-base">Work Order Execution</h4>
-                              <Badge>{selectedWorkOrder.status}</Badge>
-                            </div>
-                            {selectedWorkOrder.assignedTechnicianName && (
-                              <p className="text-sm text-muted-foreground mt-1">Assigned to: {selectedWorkOrder.assignedTechnicianName}</p>
-                            )}
-                            {selectedWorkOrder.actualStartDate && (
-                              <p className="text-xs text-muted-foreground">Started: {format(new Date(selectedWorkOrder.actualStartDate), 'MMM dd, yyyy HH:mm:ss')}</p>
-                            )}
-                            {selectedWorkOrder.actualCompletionDate && (
-                              <p className="text-xs text-muted-foreground">Completed: {format(new Date(selectedWorkOrder.actualCompletionDate), 'MMM dd, yyyy HH:mm:ss')}</p>
-                            )}
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-semibold text-base">Work Order Execution</h4>
+                            <Badge>{selectedWorkOrder.status}</Badge>
                           </div>
+                          {selectedWorkOrder.actualStartDate && (
+                            <p className="text-xs text-muted-foreground">
+                              Started: {format(new Date(selectedWorkOrder.actualStartDate), 'MMM dd, yyyy HH:mm:ss')}
+                            </p>
+                          )}
+                          {selectedWorkOrder.actualCompletionDate && (
+                            <p className="text-xs text-muted-foreground">
+                              Completed: {format(new Date(selectedWorkOrder.actualCompletionDate), 'MMM dd, yyyy HH:mm:ss')}
+                            </p>
+                          )}
+
+                          {/* Technician + cost snapshot (read-only, mirrors Work Orders "Actual to Date") */}
+                          {selectedWorkOrder && (
+                            <div className="mt-3 rounded-md border bg-muted/40 p-3 text-xs space-y-1">
+                              <div className="flex justify-between">
+                                <span className="font-semibold">Technician</span>
+                                <span>{selectedWorkOrder.assignedTechnician || 'Unassigned'}</span>
+                              </div>
+                              {(() => {
+                                const laborCost = workOrderLaborForSnapshot?.reduce(
+                                  (sum: number, l: any) => sum + (l.totalCost || 0),
+                                  0
+                                ) || 0;
+                                const partsCost = (selectedWorkOrder.parts || []).reduce(
+                                  (sum: number, p: any) => sum + (p.totalCost || 0),
+                                  0
+                                );
+                                const toolsCost = toolSummaryForSnapshot?.totalRentalCost || 0;
+                                const expensesCost = totalExpensesForSnapshot || 0;
+                                const actualTotal = laborCost + partsCost + toolsCost + expensesCost;
+
+                                return (
+                                  <>
+                                    <div className="flex justify-between text-muted-foreground">
+                                      <span>Labor</span>
+                                      <span className="font-medium">${laborCost.toFixed(2)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-muted-foreground">
+                                      <span>Parts</span>
+                                      <span className="font-medium">${partsCost.toFixed(2)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-muted-foreground">
+                                      <span>Tools</span>
+                                      <span className="font-medium">${toolsCost.toFixed(2)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-muted-foreground">
+                                      <span>Expenses</span>
+                                      <span className="font-medium">${expensesCost.toFixed(2)}</span>
+                                    </div>
+                                    <div className="mt-2 border-t pt-2 flex justify-between">
+                                      <span className="font-semibold">Actual Total</span>
+                                      <span className="font-semibold">${actualTotal.toFixed(2)}</span>
+                                    </div>
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          )}
                         </div>
+                      </div>
 
                         {/* QC Inspection */}
                         {selectedWorkOrder.status === 'Completed' && (
@@ -1802,8 +2309,8 @@ export default function JobCardsPage() {
                               <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
                                 selectedQCInspection ? 'bg-green-100' : 'bg-gray-100'
                               }`}>
-                                {selectedQCInspection ? 
-                                  <CheckCircle className="h-5 w-5 text-green-600" /> : 
+                                {selectedQCInspection ?
+                                  <CheckCircle className="h-5 w-5 text-green-600" /> :
                                   <Clock className="h-5 w-5 text-gray-400" />
                                 }
                               </div>
@@ -1829,10 +2336,390 @@ export default function JobCardsPage() {
                             </div>
                           </div>
                         )}
+
+                        {/* Discharge / Close-out step */}
+                        {selectedWorkOrder.status === 'Completed' &&
+                          selectedQCInspection &&
+                          selectedQCInspection.overallResult === 'Pass' && (
+                            <div className="flex gap-4 mt-6">
+                              <div className="flex flex-col items-center">
+                                <div
+                                  className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                                    latestDischargeForAdmission ? 'bg-green-100' : 'bg-blue-100'
+                                  }`}
+                                >
+                                  <CheckCircle className="h-5 w-5 text-green-600" />
+                                </div>
+                              </div>
+                              <div className="flex-1">
+                                <div className="flex items-center justify-between">
+                                  <h4 className="font-semibold text-base">Discharge / Close-out</h4>
+                                  {latestDischargeForAdmission ? (
+                                    <Badge
+                                      variant="outline"
+                                      className="bg-green-50 text-green-700 border-green-200"
+                                    >
+                                      Completed
+                                    </Badge>
+                                  ) : (
+                                    <Badge
+                                      variant="outline"
+                                      className="bg-blue-50 text-blue-700 border-blue-200"
+                                    >
+                                      Pending
+                                    </Badge>
+                                  )}
+                                </div>
+                                {latestDischargeForAdmission ? (
+                                  <div className="mt-2 text-sm text-muted-foreground space-y-1">
+                                    <p>
+                                      Discharged on{' '}
+                                      {format(
+                                        new Date(latestDischargeForAdmission.dischargeDate),
+                                        'MMM dd, yyyy HH:mm:ss',
+                                      )}{' '}
+                                      with condition{' '}
+                                      <span className="font-medium">
+                                        {latestDischargeForAdmission.assetConditionOnDischarge}
+                                      </span>
+                                    </p>
+                                    <p>
+                                      Customer acceptance:{' '}
+                                      <span
+                                        className={
+                                          latestDischargeForAdmission.customerAcceptance
+                                            ? 'text-green-600'
+                                            : 'text-red-600'
+                                        }
+                                      >
+                                        {latestDischargeForAdmission.customerAcceptance
+                                          ? 'Accepted'
+                                          : 'Not accepted'}
+                                      </span>
+                                    </p>
+                                    {latestDischargeForAdmission.warrantyDays > 0 && (
+                                      <p>
+                                        Warranty: {latestDischargeForAdmission.warrantyDays} days
+                                        {latestDischargeForAdmission.warrantyExpiration && (
+                                          <span>
+                                            {' '}
+                                            (until
+                                            {format(
+                                              new Date(
+                                                latestDischargeForAdmission.warrantyExpiration,
+                                              ),
+                                              'MMM dd, yyyy',
+                                            )}
+                                            )
+                                          </span>
+                                        )}
+                                      </p>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="mt-2 flex flex-col gap-2">
+                                    <p className="text-sm text-muted-foreground">
+                                      Work order is completed and QC has passed. You can now discharge the
+                                      asset and close out this job card.
+                                    </p>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => {
+                                        if (!activeAdmissionForJobCard) {
+                                          toast({
+                                            title: 'No active admission',
+                                            description:
+                                              'No active admission was found for this job card.',
+                                            variant: 'destructive',
+                                          });
+                                          return;
+                                        }
+                                        setDischargeForm(prev => ({
+                                          ...prev,
+                                          admissionId: activeAdmissionForJobCard.id,
+                                          workCompleted:
+                                            prev.workCompleted ||
+                                            (selectedWorkOrder?.tasks || [])
+                                              .map(t => `• ${t.taskName}`)
+                                              .join('\n'),
+                                        }));
+                                        setIsDischargeDialogOpen(true);
+                                      }}
+                                    >
+                                      Discharge / Close-out Asset
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
                       </>
                     )}
                   </CardContent>
                 </Card>
+              {/* Discharge / Close-out Dialog */}
+              <Dialog open={isDischargeDialogOpen} onOpenChange={setIsDischargeDialogOpen}>
+                <DialogContent className="max-w-3xl">
+                  <DialogHeader>
+                    <DialogTitle>Discharge / Close-out Asset</DialogTitle>
+                    <DialogDescription>
+                      Capture the final condition and close-out details for this maintenance job.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="space-y-4 mt-2">
+                    {/* Context summary */}
+                    <div className="grid grid-cols-2 gap-4 border rounded-md p-3 bg-muted/40">
+                      <div>
+                        <Label className="text-xs font-medium text-muted-foreground">Asset</Label>
+                        <p className="text-sm font-semibold">
+                          {selectedCardDetails?.assetName}{' '}
+                          {selectedCardDetails?.assetCode && (
+                            <span className="text-xs text-muted-foreground">
+                              ({selectedCardDetails.assetCode})
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-xs font-medium text-muted-foreground">Job Card</Label>
+                        <p className="text-sm font-semibold">
+                          {selectedCardDetails?.jobCardNumber} - {selectedCardDetails?.title}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Condition & work summary */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Condition on Discharge</Label>
+                        <Select
+                          value={dischargeForm.assetConditionOnDischarge}
+                          onValueChange={value =>
+                            setDischargeForm(prev => ({
+                              ...prev,
+                              assetConditionOnDischarge: value as any,
+                            }))
+                          }
+                        >
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Select condition" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Excellent">Excellent</SelectItem>
+                            <SelectItem value="Good">Good</SelectItem>
+                            <SelectItem value="Fair">Fair</SelectItem>
+                            <SelectItem value="Poor">Poor</SelectItem>
+                            <SelectItem value="Critical">Critical</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label>Customer Acceptance</Label>
+                        <div className="flex items-center gap-3 mt-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={dischargeForm.customerAcceptance ? 'default' : 'outline'}
+                            onClick={() =>
+                              setDischargeForm(prev => ({
+                                ...prev,
+                                customerAcceptance: true,
+                              }))
+                            }
+                          >
+                            Accepted
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={!dischargeForm.customerAcceptance ? 'default' : 'outline'}
+                            onClick={() =>
+                              setDischargeForm(prev => ({
+                                ...prev,
+                                customerAcceptance: false,
+                              }))
+                            }
+                          >
+                            Not Accepted
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Work Completed</Label>
+                        <Textarea
+                          rows={4}
+                          className="mt-1"
+                          value={dischargeForm.workCompleted}
+                          onChange={e =>
+                            setDischargeForm(prev => ({
+                              ...prev,
+                              workCompleted: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>Remaining Issues / Notes</Label>
+                        <Textarea
+                          rows={4}
+                          className="mt-1"
+                          value={dischargeForm.remainingIssues}
+                          onChange={e =>
+                            setDischargeForm(prev => ({
+                              ...prev,
+                              remainingIssues: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    {/* Readings & warranty */}
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <Label>Mileage Reading</Label>
+                        <Input
+                          type="number"
+                          className="mt-1"
+                          value={dischargeForm.mileageReading}
+                          onChange={e =>
+                            setDischargeForm(prev => ({
+                              ...prev,
+                              mileageReading: Number(e.target.value) || 0,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>Hours Reading</Label>
+                        <Input
+                          type="number"
+                          className="mt-1"
+                          value={dischargeForm.hoursReading}
+                          onChange={e =>
+                            setDischargeForm(prev => ({
+                              ...prev,
+                              hoursReading: Number(e.target.value) || 0,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>Fuel Level (%)</Label>
+                        <Input
+                          type="number"
+                          className="mt-1"
+                          value={dischargeForm.fuelLevel}
+                          onChange={e =>
+                            setDischargeForm(prev => ({
+                              ...prev,
+                              fuelLevel: Number(e.target.value) || 0,
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Warranty Days</Label>
+                        <Input
+                          type="number"
+                          className="mt-1"
+                          value={dischargeForm.warrantyDays}
+                          onChange={e =>
+                            setDischargeForm(prev => ({
+                              ...prev,
+                              warrantyDays: Number(e.target.value) || 0,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>Warranty Terms</Label>
+                        <Textarea
+                          rows={3}
+                          className="mt-1"
+                          value={dischargeForm.warrantyTerms}
+                          onChange={e =>
+                            setDischargeForm(prev => ({
+                              ...prev,
+                              warrantyTerms: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <DialogFooter className="mt-4">
+                    <Button variant="outline" onClick={() => setIsDischargeDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={async () => {
+                        if (!activeAdmissionForJobCard) {
+                          toast({
+                            title: 'No active admission',
+                            description: 'No active admission was found for this job card.',
+                            variant: 'destructive',
+                          });
+                          return;
+                        }
+                        try {
+                          setIsSubmittingDischarge(true);
+                          const request: CreateDischargeRequest = {
+                            admissionId: activeAdmissionForJobCard.id,
+                            assetConditionOnDischarge: dischargeForm.assetConditionOnDischarge,
+                            dischargeNotes: dischargeForm.dischargeNotes || undefined,
+                            workCompleted: dischargeForm.workCompleted || undefined,
+                            remainingIssues: dischargeForm.remainingIssues || undefined,
+                            mileageReading: dischargeForm.mileageReading || undefined,
+                            hoursReading: dischargeForm.hoursReading || undefined,
+                            fuelLevel: dischargeForm.fuelLevel || undefined,
+                            qualityCheckPassed: dischargeForm.qualityCheckPassed,
+                            qualityCheckNotes: dischargeForm.qualityCheckNotes || undefined,
+                            customerAcceptance: dischargeForm.customerAcceptance,
+                            acceptanceNotes: dischargeForm.acceptanceNotes || undefined,
+                            requiresFollowUp: dischargeForm.requiresFollowUp,
+                            followUpDate: dischargeForm.followUpDate || undefined,
+                            followUpInstructions: dischargeForm.followUpInstructions || undefined,
+                            warrantyDays: dischargeForm.warrantyDays || undefined,
+                            warrantyTerms: dischargeForm.warrantyTerms || undefined,
+                          };
+
+                          const discharge = await assetAdmissionService.createDischarge(request);
+                          setLatestDischargeForAdmission(discharge);
+
+                          toast({
+                            title: 'Asset discharged',
+                            description: 'The asset has been discharged and close-out recorded.',
+                          });
+
+                          setIsDischargeDialogOpen(false);
+                        } catch (error) {
+                          console.error('Error creating discharge:', error);
+                          toast({
+                            title: 'Error',
+                            description: 'Failed to create discharge',
+                            variant: 'destructive',
+                          });
+                        } finally {
+                          setIsSubmittingDischarge(false);
+                        }
+                      }}
+                      disabled={isSubmittingDischarge}
+                    >
+                      {isSubmittingDischarge ? 'Discharging...' : 'Discharge Asset'}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
               </TabsContent>
 
               {/* WORK ORDER TAB */}
@@ -1845,20 +2732,12 @@ export default function JobCardsPage() {
                         <CardDescription>WO# {selectedWorkOrder.workOrderNumber}</CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-4">
-                        <div className="grid grid-cols-3 gap-4">
-                          <div>
-                            <Label className="text-sm font-semibold">Status</Label>
-                            <Badge className="mt-1">{selectedWorkOrder.status}</Badge>
-                          </div>
-                          <div>
-                            <Label className="text-sm font-semibold">Assigned To</Label>
-                            <p className="text-base mt-1">{selectedWorkOrder.assignedTechnicianName || 'Unassigned'}</p>
-                          </div>
-                          <div>
-                            <Label className="text-sm font-semibold">Completion</Label>
-                            <p className="text-base mt-1">{selectedWorkOrder.completionPercentage || 0}%</p>
-                          </div>
-                        </div>
+                        <div className="grid grid-cols-1 gap-4">
+                           <div>
+                             <Label className="text-sm font-semibold">Status</Label>
+                             <Badge className="mt-1">{selectedWorkOrder.status}</Badge>
+                           </div>
+                         </div>
 
                         <div className="grid grid-cols-2 gap-4 border-t pt-4">
                           <div>
@@ -2127,7 +3006,6 @@ export default function JobCardsPage() {
                                     toast({
                                       title: "Opening Certificate",
                                       description: "Certificate is opening in a new window",
-                                      className: "bg-green-50 border-green-200",
                                     });
                                   } catch (error) {
                                     console.error('Error opening certificate:', error);

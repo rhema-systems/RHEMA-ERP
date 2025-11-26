@@ -19,17 +19,20 @@ public class WorkOrdersController : ControllerBase
     private readonly IWorkOrderService _workOrderService;
     private readonly IWorkOrderPartService _workOrderPartService;
     private readonly IMaintenanceNotificationService _notificationService;
+    private readonly IQualityControlService _qualityControlService;
     private readonly ILogger<WorkOrdersController> _logger;
 
     public WorkOrdersController(
         IWorkOrderService workOrderService,
         IWorkOrderPartService workOrderPartService,
         IMaintenanceNotificationService notificationService,
+        IQualityControlService qualityControlService,
         ILogger<WorkOrdersController> logger)
     {
         _workOrderService = workOrderService;
         _workOrderPartService = workOrderPartService;
         _notificationService = notificationService;
+        _qualityControlService = qualityControlService;
         _logger = logger;
     }
 
@@ -167,7 +170,8 @@ public class WorkOrdersController : ControllerBase
     }
 
     /// <summary>
-    /// Updates work order status
+    /// Updates work order status.
+    /// When setting status to Completed, enforces QC gate via the quality control service.
     /// </summary>
     [HttpPut("{id:guid}/status")]
     public async Task<ActionResult<WorkOrderDto>> UpdateWorkOrderStatus(Guid id, [FromBody] UpdateWorkOrderStatusRequest request)
@@ -176,24 +180,37 @@ public class WorkOrdersController : ControllerBase
         {
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
-                
+
             var workOrder = await _workOrderService.GetWorkOrderByIdAsync(id);
             if (workOrder == null)
                 return NotFound($"Work order with ID {id} not found");
 
             var previousStatus = workOrder.Status;
             WorkOrderDto updatedWorkOrder;
-            
+
             // If starting the work order, use StartWorkOrderAsync which handles vehicle status updates
             if (request.Status == "InProgress")
             {
                 _logger.LogInformation("Starting work order {WorkOrderId}", id);
                 updatedWorkOrder = await _workOrderService.StartWorkOrderAsync(id);
             }
-            // If completing the work order, use CompleteWorkOrderAsync which handles vehicle status updates
+            // If completing the work order, validate QC on the server and then complete
             else if (request.Status == "Completed")
             {
                 _logger.LogInformation("Completing work order {WorkOrderId}", id);
+
+                var qcValidation = await _qualityControlService.ValidateWorkOrderCompletionAsync(id);
+                if (!qcValidation.CanComplete)
+                {
+                    return BadRequest(new
+                    {
+                        message = "Work order cannot be completed until quality control requirements are met.",
+                        validationFailures = qcValidation.ValidationFailures,
+                        validationMessages = qcValidation.ValidationMessages,
+                        requiresInspectionOfficerApproval = qcValidation.RequiresInspectionOfficerApproval
+                    });
+                }
+
                 var completeDto = new ErpSystem.Core.DTOs.Maintenance.CompleteWorkOrderDto
                 {
                     WorkOrderId = id,
@@ -205,12 +222,12 @@ public class WorkOrdersController : ControllerBase
             {
                 updatedWorkOrder = await _workOrderService.UpdateWorkOrderStatusAsync(id, request.Status, request.Notes);
             }
-            
+
             // Send status change notification
             try
             {
                 await _notificationService.SendWorkOrderStatusChangeNotificationAsync(id, previousStatus, updatedWorkOrder.Status);
-                
+
                 if (request.Status == "Completed")
                 {
                     await _notificationService.SendWorkOrderCompletionNotificationAsync(id);
@@ -220,7 +237,7 @@ public class WorkOrdersController : ControllerBase
             {
                 _logger.LogWarning(notifEx, "Failed to send work order status change notification for {WorkOrderId}", id);
             }
-            
+
             return Ok(updatedWorkOrder);
         }
         catch (Exception ex)

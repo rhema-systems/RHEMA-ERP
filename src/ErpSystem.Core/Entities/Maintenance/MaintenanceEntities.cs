@@ -157,6 +157,12 @@ public class MaintenanceAssetCategory : TenantEntity
     [MaxLength(20)]
     public string MaintenanceScheduleType { get; set; } = "single"; // 'single' or 'multi'
 
+    /// <summary>
+    /// Controls whether maintenance schedules should be auto-generated for
+    /// newly created assets in this category based on the category template.
+    /// </summary>
+    public bool AutoGenerateSchedules { get; set; } = true;
+
     // Primary Maintenance Criteria
     [MaxLength(20)]
     public string MaintenanceType { get; set; } = "Time"; // 'Time', 'Distance', 'Usage', 'Cycles'
@@ -358,7 +364,7 @@ public class AssetAdmission : TenantEntity
     public virtual MaintenanceAsset Asset { get; set; } = null!;
     public virtual JobCard? JobCard { get; set; }
     public virtual WorkOrder? WorkOrder { get; set; }
-    public virtual Employee AdmittedBy { get; set; } = null!;
+    public virtual ApplicationUser AdmittedBy { get; set; } = null!;
     public virtual AssetDischarge? Discharge { get; set; }
 }
 
@@ -456,9 +462,9 @@ public class AssetDischarge : TenantEntity
     public virtual MaintenanceAsset Asset { get; set; } = null!;
     public virtual JobCard? JobCard { get; set; }
     public virtual WorkOrder? WorkOrder { get; set; }
-    public virtual Employee DischargedBy { get; set; } = null!;
-    public virtual Employee? QualityCheckedBy { get; set; }
-    public virtual Employee? AcceptedBy { get; set; }
+    public virtual ApplicationUser DischargedBy { get; set; } = null!;
+    public virtual ApplicationUser? QualityCheckedBy { get; set; }
+    public virtual ApplicationUser? AcceptedBy { get; set; }
     public virtual ICollection<MaintenanceCertificate> Certificates { get; set; } = new List<MaintenanceCertificate>();
 }
 
@@ -507,7 +513,7 @@ public class MaintenanceCertificate : TenantEntity
     // Navigation properties
     public virtual AssetDischarge Discharge { get; set; } = null!;
     public virtual MaintenanceAsset Asset { get; set; } = null!;
-    public virtual Employee IssuedBy { get; set; } = null!;
+    public virtual ApplicationUser IssuedBy { get; set; } = null!;
 }
 
 /// <summary>
@@ -688,6 +694,7 @@ public class WorkOrder : TenantEntity
     public virtual ICollection<WorkOrderTool> Tools { get; set; } = new List<WorkOrderTool>();
     public virtual ICollection<WorkOrderDocument> Documents { get; set; } = new List<WorkOrderDocument>();
     public virtual ICollection<WorkOrderComment> Comments { get; set; } = new List<WorkOrderComment>();
+    public virtual ICollection<WorkOrderQualityCheck> QualityChecks { get; set; } = new List<WorkOrderQualityCheck>();
 }
 
 public class WorkOrderType : TenantEntity

@@ -153,13 +153,19 @@ function LoginFormWithSearchParams() {
         // Don't clear stored login data since we need it for 2FA step
         return;
       }
-      
+
       // Clear stored login data after successful complete login
       setStoredLoginData(null);
-      
-      // After successful login, redirect to tenant selection
+
+      // After successful login, check authentication provider
       if (response.token) {
-        router.push('/tenant-select');
+        // If user is an external user (Local authentication), redirect to external portal
+        if (response.user?.authenticationProvider === 'Local') {
+          router.push('/external-portal');
+        } else {
+          // Internal users (LDAP or other) go to tenant selection
+          router.push('/tenant-select');
+        }
       }
     },
     onError: (error: any) => {

@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, ChevronDown, User, ClipboardList, History, FileText, Wrench, Package, Trash2, Pencil, FlaskConical, CalendarClock, DollarSign, HelpCircle, ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, CalendarIcon } from 'lucide-react';
+import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, ChevronDown, User, ClipboardList, History, FileText, Wrench, Package, Trash2, Pencil, FlaskConical, CalendarClock, DollarSign, HelpCircle, ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, CalendarIcon, ShieldCheck } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { DateRange } from '@/components/ui/calendar';
@@ -43,6 +43,8 @@ import workOrderPartService, { WorkOrderPartDto, CreateWorkOrderPartDto, Invento
 import { fileUploadService } from '@/services/fileUploadService';
 import { ClientOnly } from '@/components/ClientOnly';
 
+import assetAdmissionService from '@/services/assetAdmissionService';
+
 interface WorkOrderTask {
   id: string;
   taskName: string;
@@ -67,7 +69,7 @@ interface WorkOrder {
   assignedTechnicianName: string;
   assignedTechnicianId?: string;
   status: 'Draft' | 'Open' | 'Approved' | 'InProgress' | 'OnHold' | 'Completed' | 'Cancelled';
-  priority: 'Low' | 'Medium' | 'High' | 'Critical';
+  priority: string;
   type: string; // Work order type name
   maintenanceLocation?: string; // Internal, External, Onsite, Offsite
   createdAt: string;
@@ -115,13 +117,13 @@ export default function WorkOrdersPage() {
   const [selectedOrderTasks, setSelectedOrderTasks] = useState<WorkOrderTask[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [qualityValidation, setQualityValidation] = useState<{[key: string]: QualityValidationResult}>({});
-  
+
   // Task completion dialog state
   const [isTaskCompletionDialogOpen, setIsTaskCompletionDialogOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<WorkOrderTask | null>(null);
   const [taskActualHours, setTaskActualHours] = useState<number>(0);
   const [taskCompletionNotes, setTaskCompletionNotes] = useState<string>('');
-  
+
   // Data from services
   const [technicians, setTechnicians] = useState<Employee[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -131,7 +133,7 @@ export default function WorkOrdersPage() {
   const [priorityLevels, setPriorityLevels] = useState<PriorityLevel[]>([]);
   const [jobCards, setJobCards] = useState<JobCard[]>([]);
   const [loadingData, setLoadingData] = useState(true);
-  
+
   // Tool management state
   const [availableTools, setAvailableTools] = useState<MaintenanceToolDto[]>([]);
   const [selectedTools, setSelectedTools] = useState<string[]>([]);
@@ -144,7 +146,10 @@ export default function WorkOrdersPage() {
   const [toolReturnDialogOpen, setToolReturnDialogOpen] = useState(false);
   const [isToolAllocationDialogOpen, setIsToolAllocationDialogOpen] = useState(false);
   const [selectedWorkOrderTool, setSelectedWorkOrderTool] = useState<WorkOrderToolDto | null>(null);
-  
+
+  // Cost summary cache for work orders list (to avoid recalculating on every render)
+  const [workOrderCosts, setWorkOrderCosts] = useState<Record<string, number>>({});
+
   // Consumables state
   const [inventoryItems, setInventoryItems] = useState<InventoryItemDto[]>([]);
   const [workOrderParts, setWorkOrderParts] = useState<WorkOrderPartDto[]>([]);
@@ -155,24 +160,24 @@ export default function WorkOrdersPage() {
   const [warehouseLocations, setWarehouseLocations] = useState<WarehouseLocationDto[]>([]);
   const [selectedWarehouseLocationId, setSelectedWarehouseLocationId] = useState<string>('');
   const [pendingPartDeletes, setPendingPartDeletes] = useState<string[]>([]);
-  
+
   // Warehouse-based inventory state
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
   const [selectedWarehouse, setSelectedWarehouse] = useState<string>('');
   const [warehouseInventory, setWarehouseInventory] = useState<WarehouseInventoryDto[]>([]);
   const [warehouseTools, setWarehouseTools] = useState<WarehouseInventoryDto[]>([]);
-  
+
   // Tool search state
   const [toolSearchTerm, setToolSearchTerm] = useState<string>('');
-  
+
   // Consumable search state
   const [consumableSearchTerm, setConsumableSearchTerm] = useState<string>('');
-  
+
   // Consume part dialog state
   const [isConsumePartDialogOpen, setIsConsumePartDialogOpen] = useState(false);
   const [partToConsume, setPartToConsume] = useState<WorkOrderPartDto | null>(null);
   const [quantityToConsume, setQuantityToConsume] = useState<number>(0);
-  
+
   // Staff Schedule state
   const [staffSchedules, setStaffSchedules] = useState<MaintenanceStaffSchedule[]>([]);
   const [loadingSchedules, setLoadingSchedules] = useState(false);
@@ -191,7 +196,7 @@ export default function WorkOrdersPage() {
     assignedVehicleId: '',
     notes: '',
   });
-  
+
   // Expense state
   const [expenses, setExpenses] = useState<MaintenanceExpense[]>([]);
   const [loadingExpenses, setLoadingExpenses] = useState(false);
@@ -201,11 +206,11 @@ export default function WorkOrdersPage() {
   const [availableVehicles, setAvailableVehicles] = useState<Asset[]>([]);
   const [expenseReceiptFile, setExpenseReceiptFile] = useState<File | null>(null);
   const [pendingExpenseDeletes, setPendingExpenseDeletes] = useState<string[]>([]);
-  
+
   // Start work order confirmation dialog state
   const [isStartWorkOrderDialogOpen, setIsStartWorkOrderDialogOpen] = useState(false);
   const [workOrderToStart, setWorkOrderToStart] = useState<WorkOrder | null>(null);
-  
+
   // Submit for QC confirmation dialog state
   const [isSubmitQCDialogOpen, setIsSubmitQCDialogOpen] = useState(false);
   const [workOrderToSubmitQC, setWorkOrderToSubmitQC] = useState<WorkOrder | null>(null);
@@ -222,7 +227,7 @@ export default function WorkOrdersPage() {
     receiptPath: '',
     notes: '',
   });
-  
+
   const [newWorkOrder, setNewWorkOrder] = useState({
     title: '',
     description: '',
@@ -255,7 +260,7 @@ export default function WorkOrdersPage() {
           maintenanceApiService.getPriorityLevels(),
           toolCheckoutService.getAllTools()
         ]);
-        
+
         setTechnicians(Array.isArray(techniciansList) ? techniciansList : []);
         setAssets(assetsResponse.items || []);
         setWorkOrderTypes(Array.isArray(workOrderTypesList) ? workOrderTypesList : []);
@@ -263,7 +268,7 @@ export default function WorkOrdersPage() {
         setPriorities(Array.isArray(priorityLevelsList) ? priorityLevelsList : []);
         setPriorityLevels(Array.isArray(priorityLevelsList) ? priorityLevelsList : []);
         setAvailableTools(Array.isArray(toolsList) ? toolsList : []);
-        
+
         // Load inventory items for consumables
         try {
           const items = await workOrderPartService.getInventoryItems();
@@ -272,7 +277,7 @@ export default function WorkOrdersPage() {
           console.error('Error loading inventory items:', error);
           setInventoryItems([]);
         }
-        
+
         // Load warehouse locations
         try {
           const locations = await workOrderPartService.getWarehouseLocations();
@@ -281,7 +286,7 @@ export default function WorkOrdersPage() {
           console.error('Error loading warehouse locations:', error);
           setWarehouseLocations([]);
         }
-        
+
         // Load warehouses for warehouse-based inventory
         try {
           const warehousesList = await workOrderPartService.getWarehouses();
@@ -294,7 +299,7 @@ export default function WorkOrdersPage() {
           console.error('Error loading warehouses:', error);
           setWarehouses([]);
         }
-        
+
         // Get approved job cards from API (with error handling)
         try {
           const jobCardsList = await maintenanceApiService.getApprovedJobCards();
@@ -303,7 +308,7 @@ export default function WorkOrdersPage() {
           console.error('Error loading job cards:', error);
           setJobCards([]); // Set empty array on error
         }
-        
+
         // Load available vehicles for expense tracking
         try {
           const vehiclesList = await maintenanceApiService.getAvailableVehicles();
@@ -312,12 +317,12 @@ export default function WorkOrdersPage() {
           console.error('Error loading available vehicles:', error);
           setAvailableVehicles([]);
         }
-        
+
         // Load work orders from API
         const workOrdersResponse = await maintenanceApiService.getWorkOrders();
         setWorkOrders(workOrdersResponse.items);
         setFilteredOrders(workOrdersResponse.items);
-        
+
         // Load schedules for all work orders to get technician assignments
         const schedulesMap: {[key: string]: MaintenanceStaffSchedule[]} = {};
         for (const order of workOrdersResponse.items) {
@@ -347,7 +352,7 @@ export default function WorkOrdersPage() {
         setLoadingData(false);
       }
     };
-    
+
     loadData();
   }, []);
 
@@ -469,7 +474,7 @@ export default function WorkOrdersPage() {
     let filtered = workOrders;
 
     if (searchTerm) {
-      filtered = filtered.filter(order => 
+      filtered = filtered.filter(order =>
         order.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (order.assetName && order.assetName.toLowerCase().includes(searchTerm.toLowerCase())) ||
         order.workOrderNumber.toLowerCase().includes(searchTerm.toLowerCase())
@@ -517,37 +522,37 @@ export default function WorkOrdersPage() {
     if (schedules.length === 0) {
       return 'No technicians assigned';
     }
-    
+
     // Enrich schedules with full names
     const enrichedSchedules = enrichSchedulesWithFullNames(schedules);
-    
+
     // Get unique technician names from schedules (prefer full name if available)
     const technicianNames = enrichedSchedules
       .map(s => s.technicianFullName || s.technicianName)
       .filter((name, index, self) => name && self.indexOf(name) === index);
-    
+
     if (technicianNames.length === 0) {
       return 'No technicians assigned';
     }
-    
+
     // Show first technician and count if more than one
     if (technicianNames.length === 1) {
       return technicianNames[0];
     }
-    
+
     return `${technicianNames[0]} +${technicianNames.length - 1} more`;
   };
 
   // Load warehouse inventory when warehouse changes (consumables: itemType=1, tools: itemType=4)
   useEffect(() => {
     if (!selectedWarehouse) return;
-    
+
     const loadWarehouseInventory = async () => {
       try {
         // Load consumables (ItemType.Consumable = 1)
         const inventory = await workOrderPartService.getInventoryByWarehouse(selectedWarehouse, 1);
         setWarehouseInventory(Array.isArray(inventory) ? inventory : []);
-        
+
         // Load tools (ItemType.Tool = 4)
         const tools = await workOrderPartService.getInventoryByWarehouse(selectedWarehouse, 4);
         setWarehouseTools(Array.isArray(tools) ? tools : []);
@@ -557,7 +562,7 @@ export default function WorkOrdersPage() {
         setWarehouseTools([]);
       }
     };
-    
+
     loadWarehouseInventory();
   }, [selectedWarehouse]);
 
@@ -568,7 +573,7 @@ export default function WorkOrdersPage() {
       const selectedWorkOrderType = (Array.isArray(workOrderTypes) ? workOrderTypes : []).find(wot => wot.name === newWorkOrder.workOrderType);
       const selectedPriority = (Array.isArray(priorityLevels) ? priorityLevels : []).find(pl => pl.name === newWorkOrder.priority);
       const selectedTechnician = technicians.find(t => `${t.firstName} ${t.lastName}` === newWorkOrder.assignedTechnician);
-      
+
       if (!selectedAsset || !selectedWorkOrderType || !selectedPriority) {
         console.error('Missing required selections');
         return;
@@ -588,7 +593,7 @@ export default function WorkOrdersPage() {
       };
 
       const createdWorkOrder = await maintenanceApiService.createWorkOrder(createData);
-      
+
       // Allocate selected tools to work order
       if (newWorkOrder.requiredTools.length > 0) {
         for (const toolId of newWorkOrder.requiredTools) {
@@ -604,17 +609,17 @@ export default function WorkOrdersPage() {
           }
         }
       }
-      
+
       // Refresh work orders list
       const workOrdersResponse = await maintenanceApiService.getWorkOrders();
       setWorkOrders(workOrdersResponse.items);
-      
+
       toast({
         title: "Success",
         description: `Work order ${createdWorkOrder.workOrderNumber || ''} created successfully`,
         className: "bg-green-50 border-green-200",
       });
-      
+
       setIsCreateDialogOpen(false);
       setNewWorkOrder({
         title: '',
@@ -642,7 +647,7 @@ export default function WorkOrdersPage() {
 
   const handleEditWorkOrder = async () => {
     if (!selectedOrder) return;
-    
+
     try {
       const updateData = {
         id: selectedOrder.id,
@@ -659,17 +664,17 @@ export default function WorkOrdersPage() {
       };
 
       await maintenanceApiService.updateWorkOrder(selectedOrder.id, updateData);
-      
+
       // Refresh work orders list
       const workOrdersResponse = await maintenanceApiService.getWorkOrders();
       setWorkOrders(workOrdersResponse.items);
-      
+
       toast({
         title: "Success",
         description: `Work order ${selectedOrder.workOrderNumber} updated successfully`,
         className: "bg-green-50 border-green-200",
       });
-      
+
       setIsEditDialogOpen(false);
       setSelectedOrder(null);
     } catch (error) {
@@ -705,8 +710,8 @@ export default function WorkOrdersPage() {
 
     return (
       <Badge className={colors[status]}>
-        {status === 'InProgress' ? 'In Progress' : 
-         status === 'OnHold' ? 'On Hold' : 
+        {status === 'InProgress' ? 'In Progress' :
+         status === 'OnHold' ? 'On Hold' :
          status === 'Draft' ? 'Draft' :
          status === 'Approved' ? 'Approved' :
          status}
@@ -720,11 +725,44 @@ export default function WorkOrdersPage() {
       'Medium': 'bg-blue-100 text-blue-800',
       'High': 'bg-orange-100 text-orange-800',
       'Critical': 'bg-red-100 text-red-800',
-    };
+    } as Record<string, string>;
+
+    const display = priority || 'Not Set';
+    const key = colors[priority] ? priority : undefined;
 
     return (
-      <Badge className={colors[priority]}>
-        {priority}
+      <Badge className={key ? colors[key] : 'bg-gray-100 text-gray-800'}>
+        {display}
+      </Badge>
+    );
+  };
+
+  // Calculate actual cost for a work order (for list display)
+  const getWorkOrderActualCost = (orderId: string): number => {
+    // Check cache first
+    if (workOrderCosts[orderId] !== undefined) {
+      return workOrderCosts[orderId];
+    }
+    return 0; // Will be calculated when work order details are loaded
+  };
+
+  const getCostBadge = (cost: number) => {
+    if (cost === 0) {
+      return <Badge variant="outline" className="text-xs text-muted-foreground">$0.00</Badge>;
+    }
+
+    // Color code based on cost magnitude
+    const colorClass = cost > 10000
+      ? 'bg-red-50 text-red-700 border-red-200'
+      : cost > 5000
+      ? 'bg-orange-50 text-orange-700 border-orange-200'
+      : cost > 1000
+      ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
+      : 'bg-green-50 text-green-700 border-green-200';
+
+    return (
+      <Badge variant="outline" className={`text-xs font-semibold ${colorClass}`}>
+        ${cost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       </Badge>
     );
   };
@@ -742,7 +780,7 @@ export default function WorkOrdersPage() {
           });
           return;
         }
-        
+
         if (validation.requiresInspectionOfficerApproval) {
           toast({
             title: 'Inspection Required',
@@ -752,13 +790,13 @@ export default function WorkOrdersPage() {
           return;
         }
       }
-      
+
       await maintenanceApiService.updateWorkOrderStatus(orderId, newStatus);
-      
+
       // Refresh work orders list
       const workOrdersResponse = await maintenanceApiService.getWorkOrders();
       setWorkOrders(workOrdersResponse.items);
-      
+
       const statusMessages: Record<string, string> = {
         'Open': 'opened',
         'InProgress': 'started',
@@ -766,7 +804,7 @@ export default function WorkOrdersPage() {
         'Completed': 'completed',
         'Cancelled': 'cancelled'
       };
-      
+
       toast({
         title: "Success",
         description: `Work order ${statusMessages[newStatus] || 'updated'} successfully`,
@@ -807,7 +845,7 @@ export default function WorkOrdersPage() {
     try {
       // Validate work order first
       const validation = await validateQualityControl(orderId);
-      
+
       // Check if all required tasks are completed before QC submission
       if (validation.validationFailures.some(f => f.includes('task'))) {
         toast({
@@ -820,11 +858,11 @@ export default function WorkOrdersPage() {
 
       // Submit for QC inspection
       const qualityCheck = await qualityControlService.submitWorkOrderForInspection(orderId);
-      
+
       // Refresh work orders list to show updated status
       const workOrdersResponse = await maintenanceApiService.getWorkOrders();
       setWorkOrders(workOrdersResponse.items);
-      
+
       toast({
         title: "Submitted for QC Inspection",
         description: `Work order submitted for quality control inspection using checklist: ${qualityCheck.checklistName}`,
@@ -863,14 +901,14 @@ export default function WorkOrdersPage() {
       }
 
       const updatedTask = await response.json();
-      
+
       // Update local state with the response from the server
       setSelectedOrderTasks(prevTasks =>
         prevTasks.map(task =>
           task.id === taskId ? updatedTask : task
         )
       );
-      
+
       toast({
         title: 'Success',
         description: `Task ${newStatus === 'Completed' ? 'completed' : 'updated'} successfully`,
@@ -895,7 +933,7 @@ export default function WorkOrdersPage() {
 
   const handleCompleteTaskSubmit = async () => {
     if (!selectedTask) return;
-    
+
     await handleTaskStatusUpdate(selectedTask.id, 'Completed', taskActualHours, taskCompletionNotes);
     setIsTaskCompletionDialogOpen(false);
     setSelectedTask(null);
@@ -935,7 +973,7 @@ export default function WorkOrdersPage() {
   const SortHeader = ({ label, column }: { label: string; column: string }) => {
     return (
       <TableHead className="cursor-pointer hover:bg-gray-100 select-none">
-        <div 
+        <div
           className="flex items-center gap-1"
           onClick={() => handleSort(column)}
         >
@@ -982,7 +1020,7 @@ export default function WorkOrdersPage() {
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
-      
+
       {/* Create Work Order button hidden - work orders only originate from job card approval */}
 
       {/* Filters */}
@@ -1026,10 +1064,11 @@ export default function WorkOrdersPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Priority</SelectItem>
-                  <SelectItem value="Low">Low</SelectItem>
-                  <SelectItem value="Medium">Medium</SelectItem>
-                  <SelectItem value="High">High</SelectItem>
-                  <SelectItem value="Critical">Critical</SelectItem>
+                  {priorityLevels.map((priority) => (
+                    <SelectItem key={priority.id} value={priority.name}>
+                      {priority.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </ClientOnly>
@@ -1083,6 +1122,7 @@ export default function WorkOrdersPage() {
                 <TableHead>Technician</TableHead>
                 <SortHeader label="Status" column="status" />
                 <SortHeader label="Priority" column="priority" />
+                <TableHead>Actual Cost</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -1104,6 +1144,17 @@ export default function WorkOrdersPage() {
                     ) : (
                       <span>{order.assetName}</span>
                     )}
+                      {order.assetId && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => window.open(`/maintenance/asset-admission?assetId=${order.assetId}&workOrderId=${order.id}`, '_blank')}
+                          className="ml-2 text-xs"
+                        >
+                          Admit
+                        </Button>
+                      )}
+
                   </TableCell>
                   <TableCell>
                     {order.jobCardNumber && order.jobCardId ? (
@@ -1126,8 +1177,20 @@ export default function WorkOrdersPage() {
                     )}
                   </TableCell>
                   <TableCell>{getTechnicianNamesFromSchedules(order.id)}</TableCell>
-                  <TableCell>{getStatusBadge(order.status)}</TableCell>
+                  <TableCell>
+                    <div className="flex flex-col gap-1">
+                      {getStatusBadge(order.status)}
+                      {qualityValidation[order.id] && (
+                        <span className="text-[11px] font-medium text-muted-foreground">
+                          {qualityValidation[order.id].canComplete
+                            ? 'QC: All checks satisfied'
+                            : 'QC: Action required'}
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell>{getPriorityBadge(order.priority)}</TableCell>
+                  <TableCell>{getCostBadge(getWorkOrderActualCost(order.id))}</TableCell>
                   <TableCell>
                     <div className="flex items-center space-x-2">
                       <Button
@@ -1136,7 +1199,7 @@ export default function WorkOrdersPage() {
                         onClick={async () => {
                           setSelectedOrder(order);
                           setIsViewDialogOpen(true);
-                          
+
                           // Fetch work order details (includes tasks, parts, and labor)
                           setLoadingTasks(true);
                           setLoadingParts(true);
@@ -1147,7 +1210,7 @@ export default function WorkOrdersPage() {
                           setWorkOrderLabor([]);
                           setStaffSchedules([]);
                           setExpenses([]);
-                          
+
                           try {
                             console.log('Fetching work order details for ID:', order.id);
                             const workOrderDetails = await maintenanceApiService.getWorkOrderById(order.id);
@@ -1155,10 +1218,10 @@ export default function WorkOrdersPage() {
                             console.log('Tasks in response:', workOrderDetails.tasks);
                             console.log('Parts in response:', workOrderDetails.parts);
                             console.log('Labor in response:', workOrderDetails.labor);
-                            
+
                             // Update selectedOrder with full details to ensure assignedTechnicianId is available
                             setSelectedOrder(prev => prev ? { ...prev, ...workOrderDetails } : workOrderDetails);
-                            
+
                             // Set labor data
                             if (workOrderDetails.labor && Array.isArray(workOrderDetails.labor)) {
                               setWorkOrderLabor(workOrderDetails.labor);
@@ -1167,7 +1230,7 @@ export default function WorkOrdersPage() {
                               console.warn('No labor array in response');
                               setWorkOrderLabor([]);
                             }
-                            
+
                             // Set tasks
                             if (workOrderDetails.tasks && Array.isArray(workOrderDetails.tasks)) {
                               setSelectedOrderTasks(workOrderDetails.tasks);
@@ -1176,12 +1239,12 @@ export default function WorkOrdersPage() {
                               console.warn('No tasks array in response');
                               setSelectedOrderTasks([]);
                             }
-                            
+
                             // If work order is completed, load historical data from work order details
                             // Otherwise, load current data from separate services
                             if (order.status === 'Completed' || order.status === 'Cancelled') {
                               console.log('Loading historical data for completed work order');
-                              
+
                               // Set parts from work order details (history)
                               if (workOrderDetails.parts && Array.isArray(workOrderDetails.parts)) {
                                 setWorkOrderParts(workOrderDetails.parts);
@@ -1190,7 +1253,7 @@ export default function WorkOrdersPage() {
                                 console.warn('No parts array in response');
                                 setWorkOrderParts([]);
                               }
-                              
+
                               // Set tools from work order details (history)
                               if (workOrderDetails.tools && Array.isArray(workOrderDetails.tools)) {
                                 // Map minimal tool data to full tool format expected by UI
@@ -1208,7 +1271,7 @@ export default function WorkOrdersPage() {
                                 );
                                 setWorkOrderTools(toolsWithDetails);
                                 console.log('Set tools history with', toolsWithDetails.length, 'tools');
-                                
+
                                 // Try to get tool summary
                                 try {
                                   const summaryData = await workOrderToolService.getToolSummary(order.id);
@@ -1222,7 +1285,7 @@ export default function WorkOrdersPage() {
                               }
                             } else {
                               console.log('Loading current data for active work order');
-                              
+
                               // Load current parts from service
                               try {
                                 const partsData = await workOrderPartService.getPartsByWorkOrder(order.id);
@@ -1232,7 +1295,7 @@ export default function WorkOrdersPage() {
                                 console.error('Error loading current parts:', error);
                                 setWorkOrderParts([]);
                               }
-                              
+
                               // Load current tools from service
                               try {
                                 const [toolsData, summaryData] = await Promise.all([
@@ -1246,7 +1309,7 @@ export default function WorkOrdersPage() {
                               console.error('Error loading current tools:', error);
                               }
                             }
-                            
+
                             // Load schedules for this work order
                             try {
                               const schedulesData = await maintenanceApiService.getStaffSchedulesByWorkOrder(order.id);
@@ -1257,16 +1320,33 @@ export default function WorkOrdersPage() {
                               console.error('Error loading schedules:', error);
                               setStaffSchedules([]);
                             }
-                            
+
                             // Load expenses for this work order
+                            let expensesData: MaintenanceExpense[] = [];
                             try {
-                              const expensesData = await maintenanceApiService.getExpensesByWorkOrder(order.id);
+                              expensesData = await maintenanceApiService.getExpensesByWorkOrder(order.id);
                               setExpenses(expensesData);
                               console.log('Set expenses with', expensesData.length, 'records');
                             } catch (error) {
                               console.error('Error loading expenses:', error);
                               setExpenses([]);
                             }
+
+                            // Calculate and cache total cost for this work order (after all data is loaded)
+                            const laborCost = (workOrderDetails.labor || []).reduce((sum: number, l: any) => sum + (l.totalCost || 0), 0);
+                            const partsCost = (workOrderDetails.parts || []).reduce((sum: number, p: any) => sum + (p.totalCost || 0), 0);
+                            // Get tool cost from summary if available
+                            let toolsCost = 0;
+                            try {
+                              const summary = await workOrderToolService.getToolSummary(order.id);
+                              toolsCost = summary?.totalRentalCost || 0;
+                            } catch {
+                              toolsCost = 0;
+                            }
+                            const expensesCost = expensesData.reduce((sum, e) => sum + e.amount, 0);
+                            const totalCost = laborCost + partsCost + toolsCost + expensesCost;
+
+                            setWorkOrderCosts(prev => ({ ...prev, [order.id]: totalCost }));
                           } catch (error) {
                             console.error('Error fetching work order details:', error);
                             setSelectedOrderTasks([]);
@@ -1296,7 +1376,7 @@ export default function WorkOrdersPage() {
                             onClick={async () => {
                               setSelectedOrder(order);
                               setIsEditDialogOpen(true);
-                              
+
                               // Load existing parts, tools, schedules, and expenses for this work order
                               if (order.id) {
                                 // Load parts
@@ -1307,7 +1387,7 @@ export default function WorkOrdersPage() {
                                   console.error('Error loading consumables:', error);
                                   setWorkOrderParts([]);
                                 }
-                                
+
                                 // Load already allocated tools
                                 try {
                                   const existingTools = await workOrderToolService.getWorkOrderTools(order.id);
@@ -1318,7 +1398,7 @@ export default function WorkOrdersPage() {
                                   console.error('Error loading work order tools:', error);
                                   setSelectedTools([]);
                                 }
-                                
+
                                 // Load existing schedules
                                 try {
                                   const existingSchedules = await maintenanceApiService.getStaffSchedulesByWorkOrder(order.id);
@@ -1327,7 +1407,7 @@ export default function WorkOrdersPage() {
                                   console.error('Error loading schedules:', error);
                                   setStaffSchedules([]);
                                 }
-                                
+
                                 // Load existing expenses
                                 try {
                                   const existingExpenses = await maintenanceApiService.getExpensesByWorkOrder(order.id);
@@ -1411,10 +1491,14 @@ export default function WorkOrdersPage() {
           </DialogHeader>
           {selectedOrder && (
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col flex-1 overflow-hidden">
-              <TabsList className="grid w-full grid-cols-7 flex-shrink-0 bg-muted/50 p-1 rounded-lg gap-1">
+              <TabsList className="grid w-full grid-cols-8 flex-shrink-0 bg-muted/50 p-1 rounded-lg gap-1">
                 <TabsTrigger value="details">
                   <FileText className="h-4 w-4 mr-2" />
                   Details
+                </TabsTrigger>
+                <TabsTrigger value="quality">
+                  <ShieldCheck className="h-4 w-4 mr-2" />
+                  Quality
                 </TabsTrigger>
                 <TabsTrigger value="tasks">
                   <ClipboardList className="h-4 w-4 mr-2" />
@@ -1442,70 +1526,135 @@ export default function WorkOrdersPage() {
                   Workflow History
                 </TabsTrigger>
               </TabsList>
-              
+
               {/* Details Tab */}
               <TabsContent value="details" className="flex-1 overflow-y-auto mt-4">
                 <div className="space-y-4">
-                <div className="mb-4">
-                  <Label className="text-sm font-medium text-muted-foreground">Work Order Number</Label>
-                  <p className="text-lg font-mono">{selectedOrder.workOrderNumber}</p>
-                </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Title</Label>
-                  <p className="text-sm">{selectedOrder.title}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Asset</Label>
-                  <p className="text-sm">{selectedOrder.assetName}</p>
-                </div>
-              </div>
-              {selectedOrder.jobCardNumber && (
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Job Card</Label>
-                  <div className="pt-1">
-                    <Badge variant="outline">{selectedOrder.jobCardNumber}</Badge>
+                  <div className="mb-4">
+                    <Label className="text-sm font-medium text-muted-foreground">Work Order Number</Label>
+                    <p className="text-lg font-mono">{selectedOrder.workOrderNumber}</p>
                   </div>
-                </div>
-              )}
-              <div>
-                <Label className="text-sm font-medium text-muted-foreground">Description</Label>
-                <p className="text-sm">{selectedOrder.description}</p>
-              </div>
-              <div>
-                <Label className="text-sm font-medium text-muted-foreground">Status</Label>
-                <div className="pt-1">{getStatusBadge(selectedOrder.status)}</div>
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Priority</Label>
-                  <div className="pt-1">{getPriorityBadge(selectedOrder.priority)}</div>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Type</Label>
-                  <p className="text-sm">{selectedOrder.type}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Estimated Hours</Label>
-                  <p className="text-sm">{selectedOrder.estimatedHours} hrs</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Created Date</Label>
-                  <p className="text-sm">{format(new Date(selectedOrder.createdAt), 'PPP')}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Due Date</Label>
-                  <p className="text-sm">{selectedOrder.requestedCompletionDate ? format(new Date(selectedOrder.requestedCompletionDate), 'PPP') : 'Not set'}</p>
-                </div>
-                {selectedOrder.actualCompletionDate && (
+
+                  {/* High-level cost snapshot */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <Card className="border-dashed">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm">Estimated</CardTitle>
+                        <CardDescription className="text-xs">Planned effort & cost</CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-1">
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span>Estimated Hours</span>
+                          <span className="font-medium">{selectedOrder.estimatedHours ?? 0} hrs</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span>Estimated Cost</span>
+                          <span className="font-medium">
+                            ${((selectedOrder.estimatedCost ?? 0)).toFixed(2)}
+                          </span>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border-dashed">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm">Actual to Date</CardTitle>
+                        <CardDescription className="text-xs">Labor, parts, tools & expenses</CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-1">
+                        {(() => {
+                          const laborCost = workOrderLabor?.reduce((sum: number, l: any) => sum + (l.totalCost || 0), 0) || 0;
+                          const partsCost = workOrderParts?.reduce((sum, p) => sum + (p.totalCost || 0), 0) || 0;
+                          const toolsCost = toolSummary?.totalRentalCost || 0;
+                          const expensesCost = totalExpenses || 0;
+                          const actualTotal = laborCost + partsCost + toolsCost + expensesCost;
+
+                          return (
+                            <>
+                              <div className="flex justify-between text-xs text-muted-foreground">
+                                <span>Labor</span>
+                                <span className="font-medium">${laborCost.toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between text-xs text-muted-foreground">
+                                <span>Parts</span>
+                                <span className="font-medium">${partsCost.toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between text-xs text-muted-foreground">
+                                <span>Tools</span>
+                                <span className="font-medium">${toolsCost.toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between text-xs text-muted-foreground">
+                                <span>Expenses</span>
+                                <span className="font-medium">${expensesCost.toFixed(2)}</span>
+                              </div>
+                              <div className="mt-2 border-t pt-2 flex justify-between text-xs">
+                                <span className="font-semibold">Actual Total</span>
+                                <span className="font-semibold">${actualTotal.toFixed(2)}</span>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Core meta */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Title</Label>
+                      <p className="text-sm">{selectedOrder.title}</p>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Asset</Label>
+                      <p className="text-sm">{selectedOrder.assetName}</p>
+                    </div>
+                  </div>
+                  {selectedOrder.jobCardNumber && (
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Job Card</Label>
+                      <div className="pt-1">
+                        <Badge variant="outline">{selectedOrder.jobCardNumber}</Badge>
+                      </div>
+                    </div>
+                  )}
                   <div>
-                    <Label className="text-sm font-medium text-muted-foreground">Completed Date</Label>
-                    <p className="text-sm">{format(new Date(selectedOrder.actualCompletionDate), 'PPP')}</p>
+                    <Label className="text-sm font-medium text-muted-foreground">Description</Label>
+                    <p className="text-sm">{selectedOrder.description}</p>
                   </div>
-                )}
-              </div>
+                  <div>
+                    <Label className="text-sm font-medium text-muted-foreground">Status</Label>
+                    <div className="pt-1">{getStatusBadge(selectedOrder.status)}</div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Priority</Label>
+                      <div className="pt-1">{getPriorityBadge(selectedOrder.priority)}</div>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Type</Label>
+                      <p className="text-sm">{selectedOrder.type}</p>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Estimated Hours</Label>
+                      <p className="text-sm">{selectedOrder.estimatedHours} hrs</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Created Date</Label>
+                      <p className="text-sm">{format(new Date(selectedOrder.createdAt), 'PPP')}</p>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Due Date</Label>
+                      <p className="text-sm">{selectedOrder.requestedCompletionDate ? format(new Date(selectedOrder.requestedCompletionDate), 'PPP') : 'Not set'}</p>
+                    </div>
+                    {selectedOrder.actualCompletionDate && (
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Completed Date</Label>
+                        <p className="text-sm">{format(new Date(selectedOrder.actualCompletionDate), 'PPP')}</p>
+                      </div>
+                    )}
+                  </div>
                   {selectedOrder.actualHours && (
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Actual Hours</Label>
@@ -1514,7 +1663,118 @@ export default function WorkOrdersPage() {
                   )}
                 </div>
               </TabsContent>
-              
+
+              {/* Quality Tab */}
+              <TabsContent value="quality" className="flex-1 overflow-y-auto mt-4">
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">QC Status</Label>
+                      <div className="mt-1">
+                        {qualityValidation[selectedOrder.id] ? (
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">
+                              {qualityValidation[selectedOrder.id].canComplete
+                                ? 'All QC checks satisfied for completion'
+                                : 'QC checks outstanding before completion'}
+                            </p>
+                            {qualityValidation[selectedOrder.id].requiresInspectionOfficerApproval && (
+                              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                                Inspection officer approval is required before this work order can be completed.
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            QC validation has not been run yet for this work order.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">QC Actions</Label>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => validateQualityControl(selectedOrder.id)}
+                          disabled={selectedOrder.status === 'Completed' || selectedOrder.status === 'Cancelled'}
+                        >
+                          Refresh QC Status
+                        </Button>
+                        {selectedOrder.status === 'InProgress' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="bg-blue-50 hover:bg-blue-100"
+                            onClick={() => handleSubmitForQCInspection(selectedOrder.id)}
+                          >
+                            Submit for QC
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {qualityValidation[selectedOrder.id] && (
+                    <>
+                      {qualityValidation[selectedOrder.id].requiredInspections && qualityValidation[selectedOrder.id].requiredInspections.length > 0 && (
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Required Inspections</Label>
+                          <div className="mt-2 space-y-2">
+                            {qualityValidation[selectedOrder.id].requiredInspections.map((inspection) => (
+                              <div
+                                key={inspection.inspectionTemplateId}
+                                className="border rounded-md px-3 py-2 bg-muted/40 flex items-start justify-between gap-3"
+                              >
+                                <div>
+                                  <p className="text-sm font-medium flex items-center gap-2">
+                                    {inspection.inspectionName}
+                                    {inspection.isRegulatory && (
+                                      <span className="text-[10px] uppercase tracking-wide bg-red-50 text-red-700 border border-red-200 rounded px-1.5 py-0.5">
+                                        Regulatory
+                                      </span>
+                                    )}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">{inspection.description}</p>
+                                  <p className="text-xs text-muted-foreground mt-1">Type: {inspection.inspectionType}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {qualityValidation[selectedOrder.id].validationFailures && qualityValidation[selectedOrder.id].validationFailures.length > 0 && (
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Blocking Issues</Label>
+                          <div className="mt-2 bg-red-50 border border-red-200 rounded-md px-3 py-2 space-y-1">
+                            {qualityValidation[selectedOrder.id].validationFailures.map((failure, index) => (
+                              <p key={index} className="text-xs text-red-800">
+                                • {failure}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {qualityValidation[selectedOrder.id].validationMessages && qualityValidation[selectedOrder.id].validationMessages.length > 0 && (
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Informational Messages</Label>
+                          <div className="mt-2 bg-blue-50 border border-blue-200 rounded-md px-3 py-2 space-y-1">
+                            {qualityValidation[selectedOrder.id].validationMessages.map((message, index) => (
+                              <p key={index} className="text-xs text-blue-800">
+                                {message}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </TabsContent>
+
               {/* Tasks Tab */}
               <TabsContent value="tasks" className="flex-1 overflow-y-auto mt-4">
                 {loadingTasks ? (
@@ -1542,7 +1802,7 @@ export default function WorkOrdersPage() {
                               )}
                             </div>
                           </div>
-                          <Badge 
+                          <Badge
                             variant={task.status === 'Completed' ? 'default' : task.status === 'InProgress' ? 'secondary' : 'outline'}
                             className="ml-2 flex-shrink-0"
                           >
@@ -1596,7 +1856,7 @@ export default function WorkOrdersPage() {
                   </div>
                 )}
               </TabsContent>
-              
+
               {/* Tools Tab */}
               <TabsContent value="tools" className="flex-1 overflow-y-auto mt-4">
                 {loadingTools ? (
@@ -1901,7 +2161,7 @@ export default function WorkOrdersPage() {
                   </div>
                 )}
               </TabsContent>
-              
+
               {/* Parts/Consumables Tab */}
               <TabsContent value="parts" className="flex-1 overflow-y-auto mt-4">
                 {loadingParts ? (
@@ -2014,7 +2274,7 @@ export default function WorkOrdersPage() {
                       Technician Schedule
                     </h3>
                   </div>
-                  
+
                   {staffSchedules.length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">
                       <CalendarClock className="h-12 w-12 mx-auto mb-2 opacity-20" />
@@ -2050,7 +2310,7 @@ export default function WorkOrdersPage() {
                               <TableCell>{schedule.workLocation || 'N/A'}</TableCell>
                               <TableCell>{schedule.assignedVehicleName || '-'}</TableCell>
                               <TableCell>
-                                <Badge 
+                                <Badge
                                   variant={schedule.status === 'Completed' ? 'default' : schedule.status === 'InProgress' ? 'secondary' : 'outline'}
                                 >
                                   {schedule.status}
@@ -2074,7 +2334,7 @@ export default function WorkOrdersPage() {
                       Expenses
                     </h3>
                   </div>
-                  
+
                   {expenses.length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">
                       <DollarSign className="h-12 w-12 mx-auto mb-2 opacity-20" />
@@ -2147,7 +2407,7 @@ export default function WorkOrdersPage() {
                           </p>
                         </div>
                       </div>
-                      
+
                       {selectedOrder.actualStartDate && (
                         <div className="relative">
                           <div className="absolute -left-[1.6rem] w-4 h-4 rounded-full bg-muted border-4 border-background" />
@@ -2167,7 +2427,7 @@ export default function WorkOrdersPage() {
                           </div>
                         </div>
                       )}
-                      
+
                       {selectedOrder.status === 'Approved' || selectedOrder.status === 'InProgress' || selectedOrder.status === 'Completed' ? (
                         <div className="relative">
                           <div className="absolute -left-[1.6rem] w-4 h-4 rounded-full bg-muted border-4 border-background" />
@@ -2182,7 +2442,7 @@ export default function WorkOrdersPage() {
                           </div>
                         </div>
                       ) : null}
-                      
+
                       <div className="relative">
                         <div className="absolute -left-[1.6rem] w-4 h-4 rounded-full bg-muted border-4 border-background" />
                         <div className="space-y-1">
@@ -2198,7 +2458,7 @@ export default function WorkOrdersPage() {
                           </p>
                         </div>
                       </div>
-                      
+
                       {selectedOrder.jobCardNumber && (
                         <div className="relative">
                           <div className="absolute -left-[1.6rem] w-4 h-4 rounded-full bg-muted border-4 border-background" />
@@ -2246,7 +2506,7 @@ export default function WorkOrdersPage() {
                 <TabsTrigger value="schedule">Schedule</TabsTrigger>
                 <TabsTrigger value="expenses">Expenses</TabsTrigger>
               </TabsList>
-              
+
               {/* Details Tab */}
               <TabsContent value="details" className="flex-1 overflow-y-auto mt-4">
                 <div className="grid gap-4 py-4">
@@ -2273,12 +2533,12 @@ export default function WorkOrdersPage() {
                   <div className="grid grid-cols-4 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="edit-workOrderType">Work Order Type</Label>
-                      <Select 
-                        value={selectedOrder.workOrderTypeId || 'none'} 
-                        onValueChange={(value) => setSelectedOrder({ 
-                          ...selectedOrder, 
-                          workOrderTypeId: value === 'none' ? undefined : value 
-                        })} 
+                      <Select
+                        value={selectedOrder.workOrderTypeId || 'none'}
+                        onValueChange={(value) => setSelectedOrder({
+                          ...selectedOrder,
+                          workOrderTypeId: value === 'none' ? undefined : value
+                        })}
                         disabled={loadingData}
                       >
                         <SelectTrigger>
@@ -2296,12 +2556,12 @@ export default function WorkOrdersPage() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="edit-maintenanceType">Maintenance Type</Label>
-                      <Select 
-                        value={selectedOrder.maintenanceTypeId || 'none'} 
-                        onValueChange={(value) => setSelectedOrder({ 
-                          ...selectedOrder, 
-                          maintenanceTypeId: value === 'none' ? undefined : value 
-                        })} 
+                      <Select
+                        value={selectedOrder.maintenanceTypeId || 'none'}
+                        onValueChange={(value) => setSelectedOrder({
+                          ...selectedOrder,
+                          maintenanceTypeId: value === 'none' ? undefined : value
+                        })}
                         disabled={loadingData}
                       >
                         <SelectTrigger>
@@ -2319,12 +2579,12 @@ export default function WorkOrdersPage() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="edit-priority">Priority Level</Label>
-                      <Select 
-                        value={selectedOrder.priorityLevelId || 'none'} 
-                        onValueChange={(value) => setSelectedOrder({ 
-                          ...selectedOrder, 
-                          priorityLevelId: value === 'none' ? undefined : value 
-                        })} 
+                      <Select
+                        value={selectedOrder.priorityLevelId || 'none'}
+                        onValueChange={(value) => setSelectedOrder({
+                          ...selectedOrder,
+                          priorityLevelId: value === 'none' ? undefined : value
+                        })}
                         disabled={loadingData}
                       >
                         <SelectTrigger>
@@ -2342,11 +2602,11 @@ export default function WorkOrdersPage() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="edit-maintenanceLocation">Location</Label>
-                      <Select 
-                        value={selectedOrder.maintenanceLocation || 'Internal'} 
-                        onValueChange={(value) => setSelectedOrder({ 
-                          ...selectedOrder, 
-                          maintenanceLocation: value 
+                      <Select
+                        value={selectedOrder.maintenanceLocation || 'Internal'}
+                        onValueChange={(value) => setSelectedOrder({
+                          ...selectedOrder,
+                          maintenanceLocation: value
                         })}
                       >
                         <SelectTrigger>
@@ -2398,14 +2658,14 @@ export default function WorkOrdersPage() {
                   </div>
                 </div>
               </TabsContent>
-              
+
               {/* Tools Tab */}
               <TabsContent value="tools" className="flex-1 overflow-y-auto mt-4">
                 <div className="space-y-4 py-4">
                   <p className="text-sm text-muted-foreground mb-2">
                     Select tools to allocate to this work order. Only available tools are shown.
                   </p>
-                  
+
                   {/* Warehouse Selection */}
                   <div className="grid grid-cols-12 gap-4 mb-4">
                     <div className="col-span-4 space-y-2">
@@ -2434,13 +2694,13 @@ export default function WorkOrdersPage() {
                     </div>
                     <div className="col-span-8">
                       <p className="text-sm text-muted-foreground mt-6">
-                        {selectedWarehouse 
+                        {selectedWarehouse
                           ? `Showing tools available in ${warehouses.find(w => w.id === selectedWarehouse)?.name}.`
                           : 'Please select a warehouse to view available tools.'}
                       </p>
                     </div>
                   </div>
-                  
+
                   {/* Search Input */}
                   <div className="relative">
                     <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -2451,7 +2711,7 @@ export default function WorkOrdersPage() {
                       className="pl-9"
                     />
                   </div>
-                  
+
                   {selectedWarehouse ? (
                   <div className="border rounded-md p-3 max-h-96 overflow-y-auto">
                     {warehouseTools
@@ -2514,14 +2774,14 @@ export default function WorkOrdersPage() {
                   )}
                 </div>
               </TabsContent>
-              
+
               {/* Consumables Tab */}
               <TabsContent value="consumables" className="flex-1 overflow-y-auto mt-4">
                 <div className="space-y-4 py-4">
                   <p className="text-sm text-muted-foreground mb-2">
                     Manage consumables for this work order. Only items with available stock are displayed.
                   </p>
-                  
+
                   <div className="space-y-4">
                     <div className="grid grid-cols-12 gap-4">
                       <div className="col-span-4 space-y-2">
@@ -2550,13 +2810,13 @@ export default function WorkOrdersPage() {
                       </div>
                       <div className="col-span-8">
                         <p className="text-sm text-muted-foreground mt-6">
-                          {selectedWarehouse 
+                          {selectedWarehouse
                             ? `Showing consumables available in ${warehouses.find(w => w.id === selectedWarehouse)?.name}.`
                             : 'Please select a location to view available consumables.'}
                         </p>
                       </div>
                     </div>
-                    
+
                     {/* Search input - moved below warehouse dropdown */}
                     <div className="relative">
                       <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -2567,7 +2827,7 @@ export default function WorkOrdersPage() {
                         className="pl-9"
                       />
                     </div>
-                    
+
                     {selectedWarehouse && (
                       <div className="grid grid-cols-12 gap-4">
                         <div className="col-span-4 space-y-2">
@@ -2667,11 +2927,11 @@ export default function WorkOrdersPage() {
                             });
                             return;
                           }
-                          
+
                           if (editingPart) {
                             // Update existing part in local state
-                            setWorkOrderParts(prev => prev.map(part => 
-                              part.id === editingPart.id 
+                            setWorkOrderParts(prev => prev.map(part =>
+                              part.id === editingPart.id
                                 ? {
                                     ...part,
                                     inventoryItemId: selectedInventoryItem.id,
@@ -2710,7 +2970,7 @@ export default function WorkOrdersPage() {
                             } as any;
                             setWorkOrderParts(prev => [...prev, newPart]);
                           }
-                          
+
                           // Reset form
                           setSelectedInventoryItem(null);
                           setPartQuantity(1);
@@ -2735,7 +2995,7 @@ export default function WorkOrdersPage() {
                     </div>
                   </div>
                   )}
-                  
+
                   {/* Parts Grid */}
                   <div className="border rounded-md">
                     <Table>
@@ -2818,7 +3078,7 @@ export default function WorkOrdersPage() {
                 </div>
               </div>
               </TabsContent>
-              
+
               {/* Schedule Tab */}
               <TabsContent value="schedule" className="flex-1 overflow-y-auto mt-4">
                 <div className="space-y-4">
@@ -2876,7 +3136,7 @@ export default function WorkOrdersPage() {
                       </Button>
                     </div>
                   </div>
-                  
+
                   {loadingSchedules ? (
                     <div className="text-center py-8">
                       <Clock className="h-8 w-8 animate-spin mx-auto text-muted-foreground mb-2" />
@@ -2917,7 +3177,7 @@ export default function WorkOrdersPage() {
                               </TableCell>
                               <TableCell>{schedule.workLocation || 'N/A'}</TableCell>
                               <TableCell>
-                                <Badge 
+                                <Badge
                                   variant={schedule.status === 'Completed' ? 'default' : schedule.status === 'InProgress' ? 'secondary' : 'outline'}
                                 >
                                   {schedule.status}
@@ -2977,7 +3237,7 @@ export default function WorkOrdersPage() {
                   )}
                 </div>
               </TabsContent>
-              
+
               {/* Expenses Tab */}
               <TabsContent value="expenses" className="flex-1 overflow-y-auto mt-4">
                 <div className="space-y-4">
@@ -3040,7 +3300,7 @@ export default function WorkOrdersPage() {
                       </Button>
                     </div>
                   </div>
-                  
+
                   {totalExpenses > 0 && (
                     <div className="bg-muted p-4 rounded-md">
                       <div className="flex justify-between items-center">
@@ -3049,7 +3309,7 @@ export default function WorkOrdersPage() {
                       </div>
                     </div>
                   )}
-                  
+
                   {loadingExpenses ? (
                     <div className="text-center py-8">
                       <Clock className="h-8 w-8 animate-spin mx-auto text-muted-foreground mb-2" />
@@ -3086,7 +3346,7 @@ export default function WorkOrdersPage() {
                               <TableCell>{expense.description}</TableCell>
                               <TableCell className="font-semibold">${expense.amount.toFixed(2)}</TableCell>
                               <TableCell>
-                                <Badge 
+                                <Badge
                                   variant={expense.status === 'Approved' ? 'default' : expense.status === 'Pending' ? 'secondary' : 'outline'}
                                 >
                                   {expense.status}
@@ -3213,10 +3473,10 @@ export default function WorkOrdersPage() {
             </Button>
             <Button onClick={async () => {
               await handleEditWorkOrder();
-              
+
               const successMessages = [];
               const errors = [];
-              
+
               // Allocate selected tools in bulk (check for existing allocations first)
               if (selectedTools.length > 0 && selectedOrder?.id) {
                 // Get existing allocated tools
@@ -3227,10 +3487,10 @@ export default function WorkOrdersPage() {
                 } catch (error) {
                   console.error('Error fetching existing tools:', error);
                 }
-                
+
                 // Only allocate tools that aren't already allocated
                 const toolsToAllocate = selectedTools.filter(toolId => !existingTools.includes(toolId));
-                
+
                 if (toolsToAllocate.length > 0) {
                   try {
                     if (!selectedWarehouse) {
@@ -3243,7 +3503,7 @@ export default function WorkOrdersPage() {
                         isRequired: true,
                         notes: 'Allocated during work order setup'
                       }));
-                      
+
                       const allocated = await workOrderToolService.allocateToolsBulk(selectedOrder.id, toolDtos);
                       successMessages.push(`${allocated.length} tool(s) allocated`);
                     }
@@ -3252,14 +3512,14 @@ export default function WorkOrdersPage() {
                     errors.push('Failed to allocate tools');
                   }
                 }
-                
+
                 if (selectedTools.length > toolsToAllocate.length) {
                   const skippedCount = selectedTools.length - toolsToAllocate.length;
                   successMessages.push(`${skippedCount} tool(s) already allocated`);
                 }
                 setSelectedTools([]);
               }
-              
+
               // Delete consumables marked for deletion using bulk endpoint
               if (pendingPartDeletes.length > 0) {
                 try {
@@ -3271,12 +3531,12 @@ export default function WorkOrdersPage() {
                   errors.push('Failed to delete consumables');
                 }
               }
-              
+
               // Save consumables to backend using bulk endpoint
               if (workOrderParts.length > 0 && selectedOrder?.id) {
                 // Filter only new parts (with temp IDs)
                 const newParts = workOrderParts.filter(part => part.id.startsWith('temp-'));
-                
+
                 if (newParts.length > 0) {
                   try {
                     const partsToSave = newParts.map((part: any) => ({
@@ -3287,7 +3547,7 @@ export default function WorkOrdersPage() {
                       warehouseId: part._warehouseId || part.warehouseId,
                       notes: part.notes
                     }));
-                    
+
                     await workOrderPartService.addPartsBulk(selectedOrder.id, partsToSave);
                     successMessages.push(`${newParts.length} consumable(s) saved`);
                   } catch (error) {
@@ -3296,7 +3556,7 @@ export default function WorkOrdersPage() {
                   }
                 }
               }
-              
+
               // Delete schedules marked for deletion
               console.log('🗓️ Pending schedule deletes:', pendingScheduleDeletes);
               if (pendingScheduleDeletes.length > 0) {
@@ -3309,18 +3569,18 @@ export default function WorkOrdersPage() {
                   errors.push('Failed to delete schedules');
                 }
               }
-              
+
               // Save new and updated schedules to backend
               console.log('🗓️ All schedules in state:', staffSchedules);
               if (staffSchedules.length > 0 && selectedOrder?.id) {
                 // New schedules (with temp IDs)
                 const newSchedules = staffSchedules.filter(schedule => schedule.id.startsWith('temp-'));
                 console.log('🗓️ New schedules to save (temp IDs):', newSchedules);
-                
+
                 // Existing schedules that were loaded from DB (need to update)
                 const existingSchedules = staffSchedules.filter(schedule => !schedule.id.startsWith('temp-'));
                 console.log('🗓️ Existing schedules to update:', existingSchedules);
-                
+
                 // Save new schedules
                 if (newSchedules.length > 0) {
                   try {
@@ -3338,7 +3598,7 @@ export default function WorkOrdersPage() {
                       notes: schedule.notes
                     }));
                     console.log('🗓️ Saving new schedules to backend:', schedulesToSave);
-                    
+
                     await Promise.all(schedulesToSave.map(s => maintenanceApiService.createStaffSchedule(s)));
                     successMessages.push(`${newSchedules.length} schedule(s) saved`);
                   } catch (error) {
@@ -3346,7 +3606,7 @@ export default function WorkOrdersPage() {
                     errors.push('Failed to save schedules');
                   }
                 }
-                
+
                 // Update existing schedules
                 if (existingSchedules.length > 0) {
                   try {
@@ -3365,7 +3625,7 @@ export default function WorkOrdersPage() {
                       notes: schedule.notes
                     }));
                     console.log('🗓️ Updating existing schedules in backend:', schedulesToUpdate);
-                    
+
                     await Promise.all(schedulesToUpdate.map(s => maintenanceApiService.updateStaffSchedule(s.id, s)));
                     successMessages.push(`${existingSchedules.length} schedule(s) updated`);
                   } catch (error) {
@@ -3376,7 +3636,7 @@ export default function WorkOrdersPage() {
               } else {
                 console.log('🗓️ No schedules to save. staffSchedules.length:', staffSchedules.length, 'selectedOrder?.id:', selectedOrder?.id);
               }
-              
+
               // Delete expenses marked for deletion
               console.log('💰 Pending expense deletes:', pendingExpenseDeletes);
               if (pendingExpenseDeletes.length > 0) {
@@ -3389,18 +3649,18 @@ export default function WorkOrdersPage() {
                   errors.push('Failed to delete expenses');
                 }
               }
-              
+
               // Save new and updated expenses to backend
               console.log('💰 All expenses in state:', expenses);
               if (expenses.length > 0 && selectedOrder?.id) {
                 // New expenses (with temp IDs)
                 const newExpenses = expenses.filter(expense => expense.id.startsWith('temp-'));
                 console.log('💰 New expenses to save (temp IDs):', newExpenses);
-                
+
                 // Existing expenses that were loaded from DB (need to update)
                 const existingExpenses = expenses.filter(expense => !expense.id.startsWith('temp-'));
                 console.log('💰 Existing expenses to update:', existingExpenses);
-                
+
                 // Save new expenses
                 if (newExpenses.length > 0) {
                   try {
@@ -3420,7 +3680,7 @@ export default function WorkOrdersPage() {
                       location: expense.notes // Backend uses location field, not notes
                     }));
                     console.log('💰 Saving new expenses to backend:', expensesToSave);
-                    
+
                     await Promise.all(expensesToSave.map(e => maintenanceApiService.createExpense(e)));
                     successMessages.push(`${newExpenses.length} expense(s) saved`);
                   } catch (error) {
@@ -3428,7 +3688,7 @@ export default function WorkOrdersPage() {
                     errors.push('Failed to save expenses');
                   }
                 }
-                
+
                 // Update existing expenses
                 if (existingExpenses.length > 0) {
                   try {
@@ -3449,7 +3709,7 @@ export default function WorkOrdersPage() {
                       location: expense.notes // Backend uses location field, not notes
                     }));
                     console.log('💰 Updating existing expenses in backend:', expensesToUpdate);
-                    
+
                     await Promise.all(expensesToUpdate.map(e => maintenanceApiService.updateExpense(e.id, e)));
                     successMessages.push(`${existingExpenses.length} expense(s) updated`);
                   } catch (error) {
@@ -3460,15 +3720,15 @@ export default function WorkOrdersPage() {
               } else {
                 console.log('💰 No expenses to save. expenses.length:', expenses.length, 'selectedOrder?.id:', selectedOrder?.id);
               }
-              
+
               // Clear local states
               setWorkOrderParts([]);
               setStaffSchedules([]);
               setExpenses([]);
-              
+
               toast({
                 title: errors.length > 0 ? 'Partial Success' : 'Success',
-                description: successMessages.length > 0 
+                description: successMessages.length > 0
                   ? `Work order updated. ${successMessages.join(', ')}${errors.length > 0 ? '. ' + errors.join(', ') : ''}`
                   : 'Work order updated successfully',
                 className: errors.length > 0 ? 'bg-yellow-50 border-yellow-200' : 'bg-green-50 border-green-200',
@@ -3588,7 +3848,7 @@ export default function WorkOrdersPage() {
                   try {
                     // Get technician ID from staff schedules (ApplicationUser.Id)
                     const technicianId = staffSchedules[0]?.technicianId;
-                    
+
                     if (!technicianId) {
                       toast({
                         title: 'Error',
@@ -3597,7 +3857,7 @@ export default function WorkOrdersPage() {
                       });
                       return;
                     }
-                    
+
                     await workOrderToolService.checkoutTool({
                       workOrderId: selectedOrder.id,
                       toolId: selectedWorkOrderTool.toolId,
@@ -3750,7 +4010,7 @@ export default function WorkOrdersPage() {
                 <p className="text-lg font-semibold">${partToConsume?.unitCost.toFixed(2) || '0.00'}</p>
               </div>
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="quantityToConsume">Quantity to Consume <span className="text-destructive">*</span></Label>
               <Input
@@ -3766,7 +4026,7 @@ export default function WorkOrdersPage() {
                 Max: {(partToConsume?.quantityRequired || 0) - (partToConsume?.quantityUsed || 0)}
               </p>
             </div>
-            
+
             <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
               <p className="text-sm text-blue-900">
                 <strong>Note:</strong> Consuming this part will reduce the inventory stock and cannot be undone.
@@ -3786,7 +4046,7 @@ export default function WorkOrdersPage() {
                 if (partToConsume && quantityToConsume > 0) {
                   try {
                     const newQuantityUsed = partToConsume.quantityUsed + quantityToConsume;
-                    
+
                     // Update via API
                     await workOrderPartService.updatePart(partToConsume.id, {
                       quantityRequired: partToConsume.quantityRequired,
@@ -3797,19 +4057,19 @@ export default function WorkOrdersPage() {
                       status: newQuantityUsed >= partToConsume.quantityRequired ? 'Consumed' : 'Partial',
                       notes: partToConsume.notes
                     });
-                    
+
                     toast({
                       title: 'Success',
                       description: `Consumed ${quantityToConsume} units of ${partToConsume.itemName}`,
                       className: 'bg-green-50 border-green-200',
                     });
-                    
+
                     // Reload parts if viewing a work order
                     if (selectedOrder?.id) {
                       const updatedParts = await workOrderPartService.getWorkOrderParts(selectedOrder.id);
                       setWorkOrderParts(updatedParts);
                     }
-                    
+
                     setIsConsumePartDialogOpen(false);
                     setPartToConsume(null);
                     setQuantityToConsume(0);
@@ -4001,7 +4261,7 @@ export default function WorkOrdersPage() {
                   });
                   return;
                 }
-                
+
                 const technician = technicians.find(t => t.id === scheduleForm.technicianId);
                 const vehicle = availableVehicles.find(v => v.id === scheduleForm.assignedVehicleId);
                 const newSchedule: MaintenanceStaffSchedule = {
@@ -4013,9 +4273,9 @@ export default function WorkOrdersPage() {
                   status: 'Scheduled',
                   workOrderId: selectedOrder?.id,
                 };
-                
+
                 console.log('🗓️ Adding/updating schedule to state:', newSchedule);
-                
+
                 if (editingSchedule) {
                   // Update existing
                   setStaffSchedules(prev => {
@@ -4031,7 +4291,7 @@ export default function WorkOrdersPage() {
                     return updated;
                   });
                 }
-                
+
                 toast({
                   title: 'Success',
                   description: `Schedule ${editingSchedule ? 'updated' : 'added'} (will be saved on "Save Changes")`,
@@ -4231,7 +4491,7 @@ export default function WorkOrdersPage() {
                   });
                   return;
                 }
-                
+
                 // Validate file if present
                 if (expenseReceiptFile) {
                   const validation = fileUploadService.validateFile(expenseReceiptFile, 10 * 1024 * 1024);
@@ -4244,7 +4504,7 @@ export default function WorkOrdersPage() {
                     return;
                   }
                 }
-                
+
                 try {
                   // Use local state pattern - don't save to database yet
                   if (editingExpense?.id) {
@@ -4252,7 +4512,7 @@ export default function WorkOrdersPage() {
                     const updatedExpense = { ...editingExpense, ...expenseForm, workOrderId: selectedOrder?.id || '' };
                     console.log('💰 Updating expense in state:', updatedExpense);
                     setExpenses((prev) => {
-                      const updated = prev.map((expense) => 
+                      const updated = prev.map((expense) =>
                         expense.id === editingExpense.id ? updatedExpense : expense
                       );
                       console.log('💰 Updated expenses state:', updated);
@@ -4278,10 +4538,10 @@ export default function WorkOrdersPage() {
                       return updated;
                     });
                   }
-                  
+
                   // Store file temporarily (will upload when saving work order)
                   // Note: File upload will happen in bulk save
-                  
+
                   toast({
                     title: 'Success',
                     description: `Expense ${editingExpense ? 'updated' : 'created'} (will be saved on 'Save Changes')`,
@@ -4318,7 +4578,7 @@ export default function WorkOrdersPage() {
               Are you sure you want to start this work order?
             </DialogDescription>
           </DialogHeader>
-          
+
           {workOrderToStart && (
             <div className="space-y-4 py-4">
               <div className="space-y-2">
@@ -4328,7 +4588,7 @@ export default function WorkOrdersPage() {
                 <p><strong>Assigned Technicians:</strong> {getTechnicianNamesFromSchedules(workOrderToStart.id)}</p>
                 <p><strong>Priority:</strong> {workOrderToStart.priority}</p>
               </div>
-              
+
               <div className="bg-blue-50 border border-blue-200 rounded-md p-3 space-y-1">
                 <p className="text-sm font-medium text-blue-900">This will:</p>
                 <ul className="text-sm text-blue-800 space-y-1 ml-4 list-disc">
@@ -4340,10 +4600,10 @@ export default function WorkOrdersPage() {
               </div>
             </div>
           )}
-          
+
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => {
                 setIsStartWorkOrderDialogOpen(false);
                 setWorkOrderToStart(null);
@@ -4351,7 +4611,7 @@ export default function WorkOrdersPage() {
             >
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={() => {
                 if (workOrderToStart) {
                   updateWorkOrderStatus(workOrderToStart.id, 'InProgress');
@@ -4378,7 +4638,7 @@ export default function WorkOrdersPage() {
               Are you sure you want to submit this work order for QC inspection?
             </DialogDescription>
           </DialogHeader>
-          
+
           {workOrderToSubmitQC && (
             <div className="space-y-4 py-4">
               <div className="space-y-2">
@@ -4388,7 +4648,7 @@ export default function WorkOrdersPage() {
                 <p><strong>Assigned Technicians:</strong> {getTechnicianNamesFromSchedules(workOrderToSubmitQC.id)}</p>
                 <p><strong>Priority:</strong> {workOrderToSubmitQC.priority}</p>
               </div>
-              
+
               <div className="bg-blue-50 border border-blue-200 rounded-md p-3 space-y-1">
                 <p className="text-sm font-medium text-blue-900">This will:</p>
                 <ul className="text-sm text-blue-800 space-y-1 ml-4 list-disc">
@@ -4398,7 +4658,7 @@ export default function WorkOrdersPage() {
                   <li>Require QC approval before the work order can be completed</li>
                 </ul>
               </div>
-              
+
               <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
                 <p className="text-sm font-medium text-yellow-900">Please ensure:</p>
                 <ul className="text-sm text-yellow-800 space-y-1 ml-4 list-disc">
@@ -4409,10 +4669,10 @@ export default function WorkOrdersPage() {
               </div>
             </div>
           )}
-          
+
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => {
                 setIsSubmitQCDialogOpen(false);
                 setWorkOrderToSubmitQC(null);
@@ -4420,7 +4680,7 @@ export default function WorkOrdersPage() {
             >
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={() => {
                 if (workOrderToSubmitQC) {
                   handleSubmitForQCInspection(workOrderToSubmitQC.id);

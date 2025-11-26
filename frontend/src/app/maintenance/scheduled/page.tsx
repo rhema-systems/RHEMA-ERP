@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { maintenanceDataService, Employee, Asset, MaintenanceType } from '@/services/maintenanceDataService';
+import { maintenanceDataService, Employee, Asset, MaintenanceType, PriorityLevel } from '@/services/maintenanceDataService';
 import maintenanceScheduleService, { MaintenanceSchedule, CreateMaintenanceScheduleDto, MaintenanceScheduleHistory } from '@/services/maintenanceScheduleService';
 import { 
   Calendar as CalendarIcon,
@@ -90,6 +90,7 @@ export default function ScheduledMaintenancePage() {
   const [technicians, setTechnicians] = useState<Employee[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [maintenanceTypes, setMaintenanceTypes] = useState<MaintenanceType[]>([]);
+  const [priorityLevels, setPriorityLevels] = useState<PriorityLevel[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   
   // Form state for creating new scheduled maintenance
@@ -124,13 +125,14 @@ export default function ScheduledMaintenancePage() {
       setLoading(true);
       try {
         console.log('=== LOADING MAINTENANCE DATA ===');
-        const [techniciansList, assetsList, maintenanceTypesList, scheduledDataResponse] = await Promise.all([
+        const [techniciansList, assetsList, maintenanceTypesList, priorityLevelsList, scheduledDataResponse] = await Promise.all([
           maintenanceDataService.getTechnicians(),
           maintenanceDataService.getAssets(),
           maintenanceDataService.getMaintenanceTypes(),
+          maintenanceDataService.getPriorityLevels(),
           maintenanceScheduleService.getSchedules()
         ]);
-        
+
         console.log('=== TECHNICIANS DEBUG ===');
         console.log('Technicians loaded:', techniciansList.length, techniciansList);
         console.log('Technicians type:', typeof techniciansList, Array.isArray(techniciansList));
@@ -138,6 +140,7 @@ export default function ScheduledMaintenancePage() {
         console.log('=== OTHER DATA DEBUG ===');
         console.log('Assets loaded:', assetsList.length, assetsList);
         console.log('Maintenance types loaded:', maintenanceTypesList.length, maintenanceTypesList);
+        console.log('Priority levels loaded:', priorityLevelsList.length, priorityLevelsList);
         
         if (techniciansList.length === 0) {
           console.warn('⚠️ No technicians loaded - this may indicate an API endpoint issue');
@@ -152,6 +155,7 @@ export default function ScheduledMaintenancePage() {
         setTechnicians(techniciansList);
         setAssets(assetsList);
         setMaintenanceTypes(maintenanceTypesList);
+        setPriorityLevels(priorityLevelsList);
         
         console.log('Raw scheduled data response:', scheduledDataResponse);
         
@@ -256,9 +260,12 @@ export default function ScheduledMaintenancePage() {
       'Critical': 'bg-red-100 text-red-800',
     } as any;
 
+    const display = priority || 'Not Set';
+    const key = priority && colors[priority] ? priority : undefined;
+
     return (
-      <Badge className={colors[priority] || 'bg-gray-100 text-gray-800'}>
-        {priority}
+      <Badge className={key ? colors[key] : 'bg-gray-100 text-gray-800'}>
+        {display}
       </Badge>
     );
   };
@@ -488,25 +495,126 @@ export default function ScheduledMaintenancePage() {
     }
   };
 
-  // Handle asset selection and auto-populate type
+  // Handle asset selection and auto-populate type & default schedule based on category config
   const handleAssetSelection = async (value: string) => {
     console.log('=== Asset selected:', value);
-    setFormData({...formData, assetId: value});
+    setFormData({ ...formData, assetId: value });
     
     try {
-      const assetType = await maintenanceDataService.getMaintenanceTypeForAsset(value);
+      const [assetType, categorySchedule] = await Promise.all([
+        maintenanceDataService.getMaintenanceTypeForAsset(value),
+        maintenanceDataService.getAssetCategorySchedule(value)
+      ]);
+
       console.log('Got asset type from service:', assetType);
-      
-      if (assetType) {
-        console.log('Setting asset type:', assetType);
-        setFormData(prev => ({...prev, assetId: value, type: assetType}));
-      } else {
-        console.log('No asset type found, just setting asset');
-        setFormData(prev => ({...prev, assetId: value}));
-      }
+      console.log('Got category schedule config:', categorySchedule);
+
+      setFormData(prev => {
+        let updated = { ...prev, assetId: value };
+
+        if (assetType) {
+          console.log('Setting asset type:', assetType);
+          updated = { ...updated, type: assetType };
+        }
+
+        if (categorySchedule) {
+          const {
+            maintenanceScheduleType,
+            maintenanceType,
+            maintenanceFrequency,
+            maintenanceValue,
+            maintenanceUnit,
+            secondaryMaintenanceType,
+            secondaryMaintenanceFrequency,
+            secondaryMaintenanceValue,
+            secondaryMaintenanceUnit,
+          } = categorySchedule;
+
+          // Default priority if not already set
+          if (!updated.priority) {
+            updated.priority = 'Medium';
+          }
+
+          // Map category-level schedule into formData used by the schedule create dialog
+          if (!maintenanceScheduleType || maintenanceScheduleType === 'single') {
+            // Single criteria mapping
+            if (maintenanceType === 'Time') {
+              // Map frequency label to the UI frequency options
+              let freq = maintenanceFrequency || 'Monthly';
+              if (freq === 'Semi-Annual') {
+                freq = 'Bi-Annual';
+              }
+
+              updated.primaryTriggerType = 'Time';
+              updated.frequency = freq;
+              updated.mileageTrigger = '';
+              updated.operatingHoursTrigger = '';
+              updated.cycleTrigger = '';
+              updated.conditionCriteria = '';
+            } else {
+              // Distance / Usage / Cycles -> usage-based trigger
+              updated.primaryTriggerType = 'Usage';
+              updated.frequency = '';
+
+              if (maintenanceType === 'Distance') {
+                updated.mileageTrigger = maintenanceValue?.toString() || '';
+                updated.operatingHoursTrigger = '';
+                updated.cycleTrigger = '';
+              } else if (maintenanceType === 'Usage') {
+                updated.operatingHoursTrigger = maintenanceValue?.toString() || '';
+                updated.mileageTrigger = '';
+                updated.cycleTrigger = '';
+              } else if (maintenanceType === 'Cycles') {
+                updated.cycleTrigger = maintenanceValue?.toString() || '';
+                updated.mileageTrigger = '';
+                updated.operatingHoursTrigger = '';
+              }
+
+              updated.conditionCriteria = '';
+            }
+          } else if (maintenanceScheduleType === 'multi') {
+            // Multi-criteria: approximate as a Combined trigger in the UI
+            updated.primaryTriggerType = 'Combined';
+            updated.triggerLogic = 'OR';
+
+            // Try to map one time-based and one usage-based side if available
+            const isPrimaryTime = maintenanceType === 'Time';
+            const isSecondaryTime = secondaryMaintenanceType === 'Time';
+
+            // Time side -> frequency
+            const timeFreq = isPrimaryTime ? maintenanceFrequency : isSecondaryTime ? secondaryMaintenanceFrequency : undefined;
+            if (timeFreq) {
+              let freq = timeFreq;
+              if (freq === 'Semi-Annual') {
+                freq = 'Bi-Annual';
+              }
+              updated.frequency = freq;
+            }
+
+            // Usage side -> usage thresholds
+            const usageType = !isPrimaryTime ? maintenanceType : !isSecondaryTime ? secondaryMaintenanceType : undefined;
+            const usageValue = !isPrimaryTime ? maintenanceValue : !isSecondaryTime ? secondaryMaintenanceValue : undefined;
+
+            if (usageType && usageValue) {
+              if (usageType === 'Distance') {
+                updated.mileageTrigger = usageValue.toString();
+              } else if (usageType === 'Usage') {
+                updated.operatingHoursTrigger = usageValue.toString();
+              } else if (usageType === 'Cycles') {
+                updated.cycleTrigger = usageValue.toString();
+              }
+            }
+
+            // No condition JSON by default from category-level config
+            updated.conditionCriteria = '';
+          }
+        }
+
+        return updated;
+      });
     } catch (error) {
-      console.error('Error getting maintenance type for asset:', error);
-      setFormData(prev => ({...prev, assetId: value}));
+      console.error('Error getting maintenance metadata for asset:', error);
+      setFormData(prev => ({ ...prev, assetId: value }));
     }
   };
 
@@ -903,15 +1011,19 @@ export default function ScheduledMaintenancePage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="priority">Priority</Label>
-                  <Select value={formData.priority} onValueChange={(value) => setFormData({...formData, priority: value})}>
+                  <Select
+                    value={formData.priority}
+                    onValueChange={(value) => setFormData({ ...formData, priority: value })}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select priority" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Low">Low</SelectItem>
-                      <SelectItem value="Medium">Medium</SelectItem>
-                      <SelectItem value="High">High</SelectItem>
-                      <SelectItem value="Critical">Critical</SelectItem>
+                      {priorityLevels.map((priority) => (
+                        <SelectItem key={priority.id} value={priority.name}>
+                          {priority.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1210,15 +1322,19 @@ export default function ScheduledMaintenancePage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="edit-priority">Priority</Label>
-                  <Select value={formData.priority} onValueChange={(value) => setFormData({...formData, priority: value})}>
+                  <Select
+                    value={formData.priority}
+                    onValueChange={(value) => setFormData({ ...formData, priority: value })}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select priority" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Low">Low</SelectItem>
-                      <SelectItem value="Medium">Medium</SelectItem>
-                      <SelectItem value="High">High</SelectItem>
-                      <SelectItem value="Critical">Critical</SelectItem>
+                      {priorityLevels.map((priority) => (
+                        <SelectItem key={priority.id} value={priority.name}>
+                          {priority.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1561,10 +1677,11 @@ export default function ScheduledMaintenancePage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Priorities</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="critical">Critical</SelectItem>
+                {priorityLevels.map((priority) => (
+                  <SelectItem key={priority.id} value={priority.name.toLowerCase()}>
+                    {priority.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
 

@@ -55,26 +55,39 @@ public class NotificationDispatcherBackgroundService : BackgroundService
             "Notification Dispatcher Background Service is starting with MaxRetries={MaxRetries}, DispatchInterval={DispatchIntervalSeconds}s",
             _maxRetryAttempts, _dispatchInterval.TotalSeconds);
 
-        // Wait a bit before starting the first dispatch to allow app to fully start
-        await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
-
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
-            {
-                await DispatchPendingNotificationsAsync();
-                await ArchiveExpiredNotificationsAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error occurred during notification dispatch");
-            }
+            // Wait a bit before starting the first dispatch to allow app to fully start
+            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
 
-            // Wait for the next dispatch cycle
-            await Task.Delay(_dispatchInterval, stoppingToken);
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await DispatchPendingNotificationsAsync();
+                    await ArchiveExpiredNotificationsAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error occurred during notification dispatch");
+                }
+
+                // Wait for the next dispatch cycle
+                await Task.Delay(_dispatchInterval, stoppingToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when the service is stopping
+            _logger.LogInformation("Notification Dispatcher Background Service is stopping due to cancellation");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error in Notification Dispatcher Background Service");
+            throw;
         }
 
-        _logger.LogInformation("Notification Dispatcher Background Service is stopping");
+        _logger.LogInformation("Notification Dispatcher Background Service has stopped");
     }
 
     private async Task DispatchPendingNotificationsAsync()

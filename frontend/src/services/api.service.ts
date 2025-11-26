@@ -39,6 +39,7 @@ export interface UserInfo {
   createdAt?: string;
   lastLoginAt?: string;
   tenantId?: string;
+  authenticationProvider?: 'Local' | 'LDAP';
 }
 
 export interface UserTenantInfo {

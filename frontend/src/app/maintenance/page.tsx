@@ -32,6 +32,13 @@ const maintenanceModules = [
     color: 'bg-blue-500',
   },
   {
+    title: 'Job Cards',
+    description: 'Create and manage maintenance job cards before work orders',
+    href: '/maintenance/job-cards',
+    icon: ClipboardCheck,
+    color: 'bg-emerald-500',
+  },
+  {
     title: 'Work Orders',
     description: 'Create, manage, and track maintenance work orders',
     href: '/maintenance/work-orders',

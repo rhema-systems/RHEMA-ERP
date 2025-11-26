@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { 
+import {
   Plus,
   Search,
   Edit,
@@ -25,6 +25,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { apiService } from '@/services/api.service';
 
 // Maintenance types interface
 interface MaintenanceType {
@@ -81,54 +82,18 @@ export default function MaintenanceTypesPage() {
     notes: ''
   });
 
-  // Fetch maintenance types from API
+  // Fetch maintenance types from API using shared apiService
   const fetchMaintenanceTypes = async () => {
     try {
       setLoading(true);
       setError(null);
-      
-      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-      
-      if (!token) {
-        setError('Authentication required. Please log in to access this page.');
-        setMaintenanceTypesData([]);
-        return;
-      }
-      
-      console.log('Fetching maintenance types with token present:', !!token);
-      
-      const response = await fetch('http://localhost:5000/api/maintenance/maintenance-types?pageSize=1000', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      console.log('API Response Status:', response.status, response.statusText);
-      
-      if (!response.ok) {
-        if (response.status === 401) {
-          setError('Authentication failed. Please log in again or check your credentials.');
-        } else if (response.status === 403) {
-          setError('Access denied. You do not have permission to view maintenance types.');
-        } else {
-          const errorText = await response.text();
-          console.error('Error details:', errorText);
-          setError(`Failed to load maintenance types: ${errorText}`);
-        }
-        setMaintenanceTypesData([]);
-        return;
-      }
-      
-      const result = await response.json();
-      console.log('API Response:', result);
-      // Handle paginated response
-      const data = result.data || result.items || result || [];
+
+      const result = await apiService.request<any>('/maintenance/maintenance-types?pageSize=1000');
+      const data = (result as any).data || (result as any).items || result || [];
       setMaintenanceTypesData(data);
-      
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching maintenance types:', error);
-      setError('Network error occurred while fetching maintenance types.');
+      setError(error?.message || 'Error loading maintenance types');
       setMaintenanceTypesData([]);
     } finally {
       setLoading(false);
@@ -174,12 +139,6 @@ export default function MaintenanceTypesPage() {
 
   const handleCreate = async () => {
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-      
-      if (!token) {
-        setError('Authentication required. Please log in to create maintenance types.');
-        return;
-      }
       // Map form data to CreateMaintenanceTypeDto structure
       const createDto = {
         name: formData.name,
@@ -202,31 +161,14 @@ export default function MaintenanceTypesPage() {
 
       console.log('Sending create request:', createDto);
 
-      const response = await fetch('http://localhost:5000/api/maintenance/maintenance-types', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(createDto)
-      });
-
-      if (response.ok) {
-        const newMaintenanceType = await response.json();
-        // Add to local state
-        setMaintenanceTypesData(prev => [...prev, newMaintenanceType]);
-        setIsCreateDialogOpen(false);
-        resetForm();
-        // Show success message (you can use a toast library)
-        console.log('Maintenance type created successfully');
-      } else {
-        const error = await response.text();
-        console.error('Failed to create maintenance type:', error);
-        // Show error message
-      }
+      const newMaintenanceType = await apiService.post<any>('/maintenance/maintenance-types', createDto);
+      setMaintenanceTypesData(prev => [...prev, newMaintenanceType]);
+      setIsCreateDialogOpen(false);
+      resetForm();
+      console.log('Maintenance type created successfully');
     } catch (error) {
       console.error('Error creating maintenance type:', error);
-      // Show error message
+      setError(error instanceof Error ? error.message : 'Failed to create maintenance type');
     }
   };
 
@@ -257,13 +199,6 @@ export default function MaintenanceTypesPage() {
     if (!selectedType?.id) return;
 
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-      
-      if (!token) {
-        setError('Authentication required. Please log in to update maintenance types.');
-        return;
-      }
-      // Map form data to UpdateMaintenanceTypeDto structure
       const updateDto = {
         name: formData.name,
         code: formData.code,
@@ -285,30 +220,16 @@ export default function MaintenanceTypesPage() {
 
       console.log('Sending update request:', updateDto);
 
-      const response = await fetch(`http://localhost:5000/api/maintenance/maintenance-types/${selectedType.id}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(updateDto)
-      });
-
-      if (response.ok) {
-        const updatedMaintenanceType = await response.json();
-        // Update local state
-        setMaintenanceTypesData(prev => 
-          prev.map(item => item.id === selectedType.id ? updatedMaintenanceType : item)
-        );
-        setIsEditDialogOpen(false);
-        resetForm();
-        console.log('Maintenance type updated successfully');
-      } else {
-        const error = await response.text();
-        console.error('Failed to update maintenance type:', error);
-      }
+      const updatedMaintenanceType = await apiService.put<any>(`/maintenance/maintenance-types/${selectedType.id}`, updateDto);
+      setMaintenanceTypesData(prev =>
+        prev.map(item => (item.id === selectedType.id ? updatedMaintenanceType : item))
+      );
+      setIsEditDialogOpen(false);
+      resetForm();
+      console.log('Maintenance type updated successfully');
     } catch (error) {
       console.error('Error updating maintenance type:', error);
+      setError(error instanceof Error ? error.message : 'Failed to update maintenance type');
     }
   };
 
@@ -318,30 +239,12 @@ export default function MaintenanceTypesPage() {
     }
 
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-      
-      if (!token) {
-        setError('Authentication required. Please log in to delete maintenance types.');
-        return;
-      }
-      const response = await fetch(`http://localhost:5000/api/maintenance/maintenance-types/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        // Remove from local state
-        setMaintenanceTypesData(prev => prev.filter(item => item.id !== id));
-        console.log('Maintenance type deleted successfully');
-      } else {
-        const error = await response.text();
-        console.error('Failed to delete maintenance type:', error);
-      }
+      await apiService.delete(`/maintenance/maintenance-types/${id}`);
+      setMaintenanceTypesData(prev => prev.filter(item => item.id !== id));
+      console.log('Maintenance type deleted successfully');
     } catch (error) {
       console.error('Error deleting maintenance type:', error);
+      setError(error instanceof Error ? error.message : 'Failed to delete maintenance type');
     }
   };
 
