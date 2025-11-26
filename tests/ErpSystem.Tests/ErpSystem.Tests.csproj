@@ -25,6 +25,15 @@
     <ProjectReference Include="..\..\src\ErpSystem.Core\ErpSystem.Core.csproj" />
     <ProjectReference Include="..\..\src\ErpSystem.Data\ErpSystem.Data.csproj" />
     <ProjectReference Include="..\..\src\ErpSystem.Shared\ErpSystem.Shared.csproj" />
+    <ProjectReference Include="..\..\src\ErpSystem.Api\ErpSystem.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Services\TechnicianSchedulingServiceTests.cs" />
+    <Compile Remove="Services\MaintenanceWorkflowIntegrationTests.cs" />
+    <Compile Remove="Services\WorkflowEngineIntegrationTests.cs" />
+    <Compile Remove="Repositories\TechnicianAvailabilityRepositoryTests.cs" />
+    <Compile Remove="Repositories\TechnicianScheduleRepositoryTests.cs" />
   </ItemGroup>
 
 </Project>

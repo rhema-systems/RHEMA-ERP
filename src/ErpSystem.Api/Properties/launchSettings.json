@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "ErpSystem.Api": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:53484;http://localhost:53485"
+    }
+  }
+}
