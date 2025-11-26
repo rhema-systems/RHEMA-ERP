@@ -21,6 +21,7 @@ using ErpSystem.Api.HealthChecks;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using ErpSystem.Api.Services;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Core.Models;
 using static ErpSystem.Core.Services.StorageServiceExtensions;
 

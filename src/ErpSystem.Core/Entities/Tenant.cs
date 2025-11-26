@@ -72,6 +72,33 @@ public class Tenant : BaseEntity, IAuditable
     public int DefaultPriority { get; set; } = 10;
     public bool EnableAutoSelection { get; set; } = false;
 
+    // Finance Configuration
+    /// <summary>
+    /// Base currency for this tenant (functional currency per IAS 21).
+    /// All financial transactions are recorded and reported in this currency.
+    /// ISO 4217 three-letter currency code (e.g., "GHS", "USD", "EUR", "NGN").
+    /// </summary>
+    [Required]
+    [MaxLength(3)]
+    public string BaseCurrency { get; set; } = "GHS"; // Default to Ghana Cedis
+
+    /// <summary>
+    /// Display name for base currency (e.g., "Ghana Cedis", "US Dollar").
+    /// </summary>
+    [MaxLength(50)]
+    public string? BaseCurrencyName { get; set; }
+
+    /// <summary>
+    /// Currency symbol for display (e.g., "₵", "$", "€", "₦").
+    /// </summary>
+    [MaxLength(5)]
+    public string? CurrencySymbol { get; set; }
+
+    /// <summary>
+    /// Number of decimal places for currency amounts (typically 2).
+    /// </summary>
+    public int CurrencyDecimalPlaces { get; set; } = 2;
+
     // Navigation properties
     public virtual ICollection<UserTenant> UserTenants { get; set; } = new List<UserTenant>();
     public virtual ICollection<TenantModule> TenantModules { get; set; } = new List<TenantModule>();

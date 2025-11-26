@@ -1,9 +1,18 @@
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Interfaces.Finance;
 
 namespace ErpSystem.Core.Interfaces;
 
 public interface IUnitOfWork : IDisposable
 {
+
+    // Finance-specific repositories
+    IAccountRepository Accounts { get; }
+    IAccountSegmentStructureRepository AccountSegmentStructures { get; }
+    IAccountSegmentValueRepository AccountSegmentValues { get; }
+    ISegmentLookupValueRepository SegmentLookupValues { get; }
+
+
     /// <summary>
     /// Save all pending changes to the database
     /// </summary>
