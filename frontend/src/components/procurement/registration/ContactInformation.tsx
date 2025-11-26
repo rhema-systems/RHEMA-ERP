@@ -121,12 +121,24 @@ export default function ContactInformation({ formData, updateFormData }: Contact
                 onValueChange={(value) => updateFormData({ country: value })}
               >
                 <SelectTrigger id="country">
-                  <SelectValue placeholder="Select country" />
+                  <SelectValue placeholder="Select country">
+                    {formData.country && (
+                      <span className="flex items-center gap-2">
+                        <span className="text-xl">
+                          {COUNTRIES.find(c => c.name === formData.country)?.flag}
+                        </span>
+                        <span>{formData.country}</span>
+                      </span>
+                    )}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent className="max-h-[300px]">
                   {COUNTRIES.map((country) => (
                     <SelectItem key={country.code} value={country.name}>
-                      {country.name}
+                      <span className="flex items-center gap-2">
+                        <span className="text-xl">{country.flag}</span>
+                        <span>{country.name}</span>
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>

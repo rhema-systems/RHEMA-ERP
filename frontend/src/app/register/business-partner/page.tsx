@@ -300,46 +300,87 @@ export default function BusinessPartnerRegistrationPage() {
           </Alert>
         )}
 
-        {/* Progress Bar */}
+        {/* Connected Progress Bar */}
         <Card className="mb-6">
-          <CardContent className="pt-6">
-            <div className="mb-4">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm font-medium text-gray-700">Registration Progress</span>
-                <span className="text-sm font-medium text-gray-700">{completionPercentage}%</span>
+          <CardContent className="pt-8 pb-6">
+            {/* Step Indicators with Connected Lines */}
+            <div className="relative">
+              {/* Connection Lines */}
+              <div className="absolute top-6 left-0 right-0 flex items-center px-8">
+                <div className="flex-1 flex items-center">
+                  {STEPS.map((step, index) => {
+                    if (index === STEPS.length - 1) return null;
+                    const isCompleted = currentStep > step.id;
+                    return (
+                      <div
+                        key={`line-${step.id}`}
+                        className={`flex-1 h-1 mx-2 transition-all duration-300 ${
+                          isCompleted ? 'bg-blue-500' : 'bg-gray-300'
+                        }`}
+                      />
+                    );
+                  })}
+                </div>
               </div>
-              <Progress value={completionPercentage} className="h-2" />
+
+              {/* Step Circles and Labels */}
+              <div className="relative flex justify-between items-start">
+                {STEPS.map((step, index) => {
+                  const StepIcon = step.icon;
+                  const isActive = currentStep === step.id;
+                  const isCompleted = currentStep > step.id;
+
+                  return (
+                    <div key={step.id} className="flex flex-col items-center" style={{ flex: '1' }}>
+                      {/* Circle with Number/Icon */}
+                      <div
+                        className={`relative z-10 w-12 h-12 rounded-full flex items-center justify-center font-semibold text-lg transition-all duration-300 ${
+                          isActive
+                            ? 'bg-blue-500 text-white shadow-lg scale-110'
+                            : isCompleted
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-white text-gray-400 border-2 border-gray-300'
+                        }`}
+                      >
+                        {isCompleted ? (
+                          <CheckCircle2 className="w-6 h-6" />
+                        ) : (
+                          <span>{step.id}</span>
+                        )}
+                      </div>
+
+                      {/* Step Label */}
+                      <div className="mt-3 text-center max-w-[120px]">
+                        <div
+                          className={`text-xs font-medium transition-colors duration-300 ${
+                            isActive
+                              ? 'text-blue-600'
+                              : isCompleted
+                              ? 'text-blue-500'
+                              : 'text-gray-500'
+                          }`}
+                        >
+                          {step.name}
+                        </div>
+                        {isActive && (
+                          <div className="text-[10px] text-gray-500 mt-1">
+                            Please fill the {step.name.toLowerCase()}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* Step Indicators */}
-            <div className="flex justify-between">
-              {STEPS.map((step, index) => {
-                const StepIcon = step.icon;
-                const isActive = currentStep === step.id;
-                const isCompleted = currentStep > step.id;
-
-                return (
-                  <div key={step.id} className="flex flex-col items-center flex-1">
-                    <div
-                      className={`w-10 h-10 rounded-full flex items-center justify-center mb-2 ${
-                        isActive
-                          ? 'bg-blue-600 text-white'
-                          : isCompleted
-                          ? 'bg-green-600 text-white'
-                          : 'bg-gray-200 text-gray-500'
-                      }`}
-                    >
-                      <StepIcon className="w-5 h-5" />
-                    </div>
-                    <span className={`text-xs text-center ${isActive ? 'font-semibold text-blue-600' : 'text-gray-600'}`}>
-                      {step.name}
-                    </span>
-                    {index < STEPS.length - 1 && (
-                      <div className="hidden md:block absolute w-full h-0.5 bg-gray-200 top-5 left-1/2 -z-10" />
-                    )}
-                  </div>
-                );
-              })}
+            {/* Progress Percentage */}
+            <div className="mt-6 pt-4 border-t border-gray-200">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-600">Overall Progress</span>
+                <span className="text-sm font-semibold text-blue-600">{completionPercentage}% Complete</span>
+              </div>
+              <Progress value={completionPercentage} className="h-2 mt-2" />
             </div>
           </CardContent>
         </Card>
