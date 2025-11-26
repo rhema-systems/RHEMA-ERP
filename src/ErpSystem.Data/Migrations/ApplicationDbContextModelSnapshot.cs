@@ -329,7 +329,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("AuditLogs");
+                    b.ToTable("AuditLogs", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.BlacklistedToken", b =>
@@ -660,7 +660,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("EmailSettings");
+                    b.ToTable("EmailSettings", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.EmailTemplate", b =>
@@ -751,7 +751,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "Name")
                         .IsUnique();
 
-                    b.ToTable("EmailTemplates");
+                    b.ToTable("EmailTemplates", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.AttendanceRecord", b =>
@@ -823,7 +823,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("AttendanceRecords");
+                    b.ToTable("AttendanceRecords", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Country", b =>
@@ -884,7 +884,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("Countries");
+                    b.ToTable("Countries", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Department", b =>
@@ -977,7 +977,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("Departments");
+                    b.ToTable("Departments", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Employee", b =>
@@ -1222,7 +1222,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("Employees");
+                    b.ToTable("Employees", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeBiometric", b =>
@@ -1290,7 +1290,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("EmployeeBiometrics");
+                    b.ToTable("EmployeeBiometrics", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeContractDetail", b =>
@@ -1380,7 +1380,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("EmployeeContractDetails");
+                    b.ToTable("EmployeeContractDetails", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeDependent", b =>
@@ -1455,7 +1455,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("EmployeeDependents");
+                    b.ToTable("EmployeeDependents", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeEmergencyContact", b =>
@@ -1537,7 +1537,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("EmployeeEmergencyContacts");
+                    b.ToTable("EmployeeEmergencyContacts", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeIdentificationCard", b =>
@@ -1612,7 +1612,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("EmployeeIdentificationCards");
+                    b.ToTable("EmployeeIdentificationCards", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeePosition", b =>
@@ -1697,7 +1697,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("EmployeePositions");
+                    b.ToTable("EmployeePositions", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeQualification", b =>
@@ -1776,7 +1776,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("EmployeeQualifications");
+                    b.ToTable("EmployeeQualifications", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeShiftPreference", b =>
@@ -1836,7 +1836,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("EmployeeShiftPreferences");
+                    b.ToTable("EmployeeShiftPreferences", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeSkill", b =>
@@ -1916,7 +1916,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("EmployeeSkills");
+                    b.ToTable("EmployeeSkills", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeWorkHistory", b =>
@@ -2002,7 +2002,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("EmployeeWorkHistories");
+                    b.ToTable("EmployeeWorkHistories", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.PositionSkillRequirement", b =>
@@ -2064,7 +2064,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("PositionSkillRequirement");
+                    b.ToTable("PositionSkillRequirement", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Section", b =>
@@ -2138,7 +2138,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("Sections");
+                    b.ToTable("Sections", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Shift", b =>
@@ -2203,7 +2203,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("Shifts");
+                    b.ToTable("Shifts", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.ShiftAssignment", b =>
@@ -2269,7 +2269,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("ShiftAssignments");
+                    b.ToTable("ShiftAssignments", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Skill", b =>
@@ -2331,7 +2331,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("Skills");
+                    b.ToTable("Skills", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.WorkStation", b =>
@@ -2400,7 +2400,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("WorkStations");
+                    b.ToTable("WorkStations", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryAllocation", b =>
@@ -2510,7 +2510,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("InventoryAllocations");
+                    b.ToTable("InventoryAllocations", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryCategory", b =>
@@ -2600,7 +2600,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("InventoryCategories");
+                    b.ToTable("InventoryCategories", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryItem", b =>
@@ -2802,7 +2802,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("InventoryItems");
+                    b.ToTable("InventoryItems", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryLocation", b =>
@@ -2879,7 +2879,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("InventoryLocations");
+                    b.ToTable("InventoryLocations", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.StockAdjustment", b =>
@@ -2969,7 +2969,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("StockAdjustments");
+                    b.ToTable("StockAdjustments", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.StockAdjustmentItem", b =>
@@ -3054,7 +3054,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("StockAdjustmentItems");
+                    b.ToTable("StockAdjustmentItems", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.StockMovement", b =>
@@ -3176,7 +3176,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("StockMovements");
+                    b.ToTable("StockMovements", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.Warehouse", b =>
@@ -3283,7 +3283,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WarehouseType");
 
-                    b.ToTable("Warehouses");
+                    b.ToTable("Warehouses", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.WarehouseLocation", b =>
@@ -3385,7 +3385,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("WarehouseLocations");
+                    b.ToTable("WarehouseLocations", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.WarehouseQuantity", b =>
@@ -3469,7 +3469,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("WarehouseQuantities");
+                    b.ToTable("WarehouseQuantities", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.AssetAdmission", b =>
@@ -3871,7 +3871,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("AssetDowntimes");
+                    b.ToTable("AssetDowntimes", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.AssetInspection", b =>
@@ -3973,7 +3973,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("AssetInspections");
+                    b.ToTable("AssetInspections", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.AssetMaintenanceDowntime", b =>
@@ -4170,7 +4170,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("AssetTaskTemplates");
+                    b.ToTable("AssetTaskTemplates", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.AssetType", b =>
@@ -4503,7 +4503,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("AssetTypeTaskTemplates");
+                    b.ToTable("AssetTypeTaskTemplates", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.AssetUsageTracking", b =>
@@ -4601,7 +4601,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("AssetUsageTrackings");
+                    b.ToTable("AssetUsageTrackings", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.ContractorInvoice", b =>
@@ -4671,7 +4671,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("MaintenanceContractorId");
 
-                    b.ToTable("ContractorInvoice");
+                    b.ToTable("ContractorInvoice", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.ContractorPerformanceReview", b =>
@@ -4725,7 +4725,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ContractorId");
 
-                    b.ToTable("ContractorPerformanceReview");
+                    b.ToTable("ContractorPerformanceReview", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.ContractorWorkOrder", b =>
@@ -4784,7 +4784,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("WorkOrderId")
                         .IsUnique();
 
-                    b.ToTable("ContractorWorkOrder");
+                    b.ToTable("ContractorWorkOrder", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.InspectionApproval", b =>
@@ -4867,7 +4867,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("InspectionApprovals");
+                    b.ToTable("InspectionApprovals", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.InspectionChecklistItem", b =>
@@ -4978,7 +4978,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("InspectionChecklistItems");
+                    b.ToTable("InspectionChecklistItems", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.InspectionChecklistTemplate", b =>
@@ -5072,7 +5072,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("Version");
 
-                    b.ToTable("InspectionChecklistTemplates");
+                    b.ToTable("InspectionChecklistTemplates", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.InspectionDocument", b =>
@@ -5148,7 +5148,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("InspectionDocuments");
+                    b.ToTable("InspectionDocuments", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.InspectionTemplate", b =>
@@ -5222,7 +5222,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("InspectionTemplates");
+                    b.ToTable("InspectionTemplates", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.JobCard", b =>
@@ -5701,7 +5701,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("JobCardCertificates");
+                    b.ToTable("JobCardCertificates", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.JobCardComment", b =>
@@ -6049,7 +6049,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("MaintenanceAssets");
+                    b.ToTable("MaintenanceAssets", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceAssetCategory", b =>
@@ -6168,7 +6168,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("MaintenanceAssetCategories");
+                    b.ToTable("MaintenanceAssetCategories", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceAttachment", b =>
@@ -6278,7 +6278,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("UploadedByUserId");
 
-                    b.ToTable("MaintenanceAttachments");
+                    b.ToTable("MaintenanceAttachments", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceAttachmentTag", b =>
@@ -6330,7 +6330,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("AttachmentId");
 
-                    b.ToTable("MaintenanceAttachmentTag");
+                    b.ToTable("MaintenanceAttachmentTag", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceCertificate", b =>
@@ -6499,7 +6499,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("MaintenanceContractor");
+                    b.ToTable("MaintenanceContractor", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceEscalationRule", b =>
@@ -6582,7 +6582,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("MaintenanceEscalationRules");
+                    b.ToTable("MaintenanceEscalationRules", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceExpense", b =>
@@ -6721,7 +6721,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("MaintenanceExpenses");
+                    b.ToTable("MaintenanceExpenses", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceNotification", b =>
@@ -6830,7 +6830,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("MaintenanceNotifications");
+                    b.ToTable("MaintenanceNotifications", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceNotificationTemplate", b =>
@@ -6917,7 +6917,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("MaintenanceNotificationTemplates");
+                    b.ToTable("MaintenanceNotificationTemplates", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceSchedule", b =>
@@ -7145,7 +7145,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("MaintenanceSchedules");
+                    b.ToTable("MaintenanceSchedules", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceScheduleHistory", b =>
@@ -7211,7 +7211,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("MaintenanceScheduleHistories");
+                    b.ToTable("MaintenanceScheduleHistories", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceScheduleNotificationHistory", b =>
@@ -7296,7 +7296,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("MaintenanceScheduleNotificationHistories");
+                    b.ToTable("MaintenanceScheduleNotificationHistories", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceStaffSchedule", b =>
@@ -7421,7 +7421,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("MaintenanceStaffSchedules");
+                    b.ToTable("MaintenanceStaffSchedules", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceTaskTemplate", b =>
@@ -7503,7 +7503,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("MaintenanceTaskTemplates");
+                    b.ToTable("MaintenanceTaskTemplates", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceTool", b =>
@@ -7633,7 +7633,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("MaintenanceTools");
+                    b.ToTable("MaintenanceTools", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceType", b =>
@@ -7833,7 +7833,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("MaintenanceTypes");
+                    b.ToTable("MaintenanceTypes", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.PriorityLevel", b =>
@@ -7903,7 +7903,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("PriorityLevels");
+                    b.ToTable("PriorityLevels", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.ProtocolAdherence", b =>
@@ -7984,7 +7984,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("ProtocolAdherences");
+                    b.ToTable("ProtocolAdherences", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.ProtocolAuditDetail", b =>
@@ -8053,7 +8053,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ProtocolId");
 
-                    b.ToTable("ProtocolAuditDetails");
+                    b.ToTable("ProtocolAuditDetails", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.ProtocolTraining", b =>
@@ -8142,7 +8142,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("ProtocolTrainings");
+                    b.ToTable("ProtocolTrainings", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.ProtocolViolation", b =>
@@ -8259,7 +8259,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("ProtocolViolations");
+                    b.ToTable("ProtocolViolations", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.QualityControlChecklist", b =>
@@ -8336,7 +8336,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderType");
 
-                    b.ToTable("QualityControlChecklists");
+                    b.ToTable("QualityControlChecklists", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.QualityMetrics", b =>
@@ -8406,7 +8406,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TechnicianId");
 
-                    b.ToTable("QualityMetrics");
+                    b.ToTable("QualityMetrics", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.QualitySignOffChecklist", b =>
@@ -8521,7 +8521,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("QualitySignOffChecklists");
+                    b.ToTable("QualitySignOffChecklists", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.RejectionFollowUp", b =>
@@ -8614,7 +8614,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("RejectionFollowUps");
+                    b.ToTable("RejectionFollowUps", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.SafetyAudit", b =>
@@ -8695,7 +8695,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("SafetyAudits");
+                    b.ToTable("SafetyAudits", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.SafetyComplianceRecord", b =>
@@ -8812,7 +8812,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("SafetyComplianceRecords");
+                    b.ToTable("SafetyComplianceRecords", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.SafetyProtocol", b =>
@@ -9001,7 +9001,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("SafetyProtocols");
+                    b.ToTable("SafetyProtocols", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.ScheduledWorkOrder", b =>
@@ -9056,7 +9056,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ScheduleId");
 
-                    b.ToTable("ScheduledWorkOrder");
+                    b.ToTable("ScheduledWorkOrder", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.TechnicalSkill", b =>
@@ -9190,7 +9190,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("TechnicalSkills");
+                    b.ToTable("TechnicalSkills", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.Technician", b =>
@@ -9311,7 +9311,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("Technicians");
+                    b.ToTable("Technicians", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.TechnicianAvailability", b =>
@@ -9403,7 +9403,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("TechnicianAvailabilities");
+                    b.ToTable("TechnicianAvailabilities", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.TechnicianCertification", b =>
@@ -9529,7 +9529,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("TechnicianCertifications");
+                    b.ToTable("TechnicianCertifications", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.TechnicianSchedule", b =>
@@ -9651,7 +9651,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("TechnicianSchedules");
+                    b.ToTable("TechnicianSchedules", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.TechnicianShift", b =>
@@ -9730,7 +9730,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("TechnicianShifts");
+                    b.ToTable("TechnicianShifts", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.TechnicianSkill", b =>
@@ -9793,7 +9793,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("TechnicianSkills");
+                    b.ToTable("TechnicianSkills", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.TechnicianSkillAssignment", b =>
@@ -9892,7 +9892,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TechnicianId", "SkillId")
                         .IsUnique();
 
-                    b.ToTable("TechnicianSkillAssignments");
+                    b.ToTable("TechnicianSkillAssignments", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.TechnicianTeam", b =>
@@ -9961,7 +9961,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("TechnicianTeams");
+                    b.ToTable("TechnicianTeams", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.TechnicianTeamMember", b =>
@@ -10032,7 +10032,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TeamId", "TechnicianId");
 
-                    b.ToTable("TechnicianTeamMembers");
+                    b.ToTable("TechnicianTeamMembers", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.ToolCheckout", b =>
@@ -10140,7 +10140,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("ToolCheckouts");
+                    b.ToTable("ToolCheckouts", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.UserTechnicianSkill", b =>
@@ -10217,7 +10217,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("EmployeeId", "SkillId")
                         .IsUnique();
 
-                    b.ToTable("UserTechnicianSkills");
+                    b.ToTable("UserTechnicianSkills", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrder", b =>
@@ -10438,7 +10438,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderTypeId");
 
-                    b.ToTable("WorkOrders");
+                    b.ToTable("WorkOrders", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderComment", b =>
@@ -10508,7 +10508,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("WorkOrderComments");
+                    b.ToTable("WorkOrderComments", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderDocument", b =>
@@ -10594,7 +10594,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("WorkOrderDocuments");
+                    b.ToTable("WorkOrderDocuments", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderLabor", b =>
@@ -10674,7 +10674,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("WorkOrderLabor");
+                    b.ToTable("WorkOrderLabor", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderPart", b =>
@@ -10799,7 +10799,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("WorkOrderParts");
+                    b.ToTable("WorkOrderParts", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderQualityCheck", b =>
@@ -10868,7 +10868,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("WorkOrderQualityChecks");
+                    b.ToTable("WorkOrderQualityChecks", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderQualitySignOff", b =>
@@ -11013,7 +11013,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("WorkOrderQualitySignOffs");
+                    b.ToTable("WorkOrderQualitySignOffs", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderRejection", b =>
@@ -11187,7 +11187,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("WorkOrderRejections");
+                    b.ToTable("WorkOrderRejections", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderRework", b =>
@@ -11285,7 +11285,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderQualityCheckId");
 
-                    b.ToTable("WorkOrderReworks");
+                    b.ToTable("WorkOrderReworks", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderReworkTask", b =>
@@ -11341,7 +11341,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderReworkId");
 
-                    b.ToTable("WorkOrderReworkTasks");
+                    b.ToTable("WorkOrderReworkTasks", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderTask", b =>
@@ -11434,7 +11434,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("WorkOrderTasks");
+                    b.ToTable("WorkOrderTasks", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderTool", b =>
@@ -11510,7 +11510,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("WorkOrderTools");
+                    b.ToTable("WorkOrderTools", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderType", b =>
@@ -11588,7 +11588,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("WorkOrderTypes");
+                    b.ToTable("WorkOrderTypes", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Notification", b =>
@@ -11696,7 +11696,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("Notifications");
+                    b.ToTable("Notifications", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.PasswordResetToken", b =>
@@ -11763,7 +11763,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("PasswordResetTokens");
+                    b.ToTable("PasswordResetTokens", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Permission", b =>
@@ -13278,7 +13278,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("PurchaseOrders");
+                    b.ToTable("PurchaseOrders", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.PurchaseOrderItem", b =>
@@ -13361,7 +13361,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("PurchaseOrderItems");
+                    b.ToTable("PurchaseOrderItems", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.PurchaseOrderReceipt", b =>
@@ -13469,7 +13469,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("PurchaseOrderReceipts");
+                    b.ToTable("PurchaseOrderReceipts", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.PurchaseOrderReceiptItem", b =>
@@ -13563,7 +13563,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("PurchaseOrderReceiptItems");
+                    b.ToTable("PurchaseOrderReceiptItems", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.PurchaseRequisition", b =>
@@ -13663,7 +13663,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("PurchaseRequisitions");
+                    b.ToTable("PurchaseRequisitions", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.PurchaseRequisitionItem", b =>
@@ -13761,7 +13761,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("PurchaseRequisitionItems");
+                    b.ToTable("PurchaseRequisitionItems", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.Supplier", b =>
@@ -13916,7 +13916,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("Suppliers");
+                    b.ToTable("Suppliers", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.SupplierContact", b =>
@@ -13997,7 +13997,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("SupplierContacts");
+                    b.ToTable("SupplierContacts", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.SupplierItemCatalog", b =>
@@ -14091,7 +14091,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("SupplierItemCatalogs");
+                    b.ToTable("SupplierItemCatalogs", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.RefreshToken", b =>
@@ -15197,7 +15197,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("Securities");
+                    b.ToTable("Securities", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.SecurityAlert", b =>
@@ -15309,7 +15309,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("Type");
 
-                    b.ToTable("SecurityAlerts");
+                    b.ToTable("SecurityAlerts", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.SecurityLog", b =>
@@ -15395,7 +15395,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("SecurityLogs");
+                    b.ToTable("SecurityLogs", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.SecurityMetrics", b =>
@@ -15498,7 +15498,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "MetricDate")
                         .IsUnique();
 
-                    b.ToTable("SecurityMetricsSet");
+                    b.ToTable("SecurityMetricsSet", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.SecurityPolicy", b =>
@@ -15612,7 +15612,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("Type");
 
-                    b.ToTable("SecurityPolicies");
+                    b.ToTable("SecurityPolicies", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.SecurityPolicyViolation", b =>
@@ -15730,7 +15730,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ViolationType");
 
-                    b.ToTable("SecurityPolicyViolations");
+                    b.ToTable("SecurityPolicyViolations", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.SystemSettings", b =>
@@ -15790,7 +15790,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "Key")
                         .IsUnique();
 
-                    b.ToTable("SystemSettings");
+                    b.ToTable("SystemSettings", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Tenant", b =>
@@ -15939,7 +15939,7 @@ namespace ErpSystem.Data.Migrations
                         .IsUnique()
                         .HasFilter("[Domain] IS NOT NULL");
 
-                    b.ToTable("Tenants");
+                    b.ToTable("Tenants", (string)null);
 
                     b.HasData(
                         new
@@ -16024,7 +16024,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "ModuleName")
                         .IsUnique();
 
-                    b.ToTable("TenantModules");
+                    b.ToTable("TenantModules", (string)null);
 
                     b.HasData(
                         new
@@ -16215,7 +16215,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ThreatType");
 
-                    b.ToTable("ThreatDetections");
+                    b.ToTable("ThreatDetections", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.ThreatIndicator", b =>
@@ -16298,7 +16298,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("Value");
 
-                    b.ToTable("ThreatIndicators");
+                    b.ToTable("ThreatIndicators", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.UserReportFavorite", b =>
@@ -16432,7 +16432,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("UserSessions");
+                    b.ToTable("UserSessions", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.UserTenant", b =>
@@ -16601,7 +16601,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkflowInstanceId");
 
-                    b.ToTable("WorkflowActivityLogs");
+                    b.ToTable("WorkflowActivityLogs", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Workflow.WorkflowApproval", b =>
@@ -16687,7 +16687,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("WorkflowApprovals");
+                    b.ToTable("WorkflowApprovals", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Workflow.WorkflowDefinition", b =>
@@ -16758,7 +16758,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "Name")
                         .IsUnique();
 
-                    b.ToTable("WorkflowDefinitions");
+                    b.ToTable("WorkflowDefinitions", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Workflow.WorkflowEntityType", b =>
@@ -16841,7 +16841,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "Name")
                         .IsUnique();
 
-                    b.ToTable("WorkflowEntityTypes");
+                    b.ToTable("WorkflowEntityTypes", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Workflow.WorkflowInstance", b =>
@@ -16949,7 +16949,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("EntityTypeId", "EntityId");
 
-                    b.ToTable("WorkflowInstances");
+                    b.ToTable("WorkflowInstances", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Workflow.WorkflowStep", b =>
@@ -17048,7 +17048,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkflowDefinitionId");
 
-                    b.ToTable("WorkflowSteps");
+                    b.ToTable("WorkflowSteps", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Workflow.WorkflowStepInstance", b =>
@@ -17136,7 +17136,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WorkflowStepId");
 
-                    b.ToTable("WorkflowStepInstances");
+                    b.ToTable("WorkflowStepInstances", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Workflow.WorkflowTransition", b =>
@@ -17218,7 +17218,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("FromStepId", "ToStepId");
 
-                    b.ToTable("WorkflowTransitions");
+                    b.ToTable("WorkflowTransitions", (string)null);
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
