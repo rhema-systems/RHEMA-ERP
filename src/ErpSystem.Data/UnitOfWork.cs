@@ -1,8 +1,10 @@
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Data.Repositories;
+using ErpSystem.Data.Repositories.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using ErpSystem.Core.Interfaces;
-using ErpSystem.Core.Entities;
-using ErpSystem.Data.Repositories;
 
 namespace ErpSystem.Data;
 
@@ -19,6 +21,24 @@ public class UnitOfWork : IUnitOfWork
         _context = context;
         _repositories = new Dictionary<Type, object>();
     }
+
+    //FINANCE
+    private IAccountRepository? _accountRepository;
+    private IAccountSegmentStructureRepository? _accountSegmentStructureRepository;
+    private IAccountSegmentValueRepository? _accountSegmentValueRepository;
+    private ISegmentLookupValueRepository? _segmentLookupValueRepository;
+
+    public IAccountRepository Accounts =>
+        _accountRepository ??= new AccountRepository(_context);
+
+    public IAccountSegmentStructureRepository AccountSegmentStructures =>
+        _accountSegmentStructureRepository ??= new AccountSegmentStructureRepository(_context);
+
+    public IAccountSegmentValueRepository AccountSegmentValues =>
+        _accountSegmentValueRepository ??= new AccountSegmentValueRepository(_context);
+
+    public ISegmentLookupValueRepository SegmentLookupValues =>
+        _segmentLookupValueRepository ??= new SegmentLookupValueRepository(_context);
 
     public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {

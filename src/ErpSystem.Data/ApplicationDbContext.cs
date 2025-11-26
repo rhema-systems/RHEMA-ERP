@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Inventory;
@@ -261,6 +262,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<WorkflowActivityLog> WorkflowActivityLogs { get; set; }
     public DbSet<WorkflowApproval> WorkflowApprovals { get; set; }
     public DbSet<WorkflowEntityType> WorkflowEntityTypes { get; set; }
+
+    //Finance - GL Entities
+    public DbSet<Account> Accounts { get; set; }
+    public DbSet<AccountSegmentValue> AccountSegmentValues { get; set; }
+    public DbSet<AccountSegmentStructure> AccountSegmentStructures { get; set; }
+    public DbSet<SegmentLookupValue> SegmentLookupValues { get; set; }
+    public DbSet<JournalEntry> JournalEntries { get; set; }
+    public DbSet<FiscalYear> FiscalYears { get; set; }
+    public DbSet<FiscalPeriod> FiscalPeriods { get; set; }
+    public DbSet<ExchangeRate> ExchangeRates { get; set; }
+    public DbSet<AccountBalance> AccountBalances { get; set; }
+    public DbSet<AccountCurrencyLink> AccountCurrencyLinks { get; set; }
+    public DbSet<AccountTransaction> AccountTransactions { get; set; }
+
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
