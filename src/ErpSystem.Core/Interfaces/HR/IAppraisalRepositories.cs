@@ -1,0 +1,1 @@
+namespace ErpSystem.Core.Interfaces.HR;
