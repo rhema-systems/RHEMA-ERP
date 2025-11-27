@@ -35,5 +35,14 @@ namespace ErpSystem.Core.DTOs.Finance
         [Required]
         [MaxLength(50)]
         public string Reference { get; set; } = string.Empty;
+
+        [MaxLength(3)]
+        public string? CurrencyCode { get; set; }
+
+        public decimal? ForeignAmount { get; set; }
+
+        public decimal? ExchangeRate { get; set; }
+
+        public int LineNumber { get; set; } = 1;
     }
 }

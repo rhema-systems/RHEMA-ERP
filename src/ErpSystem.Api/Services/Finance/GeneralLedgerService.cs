@@ -31,32 +31,71 @@ namespace ErpSystem.Api.Services
 
         public async Task<Account> CreateSegmentedAccountAsync(AccountCreateDto accountDto)
         {
-            // 1. Validate Account Structure
-            await ValidateAccountStructureAsync(accountDto.AccountNumber);
-
-            // 2. Map DTO to Entity
-            var account = new Account
+            try
             {
-                Id = Guid.NewGuid(),
-                AccountCode = accountDto.AccountCode ?? accountDto.AccountNumber, // Fallback to AccountNumber if Code not provided
-                AccountNumber = accountDto.AccountNumber,
-                AccountName = accountDto.AccountName,
-                AccountType = Enum.Parse<AccountType>(accountDto.AccountType),
-                CurrencyCode = accountDto.CurrencyCode,
-                IsMultiCurrency = accountDto.IsMultiCurrency,
-                IsSegmented = true,
-                IsIFRSClassified = true,
-                IsBaseClassified = true,
-                IsLocalClassified = false,
-                Status = AccountStatus.Active,
-                TenantId = _currentUserService.TenantId ?? Guid.Empty // Ensure TenantId is set
-            };
+                // Validate input DTO
+                if (accountDto == null)
+                    throw new ArgumentNullException(nameof(accountDto), "Account DTO cannot be null");
 
-            // 3. Save to Database
-            _context.Accounts.Add(account);
-            await _context.SaveChangesAsync();
+                if (string.IsNullOrWhiteSpace(accountDto.AccountNumber))
+                    throw new ArgumentException("Account number is required", nameof(accountDto.AccountNumber));
 
-            return account;
+                if (string.IsNullOrWhiteSpace(accountDto.AccountName))
+                    throw new ArgumentException("Account name is required", nameof(accountDto.AccountName));
+
+                if (string.IsNullOrWhiteSpace(accountDto.AccountType))
+                    throw new ArgumentException("Account type is required", nameof(accountDto.AccountType));
+
+                // Get tenant ID - throw if not available
+                var tenantId = _currentUserService.TenantId;
+                Console.WriteLine($"DEBUG: TenantId from CurrentUserService: {tenantId}");
+                Console.WriteLine($"DEBUG: TenantId is null: {tenantId == null}");
+                Console.WriteLine($"DEBUG: TenantId is Guid.Empty: {tenantId == Guid.Empty}");
+                
+                if (tenantId == null || tenantId == Guid.Empty)
+                    throw new InvalidOperationException("Tenant context is required for account creation. User must be authenticated with a valid tenant.");
+
+                // 1. Validate Account Structure
+                await ValidateAccountStructureAsync(accountDto.AccountNumber);
+
+                // 2. Parse AccountType safely
+                if (!Enum.TryParse<AccountType>(accountDto.AccountType, true, out var accountType))
+                    throw new ArgumentException($"Invalid account type: {accountDto.AccountType}. Valid values are: {string.Join(", ", Enum.GetNames(typeof(AccountType)))}", nameof(accountDto.AccountType));
+
+                // 3. Map DTO to Entity
+                var account = new Account
+                {
+                    Id = Guid.NewGuid(),
+                    AccountCode = accountDto.AccountCode ?? accountDto.AccountNumber,
+                    AccountNumber = accountDto.AccountNumber,
+                    AccountName = accountDto.AccountName,
+                    AccountType = accountType,
+                    CurrencyCode = accountDto.CurrencyCode ?? "GHS",
+                    IsMultiCurrency = accountDto.IsMultiCurrency,
+                    IsSegmented = true,
+                    IsIFRSClassified = true,
+                    IsBaseClassified = true,
+                    IsLocalClassified = false,
+                    Status = AccountStatus.Active,
+                    TenantId = tenantId.Value
+                };
+
+                // 4. Save to Database
+                _context.Accounts.Add(account);
+                await _context.SaveChangesAsync();
+
+                return account;
+            }
+            catch (Exception ex)
+            {
+                // Log the error (in production, use proper logging framework)
+                Console.WriteLine($"ERROR in CreateSegmentedAccountAsync: {ex.Message}");
+                Console.WriteLine($"Stack Trace: {ex.StackTrace}");
+                if (ex.InnerException != null)
+                    Console.WriteLine($"Inner Exception: {ex.InnerException.Message}");
+                
+                throw; // Re-throw to let the controller handle it
+            }
         }
 
         public async Task<bool> ValidateAccountStructureAsync(string accountNumber)
@@ -186,20 +225,28 @@ namespace ErpSystem.Api.Services
                 {
                     // For MVP/Testing, create a default period if none exists
                     // In production, this should throw an error
-                    var fiscalYear = await _context.FiscalYears.FirstOrDefaultAsync() ?? new FiscalYear 
+                    var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context required");
+                    
+                    var fiscalYear = await _context.FiscalYears.FirstOrDefaultAsync(fy => fy.TenantId == tenantId && fy.StartDate <= entryDto.TransactionDate && fy.EndDate >= entryDto.TransactionDate) ?? new FiscalYear 
                     { 
                         Id = Guid.NewGuid(), 
+                        TenantId = tenantId,
                         FiscalYearCode = entryDto.TransactionDate.Year.ToString(),
                         StartDate = new DateTime(entryDto.TransactionDate.Year, 1, 1),
                         EndDate = new DateTime(entryDto.TransactionDate.Year, 12, 31),
                         IsActive = true
                     };
                     
-                    if (_context.Entry(fiscalYear).State == EntityState.Detached) _context.FiscalYears.Add(fiscalYear);
+                    if (_context.Entry(fiscalYear).State == EntityState.Detached) 
+                    {
+                        _context.FiscalYears.Add(fiscalYear);
+                        await _context.SaveChangesAsync();
+                    }
 
                     fiscalPeriod = new FiscalPeriod
                     {
                         Id = Guid.NewGuid(),
+                        TenantId = tenantId,
                         FiscalYearId = fiscalYear.Id,
                         PeriodName = $"{entryDto.TransactionDate:MMMM yyyy}",
                         PeriodCode = $"{entryDto.TransactionDate:yyyy-MM}",
@@ -273,8 +320,49 @@ namespace ErpSystem.Api.Services
                         SourceReferenceNumber = lineDto.Reference,
                         FiscalPeriodId = fiscalPeriod.Id,
                         LineNumber = lineNum++,
-                        BookClassification = "IFRS"
+                        BookClassification = "IFRS",
+                        // Multi-Currency Mapping
+                        TransactionCurrency = lineDto.CurrencyCode,
+                        ForeignCurrencyAmount = lineDto.ForeignAmount,
+                        ExchangeRate = lineDto.ExchangeRate
                     };
+
+                    // Update Foreign Currency Balance if applicable
+                    if (!string.IsNullOrEmpty(lineDto.CurrencyCode) && lineDto.CurrencyCode != "GHS") // Assuming GHS is base
+                    {
+                        var currencyLink = await _context.AccountCurrencyLinks
+                            .FirstOrDefaultAsync(l => l.AccountId == account.Id && l.LinkedCurrencyCode == lineDto.CurrencyCode);
+                        
+                        if (currencyLink != null)
+                        {
+                            // Determine sign based on account type and transaction type
+                            decimal foreignChange = lineDto.ForeignAmount ?? 0;
+                            
+                            // Adjust sign for Credit transactions
+                            if (lineDto.TransactionType == "Credit")
+                            {
+                                // For Assets/Expenses, Credit decreases balance
+                                if (account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense)
+                                    foreignChange = -foreignChange;
+                                // For Liabilities/Equity/Revenue, Credit increases balance
+                                else
+                                    foreignChange = foreignChange; 
+                            }
+                            else // Debit
+                            {
+                                // For Assets/Expenses, Debit increases balance
+                                if (account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense)
+                                    foreignChange = foreignChange;
+                                // For Liabilities/Equity/Revenue, Debit decreases balance
+                                else
+                                    foreignChange = -foreignChange;
+                            }
+
+                            currencyLink.ForeignCurrencyBalance += foreignChange;
+                            currencyLink.LastTransactionDate = entryDto.TransactionDate;
+                            _context.Update(currencyLink);
+                        }
+                    }
 
                     _context.AccountTransactions.Add(transactionRecord);
                 }
@@ -316,30 +404,70 @@ namespace ErpSystem.Api.Services
             var tenantId = _currentUserService.TenantId;
             if (tenantId == null) throw new InvalidOperationException("Tenant context is required.");
 
+            // Extract to local non-nullable variable to avoid EF Core Guid? translation issues
+            Guid tenantIdValue = tenantId.Value;
+            var revaluationDate = request.RevaluationDate.Date;
+
             // 1. Get Accounts to Revalue
-            var query = _context.Accounts
-                .Where(a => a.TenantId == tenantId && a.IsActive && !a.IsDeleted);
+            // Use Raw SQL with DTO projection to handle schema mismatches (Status is INT in DB, String in Entity)
+            // and bypass EF Core translation issues.
+            var accountDtos = await _context.Database.SqlQuery<AccountRevalDto>($@"
+                SELECT 
+                    Id, 
+                    TenantId, 
+                    CurrencyCode, 
+                    IsMultiCurrency,
+                    CASE WHEN Status = 1 THEN 'Active' ELSE 'Inactive' END as Status
+                FROM Accounts 
+                WHERE TenantId = {tenantIdValue} 
+                  AND IsDeleted = 0
+                  AND Status = 1 -- Active
+            ").ToListAsync();
+
+            // Map DTOs to Account entities
+            var allAccounts = accountDtos.Select(dto => new Account
+            {
+                Id = dto.Id,
+                TenantId = dto.TenantId,
+                CurrencyCode = dto.CurrencyCode,
+                IsMultiCurrency = dto.IsMultiCurrency,
+                // Convert string status from DTO to Enum
+                Status = Enum.TryParse<ErpSystem.Core.Enums.AccountStatus>(dto.Status, out var status) 
+                    ? status 
+                    : ErpSystem.Core.Enums.AccountStatus.Active // Default fallback
+            }).ToList();
+
+            // Load currency links separately for the accounts we need
+            var accountIds = allAccounts.Select(a => a.Id).ToList();
+            var currencyLinks = await _context.AccountCurrencyLinks
+                .IgnoreQueryFilters()
+                .Where(cl => accountIds.Contains(cl.AccountId) && cl.IsActive && !cl.IsDeleted)
+                .ToListAsync();
+
+            // Manually attach currency links to accounts (in-memory)
+            foreach (var account in allAccounts)
+            {
+                account.CurrencyLinks = currencyLinks.Where(cl => cl.AccountId == account.Id).ToList();
+            }
+
+            var accounts = new List<Account>();
 
             if (!string.IsNullOrEmpty(request.CurrencyCode))
             {
-                // Revalue specific currency accounts OR multi-currency accounts OR accounts with currency links
-                query = query.Where(a => 
+                accounts = allAccounts.Where(a => 
                     a.CurrencyCode == request.CurrencyCode 
                     || a.IsMultiCurrency
-                    || a.CurrencyLinks.Any(c => c.LinkedCurrencyCode == request.CurrencyCode && c.IsActive));
+                    || a.CurrencyLinks.Any(c => c.LinkedCurrencyCode == request.CurrencyCode))
+                    .ToList();
             }
             else
             {
-                // Revalue all foreign currency accounts + multi-currency accounts + accounts with active currency links
-                // Note: Ideally we filter out base currency accounts if they are not multi-currency
-                query = query.Where(a => 
+                accounts = allAccounts.Where(a => 
                     a.IsMultiCurrency 
                     || a.CurrencyCode != "GHS" 
-                    || a.CurrencyLinks.Any(c => c.IsActive)); // Include accounts with any active currency links
+                    || a.CurrencyLinks.Any())
+                    .ToList();
             }
-
-            var accounts = await query.ToListAsync();
-            var revaluationDate = request.RevaluationDate.Date;
 
             // 2. Prepare Journal Entry
             var journalEntry = new JournalEntry
@@ -353,7 +481,7 @@ namespace ErpSystem.Api.Services
                 PostingDate = DateTime.UtcNow,
                 IsBalanced = true, // Will be balanced by Gain/Loss account
                 BookClassification = "IFRS",
-                TenantId = tenantId.Value,
+                TenantId = tenantIdValue,
                 FiscalPeriodId = await GetOpenFiscalPeriodIdAsync(revaluationDate)
             };
 
@@ -519,15 +647,47 @@ namespace ErpSystem.Api.Services
 
         private async Task<Guid> GetOpenFiscalPeriodIdAsync(DateTime date)
         {
+            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context required");
+            
             var period = await _context.FiscalPeriods
-                .FirstOrDefaultAsync(p => p.StartDate <= date && p.EndDate >= date && p.TenantId == _currentUserService.TenantId);
+                .FirstOrDefaultAsync(p => p.StartDate <= date && p.EndDate >= date && p.TenantId == tenantId);
             
             if (period != null) return period.Id;
 
-            // Fallback: Create or throw? For MVP, let's throw if not found, or use the logic from PostJournalEntryAsync
-            // Reusing logic from PostJournalEntryAsync would be better but it's embedded there.
-            // For now, throw to enforce period setup.
-            throw new InvalidOperationException($"No open fiscal period found for date {date:d}");
+            // Auto-create if missing (Robustness for MVP/Testing)
+            var fiscalYear = await _context.FiscalYears.FirstOrDefaultAsync(fy => fy.TenantId == tenantId && fy.StartDate <= date && fy.EndDate >= date) ?? new FiscalYear 
+            { 
+                Id = Guid.NewGuid(), 
+                TenantId = tenantId,
+                FiscalYearCode = date.Year.ToString(),
+                StartDate = new DateTime(date.Year, 1, 1),
+                EndDate = new DateTime(date.Year, 12, 31),
+                IsActive = true
+            };
+            
+            if (_context.Entry(fiscalYear).State == EntityState.Detached) 
+            {
+                _context.FiscalYears.Add(fiscalYear);
+                await _context.SaveChangesAsync();
+            }
+
+            period = new FiscalPeriod
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                FiscalYearId = fiscalYear.Id,
+                PeriodName = $"{date:MMMM yyyy}",
+                PeriodCode = $"{date:yyyy-MM}",
+                PeriodNumber = date.Month,
+                StartDate = new DateTime(date.Year, date.Month, 1),
+                EndDate = new DateTime(date.Year, date.Month, DateTime.DaysInMonth(date.Year, date.Month)),
+                PeriodStatus = "Open",
+                IsOpen = true
+            };
+            _context.FiscalPeriods.Add(period);
+            await _context.SaveChangesAsync();
+
+            return period.Id;
         }
 
         #endregion
@@ -794,6 +954,189 @@ namespace ErpSystem.Api.Services
             incomeStatement.NetProfit = incomeStatement.ProfitBeforeTax - incomeStatement.TaxExpense;
 
             return incomeStatement;
+        }
+
+        public async Task<MultiCurrencyDetailReportDto> GenerateMultiCurrencyDetailReportAsync(MultiCurrencyDetailRequestDto request)
+        {
+            var tenantId = _currentUserService.TenantId;
+            if (tenantId == null) throw new InvalidOperationException("Tenant context is required.");
+
+            var baseCurrency = await _tenantSettings.GetBaseCurrencyAsync();
+            var companyName = await _tenantSettings.GetCompanyNameAsync();
+
+            // 1. Identify Accounts to Include
+            var query = _context.Accounts
+                .Include(a => a.CurrencyLinks)
+                .Where(a => a.TenantId == tenantId && !a.IsDeleted);
+
+            if (request.AccountId.HasValue)
+            {
+                query = query.Where(a => a.Id == request.AccountId.Value);
+            }
+
+            if (!string.IsNullOrEmpty(request.CurrencyCode))
+            {
+                // Include accounts that are defined in this currency OR have a link to this currency
+                query = query.Where(a => a.CurrencyCode == request.CurrencyCode 
+                                      || a.CurrencyLinks.Any(cl => cl.LinkedCurrencyCode == request.CurrencyCode && cl.IsActive));
+            }
+            else
+            {
+                // If no specific currency requested, include all multi-currency accounts or accounts with links
+                query = query.Where(a => a.IsMultiCurrency || a.CurrencyLinks.Any());
+            }
+
+            var accounts = await query.ToListAsync();
+            var report = new MultiCurrencyDetailReportDto
+            {
+                CompanyName = companyName,
+                ReportDate = DateTime.UtcNow,
+                PeriodStart = request.StartDate,
+                PeriodEnd = request.EndDate
+            };
+
+            // 2. Process Each Account
+            foreach (var account in accounts)
+            {
+                // Determine which currency we are reporting on for this account
+                // If request has currency, use it.
+                // If not, and account is multi-currency, we might need to report on all its currencies?
+                // For this implementation, if no currency specified, we iterate through all foreign currencies linked or native.
+                
+                var currenciesToReport = new List<string>();
+                if (!string.IsNullOrEmpty(request.CurrencyCode))
+                {
+                    currenciesToReport.Add(request.CurrencyCode);
+                }
+                else
+                {
+                    if (account.CurrencyCode != baseCurrency) currenciesToReport.Add(account.CurrencyCode);
+                    currenciesToReport.AddRange(account.CurrencyLinks.Select(cl => cl.LinkedCurrencyCode));
+                }
+                currenciesToReport = currenciesToReport.Distinct().ToList();
+
+                foreach (var currency in currenciesToReport)
+                {
+                    // Skip if account doesn't actually support this currency (unless it's the native one)
+                    if (account.CurrencyCode != currency && !account.CurrencyLinks.Any(cl => cl.LinkedCurrencyCode == currency)) continue;
+
+                    var accountDetail = new MultiCurrencyAccountDetailDto
+                    {
+                        AccountId = account.Id,
+                        AccountNumber = account.AccountNumber,
+                        AccountName = account.AccountName,
+                        CurrencyCode = currency
+                    };
+
+                    // A. Calculate Opening Balances
+                    // Get all transactions before StartDate for this currency
+                    var openingTransactions = await _context.AccountTransactions
+                        .Where(t => t.AccountId == account.Id 
+                                 && t.TransactionDate < request.StartDate 
+                                 && t.TransactionCurrency == currency
+                                 && !t.IsDeleted)
+                        .ToListAsync();
+
+                    if (!request.IncludeRevaluation)
+                    {
+                        openingTransactions = openingTransactions.Where(t => !t.IsRevaluationEntry).ToList();
+                    }
+
+                    accountDetail.OpeningBalanceForeign = openingTransactions.Sum(t => t.ForeignCurrencyAmount ?? 0);
+                    
+                    // For Base Opening Balance, we sum the Base equivalents (Debit - Credit)
+                    // Note: This logic assumes Asset/Expense are Debit normal, others Credit normal?
+                    // Or we just report Net Debit? Let's report Net Debit (Debit - Credit) for simplicity in generic report.
+                    // Or better, stick to the Account Type normalization used in PostJournalEntry.
+                    // But AccountTransaction stores Debit/Credit absolute values.
+                    // Let's use (Debit - Credit) as the "Net Movement"
+                    
+                    accountDetail.OpeningBalanceBase = openingTransactions.Sum(t => t.DebitAmount - t.CreditAmount);
+
+                    // B. Fetch Period Transactions
+                    var periodTransactions = await _context.AccountTransactions
+                        .Where(t => t.AccountId == account.Id 
+                                 && t.TransactionDate >= request.StartDate 
+                                 && t.TransactionDate <= request.EndDate
+                                 && t.TransactionCurrency == currency
+                                 && !t.IsDeleted)
+                        .OrderBy(t => t.TransactionDate)
+                        .ThenBy(t => t.CreatedAt)
+                        .ToListAsync();
+
+                    if (!request.IncludeRevaluation)
+                    {
+                        periodTransactions = periodTransactions.Where(t => !t.IsRevaluationEntry).ToList();
+                    }
+
+                    // C. Process Transactions
+                    decimal runningForeign = accountDetail.OpeningBalanceForeign;
+                    decimal runningBase = accountDetail.OpeningBalanceBase;
+
+                    foreach (var txn in periodTransactions)
+                    {
+                        var txnDetail = new MultiCurrencyTransactionDetailDto
+                        {
+                            TransactionDate = txn.TransactionDate,
+                            Description = txn.Description ?? string.Empty,
+                            Reference = txn.SourceReferenceNumber ?? string.Empty,
+                            TransactionType = txn.DebitAmount > 0 ? "Debit" : "Credit",
+                            ForeignAmount = txn.ForeignCurrencyAmount ?? 0,
+                            ExchangeRate = txn.ExchangeRate ?? 0,
+                            BaseAmount = txn.DebitAmount > 0 ? txn.DebitAmount : txn.CreditAmount,
+                            IsRevaluation = txn.IsRevaluationEntry
+                        };
+
+                        // Update Running Balances
+                        // Foreign Amount is usually signed or we need to know direction.
+                        // In our system, ForeignCurrencyAmount seems to be absolute? 
+                        // Let's check PostJournalEntry... it doesn't explicitly set ForeignCurrencyAmount sign.
+                        // But usually ForeignAmount follows the Debit/Credit logic.
+                        // If Debit > 0, it's a "Debit" in foreign currency too.
+                        
+                        decimal netBase = txn.DebitAmount - txn.CreditAmount;
+                        decimal netForeign = 0;
+
+                        // We need to infer direction of Foreign Amount if it's stored absolute.
+                        // Assuming ForeignCurrencyAmount is absolute, we apply same sign as Base.
+                        if (txn.DebitAmount > 0) netForeign = txn.ForeignCurrencyAmount ?? 0;
+                        else netForeign = -(txn.ForeignCurrencyAmount ?? 0);
+
+                        runningForeign += netForeign;
+                        runningBase += netBase;
+
+                        txnDetail.RunningBalanceForeign = runningForeign;
+                        txnDetail.RunningBalanceBase = runningBase;
+
+                        accountDetail.Transactions.Add(txnDetail);
+
+                        // Accumulate Totals
+                        if (txn.DebitAmount > 0)
+                        {
+                            accountDetail.TotalDebitsBase += txn.DebitAmount;
+                            accountDetail.TotalDebitsForeign += (txn.ForeignCurrencyAmount ?? 0);
+                        }
+                        else
+                        {
+                            accountDetail.TotalCreditsBase += txn.CreditAmount;
+                            accountDetail.TotalCreditsForeign += (txn.ForeignCurrencyAmount ?? 0);
+                        }
+                    }
+
+                    accountDetail.ClosingBalanceForeign = runningForeign;
+                    accountDetail.ClosingBalanceBase = runningBase;
+                    
+                    // Calculate Unrealized Gain/Loss embedded in this period?
+                    // Or just the sum of revaluation entries?
+                    accountDetail.UnrealizedGainLoss = periodTransactions
+                        .Where(t => t.IsRevaluationEntry)
+                        .Sum(t => t.DebitAmount - t.CreditAmount);
+
+                    report.Accounts.Add(accountDetail);
+                }
+            }
+
+            return report;
         }
 
         private IncomeStatementSectionDto BuildIncomeStatementSection(
@@ -1484,5 +1827,14 @@ namespace ErpSystem.Api.Services
         }
 
         #endregion
+    }
+
+    internal class AccountRevalDto
+    {
+        public Guid Id { get; set; }
+        public Guid TenantId { get; set; }
+        public string? CurrencyCode { get; set; }
+        public bool IsMultiCurrency { get; set; }
+        public string Status { get; set; } = string.Empty;
     }
 }
