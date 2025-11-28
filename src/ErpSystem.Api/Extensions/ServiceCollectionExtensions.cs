@@ -476,6 +476,7 @@ namespace ErpSystem.Api.Extensions
             // Finance Services
             services.AddScoped<ISegmentConfigurationService, SegmentConfigurationService>();
             services.AddScoped<IGeneralLedgerService, GeneralLedgerService>();
+            services.AddScoped<IFinanceSettingsService, FinanceSettingsService>();
 
             // Add AutoMapper - using assembly scanning approach
             services.AddAutoMapper(typeof(Program).Assembly, typeof(ErpSystem.Core.Services.TenantService).Assembly, typeof(ErpSystem.Data.ApplicationDbContext).Assembly);

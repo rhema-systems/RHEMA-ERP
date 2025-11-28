@@ -299,6 +299,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<AccountBalance> AccountBalances { get; set; }
     public DbSet<AccountCurrencyLink> AccountCurrencyLinks { get; set; }
     public DbSet<AccountTransaction> AccountTransactions { get; set; }
+    public DbSet<FinanceSettings> FinanceSettings { get; set; }
 
 
     protected override void OnModelCreating(ModelBuilder builder)
