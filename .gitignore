@@ -253,3 +253,17 @@ tools/
 
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
+
+# Logs and output
+*_log*.txt
+*_error*.txt
+*_output*.txt
+api_crash*.txt
+startup_error.txt
+last_error.txt
+
+# Token/auth files (security)
+token_output*.txt
+
+# Debug files
+debug_*.txt
