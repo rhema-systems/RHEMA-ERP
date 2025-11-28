@@ -13,16 +13,19 @@ $token = ""
 Write-Host "Generating Token..." -ForegroundColor Cyan
 try {
     & ".\TestLoginApp\bin\Debug\net9.0\TestLoginApp.exe" > token_output_reval.txt 2>&1
+    
     $output = Get-Content token_output_reval.txt -Raw
+    Write-Host "Output length: $($output.Length)"
     $start = $output.IndexOf('TOKEN_START') + 11
     $end = $output.IndexOf('TOKEN_END')
+    Write-Host "Start index: $start, End index: $end"
     
     if ($start -gt 10 -and $end -gt $start) {
         $token = $output.Substring($start, $end - $start).Trim()
-        Write-Host "Token generated successfully." -ForegroundColor Green
+        Write-Host "Token generated successfully. Length: $($token.Length)" -ForegroundColor Green
     }
     else {
-        Write-Error "Failed to extract token."
+        Write-Error "Failed to extract token. Start: $start, End: $end"
         exit 1
     }
 }
@@ -33,13 +36,18 @@ catch {
 
 $headers = @{
     "Authorization" = "Bearer $token"
-    "Content-Type"  = "application/json"
 }
 
 function Invoke-ApiRequest {
     param ([string]$Method, [string]$Uri, [hashtable]$Body = $null)
     try {
-        $params = @{ Method = $Method; Uri = $baseUrl + $Uri; Headers = $headers; ErrorAction = "Stop" }
+        $params = @{ 
+            Method      = $Method
+            Uri         = $baseUrl + $Uri
+            Headers     = $headers
+            ContentType = "application/json"
+            ErrorAction = "Stop" 
+        }
         if ($Body) { $params.Body = $Body | ConvertTo-Json -Depth 10 }
         return Invoke-RestMethod @params
     }
