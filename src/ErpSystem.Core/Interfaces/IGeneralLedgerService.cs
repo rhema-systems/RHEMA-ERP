@@ -11,8 +11,8 @@ namespace ErpSystem.Core.Interfaces
         #region Account Management
         Task<Account> CreateSegmentedAccountAsync(AccountCreateDto accountDto);
         Task<bool> ValidateAccountStructureAsync(string accountNumber);
-        Task<Account> GetAccountByIdAsync(Guid accountId);
-        Task<Account> GetAccountByCodeAsync(string accountCode);
+        Task<Account?> GetAccountByIdAsync(Guid accountId);
+        Task<Account?> GetAccountByCodeAsync(string accountCode);
         Task<IEnumerable<Account>> GetAllAccountsAsync();
         #endregion
 
@@ -31,6 +31,7 @@ namespace ErpSystem.Core.Interfaces
         Task<IncomeStatementDto> GenerateIncomeStatementAsync(IncomeStatementRequestDto request);
         Task<TrialBalanceDto> GenerateTrialBalanceAsync(TrialBalanceRequestDto request);
         Task<CashFlowStatementDto> GenerateCashFlowStatementAsync(CashFlowStatementRequestDto request);
+        Task<MultiCurrencyDetailReportDto> GenerateMultiCurrencyDetailReportAsync(MultiCurrencyDetailRequestDto request);
         #endregion
 
         #region Period-End Close

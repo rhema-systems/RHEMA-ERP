@@ -39,21 +39,6 @@ namespace ErpSystem.Api.Extensions
             // Use the new configurable database provider
             return services.AddConfigurableDatabase(configuration);
 
-            // OLD METHOD (commented out - kept for reference):
-            /*
-            var connectionString = configuration.GetConnectionString("DefaultConnection") ??
-                throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
-
-            services.AddDbContext<ApplicationDbContext>(options =>
-                options.UseSqlServer(connectionString, sqlOptions =>
-                {
-                    sqlOptions.MigrationsAssembly("ErpSystem.Data");
-                    sqlOptions.EnableRetryOnFailure(
-                        maxRetryCount: 5,
-                        maxRetryDelay: TimeSpan.FromSeconds(30),
-                        errorNumbersToAdd: null);
-                }));
-            */
         }
 
         public static IServiceCollection AddErpSystemIdentity(this IServiceCollection services)
@@ -106,9 +91,9 @@ namespace ErpSystem.Api.Extensions
                 {
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = new SymmetricSecurityKey(key),
-                    ValidateIssuer = true,
+                    ValidateIssuer = !string.IsNullOrEmpty(jwtSettings["Issuer"]),
                     ValidIssuer = jwtSettings["Issuer"],
-                    ValidateAudience = true,
+                    ValidateAudience = !string.IsNullOrEmpty(jwtSettings["Audience"]),
                     ValidAudience = jwtSettings["Audience"],
                     ValidateLifetime = true,
                     ClockSkew = TimeSpan.Zero
@@ -278,6 +263,7 @@ namespace ErpSystem.Api.Extensions
 
             // Settings services
             services.AddScoped<ISettingsService, SettingsService>();
+            services.AddScoped<ITenantSettingsService, ErpSystem.Api.Services.TenantSettingsService>();
 
             // Email template services
             services.AddScoped<IEmailTemplateService, EmailTemplateService>();
@@ -486,6 +472,10 @@ namespace ErpSystem.Api.Extensions
                 ErpSystem.Core.Services.Maintenance.MaintenanceEscalationService>();
             services.AddScoped<ErpSystem.Core.Services.Maintenance.IDeadLetterNotificationService,
                 ErpSystem.Core.Services.Maintenance.DeadLetterNotificationService>();
+
+            // Finance Services
+            services.AddScoped<ISegmentConfigurationService, SegmentConfigurationService>();
+            services.AddScoped<IGeneralLedgerService, GeneralLedgerService>();
 
             // Add AutoMapper - using assembly scanning approach
             services.AddAutoMapper(typeof(Program).Assembly, typeof(ErpSystem.Core.Services.TenantService).Assembly, typeof(ErpSystem.Data.ApplicationDbContext).Assembly);
