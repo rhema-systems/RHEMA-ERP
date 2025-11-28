@@ -109,9 +109,33 @@ public class CurrentUserService : ICurrentUserService, ICurrentUserProvider
         get
         {
             var tenantIdClaim = _httpContextAccessor.HttpContext?.User?.FindFirst("tenant_id");
-            if (tenantIdClaim != null && Guid.TryParse(tenantIdClaim.Value, out var tenantId))
+            Console.WriteLine($"DEBUG CurrentUserService: tenant_id claim found: {tenantIdClaim != null}");
+            if (tenantIdClaim != null)
             {
-                return tenantId;
+                Console.WriteLine($"DEBUG CurrentUserService: tenant_id claim value: '{tenantIdClaim.Value}'");
+                if (Guid.TryParse(tenantIdClaim.Value, out var tenantId))
+                {
+                    Console.WriteLine($"DEBUG CurrentUserService: Parsed tenant_id: {tenantId}");
+                    return tenantId;
+                }
+                else
+                {
+                    Console.WriteLine($"DEBUG CurrentUserService: Failed to parse tenant_id as Guid");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"DEBUG CurrentUserService: No tenant_id claim found");
+                // List all claims for debugging
+                var allClaims = _httpContextAccessor.HttpContext?.User?.Claims;
+                if (allClaims != null)
+                {
+                    Console.WriteLine("DEBUG CurrentUserService: All claims:");
+                    foreach (var claim in allClaims)
+                    {
+                        Console.WriteLine($"  - {claim.Type}: {claim.Value}");
+                    }
+                }
             }
             return null;
         }
