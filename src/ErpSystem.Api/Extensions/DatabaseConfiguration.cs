@@ -1,3 +1,4 @@
+
 using Microsoft.EntityFrameworkCore;
 using ErpSystem.Data;
 using ErpSystem.Data.Extensions;
@@ -34,9 +35,17 @@ namespace ErpSystem.Api.Extensions
             {
                 ConfigureDatabase(options, provider, connectionString);
                 
-                // Enable lazy loading proxies for better navigation property handling
-                // Temporarily commented out due to build errors
-                // options.UseLazyLoadingProxies();
+                // Add audit interceptor if enabled
+                if (auditEnabled)
+                {
+                    options.AddAuditInterceptor(serviceProvider);
+                }
+            });
+
+            // Register ReportingDbContext with the same configuration
+            services.AddDbContext<ReportingDbContext>((serviceProvider, options) =>
+            {
+                ConfigureDatabase(options, provider, connectionString);
                 
                 // Add audit interceptor if enabled
                 if (auditEnabled)

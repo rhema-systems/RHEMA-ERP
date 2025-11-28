@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Data;
+
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Api.Services
@@ -14,15 +15,18 @@ namespace ErpSystem.Api.Services
     public class GeneralLedgerService : IGeneralLedgerService
     {
         private readonly ApplicationDbContext _context;
+        private readonly ReportingDbContext _reportingContext;
         private readonly ICurrentUserService _currentUserService;
         private readonly ITenantSettingsService _tenantSettings;
 
         public GeneralLedgerService(
-            ApplicationDbContext context, 
+            ApplicationDbContext context,
+            ReportingDbContext reportingContext,
             ICurrentUserService currentUserService,
             ITenantSettingsService tenantSettings)
         {
             _context = context;
+            _reportingContext = reportingContext;
             _currentUserService = currentUserService;
             _tenantSettings = tenantSettings;
         }
@@ -401,6 +405,15 @@ namespace ErpSystem.Api.Services
 
         public async Task<JournalEntry> RunCurrencyRevaluationAsync(RevaluationRequestDto request)
         {
+            var strategy = _context.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
+            {
+                return await RunCurrencyRevaluationCoreAsync(request);
+            });
+        }
+
+        private async Task<JournalEntry> RunCurrencyRevaluationCoreAsync(RevaluationRequestDto request)
+        {
             var tenantId = _currentUserService.TenantId;
             if (tenantId == null) throw new InvalidOperationException("Tenant context is required.");
 
@@ -409,33 +422,13 @@ namespace ErpSystem.Api.Services
             var revaluationDate = request.RevaluationDate.Date;
 
             // 1. Get Accounts to Revalue
-            // Use Raw SQL with DTO projection to handle schema mismatches (Status is INT in DB, String in Entity)
-            // and bypass EF Core translation issues.
-            var accountDtos = await _context.Database.SqlQuery<AccountRevalDto>($@"
-                SELECT 
-                    Id, 
-                    TenantId, 
-                    CurrencyCode, 
-                    IsMultiCurrency,
-                    CASE WHEN Status = 1 THEN 'Active' ELSE 'Inactive' END as Status
-                FROM Accounts 
-                WHERE TenantId = {tenantIdValue} 
-                  AND IsDeleted = 0
-                  AND Status = 1 -- Active
-            ").ToListAsync();
-
-            // Map DTOs to Account entities
-            var allAccounts = accountDtos.Select(dto => new Account
-            {
-                Id = dto.Id,
-                TenantId = dto.TenantId,
-                CurrencyCode = dto.CurrencyCode,
-                IsMultiCurrency = dto.IsMultiCurrency,
-                // Convert string status from DTO to Enum
-                Status = Enum.TryParse<ErpSystem.Core.Enums.AccountStatus>(dto.Status, out var status) 
-                    ? status 
-                    : ErpSystem.Core.Enums.AccountStatus.Active // Default fallback
-            }).ToList();
+            // Use ReportingDbContext to bypass global filters (TenantId, SoftDelete) which cause EF Core translation issues.
+            // We manually apply the filters here.
+            var allAccounts = await _reportingContext.Accounts
+                .Where(a => a.TenantId == tenantIdValue 
+                         && !a.IsDeleted 
+                         && a.Status == ErpSystem.Core.Enums.AccountStatus.Active)
+                .ToListAsync();
 
             // Load currency links separately for the accounts we need
             var accountIds = allAccounts.Select(a => a.Id).ToList();
@@ -564,7 +557,7 @@ namespace ErpSystem.Api.Services
                         FiscalPeriodId = journalEntry.FiscalPeriodId,
                         LineNumber = lineNum++,
                         BookClassification = "IFRS",
-                        TenantId = tenantId.Value
+                        TenantId = tenantIdValue
                     };
 
                     if (adjustment > 0)
@@ -608,7 +601,7 @@ namespace ErpSystem.Api.Services
                 FiscalPeriodId = journalEntry.FiscalPeriodId,
                 LineNumber = lineNum++,
                 BookClassification = "IFRS",
-                TenantId = tenantId.Value
+                TenantId = tenantIdValue
             };
 
             // TotalAdjustment is Net Debit change.
@@ -1829,12 +1822,5 @@ namespace ErpSystem.Api.Services
         #endregion
     }
 
-    internal class AccountRevalDto
-    {
-        public Guid Id { get; set; }
-        public Guid TenantId { get; set; }
-        public string? CurrencyCode { get; set; }
-        public bool IsMultiCurrency { get; set; }
-        public string Status { get; set; } = string.Empty;
-    }
+
 }

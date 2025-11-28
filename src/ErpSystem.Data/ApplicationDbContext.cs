@@ -48,11 +48,35 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             }
             catch
             {
-                // Tenant ID not available - this is fine for seeding and anonymous requests
-                _tenantId = null;
+                // Ignore errors during tenant resolution
             }
         }
     }
+
+    protected ApplicationDbContext(DbContextOptions options, IServiceProvider serviceProvider) : base(options)
+    {
+        // Try to get tenant ID from ICurrentUserProvider
+        var currentUserProvider = serviceProvider?.GetService(typeof(ErpSystem.Core.Interfaces.ICurrentUserProvider))
+            as ErpSystem.Core.Interfaces.ICurrentUserProvider;
+
+        if (currentUserProvider != null)
+        {
+            try
+            {
+                var tid = currentUserProvider.TenantId;
+                if (tid != Guid.Empty)
+                {
+                    _tenantId = tid;
+                }
+            }
+            catch
+            {
+                // Ignore errors during tenant resolution
+            }
+        }
+    }
+
+
 
     // Core entities
     public DbSet<Tenant> Tenants { get; set; }
@@ -2195,7 +2219,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         });
     }
 
-    private void ApplyGlobalFilters(ModelBuilder builder)
+    protected virtual void ApplyGlobalFilters(ModelBuilder builder)
     {
         // Apply soft delete filter to all entities that inherit from BaseEntity
         foreach (var entityType in builder.Model.GetEntityTypes())
@@ -2210,12 +2234,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             }
 
             // Apply tenant filter to all entities that inherit from TenantEntity
-            if (typeof(TenantEntity).IsAssignableFrom(type) && _tenantId.HasValue)
+            if (typeof(TenantEntity).IsAssignableFrom(type))
             {
                 var method = typeof(ApplicationDbContext)
-                    .GetMethod(nameof(SetTenantFilter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                    .GetMethod(nameof(SetTenantFilter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
                     .MakeGenericMethod(type);
-                method.Invoke(null, new object[] { builder, entityType, _tenantId.Value });
+                method.Invoke(this, new object[] { builder, entityType });
             }
         }
     }
@@ -2226,10 +2250,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<TEntity>().HasQueryFilter(e => !e.IsDeleted);
     }
 
-    private static void SetTenantFilter<TEntity>(ModelBuilder builder, Microsoft.EntityFrameworkCore.Metadata.IMutableEntityType entityType, Guid tenantId)
+    private void SetTenantFilter<TEntity>(ModelBuilder builder, Microsoft.EntityFrameworkCore.Metadata.IMutableEntityType entityType)
         where TEntity : TenantEntity
     {
-        builder.Entity<TEntity>().HasQueryFilter(e => e.TenantId == tenantId);
+        // Use a simpler expression that EF Core can translate reliably
+        // This avoids the closure issue by using the field directly in a way EF understands
+        builder.Entity<TEntity>().HasQueryFilter(e => _tenantId == null || e.TenantId == _tenantId);
     }
 
     private void SeedData(ModelBuilder builder)

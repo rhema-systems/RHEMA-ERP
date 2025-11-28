@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces;
 
@@ -11,10 +12,12 @@ namespace ErpSystem.Api.Controllers
     public class FinanceController : ControllerBase
     {
         private readonly IGeneralLedgerService _glService;
+        private readonly ICurrentUserService _currentUserService;
 
-        public FinanceController(IGeneralLedgerService glService)
+        public FinanceController(IGeneralLedgerService glService, ICurrentUserService currentUserService)
         {
             _glService = glService;
+            _currentUserService = currentUserService;
         }
 
         [HttpPost("accounts")]
@@ -22,21 +25,53 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
+                if (accountDto == null)
+                    return BadRequest(new { error = "Request body cannot be null" });
+
                 var account = await _glService.CreateSegmentedAccountAsync(accountDto);
-                return CreatedAtAction(nameof(GetAccount), new { id = account.Id }, account);
+                
+                return CreatedAtAction(
+                    nameof(GetAccountBalance),
+                    new { id = account.Id },
+                    new
+                    {
+                        id = account.Id,
+                        accountCode = account.AccountCode,
+                        accountNumber = account.AccountNumber,
+                        accountName = account.AccountName,
+                        accountType = account.AccountType.ToString(),
+                        currencyCode = account.CurrencyCode
+                    });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message, parameter = ex.ParamName });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
             }
             catch (Exception ex)
             {
-                return BadRequest(new { message = ex.Message });
+                Console.WriteLine($"ERROR in CreateAccount: {ex.Message}");
+                return StatusCode(500, new { error = "An error occurred while creating the account", details = ex.Message });
             }
         }
 
-        [HttpGet("accounts/{id}")]
-        public async Task<IActionResult> GetAccount(Guid id)
+        [HttpGet("debug/claims")]
+        public IActionResult GetClaims()
         {
-            var account = await _glService.GetAccountByIdAsync(id);
-            if (account == null) return NotFound();
-            return Ok(account);
+            var claims = User.Claims.Select(c => new { c.Type, c.Value }).ToList();
+            var tenantId = _glService.GetType().GetProperty("_currentUserService", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            
+            return Ok(new
+            {
+                claims = claims,
+                tenantIdFromService = _currentUserService?.TenantId,
+                isAuthenticated = User.Identity?.IsAuthenticated,
+                userName = User.Identity?.Name
+            });
         }
 
         [HttpPost("journal-entries")]
@@ -123,6 +158,20 @@ namespace ErpSystem.Api.Controllers
             {
                 var cashFlowStatement = await _glService.GenerateCashFlowStatementAsync(request);
                 return Ok(cashFlowStatement);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpGet("statements/multi-currency-detail")]
+        public async Task<IActionResult> GetMultiCurrencyDetailReport([FromQuery] MultiCurrencyDetailRequestDto request)
+        {
+            try
+            {
+                var report = await _glService.GenerateMultiCurrencyDetailReportAsync(request);
+                return Ok(report);
             }
             catch (Exception ex)
             {
