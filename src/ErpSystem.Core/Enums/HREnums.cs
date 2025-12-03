@@ -2554,6 +2554,21 @@ public enum TransferStatus
     Cancelled = 6
 }
 
+public enum AssetAttributeDataType
+{
+    Checkbox = 1,
+
+    Date = 2,
+
+    Decimal = 3,
+
+    Dropdown = 4,
+
+    Integer = 5,
+
+    Text = 6
+}
+
 #endregion Staff Assets
 
 #region Career Movement
