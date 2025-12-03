@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.HR.StaffLeave;
+using ErpSystem.Core.Entities.HR.Performance;
 
 namespace ErpSystem.Core.Entities.HR;
 
@@ -273,6 +274,10 @@ public class Employee : TenantEntity
     public virtual ICollection<LeaveRequest> LeaveRequests { get; set; } = new List<LeaveRequest>();
     public virtual ICollection<LeaveBalance> LeaveBalances { get; set; } = new List<LeaveBalance>();
     public virtual ICollection<LeavePlan> LeavePlans { get; set; } = new List<LeavePlan>();
+
+    // Performance Management
+    public virtual ICollection<PerformanceAppraisal> PerformanceAppraisals { get; set; } = new List<PerformanceAppraisal>();
+
 
     // Manager/Employee relationship
     public virtual ICollection<Employee> DirectReports { get; set; } = new List<Employee>(); // Employees who report to this manager

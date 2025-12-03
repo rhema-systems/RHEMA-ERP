@@ -431,6 +431,14 @@ namespace ErpSystem.Api.Extensions
 
             services.AddScoped<ILeaveService, LeaveService>();
             
+            services.AddScoped<IAppraisalGradeDefinitionService, AppraisalGradeDefinitionService>();
+            services.AddScoped<IKpiDefinitionService, KpiDefinitionService>();
+            services.AddScoped<IAppraisalCriteriaService, AppraisalCriteriaService>();
+            services.AddScoped<IPerformanceAppraisalService, PerformanceAppraisalService>();
+            services.AddScoped<IPerformanceImprovementPlanService, PerformanceImprovementPlanService>();
+            services.AddScoped<IPositionCriteriaMappingService, PositionCriteriaMappingService>();
+            services.AddScoped<IEmployeeKpiTargetService, EmployeeKpiTargetService>();
+            
             #endregion HR Services
             
             // Maintenance background services - temporarily disabled to get API running

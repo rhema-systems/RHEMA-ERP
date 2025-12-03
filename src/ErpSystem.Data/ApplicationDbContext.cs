@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data.Configuration;
 using ErpSystem.Core.Entities.HR.StaffLeave;
+using ErpSystem.Core.Entities.HR.Performance;
 
 namespace ErpSystem.Data;
 
@@ -218,6 +219,22 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<LeavePlan> LeavePlans { get; set; }
     public DbSet<LeaveRequest> LeaveRequests { get; set; }
     public DbSet<PublicHoliday> PublicHolidays { get; set; }
+
+    // Performance Management
+    public DbSet<AppraisalGradeDefinition> AppraisalGradeDefinitions { get; set; }
+    public DbSet<KpiDefinition> KpiDefinitions { get; set; }
+    public DbSet<AppraisalCriteria> AppraisalCriterias { get; set; }
+    public DbSet<PositionCriteriaMapping> PositionCriteriaMappings { get; set; }
+    public DbSet<MappingGradeRange> MappingGradeRanges { get; set; }
+    public DbSet<EmployeeKpiTarget> EmployeeKpiTargets { get; set; }
+    public DbSet<PerformanceAppraisal> PerformanceAppraisals { get; set; }
+    public DbSet<EvaluatorEvaluation> EvaluatorEvaluations { get; set; }
+    public DbSet<CriterionScore> CriterionScores { get; set; }
+    public DbSet<KpiEvaluationRecord> KpiEvaluationRecords { get; set; }
+    public DbSet<AppraisalEmployeeResponse> AppraisalEmployeeResponses { get; set; }
+    public DbSet<AppraisalAttachment> AppraisalAttachments { get; set; }
+    public DbSet<PerformanceImprovementPlan> PerformanceImprovementPlans { get; set; }
+    public DbSet<PipReviewMeeting> PipReviewMeetings { get; set; }
 
     #endregion HR Entities
 
@@ -2016,6 +2033,273 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.HasIndex(x => x.Date);
             entity.HasIndex(x => x.Year);
+        });
+
+        builder.Entity<AppraisalGradeDefinition>(entity =>
+        {
+            entity.HasIndex(x => x.GradeName);
+
+            entity.HasMany(x => x.MappingGradeRanges)
+                .WithOne(x => x.GradeDefinition)
+                .HasForeignKey(x => x.GradeDefinitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AppraisalCriteria>(entity =>
+        {
+            entity.HasIndex(x => x.CriteriaName);
+            entity.HasIndex(x => x.Code);
+            entity.HasIndex(x => x.CriteriaType);
+
+            entity.HasOne(x => x.KpiDefinition)
+                .WithMany(x => x.AppraisalCriterias)
+                .HasForeignKey(x => x.KpiDefinitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<KpiDefinition>(entity =>
+        {
+            entity.HasIndex(x => x.KpiName);
+            entity.HasIndex(x => x.MeasurementType);
+
+            entity.HasMany(x => x.EmployeeKpiTargets)
+                .WithOne(x => x.KpiDefinition)
+                .HasForeignKey(x => x.KpiDefinitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PositionCriteriaMapping>(entity =>
+        {
+            entity.HasIndex(x => x.DepartmentId);
+            entity.HasIndex(x => x.PositionId);
+            entity.HasIndex(x => new { x.CriteriaId, x.PositionId }).IsUnique(false);
+
+            entity.HasOne(x => x.Department)
+                .WithMany()
+                .HasForeignKey(x => x.DepartmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Position)
+                .WithMany()
+                .HasForeignKey(x => x.PositionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.AppraisalCriteria)
+                .WithMany(x => x.PositionCriteriaMappings)
+                .HasForeignKey(x => x.CriteriaId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<MappingGradeRange>(entity =>
+        {
+            entity.HasIndex(x => x.PositionCriteriaMappingId);
+            entity.HasIndex(x => x.GradeDefinitionId);
+
+            entity.HasOne(x => x.PositionCriteriaMapping)
+                .WithMany(x => x.MappingGradeRanges)
+                .HasForeignKey(x => x.PositionCriteriaMappingId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PerformanceAppraisal>(entity =>
+        {
+            entity.HasIndex(x => x.AppraisalNumber).IsUnique(false);
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.Year);
+            entity.HasIndex(x => x.AppraisalType);
+            entity.HasIndex(x => x.Status);
+
+            entity.HasOne(x => x.Employee)
+                .WithMany(x => x.PerformanceAppraisals)
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(x => x.EvaluatorEvaluations)
+                .WithOne(x => x.Appraisal)
+                .HasForeignKey(x => x.AppraisalId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(x => x.EmployeeResponses)
+                .WithOne(x => x.Appraisal)
+                .HasForeignKey(x => x.AppraisalId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(x => x.Attachments)
+                .WithOne(x => x.Appraisal)
+                .HasForeignKey(x => x.AppraisalId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EvaluatorEvaluation>(entity =>
+        {
+            entity.HasIndex(x => x.AppraisalId);
+            entity.HasIndex(x => x.EvaluatorId);
+            entity.HasIndex(x => new { x.AppraisalId, x.EvaluatorId }).IsUnique(false);
+
+            entity.HasOne(x => x.Appraisal)
+                .WithMany(x => x.EvaluatorEvaluations)
+                .HasForeignKey(x => x.AppraisalId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Evaluator)
+                .WithMany()
+                .HasForeignKey(x => x.EvaluatorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(x => x.CriterionScores)
+                .WithOne(x => x.EvaluatorEvaluation)
+                .HasForeignKey(x => x.EvaluatorEvaluationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<CriterionScore>(entity =>
+        {
+            entity.HasIndex(x => x.EvaluatorEvaluationId);
+            entity.HasIndex(x => x.CriteriaId);
+            entity.HasIndex(x => x.KpiEvaluationRecordId);
+
+            entity.HasOne(x => x.EvaluatorEvaluation)
+                .WithMany(x => x.CriterionScores)
+                .HasForeignKey(x => x.EvaluatorEvaluationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.AppraisalCriteria)
+                .WithMany()
+                .HasForeignKey(x => x.CriteriaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.KpiEvaluationRecord)
+                .WithMany(x => x.CriterionScores)
+                .HasForeignKey(x => x.KpiEvaluationRecordId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AppraisalEmployeeResponse>(entity =>
+        {
+            entity.HasIndex(x => x.AppraisalId);
+            entity.HasIndex(x => x.CriteriaId);
+
+            entity.HasOne(x => x.Appraisal)
+                .WithMany(x => x.EmployeeResponses)
+                .HasForeignKey(x => x.AppraisalId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.AppraisalCriteria)
+                .WithMany()
+                .HasForeignKey(x => x.CriteriaId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AppraisalAttachment>(entity =>
+        {
+            entity.HasIndex(x => x.AppraisalId);
+            entity.HasIndex(x => x.FileName);
+
+            entity.HasOne(x => x.Appraisal)
+                .WithMany(x => x.Attachments)
+                .HasForeignKey(x => x.AppraisalId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeKpiTarget>(entity =>
+        {
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.KpiDefinitionId);
+            entity.HasIndex(x => x.PositionCriteriaMappingId);
+            entity.HasIndex(x => new { x.EmployeeId, x.KpiDefinitionId, x.PeriodStart, x.PeriodEnd });
+
+            // Employee
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // KPI Definition
+            entity.HasOne(x => x.KpiDefinition)
+                .WithMany(x => x.EmployeeKpiTargets)
+                .HasForeignKey(x => x.KpiDefinitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Position Criteria Mapping
+            entity.HasOne(x => x.PositionCriteriaMapping)
+                .WithMany()
+                .HasForeignKey(x => x.PositionCriteriaMappingId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // KPI Evaluation Records
+            entity.HasMany(x => x.KpiEvaluationRecords)
+                .WithOne(x => x.EmployeeKpiTarget)
+                .HasForeignKey(x => x.EmployeeKpiTargetId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<KpiEvaluationRecord>(entity =>
+        {
+            entity.HasIndex(x => x.EmployeeKpiTargetId);
+            entity.HasIndex(x => x.EvaluatorId);
+            entity.HasIndex(x => x.IsSelfEvaluation);
+            entity.HasIndex(x => x.EvaluationDate);
+
+            entity.HasOne(x => x.EmployeeKpiTarget)
+                .WithMany(x => x.KpiEvaluationRecords)
+                .HasForeignKey(x => x.EmployeeKpiTargetId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Evaluator)
+                .WithMany()
+                .HasForeignKey(x => x.EvaluatorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(x => x.CriterionScores)
+                .WithOne(x => x.KpiEvaluationRecord)
+                .HasForeignKey(x => x.KpiEvaluationRecordId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PerformanceImprovementPlan>(entity =>
+        {
+            entity.HasIndex(x => x.PipNumber).IsUnique(false);
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.AppraisalId);
+            entity.HasIndex(x => x.SupervisorId);
+            entity.HasIndex(x => x.Status);
+
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Appraisal)
+                .WithMany()
+                .HasForeignKey(x => x.AppraisalId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Supervisor)
+                .WithMany()
+                .HasForeignKey(x => x.SupervisorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(x => x.ReviewMeetings)
+                .WithOne(x => x.Pip)
+                .HasForeignKey(x => x.PipId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PipReviewMeeting>(entity =>
+        {
+            entity.HasIndex(x => x.PipId);
+            entity.HasIndex(x => x.ConductedById);
+            entity.HasIndex(x => x.MeetingDate);
+
+            entity.HasOne(x => x.Pip)
+                .WithMany(x => x.ReviewMeetings)
+                .HasForeignKey(x => x.PipId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ConductedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ConductedById)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 
