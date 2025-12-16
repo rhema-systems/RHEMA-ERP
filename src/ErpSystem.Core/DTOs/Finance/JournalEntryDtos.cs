@@ -41,4 +41,17 @@ namespace ErpSystem.Core.DTOs.Finance
 
         public List<CreateAccountTransactionDto> Transactions { get; set; } = new();
     }
+
+    public class UpdateJournalEntryDto
+    {
+        public DateTime? TransactionDate { get; set; }
+
+        [MaxLength(500)]
+        public string? Description { get; set; }
+
+        [MaxLength(100)]
+        public string? Reference { get; set; }
+
+        public List<CreateAccountTransactionDto>? Transactions { get; set; }
+    }
 }
