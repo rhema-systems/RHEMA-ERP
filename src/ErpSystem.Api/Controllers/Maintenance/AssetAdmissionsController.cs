@@ -28,7 +28,11 @@ public class AssetAdmissionsController : ControllerBase
     public async Task<ActionResult<AssetAdmissionDto>> GetAdmissionById(Guid id)
     {
         var result = await _admissionService.GetAdmissionByIdAsync(id);
-        if (result == null) return NotFound();
+        if (result == null)
+        {
+            return NotFound();
+        }
+
         return Ok(result);
     }
 

@@ -128,7 +128,9 @@ public class WorkOrderToolsController : ControllerBase
         try
         {
             if (workOrderId != allocateDto.WorkOrderId)
+            {
                 return BadRequest("Work order ID mismatch");
+            }
 
             var result = await _workOrderToolService.AllocateToolAsync(allocateDto);
             return CreatedAtAction(nameof(GetWorkOrderTools), new { workOrderId }, result);
@@ -162,7 +164,9 @@ public class WorkOrderToolsController : ControllerBase
         {
             // Validate all DTOs have matching work order ID
             if (allocateDtos.Any(dto => dto.WorkOrderId != workOrderId))
+            {
                 return BadRequest("All tools must be for the specified work order");
+            }
 
             var results = await _workOrderToolService.AllocateToolsBulkAsync(allocateDtos);
             return Ok(results);
@@ -216,10 +220,14 @@ public class WorkOrderToolsController : ControllerBase
         try
         {
             if (workOrderId != checkoutDto.WorkOrderId)
+            {
                 return BadRequest("Work order ID mismatch");
+            }
 
             if (toolId != checkoutDto.ToolId)
+            {
                 return BadRequest("Tool ID mismatch");
+            }
 
             var result = await _workOrderToolService.CheckoutToolAsync(checkoutDto);
             return Ok(result);

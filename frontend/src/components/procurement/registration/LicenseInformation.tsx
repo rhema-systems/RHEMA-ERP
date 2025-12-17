@@ -94,7 +94,7 @@ export default function LicenseInformation({ formData, updateFormData }: License
 
   const getLicenseTypeName = (licenseTypeId: string): string => {
     const licenseType = licenseTypes.find((lt) => lt.id === licenseTypeId);
-    return licenseType?.name || 'Unknown License';
+    return licenseType?.licenseName || 'Unknown License';
   };
 
   // Show message if partner type is Supplier (licenses typically for contractors)
@@ -148,7 +148,7 @@ export default function LicenseInformation({ formData, updateFormData }: License
                   <SelectContent>
                     {licenseTypes.map((type) => (
                       <SelectItem key={type.id} value={type.id}>
-                        {type.name}
+                        {type.licenseName}
                         {type.isMandatory && <Badge className="ml-2 text-xs">Required</Badge>}
                       </SelectItem>
                     ))}

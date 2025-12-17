@@ -1,12 +1,12 @@
 using AutoMapper;
-using Microsoft.Extensions.Logging;
+using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Maintenance;
-using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Api.Services.Maintenance;
 
@@ -48,11 +48,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
             _logger.LogInformation("Creating new maintenance asset: {AssetName}", createDto.Name);
 
             // Validate category exists
-            var category = await _categoryRepository.GetByIdAsync(createDto.AssetCategoryId);
-            if (category == null)
-            {
-                throw new ArgumentException($"Asset category with ID {createDto.AssetCategoryId} not found");
-            }
+            var category = await _categoryRepository.GetByIdAsync(createDto.AssetCategoryId) ?? throw new ArgumentException($"Asset category with ID {createDto.AssetCategoryId} not found");
 
             // Generate asset number if not provided
             if (string.IsNullOrEmpty(createDto.AssetNumber))
@@ -71,16 +67,12 @@ public class MaintenanceAssetService : IMaintenanceAssetService
             // Validate parent asset if specified
             if (createDto.ParentAssetId.HasValue)
             {
-                var parentAsset = await _assetRepository.GetByIdAsync(createDto.ParentAssetId.Value);
-                if (parentAsset == null)
-                {
-                    throw new ArgumentException($"Parent asset with ID {createDto.ParentAssetId} not found");
-                }
+                var parentAsset = await _assetRepository.GetByIdAsync(createDto.ParentAssetId.Value) ?? throw new ArgumentException($"Parent asset with ID {createDto.ParentAssetId} not found");
             }
 
             var asset = _mapper.Map<MaintenanceAsset>(createDto);
             asset.TenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
-            
+
             // Debug logging
             _logger.LogInformation("Creating asset with AssetCategoryId: {CategoryId}", asset.AssetCategoryId);
 
@@ -128,27 +120,15 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         {
             _logger.LogInformation("Updating maintenance asset: {AssetId}", id);
 
-            var existingAsset = await _assetRepository.GetByIdAsync(id);
-            if (existingAsset == null)
-            {
-                throw new ArgumentException($"Asset with ID {id} not found");
-            }
+            var existingAsset = await _assetRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Asset with ID {id} not found");
 
             // Validate category exists
-            var category = await _categoryRepository.GetByIdAsync(updateDto.AssetCategoryId);
-            if (category == null)
-            {
-                throw new ArgumentException($"Asset category with ID {updateDto.AssetCategoryId} not found");
-            }
+            var category = await _categoryRepository.GetByIdAsync(updateDto.AssetCategoryId) ?? throw new ArgumentException($"Asset category with ID {updateDto.AssetCategoryId} not found");
 
             // Validate parent asset if specified
             if (updateDto.ParentAssetId.HasValue)
             {
-                var parentAsset = await _assetRepository.GetByIdAsync(updateDto.ParentAssetId.Value);
-                if (parentAsset == null)
-                {
-                    throw new ArgumentException($"Parent asset with ID {updateDto.ParentAssetId} not found");
-                }
+                var parentAsset = await _assetRepository.GetByIdAsync(updateDto.ParentAssetId.Value) ?? throw new ArgumentException($"Parent asset with ID {updateDto.ParentAssetId} not found");
 
                 // Ensure no circular reference
                 if (await WouldCreateCircularReference(id, updateDto.ParentAssetId.Value))
@@ -178,11 +158,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         {
             _logger.LogInformation("Deleting maintenance asset: {AssetId}", id);
 
-            var asset = await _assetRepository.GetByIdAsync(id);
-            if (asset == null)
-            {
-                throw new ArgumentException($"Asset with ID {id} not found");
-            }
+            var asset = await _assetRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Asset with ID {id} not found");
 
             // Check for child assets
             var childAssets = await _assetRepository.GetByParentAssetIdAsync(id);
@@ -233,7 +209,9 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         try
         {
             if (ids == null || !ids.Any())
+            {
                 return Enumerable.Empty<MaintenanceAssetDto>();
+            }
 
             var assets = await _assetRepository.GetQueryable()
                 .Include(a => a.AssetCategory)
@@ -273,7 +251,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
 
             if (!string.IsNullOrEmpty(searchTerm))
             {
-                query = query.Where(a => 
+                query = query.Where(a =>
                     a.Name.Contains(searchTerm) ||
                     a.AssetNumber.Contains(searchTerm) ||
                     (a.Description != null && a.Description.Contains(searchTerm)) ||
@@ -481,12 +459,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         {
             _logger.LogInformation("Updating operating hours for asset: {AssetId}", assetId);
 
-            var asset = await _assetRepository.GetByIdAsync(assetId);
-            if (asset == null)
-            {
-                throw new ArgumentException($"Asset with ID {assetId} not found");
-            }
-
+            var asset = await _assetRepository.GetByIdAsync(assetId) ?? throw new ArgumentException($"Asset with ID {assetId} not found");
             asset.OperatingHours = operatingHours;
             asset.LastOperatingHoursUpdate = DateTime.UtcNow;
 
@@ -507,12 +480,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         {
             _logger.LogInformation("Updating mileage for asset: {AssetId}", assetId);
 
-            var asset = await _assetRepository.GetByIdAsync(assetId);
-            if (asset == null)
-            {
-                throw new ArgumentException($"Asset with ID {assetId} not found");
-            }
-
+            var asset = await _assetRepository.GetByIdAsync(assetId) ?? throw new ArgumentException($"Asset with ID {assetId} not found");
             asset.Mileage = mileage;
             asset.LastMileageUpdate = DateTime.UtcNow;
 
@@ -548,14 +516,18 @@ public class MaintenanceAssetService : IMaintenanceAssetService
             {
                 // Parse all sequence numbers and find the maximum
                 var maxSequence = assetsWithPrefix
-                    .Select(assetNum => {
+                    .Select(assetNum =>
+                    {
                         var numberPart = assetNum.Substring(prefix.Length);
                         if (int.TryParse(numberPart, out int seq))
+                        {
                             return seq;
+                        }
+
                         return 0;
                     })
                     .Max();
-                
+
                 nextSequence = maxSequence + 1;
             }
 
@@ -573,15 +545,15 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         try
         {
             _logger.LogInformation("Retrieving available vehicles");
-            
+
             var query = _assetRepository.GetQueryable()
                 .Include(a => a.AssetCategory)
                 .Where(a => a.AssetCategory.AssetType == "Vehicle" && a.Status == AssetStatus.Active);
-            
+
             var vehicles = await query.ToListAsync();
-            
+
             _logger.LogInformation("Found {Count} available vehicles", vehicles.Count);
-            
+
             return _mapper.Map<IEnumerable<MaintenanceAssetDto>>(vehicles);
         }
         catch (Exception ex)
@@ -832,7 +804,9 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         while (currentId != Guid.Empty)
         {
             if (currentId == assetId)
+            {
                 return true;
+            }
 
             var parent = await _assetRepository.GetByIdAsync(currentId);
             currentId = parent?.ParentAssetId ?? Guid.Empty;
@@ -840,5 +814,5 @@ public class MaintenanceAssetService : IMaintenanceAssetService
 
         return false;
     }
-    
+
 }

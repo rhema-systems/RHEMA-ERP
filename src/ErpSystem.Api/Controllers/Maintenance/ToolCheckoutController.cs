@@ -1,9 +1,9 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
-using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -74,7 +74,9 @@ public class ToolCheckoutController : ControllerBase
         {
             var tool = await _toolCheckoutService.GetToolByIdAsync(toolId);
             if (tool == null)
+            {
                 return NotFound($"Tool {toolId} not found");
+            }
 
             return Ok(tool);
         }
@@ -152,7 +154,9 @@ public class ToolCheckoutController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var result = await _toolCheckoutService.CheckoutToolAsync(toolId, employeeId, dto);
             return Ok(result);
@@ -185,11 +189,15 @@ public class ToolCheckoutController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             // Use current application user (Users table) as the person performing the return
             if (string.IsNullOrEmpty(_currentUserService.UserId) || !Guid.TryParse(_currentUserService.UserId, out var userId))
+            {
                 return BadRequest("Current user is not linked to an application user");
+            }
 
             var result = await _toolCheckoutService.ReturnToolAsync(checkoutId, userId, dto);
             return Ok(result);
@@ -222,7 +230,9 @@ public class ToolCheckoutController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             await _toolCheckoutService.ReportToolDamageAsync(checkoutId, dto);
             return Ok(new { message = "Damage reported successfully" });

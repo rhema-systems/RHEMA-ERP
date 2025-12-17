@@ -1,5 +1,5 @@
-using ErpSystem.Core.Entities;
 using ErpSystem.Core.DTOs.Notifications;
+using ErpSystem.Core.Entities;
 
 namespace ErpSystem.Core.Interfaces;
 
@@ -12,7 +12,7 @@ public interface INotificationRepository : IGenericRepository<Notification>
     /// Gets notifications for a user with pagination and filtering
     /// </summary>
     Task<PagedResult<NotificationDto>> GetUserNotificationsAsync(
-        Guid userId, Guid tenantId, int page = 1, int pageSize = 20, 
+        Guid userId, Guid tenantId, int page = 1, int pageSize = 20,
         bool? unreadOnly = null, string? type = null);
 
     /// <summary>

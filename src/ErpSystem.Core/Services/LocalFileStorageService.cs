@@ -1,16 +1,16 @@
+using System.Text.RegularExpressions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Models;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Hosting;
-using System.Text.RegularExpressions;
 
 namespace ErpSystem.Core.Services;
 
 /// <summary>
 /// Local file system storage implementation
 /// </summary>
-public class LocalFileStorageService : IFileStorageService
+public partial class LocalFileStorageService : IFileStorageService
 {
     private readonly ILogger<LocalFileStorageService> _logger;
     private readonly StorageProviderOptions _options;
@@ -19,6 +19,7 @@ public class LocalFileStorageService : IFileStorageService
     private readonly string _baseUrl;
 
     public string ProviderName => "Local";
+    private static readonly char[] second = new[] { ' ', '.', ',', ';' };
 
     public LocalFileStorageService(
         ILogger<LocalFileStorageService> logger,
@@ -64,22 +65,22 @@ public class LocalFileStorageService : IFileStorageService
         {
             // Generate unique filename
             var uniqueFileName = GenerateUniqueFileName(fileName);
-            
+
             // Create directory path
             var fullDirectoryPath = Path.Combine(_basePath, folderPath);
             Directory.CreateDirectory(fullDirectoryPath);
-            
+
             // Full file path
             var filePath = Path.Combine(fullDirectoryPath, uniqueFileName);
             var relativeFilePath = Path.Combine(folderPath, uniqueFileName).Replace('\\', '/');
-            
+
             // Save file
             using (var fileStreamWriter = new FileStream(filePath, FileMode.Create, FileAccess.Write))
             {
                 await fileStream.CopyToAsync(fileStreamWriter);
                 await fileStreamWriter.FlushAsync();
             }
-            
+
             _logger.LogInformation("File uploaded: {FileName} -> {FilePath}", fileName, relativeFilePath);
             return relativeFilePath;
         }
@@ -99,7 +100,7 @@ public class LocalFileStorageService : IFileStorageService
             {
                 throw new FileNotFoundException($"File not found: {filePath}");
             }
-            
+
             var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read);
             return await Task.FromResult(stream);
         }
@@ -116,24 +117,24 @@ public class LocalFileStorageService : IFileStorageService
         {
             // Generate unique filename
             var uniqueFileName = GenerateUniqueFileName(request.FileName);
-            
+
             // Create directory path based on category and date
             var datePath = DateTime.UtcNow.ToString("yyyy/MM");
             var categoryPath = SanitizePathComponent(request.Category);
-            var tenantPath = !string.IsNullOrEmpty(request.TenantId) 
-                ? SanitizePathComponent(request.TenantId) 
+            var tenantPath = !string.IsNullOrEmpty(request.TenantId)
+                ? SanitizePathComponent(request.TenantId)
                 : "global";
-            
+
             var relativePath = Path.Combine(categoryPath, tenantPath, datePath);
             var fullDirectoryPath = Path.Combine(_basePath, relativePath);
-            
+
             // Ensure directory exists
             Directory.CreateDirectory(fullDirectoryPath);
-            
+
             // Full file path
             var filePath = Path.Combine(fullDirectoryPath, uniqueFileName);
             var relativeFilePath = Path.Combine(relativePath, uniqueFileName).Replace('\\', '/');
-            
+
             // Check if file already exists and handle overwrite
             if (File.Exists(filePath) && !request.OverwriteExisting)
             {
@@ -152,21 +153,21 @@ public class LocalFileStorageService : IFileStorageService
                     StorageProvider = ProviderName
                 };
             }
-            
+
             // Save file
             using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write))
             {
                 await request.FileStream.CopyToAsync(fileStream);
                 await fileStream.FlushAsync();
             }
-            
+
             // Get actual file size
             var fileInfo = new FileInfo(filePath);
             var actualFileSize = fileInfo.Length;
-            
+
             _logger.LogInformation("File uploaded successfully: {OriginalFileName} -> {FilePath} ({FileSize} bytes)",
                 request.FileName, relativeFilePath, actualFileSize);
-            
+
             return new FileStorageResult
             {
                 Success = true,
@@ -227,7 +228,9 @@ public class LocalFileStorageService : IFileStorageService
                     });
 
                     if (request.StopOnFirstError)
+                    {
                         break;
+                    }
                 }
             }
             catch (Exception ex)
@@ -240,7 +243,9 @@ public class LocalFileStorageService : IFileStorageService
                 });
 
                 if (request.StopOnFirstError)
+                {
                     break;
+                }
             }
         }
 
@@ -252,7 +257,7 @@ public class LocalFileStorageService : IFileStorageService
         try
         {
             var fullPath = Path.Combine(_basePath, filePath);
-            
+
             if (!File.Exists(fullPath))
             {
                 _logger.LogWarning("Attempted to delete non-existent file: {FilePath}", filePath);
@@ -260,10 +265,10 @@ public class LocalFileStorageService : IFileStorageService
             }
 
             File.Delete(fullPath);
-            
+
             // Clean up empty directories
             await CleanupEmptyDirectoriesAsync(Path.GetDirectoryName(fullPath)!);
-            
+
             _logger.LogInformation("File deleted successfully: {FilePath}", filePath);
             return true;
         }
@@ -293,12 +298,14 @@ public class LocalFileStorageService : IFileStorageService
         try
         {
             var fullPath = Path.Combine(_basePath, filePath);
-            
+
             if (!File.Exists(fullPath))
+            {
                 return null;
+            }
 
             var fileInfo = new FileInfo(fullPath);
-            
+
             return new FileInfoResult
             {
                 FileName = fileInfo.Name,
@@ -338,22 +345,24 @@ public class LocalFileStorageService : IFileStorageService
             var destinationPath = Path.Combine(_basePath, destinationFilePath);
 
             if (!File.Exists(sourcePath))
+            {
                 return false;
+            }
 
             // Ensure destination directory exists
             var destinationDir = Path.GetDirectoryName(destinationPath)!;
             Directory.CreateDirectory(destinationDir);
 
             File.Copy(sourcePath, destinationPath, true);
-            
-            _logger.LogInformation("File copied: {SourcePath} -> {DestinationPath}", 
+
+            _logger.LogInformation("File copied: {SourcePath} -> {DestinationPath}",
                 sourceFilePath, destinationFilePath);
-            
+
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error copying file: {SourcePath} -> {DestinationPath}", 
+            _logger.LogError(ex, "Error copying file: {SourcePath} -> {DestinationPath}",
                 sourceFilePath, destinationFilePath);
             return false;
         }
@@ -367,25 +376,27 @@ public class LocalFileStorageService : IFileStorageService
             var destinationPath = Path.Combine(_basePath, destinationFilePath);
 
             if (!File.Exists(sourcePath))
+            {
                 return false;
+            }
 
             // Ensure destination directory exists
             var destinationDir = Path.GetDirectoryName(destinationPath)!;
             Directory.CreateDirectory(destinationDir);
 
             File.Move(sourcePath, destinationPath);
-            
+
             // Clean up empty directories
             await CleanupEmptyDirectoriesAsync(Path.GetDirectoryName(sourcePath)!);
-            
-            _logger.LogInformation("File moved: {SourcePath} -> {DestinationPath}", 
+
+            _logger.LogInformation("File moved: {SourcePath} -> {DestinationPath}",
                 sourceFilePath, destinationFilePath);
-            
+
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error moving file: {SourcePath} -> {DestinationPath}", 
+            _logger.LogError(ex, "Error moving file: {SourcePath} -> {DestinationPath}",
                 sourceFilePath, destinationFilePath);
             return false;
         }
@@ -396,20 +407,22 @@ public class LocalFileStorageService : IFileStorageService
         try
         {
             var fullPath = Path.Combine(_basePath, directoryPath);
-            
+
             if (!Directory.Exists(fullPath))
+            {
                 return Enumerable.Empty<FileInfoResult>();
+            }
 
             var pattern = searchPattern ?? "*.*";
             var files = Directory.GetFiles(fullPath, pattern, SearchOption.AllDirectories);
-            
+
             var results = new List<FileInfoResult>();
-            
+
             foreach (var filePath in files)
             {
                 var fileInfo = new FileInfo(filePath);
                 var relativePath = Path.GetRelativePath(_basePath, filePath).Replace('\\', '/');
-                
+
                 results.Add(new FileInfoResult
                 {
                     FileName = fileInfo.Name,
@@ -422,7 +435,7 @@ public class LocalFileStorageService : IFileStorageService
                     Exists = true
                 });
             }
-            
+
             return results;
         }
         catch (Exception ex)
@@ -438,13 +451,15 @@ public class LocalFileStorageService : IFileStorageService
         {
             // Check if base directory exists and is writable
             if (!Directory.Exists(_basePath))
+            {
                 return false;
+            }
 
             // Try to create a temporary file to test write access
             var testFile = Path.Combine(_basePath, $"health_check_{Guid.NewGuid():N}.tmp");
             await File.WriteAllTextAsync(testFile, "health check");
             File.Delete(testFile);
-            
+
             return true;
         }
         catch (Exception ex)
@@ -463,30 +478,30 @@ public class LocalFileStorageService : IFileStorageService
         var sanitizedFileName = SanitizeFileName(fileNameWithoutExtension);
         var uniqueId = Guid.NewGuid().ToString("N")[..8]; // Use first 8 characters of GUID
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-        
+
         return $"{sanitizedFileName}_{timestamp}_{uniqueId}{extension}";
     }
 
-    private string SanitizeFileName(string fileName)
+    private static string SanitizeFileName(string fileName)
     {
         // Remove invalid characters and limit length
         var invalidChars = Path.GetInvalidFileNameChars();
         var sanitized = new string(fileName.Where(c => !invalidChars.Contains(c)).ToArray());
-        sanitized = Regex.Replace(sanitized, @"\s+", "_").ToLowerInvariant();
-        
+        sanitized = MyRegex().Replace(sanitized, "_").ToLowerInvariant();
+
         // Limit length
         if (sanitized.Length > 50)
         {
             sanitized = sanitized[..50];
         }
-        
+
         return string.IsNullOrEmpty(sanitized) ? "file" : sanitized;
     }
 
-    private string SanitizePathComponent(string pathComponent)
+    private static string SanitizePathComponent(string pathComponent)
     {
         // Sanitize path component for use in file path
-        var invalidChars = Path.GetInvalidPathChars().Union(new[] { ' ', '.', ',', ';' });
+        var invalidChars = Path.GetInvalidPathChars().Union(second);
         var sanitized = new string(pathComponent.Where(c => !invalidChars.Contains(c)).ToArray());
         return sanitized.ToLowerInvariant();
     }
@@ -496,7 +511,7 @@ public class LocalFileStorageService : IFileStorageService
         return $"{_baseUrl}/{filePath}";
     }
 
-    private string GetContentType(string extension)
+    private static string GetContentType(string extension)
     {
         return extension.ToLowerInvariant() switch
         {
@@ -521,18 +536,22 @@ public class LocalFileStorageService : IFileStorageService
         try
         {
             if (string.IsNullOrEmpty(directoryPath) || !Directory.Exists(directoryPath))
+            {
                 return;
+            }
 
             // Don't delete the base directory
             if (Path.GetFullPath(directoryPath) == Path.GetFullPath(_basePath))
+            {
                 return;
+            }
 
             // Check if directory is empty
             if (!Directory.EnumerateFileSystemEntries(directoryPath).Any())
             {
                 Directory.Delete(directoryPath);
                 _logger.LogDebug("Cleaned up empty directory: {DirectoryPath}", directoryPath);
-                
+
                 // Recursively clean up parent directories
                 await CleanupEmptyDirectoriesAsync(Path.GetDirectoryName(directoryPath)!);
             }
@@ -542,6 +561,9 @@ public class LocalFileStorageService : IFileStorageService
             _logger.LogWarning(ex, "Failed to cleanup empty directory: {DirectoryPath}", directoryPath);
         }
     }
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex MyRegex();
 
     #endregion
 }

@@ -73,7 +73,9 @@ public class PartnerCategoriesController : ControllerBase
         {
             var category = await _categoryService.GetByIdAsync(id);
             if (category == null)
+            {
                 return NotFound();
+            }
 
             return Ok(category);
         }
@@ -90,7 +92,9 @@ public class PartnerCategoriesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var category = await _categoryService.CreateAsync(createDto);
             return CreatedAtAction(nameof(GetCategory), new { id = category.Id }, category);
@@ -112,7 +116,9 @@ public class PartnerCategoriesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var category = await _categoryService.UpdateAsync(id, updateDto);
             return Ok(category);

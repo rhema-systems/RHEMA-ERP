@@ -1,10 +1,10 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces.Procurement;
-using System.ComponentModel.DataAnnotations;
-using ErpSystem.Core.DTOs.Common;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Procurement;
 
@@ -556,7 +556,7 @@ public class PurchaseRequisitionsController : ControllerBase
             {
                 // Update requisition status to indicate it's being processed
                 await _purchaseRequisitionRepository.UpdateStatusAsync(id, "Converting to PO");
-                
+
                 return Ok(purchaseOrderDtos.First());
             }
             else
@@ -576,7 +576,10 @@ public class PurchaseRequisitionsController : ControllerBase
     private async Task<PurchaseRequisitionDetailDto> GetPurchaseRequisitionDetailDto(Guid requisitionId)
     {
         var requisition = await _purchaseRequisitionRepository.GetRequisitionByIdAsync(requisitionId);
-        if (requisition == null) return null!;
+        if (requisition == null)
+        {
+            return null!;
+        }
 
         var items = await _purchaseRequisitionItemRepository.GetItemsByRequisitionIdAsync(requisitionId);
 

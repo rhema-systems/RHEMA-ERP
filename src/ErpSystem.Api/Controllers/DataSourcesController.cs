@@ -1,9 +1,9 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.DataSources;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
-using ErpSystem.Core.Entities;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -37,17 +37,19 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = Guid.Parse("00000000-0000-0000-0000-000000000001"); // Default tenant
                 var dataSources = await _dataSourceService.GetDataSourcesAsync(tenantId);
-                return Ok(new { 
-                    Success = true, 
-                    Count = dataSources.Count, 
-                    DataSources = dataSources 
+                return Ok(new
+                {
+                    Success = true,
+                    Count = dataSources.Count,
+                    DataSources = dataSources
                 });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Debug: Error retrieving data sources");
-                return Ok(new { 
-                    Success = false, 
+                return Ok(new
+                {
+                    Success = false,
                     Error = ex.Message,
                     StackTrace = ex.StackTrace
                 });
@@ -65,7 +67,7 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = Guid.Parse("00000000-0000-0000-0000-000000000001"); // Default tenant
                 var userId = Guid.Parse("00000000-0000-0000-0000-000000000001"); // Default admin user
-                
+
                 var createDto = new CreateDataSourceDto
                 {
                     Name = "ERP System Database (Sample)",
@@ -78,19 +80,21 @@ namespace ErpSystem.Api.Controllers
                     Password = "sa",
                     IsActive = true
                 };
-                
+
                 var dataSource = await _dataSourceService.CreateDataSourceAsync(createDto, tenantId, userId);
-                return Ok(new { 
-                    Success = true, 
+                return Ok(new
+                {
+                    Success = true,
                     Message = "ERP database data source created successfully. You can now use this in ReportBuilder to see real tables and schemas.",
-                    DataSource = dataSource 
+                    DataSource = dataSource
                 });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Debug: Error creating ERP data source");
-                return Ok(new { 
-                    Success = false, 
+                return Ok(new
+                {
+                    Success = false,
                     Error = ex.Message,
                     StackTrace = ex.StackTrace
                 });
@@ -108,7 +112,7 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = Guid.Parse("00000000-0000-0000-0000-000000000001"); // Default tenant
                 var userId = Guid.Parse("00000000-0000-0000-0000-000000000001"); // Default admin user
-                
+
                 var createDto = new CreateDataSourceDto
                 {
                     Name = "Debug Test Source " + DateTime.Now.ToString("HH:mm:ss"),
@@ -121,19 +125,21 @@ namespace ErpSystem.Api.Controllers
                     Password = "debugpass",
                     IsActive = true
                 };
-                
+
                 var dataSource = await _dataSourceService.CreateDataSourceAsync(createDto, tenantId, userId);
-                return Ok(new { 
-                    Success = true, 
+                return Ok(new
+                {
+                    Success = true,
                     Message = "Data source created successfully",
-                    DataSource = dataSource 
+                    DataSource = dataSource
                 });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Debug: Error creating data source");
-                return Ok(new { 
-                    Success = false, 
+                return Ok(new
+                {
+                    Success = false,
                     Error = ex.Message,
                     StackTrace = ex.StackTrace
                 });
@@ -150,23 +156,25 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var tenantId = Guid.Parse("00000000-0000-0000-0000-000000000001"); // Default tenant
-                
+
                 // Get the first available data source
                 var dataSources = await _dataSourceService.GetActiveDataSourcesAsync(tenantId);
                 if (!dataSources.Any())
                 {
-                    return Ok(new {
+                    return Ok(new
+                    {
                         Success = false,
                         Error = "No data sources available. Use /debug/create-erp-datasource to create one first."
                     });
                 }
-                
+
                 var firstDataSource = dataSources.First();
-                
+
                 // Test schema retrieval
                 var schema = await _dataSourceService.GetSchemaAsync(firstDataSource.Id, tenantId);
-                
-                return Ok(new {
+
+                return Ok(new
+                {
                     Success = true,
                     Message = $"Schema retrieved successfully from data source: {firstDataSource.Name}",
                     DataSourceId = firstDataSource.Id,
@@ -174,7 +182,8 @@ namespace ErpSystem.Api.Controllers
                     TablesCount = schema.Tables.Count,
                     ViewsCount = schema.Views.Count,
                     StoredProceduresCount = schema.StoredProcedures.Count,
-                    SampleTables = schema.Tables.Take(5).Select(t => new {
+                    SampleTables = schema.Tables.Take(5).Select(t => new
+                    {
                         t.Name,
                         t.Schema,
                         ColumnCount = t.Columns.Count,
@@ -186,7 +195,8 @@ namespace ErpSystem.Api.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Debug: Error testing schema retrieval");
-                return Ok(new {
+                return Ok(new
+                {
                     Success = false,
                     Error = ex.Message,
                     StackTrace = ex.StackTrace
@@ -205,15 +215,16 @@ namespace ErpSystem.Api.Controllers
             {
                 var connectionString = "Server=localhost;Database=RHEMA-ERP;User Id=sa;Password=sa;TrustServerCertificate=true;MultipleActiveResultSets=true;";
                 _logger.LogInformation("Testing direct database connection to RHEMA-ERP...");
-                
+
                 await using var conn = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
                 await conn.OpenAsync();
-                
+
                 await using var cmd = conn.CreateCommand();
                 cmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'";
                 var tableCount = await cmd.ExecuteScalarAsync();
-                
-                return Ok(new {
+
+                return Ok(new
+                {
                     Success = true,
                     Message = "Database connection successful",
                     TableCount = tableCount,
@@ -223,14 +234,15 @@ namespace ErpSystem.Api.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Debug connection test failed: {Error}", ex.Message);
-                return Ok(new {
+                return Ok(new
+                {
                     Success = false,
                     Error = ex.Message,
                     StackTrace = ex.StackTrace
                 });
             }
         }
-        
+
         /// <summary>
         /// Get schema from the RHEMA-ERP database
         /// </summary>
@@ -241,11 +253,11 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 _logger.LogInformation("Retrieving schema from RHEMA-ERP database");
-                
+
                 // Get the connection string from configuration (includes user secrets)
                 var configuration = HttpContext.RequestServices.GetRequiredService<IConfiguration>();
                 var connectionString = configuration.GetConnectionString("DefaultConnection");
-                
+
                 // Log the database we're connecting to
                 if (!string.IsNullOrEmpty(connectionString))
                 {
@@ -260,7 +272,7 @@ namespace ErpSystem.Api.Controllers
                     }
                     _logger.LogInformation("Connecting to database: {DatabaseName}", dbName);
                 }
-                
+
                 if (string.IsNullOrEmpty(connectionString))
                 {
                     _logger.LogWarning("No DefaultConnection configured, using sample schema");
@@ -271,7 +283,7 @@ namespace ErpSystem.Api.Controllers
                     }
                     return Ok(GetEmptySchema());
                 }
-                
+
                 // Use the existing service method to get schema
                 var concreteDataSourceService = _dataSourceService as EnterpriseDataSourceService;
                 if (concreteDataSourceService != null)
@@ -281,14 +293,14 @@ namespace ErpSystem.Api.Controllers
                     _logger.LogInformation("Successfully retrieved schema with {TableCount} tables, {ViewCount} views", schema.Tables?.Count ?? 0, schema.Views?.Count ?? 0);
                     return Ok(schema);
                 }
-                
+
                 _logger.LogError("Service implementation not available - could not cast to EnterpriseDataSourceService");
                 throw new InvalidOperationException("Service implementation not available");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error retrieving RHEMA-ERP schema: {ErrorMessage}. Falling back to sample schema", ex.Message);
-                
+
                 // Fallback to sample schema
                 var concreteService = _dataSourceService as EnterpriseDataSourceService;
                 if (concreteService != null)
@@ -296,12 +308,12 @@ namespace ErpSystem.Api.Controllers
                     _logger.LogWarning("Using sample schema as fallback due to database connection failure");
                     return Ok(await concreteService.GetSampleSchemaAsync());
                 }
-                
+
                 // Manual fallback if cast fails
                 return Ok(GetEmptySchema());
             }
         }
-        
+
         private static DataSourceSchemaDto GetEmptySchema()
         {
             return new DataSourceSchemaDto
@@ -410,10 +422,10 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var dataSource = await _dataSourceService.CreateDataSourceAsync(createDto, tenantId.Value, userId.Value);
-                
+
                 return CreatedAtAction(
-                    nameof(GetDataSource), 
-                    new { dataSourceId = dataSource.Id }, 
+                    nameof(GetDataSource),
+                    new { dataSourceId = dataSource.Id },
                     dataSource);
             }
             catch (Exception ex)
@@ -444,7 +456,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var dataSource = await _dataSourceService.UpdateDataSourceAsync(dataSourceId, updateDto, tenantId.Value, userId.Value);
-                
+
                 if (dataSource == null)
                 {
                     return NotFound();
@@ -480,7 +492,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var success = await _dataSourceService.DeleteDataSourceAsync(dataSourceId, tenantId.Value, userId.Value);
-                
+
                 if (!success)
                 {
                     return NotFound();

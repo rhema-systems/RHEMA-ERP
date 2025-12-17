@@ -21,7 +21,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<OeeAnalysisDto> CalculateOeeAsync(Guid assetId, DateTime startDate, DateTime endDate)
     {
         _logger.LogInformation("Calculating OEE for asset {AssetId} - STUB", assetId);
-        
+
         return new OeeAnalysisDto
         {
             AssetId = assetId,
@@ -49,7 +49,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetReliabilityMetricsDto> CalculateReliabilityMetricsAsync(Guid assetId, DateTime startDate, DateTime endDate)
     {
         _logger.LogInformation("Calculating reliability metrics for asset {AssetId} - STUB", assetId);
-        
+
         return new AssetReliabilityMetricsDto
         {
             AssetId = assetId,
@@ -79,7 +79,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetPerformanceBenchmarkDto> GetPerformanceBenchmarkAsync(Guid assetId, string benchmarkCategory = "Industry")
     {
         _logger.LogInformation("Getting performance benchmark for asset {AssetId} - STUB", assetId);
-        
+
         return new AssetPerformanceBenchmarkDto
         {
             AssetId = assetId,
@@ -95,7 +95,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetBenchmarkComparisonDto> CompareAssetPerformanceAsync(Guid assetId, string industryType, DateTime startDate, DateTime endDate)
     {
         _logger.LogInformation("Comparing asset performance for asset {AssetId} - STUB", assetId);
-        
+
         return new AssetBenchmarkComparisonDto
         {
             AssetId = assetId,
@@ -112,7 +112,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetPerformanceRankingDto> GetAssetPerformanceRankingAsync(Guid tenantId, string metricType, int topCount = 10, int bottomCount = 10)
     {
         _logger.LogInformation("Getting asset performance ranking - STUB");
-        
+
         return new AssetPerformanceRankingDto
         {
             MetricType = metricType,
@@ -129,7 +129,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetHealthTrendDto> GetAssetHealthTrendAsync(Guid assetId, int periodMonths = 12)
     {
         _logger.LogInformation("Getting asset health trend for asset {AssetId} - STUB", assetId);
-        
+
         return new AssetHealthTrendDto
         {
             AssetId = assetId,
@@ -145,7 +145,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetPerformancePredictionDto> PredictAssetPerformanceAsync(Guid assetId, int predictionDays = 30)
     {
         _logger.LogInformation("Predicting asset performance for asset {AssetId} - STUB", assetId);
-        
+
         return new AssetPerformancePredictionDto
         {
             AssetId = assetId,
@@ -171,7 +171,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetKpiDashboardDto> GetAssetKpiDashboardAsync(Guid? assetId = null, DateTime? startDate = null, DateTime? endDate = null)
     {
         _logger.LogInformation("Getting asset KPI dashboard - STUB");
-        
+
         return new AssetKpiDashboardDto
         {
             TenantId = Guid.Empty,
@@ -196,7 +196,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetPerformanceMetricsDto> CalculateAssetPerformanceMetricsAsync(Guid assetId, DateTime startDate, DateTime endDate)
     {
         _logger.LogInformation("Calculating asset performance metrics for asset {AssetId} - STUB", assetId);
-        
+
         return new AssetPerformanceMetricsDto
         {
             AssetId = assetId,
@@ -217,7 +217,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetPerformanceDashboardDto> GetAssetPerformanceDashboardAsync(Guid tenantId, DateTime startDate, DateTime endDate, Guid? assetId = null)
     {
         _logger.LogInformation("Getting asset performance dashboard - STUB");
-        
+
         return new AssetPerformanceDashboardDto
         {
             AssetId = assetId ?? Guid.Empty,
@@ -251,7 +251,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetRootCauseAnalysisDto> PerformRootCauseAnalysisAsync(Guid assetId, DateTime incidentDate, string issueType)
     {
         _logger.LogInformation("Performing root cause analysis for asset {AssetId} - STUB", assetId);
-        
+
         return new AssetRootCauseAnalysisDto
         {
             AssetId = assetId,
@@ -268,7 +268,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetCriticalityAnalysisDto> AnalyzeAssetCriticalityAsync(Guid tenantId, Guid assetId)
     {
         _logger.LogInformation("Analyzing asset criticality for asset {AssetId} - STUB", assetId);
-        
+
         return new AssetCriticalityAnalysisDto
         {
             AssetId = assetId,
@@ -294,7 +294,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetTotalCostOfOwnershipDto> CalculateTotalCostOfOwnershipAsync(Guid assetId, DateTime startDate, DateTime endDate)
     {
         _logger.LogInformation("Calculating total cost of ownership for asset {AssetId} - STUB", assetId);
-        
+
         return new AssetTotalCostOfOwnershipDto
         {
             AssetId = assetId,
@@ -313,7 +313,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetCostEfficiencyDto> AnalyzeCostEfficiencyAsync(Guid assetId, DateTime startDate, DateTime endDate)
     {
         _logger.LogInformation("Analyzing cost efficiency for asset {AssetId} - STUB", assetId);
-        
+
         return new AssetCostEfficiencyDto
         {
             AssetId = assetId,
@@ -332,7 +332,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<MaintenanceReturnOnInvestmentDto> CalculateMaintenanceROIAsync(Guid assetId, DateTime startDate, DateTime endDate)
     {
         _logger.LogInformation("Calculating maintenance ROI for asset {AssetId} - STUB", assetId);
-        
+
         return new MaintenanceReturnOnInvestmentDto
         {
             AssetId = assetId,
@@ -354,7 +354,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetEnergyPerformanceDto> AnalyzeEnergyPerformanceAsync(Guid assetId, DateTime startDate, DateTime endDate)
     {
         _logger.LogInformation("Analyzing energy performance for asset {AssetId} - STUB", assetId);
-        
+
         return new AssetEnergyPerformanceDto
         {
             AssetId = assetId,
@@ -372,7 +372,7 @@ public class AssetPerformanceAnalyticsService : IAssetPerformanceAnalyticsServic
     public async Task<AssetEnvironmentalImpactDto> CalculateEnvironmentalImpactAsync(Guid assetId, DateTime startDate, DateTime endDate)
     {
         _logger.LogInformation("Calculating environmental impact for asset {AssetId} - STUB", assetId);
-        
+
         return new AssetEnvironmentalImpactDto
         {
             AssetId = assetId,

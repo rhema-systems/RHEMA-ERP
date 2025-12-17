@@ -1,0 +1,21 @@
+# User 1: Michael Marmah
+dn: uid=michael.martey,ou=Users,dc=erp,dc=company,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+cn: Michael Marmah
+sn: Michael
+uid: michael.martey
+userPassword: Test1234$
+
+# User 2: Jane Doe
+dn: uid=jane.doe,ou=Users,dc=erp,dc=company,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+cn: Jane Doe
+sn: Doe
+uid: jane.doe
+userPassword: Test1234$

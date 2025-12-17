@@ -34,15 +34,29 @@ public class AssetDischargeService : IAssetDischargeService
         var discharges = await repo.FindAsync(d => d.TenantId == tenantId);
 
         if (query.AdmissionId.HasValue)
+        {
             discharges = discharges.Where(d => d.AdmissionId == query.AdmissionId.Value);
+        }
+
         if (query.AssetId.HasValue)
+        {
             discharges = discharges.Where(d => d.AssetId == query.AssetId.Value);
+        }
+
         if (query.WorkOrderId.HasValue)
+        {
             discharges = discharges.Where(d => d.WorkOrderId == query.WorkOrderId.Value);
+        }
+
         if (query.FromDate.HasValue)
+        {
             discharges = discharges.Where(d => d.DischargeDate >= query.FromDate.Value);
+        }
+
         if (query.ToDate.HasValue)
+        {
             discharges = discharges.Where(d => d.DischargeDate <= query.ToDate.Value);
+        }
 
         var totalCount = discharges.Count();
         var items = discharges
@@ -72,7 +86,9 @@ public class AssetDischargeService : IAssetDischargeService
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         var discharge = await repo.FirstOrDefaultAsync(d => d.Id == id && d.TenantId == tenantId);
         if (discharge == null)
+        {
             return null;
+        }
 
         var asset = await _assetService.GetAssetByIdAsync(discharge.AssetId);
         return MapToDto(discharge, asset);
@@ -143,7 +159,7 @@ public class AssetDischargeService : IAssetDischargeService
         var admissionRepo = _unitOfWork.Repository<AssetAdmission>();
         var admission = await admissionRepo.FirstOrDefaultAsync(a => a.Id == dto.AdmissionId && a.TenantId == tenantId);
         if (admission != null)
-        
+
         {
             admission.DischargeId = discharge.Id;
             admission.Status = "Completed";

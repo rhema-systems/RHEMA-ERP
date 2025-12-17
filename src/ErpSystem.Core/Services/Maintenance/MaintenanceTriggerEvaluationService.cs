@@ -1,9 +1,9 @@
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -44,7 +44,7 @@ public class MaintenanceTriggerEvaluationService
     /// <param name="tenantId">Optional tenant ID. If null, evaluates schedules for all tenants (background service mode)</param>
     public async Task<int> EvaluateAllSchedulesAsync(Guid? tenantId = null)
     {
-        _logger.LogInformation("Starting maintenance schedule evaluation for {TenantMode}", 
+        _logger.LogInformation("Starting maintenance schedule evaluation for {TenantMode}",
             tenantId.HasValue ? $"tenant {tenantId}" : "all tenants");
         var generatedCount = 0;
 
@@ -131,7 +131,7 @@ public class MaintenanceTriggerEvaluationService
                 var mileageDelta = usageSummary.CurrentMileage.Value - schedule.LastUsageValue.Value;
                 if (mileageDelta >= schedule.MileageTrigger.Value)
                 {
-                    _logger.LogInformation("Mileage trigger met for schedule {ScheduleId}. Current: {Current}, Baseline: {Baseline}, Delta: {Delta}, Trigger: {Trigger}", 
+                    _logger.LogInformation("Mileage trigger met for schedule {ScheduleId}. Current: {Current}, Baseline: {Baseline}, Delta: {Delta}, Trigger: {Trigger}",
                         schedule.Id, usageSummary.CurrentMileage.Value, schedule.LastUsageValue.Value, mileageDelta, schedule.MileageTrigger.Value);
                     return true;
                 }
@@ -154,7 +154,7 @@ public class MaintenanceTriggerEvaluationService
                 var hoursDelta = usageSummary.CurrentOperatingHours.Value - schedule.LastUsageValue.Value;
                 if (hoursDelta >= schedule.OperatingHoursTrigger.Value)
                 {
-                    _logger.LogInformation("Operating hours trigger met for schedule {ScheduleId}. Current: {Current}, Baseline: {Baseline}, Delta: {Delta}, Trigger: {Trigger}", 
+                    _logger.LogInformation("Operating hours trigger met for schedule {ScheduleId}. Current: {Current}, Baseline: {Baseline}, Delta: {Delta}, Trigger: {Trigger}",
                         schedule.Id, usageSummary.CurrentOperatingHours.Value, schedule.LastUsageValue.Value, hoursDelta, schedule.OperatingHoursTrigger.Value);
                     return true;
                 }
@@ -177,7 +177,7 @@ public class MaintenanceTriggerEvaluationService
                 var cyclesDelta = usageSummary.CurrentCycles.Value - (int)schedule.LastUsageValue.Value;
                 if (cyclesDelta >= schedule.CycleTrigger.Value)
                 {
-                    _logger.LogInformation("Cycles trigger met for schedule {ScheduleId}. Current: {Current}, Baseline: {Baseline}, Delta: {Delta}, Trigger: {Trigger}", 
+                    _logger.LogInformation("Cycles trigger met for schedule {ScheduleId}. Current: {Current}, Baseline: {Baseline}, Delta: {Delta}, Trigger: {Trigger}",
                         schedule.Id, usageSummary.CurrentCycles.Value, (int)schedule.LastUsageValue.Value, cyclesDelta, schedule.CycleTrigger.Value);
                     return true;
                 }
@@ -190,17 +190,19 @@ public class MaintenanceTriggerEvaluationService
     private async Task<bool> EvaluateConditionBasedTriggerAsync(MaintenanceSchedule schedule)
     {
         if (string.IsNullOrEmpty(schedule.ConditionCriteria))
+        {
             return false;
+        }
 
         try
         {
             List<ConditionCriterion>? criteria = null;
-            
+
             try
             {
                 // Try to deserialize as a list first
                 criteria = JsonSerializer.Deserialize<List<ConditionCriterion>>(schedule.ConditionCriteria);
-                
+
                 // If that fails, try as a single object and wrap it in a list
                 if (criteria == null)
                 {
@@ -213,24 +215,30 @@ public class MaintenanceTriggerEvaluationService
             }
             catch (JsonException jsonEx)
             {
-                _logger.LogWarning(jsonEx, "Invalid JSON in ConditionCriteria for schedule {ScheduleId}: {CriteriaJson}", 
+                _logger.LogWarning(jsonEx, "Invalid JSON in ConditionCriteria for schedule {ScheduleId}: {CriteriaJson}",
                     schedule.Id, schedule.ConditionCriteria);
                 return false;
             }
-            
+
             if (criteria == null || !criteria.Any())
+            {
                 return false;
+            }
 
             // Get latest usage record for condition data
             var usageRecords = await _usageTrackingService.GetUsageRecordsAsync(schedule.AssetId);
             var latestRecord = usageRecords.FirstOrDefault();
-            
+
             if (latestRecord == null || string.IsNullOrEmpty(latestRecord.AdditionalMetrics))
+            {
                 return false;
+            }
 
             var metrics = JsonSerializer.Deserialize<Dictionary<string, object>>(latestRecord.AdditionalMetrics);
             if (metrics == null)
+            {
                 return false;
+            }
 
             // Evaluate all criteria
             var allCriteriaMet = true;
@@ -266,13 +274,13 @@ public class MaintenanceTriggerEvaluationService
             if (allCriteriaMet)
             {
                 _logger.LogInformation("Condition-based trigger met for schedule {ScheduleId}", schedule.Id);
-                
+
                 // Update last condition check
                 schedule.LastConditionCheckResult = true;
                 schedule.LastConditionCheckDate = DateTime.UtcNow;
                 await _unitOfWork.Repository<MaintenanceSchedule>().UpdateAsync(schedule);
                 await _unitOfWork.SaveChangesAsync();
-                
+
                 return true;
             }
         }
@@ -295,7 +303,9 @@ public class MaintenanceTriggerEvaluationService
         };
 
         if (string.IsNullOrEmpty(schedule.SecondaryTriggerType))
+        {
             return primaryTriggered;
+        }
 
         var secondaryTriggered = schedule.SecondaryTriggerType switch
         {
@@ -306,8 +316,8 @@ public class MaintenanceTriggerEvaluationService
         };
 
         // Apply trigger logic (AND/OR)
-        return schedule.TriggerLogic?.ToUpper() == "AND" 
-            ? primaryTriggered && secondaryTriggered 
+        return schedule.TriggerLogic?.ToUpper() == "AND"
+            ? primaryTriggered && secondaryTriggered
             : primaryTriggered || secondaryTriggered;
     }
 
@@ -352,7 +362,7 @@ public class MaintenanceTriggerEvaluationService
                 RequestedCompletionDate = DateTime.UtcNow.AddDays(7),
                 TenantId = schedule.TenantId  // Pass schedule's tenant for background service context
             };
-            
+
             var workOrder = await _workOrderService.CreateWorkOrderAsync(workOrderDto);
 
             // Send notification for work order assignment (non-blocking)
@@ -372,7 +382,7 @@ public class MaintenanceTriggerEvaluationService
                         ScheduledFor = DateTime.UtcNow,
                         TenantId = schedule.TenantId  // Pass schedule's tenant for background service context
                     };
-                    
+
                     await _notificationService.CreateNotificationAsync(notificationDto);
                     _logger.LogInformation("Notification sent for auto-generated work order {WorkOrderId}", workOrder.Id);
                 }
@@ -386,7 +396,7 @@ public class MaintenanceTriggerEvaluationService
             // Update schedule
             schedule.LastCompletedDate = DateTime.UtcNow;
             schedule.NextDueDate = CalculateNextDueDate(schedule);
-            
+
             // Update LastUsageValue if usage-based
             if (schedule.PrimaryTriggerType == "Usage")
             {
@@ -420,7 +430,7 @@ public class MaintenanceTriggerEvaluationService
         }
     }
 
-    private DateTime CalculateNextDueDate(MaintenanceSchedule schedule)
+    private static DateTime CalculateNextDueDate(MaintenanceSchedule schedule)
     {
         if (schedule.PrimaryTriggerType == "Time")
         {

@@ -1,13 +1,13 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
-using ErpSystem.Core.DTOs.Maintenance;
-using ErpSystem.Core.Enums;
-using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Services.Maintenance;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Services.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -54,8 +54,10 @@ public class WorkOrdersController : ControllerBase
         try
         {
             if (pageSize > 100)
+            {
                 pageSize = 100;
-            
+            }
+
             // Create filter DTO
             var filter = new WorkOrderFilterDto
             {
@@ -90,7 +92,9 @@ public class WorkOrdersController : ControllerBase
         {
             var workOrder = await _workOrderService.GetWorkOrderByIdAsync(id);
             if (workOrder == null)
+            {
                 return NotFound($"Work order with ID {id} not found");
+            }
 
             return Ok(workOrder);
         }
@@ -110,7 +114,9 @@ public class WorkOrdersController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var newWorkOrder = await _workOrderService.CreateWorkOrderAsync(createDto);
             return CreatedAtAction(nameof(GetWorkOrder), new { id = newWorkOrder.Id }, newWorkOrder);
@@ -131,11 +137,15 @@ public class WorkOrdersController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var existingWorkOrder = await _workOrderService.GetWorkOrderByIdAsync(id);
             if (existingWorkOrder == null)
+            {
                 return NotFound($"Work order with ID {id} not found");
+            }
 
             var updatedWorkOrder = await _workOrderService.UpdateWorkOrderAsync(id, updateDto);
             return Ok(updatedWorkOrder);
@@ -157,7 +167,9 @@ public class WorkOrdersController : ControllerBase
         {
             var workOrder = await _workOrderService.GetWorkOrderByIdAsync(id);
             if (workOrder == null)
+            {
                 return NotFound($"Work order with ID {id} not found");
+            }
 
             await _workOrderService.DeleteWorkOrderAsync(id);
             return NoContent();
@@ -179,11 +191,15 @@ public class WorkOrdersController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var workOrder = await _workOrderService.GetWorkOrderByIdAsync(id);
             if (workOrder == null)
+            {
                 return NotFound($"Work order with ID {id} not found");
+            }
 
             var previousStatus = workOrder.Status;
             WorkOrderDto updatedWorkOrder;
@@ -257,10 +273,12 @@ public class WorkOrdersController : ControllerBase
         {
             var workOrder = await _workOrderService.GetWorkOrderByIdAsync(id);
             if (workOrder == null)
+            {
                 return NotFound($"Work order with ID {id} not found");
+            }
 
             var approvedWorkOrder = await _workOrderService.ApproveWorkOrderAsync(id, request?.Notes);
-            
+
             // Notify if assigned technician about approval
             try
             {
@@ -273,7 +291,7 @@ public class WorkOrdersController : ControllerBase
             {
                 _logger.LogWarning(notifEx, "Failed to send work order approval notification for {WorkOrderId}", id);
             }
-            
+
             return Ok(approvedWorkOrder);
         }
         catch (Exception ex)
@@ -306,22 +324,26 @@ public class WorkOrdersController : ControllerBase
     /// </summary>
     [HttpPut("tasks/{taskId:guid}/status")]
     public async Task<ActionResult<ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto>> UpdateTaskStatus(
-        Guid taskId, 
+        Guid taskId,
         [FromBody] UpdateTaskStatusRequest request)
     {
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var updatedTask = await _workOrderService.UpdateTaskStatusAsync(
-                taskId, 
-                request.Status, 
-                request.ActualHours, 
+                taskId,
+                request.Status,
+                request.ActualHours,
                 request.CompletionNotes);
-            
+
             if (updatedTask == null)
+            {
                 return NotFound($"Task with ID {taskId} not found");
+            }
 
             return Ok(updatedTask);
         }
@@ -361,7 +383,9 @@ public class WorkOrdersController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var part = await _workOrderPartService.AddPartAsync(createDto);
             return Ok(part);
@@ -384,10 +408,14 @@ public class WorkOrdersController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             if (parts == null || parts.Count == 0)
+            {
                 return BadRequest("No parts provided");
+            }
 
             // Ensure all parts are for the same work order
             foreach (var part in parts)
@@ -416,7 +444,9 @@ public class WorkOrdersController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var part = await _workOrderPartService.UpdatePartAsync(id, updateDto);
             return Ok(part);
@@ -481,7 +511,9 @@ public class WorkOrdersController : ControllerBase
         try
         {
             if (ids == null || ids.Count == 0)
+            {
                 return BadRequest("No part IDs provided");
+            }
 
             await _workOrderPartService.DeletePartsBulkAsync(ids);
             return NoContent();

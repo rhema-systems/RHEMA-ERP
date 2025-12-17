@@ -1,7 +1,7 @@
+using System.Security.Claims;
+using ErpSystem.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using ErpSystem.Core.Interfaces;
-using System.Security.Claims;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -84,7 +84,7 @@ namespace ErpSystem.Api.Controllers
                     themePreferences = new
                     {
                         theme = "system",
-                        colorScheme = "blue", 
+                        colorScheme = "blue",
                         fontSize = "md",
                         compactMode = false,
                         reducedMotion = false,
@@ -124,7 +124,7 @@ namespace ErpSystem.Api.Controllers
                     {
                         theme = "system",
                         colorScheme = "blue",
-                        fontSize = "md", 
+                        fontSize = "md",
                         compactMode = false,
                         reducedMotion = false,
                         highContrast = false,

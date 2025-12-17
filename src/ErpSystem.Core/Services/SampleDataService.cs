@@ -1,5 +1,5 @@
-using Microsoft.Extensions.Logging;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services;
 
@@ -82,13 +82,19 @@ public class SampleDataService : ISampleDataService
 
         // Name fields
         if (lowerFieldName.Contains("firstname") || lowerFieldName.Contains("first_name"))
+        {
             return _firstNames[_random.Next(_firstNames.Length)];
+        }
 
         if (lowerFieldName.Contains("lastname") || lowerFieldName.Contains("last_name") || lowerFieldName.Contains("surname"))
+        {
             return _lastNames[_random.Next(_lastNames.Length)];
+        }
 
         if (lowerFieldName.Contains("fullname") || lowerFieldName.Contains("full_name") || lowerFieldName.Equals("name"))
+        {
             return $"{_firstNames[_random.Next(_firstNames.Length)]} {_lastNames[_random.Next(_lastNames.Length)]}";
+        }
 
         // Email fields
         if (lowerFieldName.Contains("email"))
@@ -100,39 +106,59 @@ public class SampleDataService : ISampleDataService
 
         // Phone fields
         if (lowerFieldName.Contains("phone") || lowerFieldName.Contains("mobile") || lowerFieldName.Contains("tel"))
+        {
             return $"+1 ({_random.Next(200, 999)}) {_random.Next(100, 999)}-{_random.Next(1000, 9999)}";
+        }
 
         // Address fields
         if (lowerFieldName.Contains("address") || lowerFieldName.Contains("street"))
+        {
             return $"{_random.Next(100, 9999)} {_streets[_random.Next(_streets.Length)]}";
+        }
 
         if (lowerFieldName.Contains("city"))
+        {
             return _cities[_random.Next(_cities.Length)];
+        }
 
         if (lowerFieldName.Contains("state") || lowerFieldName.Contains("province"))
+        {
             return "California";
+        }
 
         if (lowerFieldName.Contains("zip") || lowerFieldName.Contains("postal"))
+        {
             return _random.Next(10000, 99999).ToString();
+        }
 
         if (lowerFieldName.Contains("country"))
+        {
             return "United States";
+        }
 
         // Company fields
         if (lowerFieldName.Contains("company") || lowerFieldName.Contains("organization"))
+        {
             return _companies[_random.Next(_companies.Length)];
+        }
 
         // Product fields
         if (lowerFieldName.Contains("product") || lowerFieldName.Contains("item"))
+        {
             return _products[_random.Next(_products.Length)];
+        }
 
         // Amount/Price fields
         if (lowerFieldName.Contains("amount") || lowerFieldName.Contains("price") || lowerFieldName.Contains("total") || lowerFieldName.Contains("cost"))
+        {
             return $"${_random.Next(10, 5000):N2}";
+        }
 
         // Quantity fields
         if (lowerFieldName.Contains("quantity") || lowerFieldName.Contains("qty") || lowerFieldName.Contains("count"))
+        {
             return _random.Next(1, 100).ToString();
+        }
 
         // Date fields
         if (lowerFieldName.Contains("date") || lowerFieldName.Contains("created") || lowerFieldName.Contains("updated"))
@@ -150,11 +176,15 @@ public class SampleDataService : ISampleDataService
 
         // ID fields
         if (lowerFieldName.Contains("id") || lowerFieldName.Equals("id"))
+        {
             return _random.Next(1000, 9999).ToString();
+        }
 
         // Boolean fields
         if (lowerFieldName.Contains("active") || lowerFieldName.Contains("enabled") || lowerFieldName.Contains("verified"))
+        {
             return _random.Next(2) == 0 ? "false" : "true";
+        }
 
         // Username fields
         if (lowerFieldName.Contains("username") || lowerFieldName.Contains("user_name"))
@@ -165,11 +195,15 @@ public class SampleDataService : ISampleDataService
 
         // Description fields
         if (lowerFieldName.Contains("description") || lowerFieldName.Contains("notes") || lowerFieldName.Contains("comment"))
+        {
             return "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore.";
+        }
 
         // Title fields
         if (lowerFieldName.Contains("title") || lowerFieldName.Contains("subject"))
+        {
             return "Sample Title or Subject";
+        }
 
         // Category fields
         if (lowerFieldName.Contains("category") || lowerFieldName.Contains("type"))
@@ -184,25 +218,37 @@ public class SampleDataService : ISampleDataService
             case "users":
             case "user":
                 if (lowerFieldName.Contains("role"))
+                {
                     return "Manager";
+                }
+
                 break;
 
             case "orders":
             case "order":
                 if (lowerFieldName.Contains("number"))
+                {
                     return $"ORD-{_random.Next(10000, 99999)}";
+                }
+
                 break;
 
             case "invoices":
             case "invoice":
                 if (lowerFieldName.Contains("number"))
+                {
                     return $"INV-{_random.Next(10000, 99999)}";
+                }
+
                 break;
 
             case "products":
             case "product":
                 if (lowerFieldName.Contains("sku"))
+                {
                     return $"SKU-{_random.Next(1000, 9999)}";
+                }
+
                 break;
         }
 

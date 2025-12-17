@@ -1,8 +1,8 @@
+using System.Security.Cryptography;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
-using System.Security.Cryptography;
 
 namespace ErpSystem.Core.Services
 {

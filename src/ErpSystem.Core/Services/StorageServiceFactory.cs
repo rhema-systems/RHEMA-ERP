@@ -142,7 +142,7 @@ public class StorageServiceFactory : IStorageServiceFactory
                !string.IsNullOrEmpty(_options.Aws.BucketName);
     }
 
-    private bool IsGoogleCloudAvailable()
+    private static bool IsGoogleCloudAvailable()
     {
         // Placeholder - implement based on Google Cloud Storage requirements
         return false;
@@ -176,10 +176,10 @@ public static class StorageServiceExtensions
         // Register storage service implementations
         services.AddScoped<LocalFileStorageService>();
         services.AddScoped<AzureBlobStorageService>();
-        
+
         // Register factory
         services.AddScoped<IStorageServiceFactory, StorageServiceFactory>();
-        
+
         // Register primary storage service based on configuration
         services.AddScoped<IFileStorageService>(provider =>
         {
@@ -194,7 +194,7 @@ public static class StorageServiceExtensions
     /// Configure storage services with options
     /// </summary>
     public static IServiceCollection ConfigureStorageServices(
-        this IServiceCollection services, 
+        this IServiceCollection services,
         Action<StorageProviderOptions> configure)
     {
         services.Configure(configure);
@@ -236,7 +236,7 @@ public class StorageServiceHealthCheck : Microsoft.Extensions.Diagnostics.Health
     }
 
     public async Task<Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult> CheckHealthAsync(
-        Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckContext context, 
+        Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckContext context,
         CancellationToken cancellationToken = default)
     {
         try

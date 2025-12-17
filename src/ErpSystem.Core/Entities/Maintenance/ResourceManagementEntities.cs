@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Base;
+using ErpSystem.Core.Entities.HR;
 
 namespace ErpSystem.Core.Entities.Maintenance;
 
@@ -267,7 +267,7 @@ public class MaintenanceTool : TenantEntity
     // Safety and certification requirements
     public bool RequiresCertification { get; set; } = false;
     public bool RequiresTraining { get; set; } = false;
-    
+
     [MaxLength(1000)]
     public string? SafetyNotes { get; set; }
 
@@ -321,7 +321,7 @@ public class ToolCheckout : TenantEntity
 
     // Damage or issues
     public bool DamageReported { get; set; } = false;
-    
+
     [MaxLength(2000)]
     public string? DamageDescription { get; set; }
 
@@ -412,7 +412,7 @@ public class MaintenanceStaffSchedule : TenantEntity
 
     // Vehicle/transportation
     public Guid? AssignedVehicleId { get; set; }
-    
+
     [MaxLength(100)]
     public string? TransportationType { get; set; } // Company Vehicle, Personal Vehicle, Public Transport
 
@@ -482,7 +482,7 @@ public class MaintenanceExpense : TenantEntity
 
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedDate { get; set; }
-    
+
     [MaxLength(1000)]
     public string? ApprovalNotes { get; set; }
 
@@ -492,7 +492,7 @@ public class MaintenanceExpense : TenantEntity
 
     // Vehicle tracking
     public Guid? VehicleId { get; set; }
-    
+
     // Location information
     [MaxLength(200)]
     public string? Location { get; set; }

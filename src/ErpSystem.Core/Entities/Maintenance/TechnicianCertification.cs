@@ -134,8 +134,8 @@ public class TechnicianCertification : TenantEntity
     /// Whether the certification is expiring soon (within 30 days)
     /// </summary>
     [NotMapped]
-    public bool IsExpiringSoon => ExpirationDate.HasValue && 
-                                   ExpirationDate.Value >= DateTime.UtcNow.Date && 
+    public bool IsExpiringSoon => ExpirationDate.HasValue &&
+                                   ExpirationDate.Value >= DateTime.UtcNow.Date &&
                                    ExpirationDate.Value <= DateTime.UtcNow.AddDays(30).Date;
 
     /// <summary>

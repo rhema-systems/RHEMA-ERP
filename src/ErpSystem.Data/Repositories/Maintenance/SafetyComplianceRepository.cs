@@ -1,6 +1,6 @@
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.Maintenance;
 
@@ -40,8 +40,8 @@ public class SafetyComplianceRepository : GenericRepository<SafetyComplianceReco
     public async Task<IEnumerable<SafetyComplianceRecord>> GetByDateRangeAsync(DateTime startDate, DateTime endDate)
     {
         return await _context.SafetyComplianceRecords
-            .Where(scr => scr.CheckDate >= startDate && 
-                         scr.CheckDate <= endDate && 
+            .Where(scr => scr.CheckDate >= startDate &&
+                         scr.CheckDate <= endDate &&
                          !scr.IsDeleted)
             .OrderByDescending(scr => scr.CheckDate)
             .ToListAsync();
@@ -58,7 +58,7 @@ public class SafetyComplianceRepository : GenericRepository<SafetyComplianceReco
     public async Task<IEnumerable<SafetyComplianceRecord>> GetViolationsAsync(DateTime? startDate = null, DateTime? endDate = null)
     {
         var query = _context.SafetyComplianceRecords
-            .Where(scr => scr.ComplianceStatus == "Non-Compliant" && 
+            .Where(scr => scr.ComplianceStatus == "Non-Compliant" &&
                          !string.IsNullOrEmpty(scr.Violations) &&
                          !scr.IsDeleted);
 
@@ -66,7 +66,7 @@ public class SafetyComplianceRepository : GenericRepository<SafetyComplianceReco
         {
             query = query.Where(scr => scr.CheckDate >= startDate.Value);
         }
-        
+
         if (endDate.HasValue)
         {
             query = query.Where(scr => scr.CheckDate <= endDate.Value);
@@ -120,7 +120,7 @@ public class SafetyComplianceRepository : GenericRepository<SafetyComplianceReco
     public async Task<IEnumerable<SafetyComplianceRecord>> GetRecentComplianceChecksAsync(int daysBack = 30)
     {
         var cutoffDate = DateTime.UtcNow.AddDays(-daysBack);
-        
+
         return await _context.SafetyComplianceRecords
             .Where(scr => scr.CheckDate >= cutoffDate && !scr.IsDeleted)
             .OrderByDescending(scr => scr.CheckDate)
@@ -148,22 +148,25 @@ public class SafetyComplianceRepository : GenericRepository<SafetyComplianceReco
         }
 
         var totalChecks = await query.CountAsync();
-        if (totalChecks == 0) return 0;
+        if (totalChecks == 0)
+        {
+            return 0;
+        }
 
         var compliantChecks = await query.CountAsync(scr => scr.ComplianceStatus == "Compliant");
         return (decimal)compliantChecks / totalChecks * 100;
     }
-    
+
     public async Task<SafetyComplianceRecord?> GetLatestComplianceAsync(Guid protocolId, Guid technicianId)
     {
         return await _context.SafetyComplianceRecords
-            .Where(scr => scr.ProtocolId == protocolId && 
-                         scr.TechnicianId == technicianId && 
+            .Where(scr => scr.ProtocolId == protocolId &&
+                         scr.TechnicianId == technicianId &&
                          !scr.IsDeleted)
             .OrderByDescending(scr => scr.CheckDate)
             .FirstOrDefaultAsync();
     }
-    
+
     public async Task<decimal> GetComplianceRateAsync(Guid protocolId, DateTime startDate, DateTime endDate)
     {
         var query = _context.SafetyComplianceRecords
@@ -173,7 +176,10 @@ public class SafetyComplianceRepository : GenericRepository<SafetyComplianceReco
                          !scr.IsDeleted);
 
         var totalChecks = await query.CountAsync();
-        if (totalChecks == 0) return 0;
+        if (totalChecks == 0)
+        {
+            return 0;
+        }
 
         var compliantChecks = await query.CountAsync(scr => scr.ComplianceStatus == "Compliant");
         return (decimal)compliantChecks / totalChecks * 100;

@@ -1,0 +1,871 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  ArrowLeft,
+  FileText,
+  Package,
+  DollarSign,
+  Clock,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  Eye,
+  Info,
+  Award,
+  Download,
+  Trophy,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import * as tenderBidService from '@/services/tenderBidService';
+import { type TenderBidDetailDto } from '@/services/tenderBidService';
+import { tenderService, type TenderDetailDto } from '@/services/tenderService';
+import { format } from 'date-fns';
+
+export default function BidDetailPage() {
+  const params = useParams();
+  const router = useRouter();
+  const bidId = params.id as string;
+
+  const [bid, setBid] = useState<TenderBidDetailDto | null>(null);
+  const [tender, setTender] = useState<TenderDetailDto | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [withdrawing, setWithdrawing] = useState(false);
+
+  useEffect(() => {
+    if (bidId) {
+      loadBid();
+    }
+  }, [bidId]);
+
+  const loadBid = async () => {
+    try {
+      setLoading(true);
+      const data = await tenderBidService.getBidById(bidId);
+      setBid(data);
+
+      // Load tender details to get required documents
+      if (data.tenderId) {
+        try {
+          const tenderData = await tenderService.getTenderById(data.tenderId);
+          setTender(tenderData);
+        } catch (error) {
+          console.error('Error loading tender:', error);
+          // Don't show error - bid details are more important
+        }
+      }
+    } catch (error) {
+      console.error('Error loading bid:', error);
+      toast.error('Failed to load bid details');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleWithdraw = async () => {
+    if (!bid) return;
+
+    if (!confirm('Are you sure you want to withdraw this bid? This action cannot be undone.')) {
+      return;
+    }
+
+    const reason = prompt('Please provide a reason for withdrawal:');
+    if (!reason) {
+      toast.error('Withdrawal reason is required');
+      return;
+    }
+
+    try {
+      setWithdrawing(true);
+      await tenderBidService.withdrawBid(bidId, { reason });
+      toast.success('Bid withdrawn successfully');
+      loadBid(); // Reload to show updated status
+    } catch (error) {
+      console.error('Error withdrawing bid:', error);
+      toast.error('Failed to withdraw bid');
+    } finally {
+      setWithdrawing(false);
+    }
+  };
+
+  const handleViewTender = () => {
+    if (bid) {
+      router.push(`/external-portal/tenders/${bid.tenderId}`);
+    }
+  };
+
+  const handleEditBid = () => {
+    if (bid) {
+      router.push(`/external-portal/tenders/${bid.tenderId}/submit-bid`);
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    const statusConfig: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', className: string, icon: any }> = {
+      'Draft': { variant: 'secondary', className: 'bg-gray-100 text-gray-800', icon: Clock },
+      'Submitted': { variant: 'default', className: 'bg-blue-100 text-blue-800', icon: CheckCircle },
+      'Opened': { variant: 'default', className: 'bg-purple-100 text-purple-800', icon: Eye },
+      'UnderEvaluation': { variant: 'default', className: 'bg-yellow-100 text-yellow-800', icon: AlertCircle },
+      'Accepted': { variant: 'default', className: 'bg-green-100 text-green-800', icon: CheckCircle },
+      'Awarded': { variant: 'default', className: 'bg-gradient-to-r from-amber-400 to-yellow-500 text-white', icon: Trophy },
+      'Rejected': { variant: 'destructive', className: 'bg-red-100 text-red-800', icon: XCircle },
+      'Withdrawn': { variant: 'outline', className: 'bg-gray-100 text-gray-600', icon: XCircle },
+    };
+
+    const config = statusConfig[status] || { variant: 'outline' as const, className: '', icon: FileText };
+    const Icon = config.icon;
+
+    return (
+      <Badge variant={config.variant} className={config.className}>
+        <Icon className="h-3 w-3 mr-1" />
+        {status}
+      </Badge>
+    );
+  };
+
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return 'N/A';
+    try {
+      return format(new Date(dateString), 'PPP');
+    } catch {
+      return dateString;
+    }
+  };
+
+  const calculateItemTotal = (item: any) => {
+    return item.offeredQuantity * item.unitPrice;
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Clock className="h-12 w-12 animate-spin mx-auto mb-4 text-blue-500" />
+          <p className="text-lg text-gray-600">Loading bid details...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!bid) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <AlertCircle className="h-12 w-12 mx-auto mb-4 text-red-500" />
+          <p className="text-lg text-gray-600">Bid not found</p>
+          <Button onClick={() => router.push('/external-portal/my-bids')} className="mt-4">
+            Back to My Bids
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const canWithdraw = bid.status === 'Submitted' || bid.status === 'Draft';
+
+  return (
+    <div className="container mx-auto py-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" onClick={() => router.push('/external-portal/my-bids')}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold">Bid Details</h1>
+            <p className="text-gray-500 font-mono">{bid.bidNumber}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {getStatusBadge(bid.status)}
+        </div>
+      </div>
+
+      {/* Award Celebration Banner */}
+      {bid.status === 'Awarded' && (
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 via-green-500 to-teal-600 p-8 text-white shadow-2xl">
+          {/* Decorative blur elements */}
+          <div className="absolute top-0 right-0 -mt-4 -mr-4 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
+          <div className="absolute bottom-0 left-0 -mb-8 -ml-8 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
+          <div className="absolute top-1/2 right-10 h-20 w-20 rounded-full bg-yellow-400/20 blur-xl" />
+
+          {/* Animated celebration emojis */}
+          <div className="absolute top-4 left-8 text-4xl animate-bounce" style={{ animationDelay: '0s', animationDuration: '2s' }}>✨</div>
+          <div className="absolute top-8 right-20 text-3xl animate-bounce" style={{ animationDelay: '0.3s', animationDuration: '2.2s' }}>🎉</div>
+          <div className="absolute bottom-6 right-8 text-3xl animate-bounce" style={{ animationDelay: '0.6s', animationDuration: '1.8s' }}>⭐</div>
+          <div className="absolute bottom-12 left-16 text-2xl animate-bounce" style={{ animationDelay: '0.4s', animationDuration: '2.1s' }}>🎊</div>
+          <div className="absolute top-1/3 left-1/4 text-2xl animate-bounce" style={{ animationDelay: '0.2s', animationDuration: '2.3s' }}>🏅</div>
+
+          <div className="relative z-10 text-center">
+            {/* Large Trophy Badge */}
+            <div className="mx-auto mb-4 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-yellow-300 to-yellow-500 shadow-lg ring-4 ring-white/30 animate-pulse">
+              <Trophy className="h-14 w-14 text-yellow-900" />
+            </div>
+
+            <h2 className="text-3xl font-bold tracking-tight mb-2">
+              🎉 Congratulations! 🎉
+            </h2>
+            <p className="text-xl text-white/95 mb-2">Your Bid Has Been Awarded!</p>
+            <p className="text-white/80 max-w-md mx-auto">
+              You have successfully won the contract for this tender.
+              Our team will contact you shortly with the next steps.
+            </p>
+
+            <Badge className="mt-4 bg-white/20 text-white border-white/30 hover:bg-white/30 text-sm px-4 py-1.5">
+              <Trophy className="h-4 w-4 mr-2" />
+              Contract Awarded
+            </Badge>
+          </div>
+        </div>
+      )}
+
+      {/* Accepted Status Alert (legacy support) */}
+      {bid.status === 'Accepted' && (
+        <Card className="border-green-300 bg-green-50">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <Award className="h-6 w-6 text-green-600" />
+              <div>
+                <p className="font-medium text-green-900">Congratulations! Your bid has been accepted</p>
+                <p className="text-sm text-green-700">
+                  You will be contacted soon regarding the next steps.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Rejected Status Alert */}
+      {bid.status === 'Rejected' && (
+        <Card className="border-red-300 bg-red-50">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <XCircle className="h-6 w-6 text-red-600" />
+              <div>
+                <p className="font-medium text-red-900">Your bid was not successful</p>
+                <p className="text-sm text-red-700">
+                  Thank you for your participation. We encourage you to bid on future tenders.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Quick Info */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-500">Tender</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p
+              className="font-medium text-blue-600 cursor-pointer hover:underline"
+              onClick={handleViewTender}
+            >
+              {bid.tenderNumber}
+            </p>
+            <p className="text-sm text-gray-600">{bid.tenderTitle}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-500">Total Bid Amount</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xl font-bold text-green-600">
+              {bid.currency} {bid.totalBidAmount.toLocaleString()}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-500">Submitted Date</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="font-medium">{formatDate(bid.submittedDate)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-500">Delivery Period</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="font-medium">{bid.deliveryDays ? `${bid.deliveryDays} days` : 'N/A'}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Tabs */}
+      <Tabs defaultValue="items" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="items">
+            <Package className="h-4 w-4 mr-2" />
+            Lots ({bid.items?.length || 0})
+          </TabsTrigger>
+          <TabsTrigger value="proposals">
+            <FileText className="h-4 w-4 mr-2" />
+            Proposals
+          </TabsTrigger>
+          <TabsTrigger value="terms">
+            <DollarSign className="h-4 w-4 mr-2" />
+            Terms
+          </TabsTrigger>
+          <TabsTrigger value="documents">
+            <FileText className="h-4 w-4 mr-2" />
+            Documents ({bid.documents?.filter(doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal').length || 0})
+          </TabsTrigger>
+          <TabsTrigger value="info">
+            <Info className="h-4 w-4 mr-2" />
+            Information
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Bid Lots Tab */}
+        <TabsContent value="items">
+          <Card>
+            <CardHeader>
+              <CardTitle>Bid Lots</CardTitle>
+              <CardDescription>Lots and pricing in your bid</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {bid.items && bid.items.length > 0 ? (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>#</TableHead>
+                        <TableHead>Description</TableHead>
+                        <TableHead>Quantity</TableHead>
+                        <TableHead>Unit Price</TableHead>
+                        <TableHead>Total</TableHead>
+                        <TableHead>Delivery</TableHead>
+                        <TableHead>Brand/Model</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {bid.items.map((item, index) => (
+                        <TableRow key={item.id}>
+                          <TableCell>{index + 1}</TableCell>
+                          <TableCell>
+                            <div>
+                              <p className="font-medium">{item.tenderItemDescription}</p>
+                              {item.specifications && (
+                                <p className="text-sm text-gray-500 whitespace-pre-wrap">{item.specifications}</p>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {item.offeredQuantity}
+                            {item.unitOfMeasure && <span className="text-gray-500 text-sm ml-1">{item.unitOfMeasure}</span>}
+                          </TableCell>
+                          <TableCell>
+                            {bid.currency} {item.unitPrice.toLocaleString()}
+                          </TableCell>
+                          <TableCell className="font-bold text-green-600">
+                            {bid.currency} {calculateItemTotal(item).toLocaleString()}
+                          </TableCell>
+                          <TableCell>{item.deliveryDays ? `${item.deliveryDays} days` : 'N/A'}</TableCell>
+                          <TableCell>
+                            {item.brand || item.model ? `${item.brand || ''} ${item.model || ''}`.trim() : 'N/A'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+
+                  <div className="mt-4 flex justify-end">
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 min-w-64 max-w-md">
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-lg font-medium whitespace-nowrap">Total:</span>
+                        <span className="text-2xl font-bold text-green-600 break-all text-right">
+                          {bid.currency} {bid.totalBidAmount.toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-12">
+                  <Package className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                  <p className="text-gray-500 mb-2">No lots selected yet</p>
+                  {bid.status === 'Draft' && (
+                    <p className="text-sm text-gray-400 mb-4">
+                      Continue editing your bid to select lots and enter pricing
+                    </p>
+                  )}
+                  {bid.status === 'Draft' && (
+                    <Button onClick={handleEditBid} size="sm">
+                      <FileText className="h-4 w-4 mr-2" />
+                      Continue Editing
+                    </Button>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Proposals Tab */}
+        <TabsContent value="proposals">
+          <div className="space-y-4">
+            {/* Technical Proposal */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Technical Proposal</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {(() => {
+                  const technicalDoc = bid.documents?.find(doc => doc.documentType === 'TechnicalProposal');
+
+                  if (technicalDoc) {
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-green-600">
+                          <CheckCircle className="h-5 w-5" />
+                          <span className="font-medium">Document uploaded</span>
+                        </div>
+                        <div className="flex items-center justify-between p-4 border rounded-lg bg-green-50 border-green-200">
+                          <div className="flex items-center gap-3">
+                            <FileText className="h-5 w-5 text-green-600" />
+                            <div>
+                              <p className="font-medium">{technicalDoc.documentName}</p>
+                              <p className="text-xs text-gray-500">
+                                Uploaded: {format(new Date(technicalDoc.uploadedDate), 'MMM dd, yyyy')}
+                                {technicalDoc.fileSize && ` • ${(technicalDoc.fileSize / 1024).toFixed(1)} KB`}
+                              </p>
+                            </div>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => tenderBidService.downloadBidDocument(bid.id, technicalDoc.id, technicalDoc.documentName)}
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Download
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (bid.technicalProposal) {
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-blue-600">
+                          <FileText className="h-5 w-5" />
+                          <span className="font-medium">Text proposal</span>
+                        </div>
+                        <div className="p-4 border rounded-lg bg-gray-50">
+                          <p className="whitespace-pre-wrap text-gray-700">{bid.technicalProposal}</p>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return <p className="text-gray-500">No technical proposal provided</p>;
+                })()}
+              </CardContent>
+            </Card>
+
+            {/* Commercial Proposal */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Commercial Proposal</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {(() => {
+                  const commercialDoc = bid.documents?.find(doc => doc.documentType === 'CommercialProposal');
+
+                  if (commercialDoc) {
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-green-600">
+                          <CheckCircle className="h-5 w-5" />
+                          <span className="font-medium">Document uploaded</span>
+                        </div>
+                        <div className="flex items-center justify-between p-4 border rounded-lg bg-green-50 border-green-200">
+                          <div className="flex items-center gap-3">
+                            <FileText className="h-5 w-5 text-green-600" />
+                            <div>
+                              <p className="font-medium">{commercialDoc.documentName}</p>
+                              <p className="text-xs text-gray-500">
+                                Uploaded: {format(new Date(commercialDoc.uploadedDate), 'MMM dd, yyyy')}
+                                {commercialDoc.fileSize && ` • ${(commercialDoc.fileSize / 1024).toFixed(1)} KB`}
+                              </p>
+                            </div>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => tenderBidService.downloadBidDocument(bid.id, commercialDoc.id, commercialDoc.documentName)}
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Download
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (bid.commercialProposal) {
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-blue-600">
+                          <FileText className="h-5 w-5" />
+                          <span className="font-medium">Text proposal</span>
+                        </div>
+                        <div className="p-4 border rounded-lg bg-gray-50">
+                          <p className="whitespace-pre-wrap text-gray-700">{bid.commercialProposal}</p>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return <p className="text-gray-500">No commercial proposal provided</p>;
+                })()}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Terms Tab */}
+        <TabsContent value="terms">
+          <Card>
+            <CardHeader>
+              <CardTitle>Terms & Conditions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <p className="text-sm text-gray-500">Delivery Period</p>
+                <p className="font-medium">{bid.deliveryDays ? `${bid.deliveryDays} days` : 'Not specified'}</p>
+              </div>
+
+              <div>
+                <p className="text-sm text-gray-500">Payment Terms</p>
+                <p className="font-medium whitespace-pre-wrap">
+                  {bid.paymentTerms || 'Not specified'}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-sm text-gray-500">Warranty Terms</p>
+                <p className="font-medium whitespace-pre-wrap">
+                  {bid.warrantyTerms || 'Not specified'}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Documents Tab */}
+        <TabsContent value="documents">
+          <Card>
+            <CardHeader>
+              <CardTitle>Supporting Documents</CardTitle>
+              <CardDescription>
+                {(() => {
+                  try {
+                    const requirements = tender?.requiredDocuments ? JSON.parse(tender.requiredDocuments) : [];
+                    const requiredCount = requirements.filter((r: any) => r.isRequired).length;
+                    const optionalCount = requirements.length - requiredCount;
+                    // Exclude proposal documents from count
+                    const uploadedCount = bid.documents?.filter(
+                      doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal'
+                    ).length || 0;
+                    return requirements.length > 0
+                      ? `${requirements.length} requirement(s) - ${requiredCount} required, ${optionalCount} optional • ${uploadedCount} file(s) uploaded`
+                      : `${uploadedCount} file(s) uploaded`;
+                  } catch {
+                    const uploadedCount = bid.documents?.filter(
+                      doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal'
+                    ).length || 0;
+                    return `${uploadedCount} file(s) uploaded`;
+                  }
+                })()}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                try {
+                  const requirements = tender?.requiredDocuments ? JSON.parse(tender.requiredDocuments) : [];
+                  // Filter out proposal documents - only show required documents
+                  const uploadedDocs = (bid.documents || []).filter(
+                    doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal'
+                  );
+
+                  if (requirements.length === 0 && uploadedDocs.length === 0) {
+                    return <p className="text-center py-8 text-gray-500">No document requirements or uploads</p>;
+                  }
+
+                  // If no requirements defined, show all documents in a simple list
+                  if (requirements.length === 0) {
+                    return (
+                      <div className="space-y-3">
+                        {uploadedDocs.map((document) => (
+                          <div
+                            key={document.id}
+                            className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
+                          >
+                            <div className="flex items-center gap-3">
+                              <FileText className="h-5 w-5 text-blue-600" />
+                              <div>
+                                <p className="font-medium">{document.documentName}</p>
+                                <div className="flex items-center gap-3 text-sm text-gray-500">
+                                  <span>{document.documentType}</span>
+                                  {document.fileSize && (
+                                    <>
+                                      <span>•</span>
+                                      <span>{(document.fileSize / 1024).toFixed(1)} KB</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => tenderBidService.downloadBidDocument(bid.id, document.id, document.documentName)}
+                            >
+                              <Download className="h-4 w-4 mr-2" />
+                              Download
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+
+                  // Show requirements with their uploaded files
+                  return (
+                    <div className="space-y-4">
+                      {requirements.map((req: any, index: number) => {
+                        const matchingDocs = uploadedDocs.filter(doc => doc.documentType === req.documentType);
+
+                        return (
+                          <div key={index} className="border rounded-lg overflow-hidden">
+                            <div className="bg-gray-50 p-4 border-b">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <FileText className="h-5 w-5 text-blue-600" />
+                                    <p className="font-medium">{req.documentName}</p>
+                                    <Badge variant={req.isRequired ? 'destructive' : 'secondary'} className="text-xs">
+                                      {req.isRequired ? 'Required' : 'Optional'}
+                                    </Badge>
+                                    {matchingDocs.length > 0 && (
+                                      <Badge className="bg-green-600 text-xs">
+                                        <CheckCircle className="h-3 w-3 mr-1" />
+                                        {matchingDocs.length} uploaded
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-sm text-gray-600 mt-2">
+                                    Type: <span className="font-medium">{req.documentType}</span>
+                                  </p>
+                                  {req.description && (
+                                    <p className="text-sm text-gray-500 mt-1">{req.description}</p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Uploaded Files for this Requirement */}
+                            {matchingDocs.length > 0 ? (
+                              <div className="p-4 space-y-2">
+                                {matchingDocs.map((doc) => (
+                                  <div
+                                    key={doc.id}
+                                    className="flex items-center justify-between p-3 bg-white border rounded-lg hover:bg-gray-50"
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <CheckCircle className="h-5 w-5 text-green-600" />
+                                      <div>
+                                        <p className="font-medium text-sm">{doc.documentName}</p>
+                                        <p className="text-xs text-gray-500">
+                                          Uploaded: {format(new Date(doc.uploadedDate), 'MMM dd, yyyy')}
+                                          {doc.fileSize && ` • ${(doc.fileSize / 1024).toFixed(1)} KB`}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => tenderBidService.downloadBidDocument(bid.id, doc.id, doc.documentName)}
+                                    >
+                                      <Download className="h-4 w-4 mr-2" />
+                                      Download
+                                    </Button>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="p-4 text-center text-gray-500 text-sm">
+                                <AlertCircle className="h-5 w-5 mx-auto mb-2 text-yellow-600" />
+                                No document uploaded for this requirement
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {/* Show any uploaded documents that don't match requirements */}
+                      {(() => {
+                        const requiredTypes = requirements.map((r: any) => r.documentType);
+                        const unmatchedDocs = uploadedDocs.filter(doc => !requiredTypes.includes(doc.documentType));
+
+                        if (unmatchedDocs.length > 0) {
+                          return (
+                            <div className="border rounded-lg overflow-hidden">
+                              <div className="bg-gray-50 p-4 border-b">
+                                <div className="flex items-center gap-2">
+                                  <FileText className="h-5 w-5 text-gray-600" />
+                                  <p className="font-medium">Other Documents</p>
+                                  <Badge variant="secondary" className="text-xs">
+                                    {unmatchedDocs.length} file(s)
+                                  </Badge>
+                                </div>
+                              </div>
+                              <div className="p-4 space-y-2">
+                                {unmatchedDocs.map((doc) => (
+                                  <div
+                                    key={doc.id}
+                                    className="flex items-center justify-between p-3 bg-white border rounded-lg hover:bg-gray-50"
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <FileText className="h-5 w-5 text-blue-600" />
+                                      <div>
+                                        <p className="font-medium text-sm">{doc.documentName}</p>
+                                        <p className="text-xs text-gray-500">
+                                          {doc.documentType}
+                                          {doc.fileSize && ` • ${(doc.fileSize / 1024).toFixed(1)} KB`}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => tenderBidService.downloadBidDocument(bid.id, doc.id, doc.documentName)}
+                                    >
+                                      <Download className="h-4 w-4 mr-2" />
+                                      Download
+                                    </Button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+                  );
+                } catch (error) {
+                  console.error('Error rendering documents:', error);
+                  return <p className="text-center py-8 text-red-500">Error loading documents</p>;
+                }
+              })()}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Information Tab */}
+        <TabsContent value="info">
+          <Card>
+            <CardHeader>
+              <CardTitle>Bid Information</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-gray-500">Bid Number</p>
+                  <p className="font-medium font-mono">{bid.bidNumber}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Status</p>
+                  <div className="mt-1">{getStatusBadge(bid.status)}</div>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Submitted Date</p>
+                  <p className="font-medium">{formatDate(bid.submittedDate)}</p>
+                </div>
+                {bid.openedDate && (
+                  <div>
+                    <p className="text-sm text-gray-500">Opened Date</p>
+                    <p className="font-medium">{formatDate(bid.openedDate)}</p>
+                  </div>
+                )}
+                {bid.openedByName && (
+                  <div>
+                    <p className="text-sm text-gray-500">Opened By</p>
+                    <p className="font-medium">{bid.openedByName}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-sm text-gray-500">Total Amount</p>
+                  <p className="font-medium text-green-600">
+                    {bid.currency} {bid.totalBidAmount.toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* Actions */}
+      {bid.status === 'Draft' && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">Continue Editing Your Bid</p>
+                <p className="text-sm text-gray-500">
+                  Your bid is saved as a draft. Continue editing to complete and submit your bid.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={handleEditBid}>
+                  <FileText className="h-4 w-4 mr-2" />
+                  Continue Editing
+                </Button>
+                <Button variant="destructive" onClick={handleWithdraw} disabled={withdrawing}>
+                  <XCircle className="h-4 w-4 mr-2" />
+                  {withdrawing ? 'Withdrawing...' : 'Withdraw Bid'}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {bid.status === 'Submitted' && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">Withdraw Bid</p>
+                <p className="text-sm text-gray-500">
+                  You can withdraw your bid if you no longer wish to participate
+                </p>
+              </div>
+              <Button variant="destructive" onClick={handleWithdraw} disabled={withdrawing}>
+                <XCircle className="h-4 w-4 mr-2" />
+                {withdrawing ? 'Withdrawing...' : 'Withdraw Bid'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+

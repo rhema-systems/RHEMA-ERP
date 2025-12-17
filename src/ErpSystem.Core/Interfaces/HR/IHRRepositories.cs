@@ -1,7 +1,7 @@
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
-using ErpSystem.Core.Entities.HR;
 
 namespace ErpSystem.Core.Interfaces.HR;
 

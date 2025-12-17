@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Base;
+using ErpSystem.Core.Entities.HR;
 
 namespace ErpSystem.Core.Entities.Maintenance;
 
@@ -275,7 +275,7 @@ public class InspectionApproval
     // Navigation property
     [ForeignKey("InspectionId")]
     public virtual AssetInspection Inspection { get; set; } = null!;
-    
+
     public virtual Employee Approver { get; set; } = null!;
     public virtual Employee? DelegatedTo { get; set; }
 }

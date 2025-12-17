@@ -1,9 +1,9 @@
 using ErpSystem.Core.DTOs.Maintenance;
-using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
-using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Maintenance;
@@ -35,31 +35,25 @@ public class WorkOrderPartService : IWorkOrderPartService
         var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("TenantId is required");
         var userIdString = _currentUserService.UserId ?? throw new InvalidOperationException("UserId is required");
         var userId = Guid.Parse(userIdString);
-        
+
         // Verify warehouse exists
-        var warehouse = await _warehouseRepository.GetByIdAsync(createDto.WarehouseId);
-        if (warehouse == null)
-            throw new InvalidOperationException($"Warehouse {createDto.WarehouseId} not found");
-        
+        var warehouse = await _warehouseRepository.GetByIdAsync(createDto.WarehouseId) ?? throw new InvalidOperationException($"Warehouse {createDto.WarehouseId} not found");
+
         // Check warehouse-level inventory availability
         var warehouseQuantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(
-            createDto.WarehouseId, createDto.InventoryItemId);
-            
-        if (warehouseQuantity == null)
-            throw new InvalidOperationException(
+            createDto.WarehouseId, createDto.InventoryItemId) ?? throw new InvalidOperationException(
                 $"Item {createDto.InventoryItemId} not found in warehouse {warehouse.Name}");
-
         if (warehouseQuantity.AvailableStock < createDto.QuantityRequired)
         {
             _logger.LogWarning(
                 "Insufficient stock in warehouse {Warehouse} for item {ItemCode}. Required: {Required}, Available: {Available}",
-                warehouse.Name, warehouseQuantity.InventoryItem.ItemCode, 
+                warehouse.Name, warehouseQuantity.InventoryItem.ItemCode,
                 createDto.QuantityRequired, warehouseQuantity.AvailableStock);
             throw new InvalidOperationException(
                 $"Insufficient stock in {warehouse.Name} for {warehouseQuantity.InventoryItem.ItemCode}. " +
                 $"Available: {warehouseQuantity.AvailableStock}, Required: {createDto.QuantityRequired}");
         }
-        
+
         await _unitOfWork.BeginTransactionAsync();
         try
         {
@@ -96,7 +90,7 @@ public class WorkOrderPartService : IWorkOrderPartService
             var partRepo = _unitOfWork.Repository<WorkOrderPart>();
             await partRepo.AddAsync(part);
             await _warehouseQuantityRepository.UpdateAsync(warehouseQuantity);
-            
+
             // Always create inventory allocation for tracking and consume functionality
             // WarehouseId is required, LocationId is optional (for specific warehouse location)
             var allocation = new InventoryAllocation
@@ -120,20 +114,20 @@ public class WorkOrderPartService : IWorkOrderPartService
                 AllocatedById = userId,
                 CreatedAt = DateTime.UtcNow
             };
-            
+
             var allocationRepo = _unitOfWork.Repository<InventoryAllocation>();
             await allocationRepo.AddAsync(allocation);
-            
+
             part.AllocationId = allocation.Id;
             await partRepo.UpdateAsync(part);
-            
+
             await _unitOfWork.CommitAsync();
-            
+
             _logger.LogInformation(
                 "Allocated {Quantity} units of {ItemCode} from warehouse {Warehouse} for work order {WorkOrderId}",
-                createDto.QuantityRequired, warehouseQuantity.InventoryItem.ItemCode, 
+                createDto.QuantityRequired, warehouseQuantity.InventoryItem.ItemCode,
                 warehouse.Name, createDto.WorkOrderId);
-            
+
             return MapToDto(part);
         }
         catch (Exception ex)
@@ -147,13 +141,10 @@ public class WorkOrderPartService : IWorkOrderPartService
     public async Task<WorkOrderPartDto> UpdatePartAsync(Guid id, UpdateWorkOrderPartDto updateDto)
     {
         var partRepo = _unitOfWork.Repository<WorkOrderPart>();
-        var part = await partRepo.GetByIdAsync(id);
-        if (part == null)
-            throw new KeyNotFoundException($"Part with ID {id} not found");
-
+        var part = await partRepo.GetByIdAsync(id) ?? throw new KeyNotFoundException($"Part with ID {id} not found");
         var oldQuantityUsed = part.QuantityUsed;
         var newQuantityUsed = updateDto.QuantityUsed;
-        
+
         await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
             await _unitOfWork.BeginTransactionAsync();
@@ -187,7 +178,7 @@ public class WorkOrderPartService : IWorkOrderPartService
                 throw; // Let ExecuteInStrategyAsync handle retries
             }
         });
-        
+
         return MapToDto(part);
     }
 
@@ -196,7 +187,9 @@ public class WorkOrderPartService : IWorkOrderPartService
         var partRepo = _unitOfWork.Repository<WorkOrderPart>();
         var part = await partRepo.GetByIdAsync(id);
         if (part == null)
+        {
             return;
+        }
 
         // Check if part has been used - if so, don't delete (keep for history)
         if (part.QuantityUsed > 0 || part.Status == "Used" || part.Status == "Returned")
@@ -215,7 +208,7 @@ public class WorkOrderPartService : IWorkOrderPartService
                 {
                     await ReleaseAllocationAsync(part);
                 }
-                
+
                 // Hard delete - only allowed for unused parts (Draft/planning phase)
                 await partRepo.HardDeleteAsync(part);
                 await _unitOfWork.CommitAsync();
@@ -238,22 +231,19 @@ public class WorkOrderPartService : IWorkOrderPartService
     public async Task<WorkOrderPartDto> UpdatePartStatusAsync(Guid id, string status, int? quantityUsed = null)
     {
         var partRepo = _unitOfWork.Repository<WorkOrderPart>();
-        var part = await partRepo.GetByIdAsync(id);
-        if (part == null)
-            throw new KeyNotFoundException($"Part with ID {id} not found");
-
+        var part = await partRepo.GetByIdAsync(id) ?? throw new KeyNotFoundException($"Part with ID {id} not found");
         await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
             await _unitOfWork.BeginTransactionAsync();
             try
             {
                 var oldQuantityUsed = part.QuantityUsed;
-                
+
                 part.Status = status;
                 if (quantityUsed.HasValue)
                 {
                     part.QuantityUsed = quantityUsed.Value;
-                    
+
                     // Update inventory consumption if quantity increased
                     if (quantityUsed.Value > oldQuantityUsed && part.AllocationId.HasValue)
                     {
@@ -261,12 +251,12 @@ public class WorkOrderPartService : IWorkOrderPartService
                         await UpdateInventoryConsumptionAsync(part, quantityConsumed);
                     }
                 }
-                
+
                 if (status == "Returned" && part.AllocationId.HasValue)
                 {
                     await ReleaseAllocationAsync(part);
                 }
-                
+
                 part.UpdatedAt = DateTime.UtcNow;
 
                 await partRepo.UpdateAsync(part);
@@ -277,7 +267,7 @@ public class WorkOrderPartService : IWorkOrderPartService
                 throw; // Let ExecuteInStrategyAsync handle retries
             }
         });
-        
+
         return MapToDto(part);
     }
 
@@ -298,16 +288,17 @@ public class WorkOrderPartService : IWorkOrderPartService
     public async Task<WorkOrderPartDto> ReturnUnusedPartsAsync(Guid partId)
     {
         var partRepo = _unitOfWork.Repository<WorkOrderPart>();
-        var part = await partRepo.GetByIdAsync(partId);
-        if (part == null)
-            throw new KeyNotFoundException($"Part with ID {partId} not found");
-
+        var part = await partRepo.GetByIdAsync(partId) ?? throw new KeyNotFoundException($"Part with ID {partId} not found");
         if (!part.AllocationId.HasValue)
+        {
             throw new InvalidOperationException("Part has no allocation to return");
+        }
 
         // Prevent returning multiple times
         if (part.Status == "Returned" || part.QuantityReturned > 0)
+        {
             throw new InvalidOperationException("Parts have already been returned");
+        }
 
         await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
@@ -315,13 +306,11 @@ public class WorkOrderPartService : IWorkOrderPartService
             try
             {
                 var allocationRepo = _unitOfWork.Repository<InventoryAllocation>();
-                var allocation = await allocationRepo.GetByIdAsync(part.AllocationId.Value);
-                if (allocation == null)
-                    throw new InvalidOperationException("Allocation not found");
+                var allocation = await allocationRepo.GetByIdAsync(part.AllocationId.Value) ?? throw new InvalidOperationException("Allocation not found");
 
                 // Calculate unused quantity (allocated - used)
                 var unusedQuantity = part.QuantityAllocated - part.QuantityUsed;
-                
+
                 if (unusedQuantity <= 0)
                 {
                     _logger.LogInformation("No unused parts to return for part {PartId}", partId);
@@ -331,9 +320,7 @@ public class WorkOrderPartService : IWorkOrderPartService
 
                 // Get warehouse quantity using WarehouseId from allocation
                 var warehouseQuantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(
-                    allocation.WarehouseId, part.InventoryItemId);
-                if (warehouseQuantity == null)
-                    throw new InvalidOperationException("Warehouse quantity not found");
+                    allocation.WarehouseId, part.InventoryItemId) ?? throw new InvalidOperationException("Warehouse quantity not found");
 
                 // Return unused quantity back to available stock
                 warehouseQuantity.AvailableStock += unusedQuantity;
@@ -385,7 +372,7 @@ public class WorkOrderPartService : IWorkOrderPartService
             // Get warehouse quantity using WarehouseId from allocation
             var warehouseQuantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(
                 allocation.WarehouseId, part.InventoryItemId);
-            
+
             if (warehouseQuantity == null)
             {
                 _logger.LogWarning("Warehouse quantity not found for item {ItemId}", part.InventoryItemId);
@@ -396,7 +383,7 @@ public class WorkOrderPartService : IWorkOrderPartService
             allocation.ConsumedQuantity += quantityConsumed;
             allocation.RemainingQuantity -= quantityConsumed;
             allocation.UpdatedAt = DateTime.UtcNow;
-            
+
             if (allocation.RemainingQuantity <= 0)
             {
                 allocation.Status = "Used";
@@ -410,9 +397,9 @@ public class WorkOrderPartService : IWorkOrderPartService
 
             await allocationRepo.UpdateAsync(allocation);
             await _warehouseQuantityRepository.UpdateAsync(warehouseQuantity);
-            
+
             part.UsedAt = DateTime.UtcNow;
-            
+
             _logger.LogInformation(
                 "Consumed {Quantity} units of {ItemCode} from allocation {AllocationId}",
                 quantityConsumed, warehouseQuantity.InventoryItem.ItemCode, allocation.Id);
@@ -423,7 +410,7 @@ public class WorkOrderPartService : IWorkOrderPartService
             // Find warehouse with allocated stock for this item
             var warehouseQuantities = await _warehouseQuantityRepository.GetByInventoryItemIdAsync(part.InventoryItemId);
             var warehouseQuantity = warehouseQuantities.FirstOrDefault(wq => wq.AllocatedStock >= quantityConsumed);
-            
+
             if (warehouseQuantity == null)
             {
                 _logger.LogWarning("No warehouse found with sufficient allocated stock for item {ItemId}", part.InventoryItemId);
@@ -437,9 +424,9 @@ public class WorkOrderPartService : IWorkOrderPartService
             warehouseQuantity.UpdatedAt = DateTime.UtcNow;
 
             await _warehouseQuantityRepository.UpdateAsync(warehouseQuantity);
-            
+
             part.UsedAt = DateTime.UtcNow;
-            
+
             _logger.LogInformation(
                 "Consumed {Quantity} units of {ItemCode} from warehouse (no allocation)",
                 quantityConsumed, warehouseQuantity.InventoryItem.ItemCode);
@@ -449,22 +436,28 @@ public class WorkOrderPartService : IWorkOrderPartService
     private async Task ReleaseAllocationAsync(WorkOrderPart part)
     {
         if (!part.AllocationId.HasValue)
+        {
             return;
+        }
 
         var allocationRepo = _unitOfWork.Repository<InventoryAllocation>();
         var allocation = await allocationRepo.GetByIdAsync(part.AllocationId.Value);
         if (allocation == null)
+        {
             return;
+        }
 
         // Get warehouse quantity using WarehouseId from allocation
         var warehouseQuantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(
             allocation.WarehouseId, part.InventoryItemId);
         if (warehouseQuantity == null)
+        {
             return;
+        }
 
         // Calculate quantity to release (allocated - consumed)
         var quantityToRelease = allocation.RemainingQuantity;
-        
+
         if (quantityToRelease > 0)
         {
             // Return allocated quantity back to available stock
@@ -472,9 +465,9 @@ public class WorkOrderPartService : IWorkOrderPartService
             warehouseQuantity.AllocatedStock -= quantityToRelease;
             warehouseQuantity.LastMovementDate = DateTime.UtcNow;
             warehouseQuantity.UpdatedAt = DateTime.UtcNow;
-            
+
             await _warehouseQuantityRepository.UpdateAsync(warehouseQuantity);
-            
+
             _logger.LogInformation(
                 "Released {Quantity} units of {ItemCode} from allocation {AllocationId}",
                 quantityToRelease, warehouseQuantity.InventoryItem.ItemCode, allocation.Id);
@@ -491,9 +484,9 @@ public class WorkOrderPartService : IWorkOrderPartService
         var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("TenantId is required");
         var userIdString = _currentUserService.UserId ?? throw new InvalidOperationException("UserId is required");
         var userId = Guid.Parse(userIdString);
-        
+
         var createdParts = new List<WorkOrderPartDto>();
-        
+
         // Use execution strategy to handle retries with transaction
         await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
@@ -502,100 +495,94 @@ public class WorkOrderPartService : IWorkOrderPartService
             {
                 var partRepo = _unitOfWork.Repository<WorkOrderPart>();
                 var allocationRepo = _unitOfWork.Repository<InventoryAllocation>();
-            
-            foreach (var createDto in createDtos)
-            {
-                // Verify warehouse exists
-                var warehouse = await _warehouseRepository.GetByIdAsync(createDto.WarehouseId);
-                if (warehouse == null)
-                    throw new InvalidOperationException($"Warehouse {createDto.WarehouseId} not found");
-                
-                // Check warehouse-level inventory availability
-                var warehouseQuantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(
-                    createDto.WarehouseId, createDto.InventoryItemId);
-                    
-                if (warehouseQuantity == null)
-                    throw new InvalidOperationException(
-                        $"Item {createDto.InventoryItemId} not found in warehouse {warehouse.Name}");
 
-                if (warehouseQuantity.AvailableStock < createDto.QuantityRequired)
+                foreach (var createDto in createDtos)
                 {
-                    _logger.LogWarning(
-                        "Insufficient stock in warehouse {Warehouse} for item {ItemCode}. Required: {Required}, Available: {Available}",
-                        warehouse.Name, warehouseQuantity.InventoryItem.ItemCode, 
-                        createDto.QuantityRequired, warehouseQuantity.AvailableStock);
-                    throw new InvalidOperationException(
-                        $"Insufficient stock in {warehouse.Name} for {warehouseQuantity.InventoryItem.ItemCode}. " +
-                        $"Available: {warehouseQuantity.AvailableStock}, Required: {createDto.QuantityRequired}");
+                    // Verify warehouse exists
+                    var warehouse = await _warehouseRepository.GetByIdAsync(createDto.WarehouseId) ?? throw new InvalidOperationException($"Warehouse {createDto.WarehouseId} not found");
+
+                    // Check warehouse-level inventory availability
+                    var warehouseQuantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(
+                        createDto.WarehouseId, createDto.InventoryItemId) ?? throw new InvalidOperationException(
+                            $"Item {createDto.InventoryItemId} not found in warehouse {warehouse.Name}");
+                    if (warehouseQuantity.AvailableStock < createDto.QuantityRequired)
+                    {
+                        _logger.LogWarning(
+                            "Insufficient stock in warehouse {Warehouse} for item {ItemCode}. Required: {Required}, Available: {Available}",
+                            warehouse.Name, warehouseQuantity.InventoryItem.ItemCode,
+                            createDto.QuantityRequired, warehouseQuantity.AvailableStock);
+                        throw new InvalidOperationException(
+                            $"Insufficient stock in {warehouse.Name} for {warehouseQuantity.InventoryItem.ItemCode}. " +
+                            $"Available: {warehouseQuantity.AvailableStock}, Required: {createDto.QuantityRequired}");
+                    }
+
+                    // Create inventory allocation first
+                    var allocationId = Guid.NewGuid();
+                    var allocation = new InventoryAllocation
+                    {
+                        Id = allocationId,
+                        TenantId = tenantId,
+                        InventoryItemId = createDto.InventoryItemId,
+                        WarehouseId = createDto.WarehouseId,
+                        LocationId = createDto.WarehouseLocationId, // Nullable - use if provided
+                        AllocationType = "WorkOrder",
+                        ReferenceNumber = $"WO-{createDto.WorkOrderId}",
+                        ReferenceId = createDto.WorkOrderId,
+                        AllocatedQuantity = createDto.QuantityRequired,
+                        ConsumedQuantity = 0,
+                        RemainingQuantity = createDto.QuantityRequired,
+                        AllocationDate = DateTime.UtcNow,
+                        Status = "Active",
+                        SerialNumber = createDto.SerialNumber,
+                        LotNumber = createDto.LotNumber,
+                        Notes = createDto.Notes,
+                        AllocatedById = userId,
+                        CreatedAt = DateTime.UtcNow
+                    };
+
+                    var part = new WorkOrderPart
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        WorkOrderId = createDto.WorkOrderId,
+                        InventoryItemId = createDto.InventoryItemId,
+                        ItemCode = warehouseQuantity.InventoryItem.ItemCode,
+                        ItemName = warehouseQuantity.InventoryItem.Name,
+                        QuantityRequired = createDto.QuantityRequired,
+                        QuantityAllocated = createDto.QuantityRequired,
+                        QuantityUsed = 0,
+                        QuantityReturned = 0,
+                        UnitCost = createDto.UnitCost,
+                        TotalCost = createDto.QuantityRequired * createDto.UnitCost,
+                        Status = "Allocated",
+                        Notes = createDto.Notes,
+                        SerialNumber = createDto.SerialNumber,
+                        LotNumber = createDto.LotNumber,
+                        WarehouseLocationId = createDto.WarehouseLocationId,
+                        Allocation = allocation, // Use navigation property instead of FK
+                        AllocatedAt = DateTime.UtcNow,
+                        CreatedAt = DateTime.UtcNow
+                    };
+
+                    // Update warehouse quantity stock levels
+                    warehouseQuantity.AvailableStock -= createDto.QuantityRequired;
+                    warehouseQuantity.AllocatedStock += createDto.QuantityRequired;
+                    warehouseQuantity.LastMovementDate = DateTime.UtcNow;
+                    warehouseQuantity.UpdatedAt = DateTime.UtcNow;
+
+                    // Add both allocation and part - EF will handle the FK relationship order
+                    await allocationRepo.AddAsync(allocation);
+                    await partRepo.AddAsync(part);
+                    await _warehouseQuantityRepository.UpdateAsync(warehouseQuantity);
+
+                    createdParts.Add(MapToDto(part));
+
+                    _logger.LogInformation(
+                        "Allocated {Quantity} units of {ItemCode} from warehouse {Warehouse} for work order {WorkOrderId}",
+                        createDto.QuantityRequired, warehouseQuantity.InventoryItem.ItemCode,
+                        warehouse.Name, createDto.WorkOrderId);
                 }
-                
-                // Create inventory allocation first
-                var allocationId = Guid.NewGuid();
-                var allocation = new InventoryAllocation
-                {
-                    Id = allocationId,
-                    TenantId = tenantId,
-                    InventoryItemId = createDto.InventoryItemId,
-                    WarehouseId = createDto.WarehouseId,
-                    LocationId = createDto.WarehouseLocationId, // Nullable - use if provided
-                    AllocationType = "WorkOrder",
-                    ReferenceNumber = $"WO-{createDto.WorkOrderId}",
-                    ReferenceId = createDto.WorkOrderId,
-                    AllocatedQuantity = createDto.QuantityRequired,
-                    ConsumedQuantity = 0,
-                    RemainingQuantity = createDto.QuantityRequired,
-                    AllocationDate = DateTime.UtcNow,
-                    Status = "Active",
-                    SerialNumber = createDto.SerialNumber,
-                    LotNumber = createDto.LotNumber,
-                    Notes = createDto.Notes,
-                    AllocatedById = userId,
-                    CreatedAt = DateTime.UtcNow
-                };
-                
-                var part = new WorkOrderPart
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    WorkOrderId = createDto.WorkOrderId,
-                    InventoryItemId = createDto.InventoryItemId,
-                    ItemCode = warehouseQuantity.InventoryItem.ItemCode,
-                    ItemName = warehouseQuantity.InventoryItem.Name,
-                    QuantityRequired = createDto.QuantityRequired,
-                    QuantityAllocated = createDto.QuantityRequired,
-                    QuantityUsed = 0,
-                    QuantityReturned = 0,
-                    UnitCost = createDto.UnitCost,
-                    TotalCost = createDto.QuantityRequired * createDto.UnitCost,
-                    Status = "Allocated",
-                    Notes = createDto.Notes,
-                    SerialNumber = createDto.SerialNumber,
-                    LotNumber = createDto.LotNumber,
-                    WarehouseLocationId = createDto.WarehouseLocationId,
-                    Allocation = allocation, // Use navigation property instead of FK
-                    AllocatedAt = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow
-                };
 
-                // Update warehouse quantity stock levels
-                warehouseQuantity.AvailableStock -= createDto.QuantityRequired;
-                warehouseQuantity.AllocatedStock += createDto.QuantityRequired;
-                warehouseQuantity.LastMovementDate = DateTime.UtcNow;
-                warehouseQuantity.UpdatedAt = DateTime.UtcNow;
-
-                // Add both allocation and part - EF will handle the FK relationship order
-                await allocationRepo.AddAsync(allocation);
-                await partRepo.AddAsync(part);
-                await _warehouseQuantityRepository.UpdateAsync(warehouseQuantity);
-                
-                createdParts.Add(MapToDto(part));
-                
-                _logger.LogInformation(
-                    "Allocated {Quantity} units of {ItemCode} from warehouse {Warehouse} for work order {WorkOrderId}",
-                    createDto.QuantityRequired, warehouseQuantity.InventoryItem.ItemCode, 
-                    warehouse.Name, createDto.WorkOrderId);
-            }
-            
                 await _unitOfWork.CommitAsync();
             }
             catch (Exception ex)
@@ -605,7 +592,7 @@ public class WorkOrderPartService : IWorkOrderPartService
                 throw;
             }
         });
-        
+
         return createdParts;
     }
 
@@ -618,25 +605,27 @@ public class WorkOrderPartService : IWorkOrderPartService
             try
             {
                 var partRepo = _unitOfWork.Repository<WorkOrderPart>();
-                
+
                 foreach (var id in ids)
                 {
                     var part = await partRepo.GetByIdAsync(id);
                     if (part == null)
+                    {
                         continue;
+                    }
 
-                // Release allocation if exists
-                if (part.AllocationId.HasValue)
-                {
-                    await ReleaseAllocationAsync(part);
+                    // Release allocation if exists
+                    if (part.AllocationId.HasValue)
+                    {
+                        await ReleaseAllocationAsync(part);
+                    }
+
+                    // Hard delete - permanently remove from database
+                    await partRepo.HardDeleteAsync(part);
                 }
-                
-                // Hard delete - permanently remove from database
-                await partRepo.HardDeleteAsync(part);
-            }
-                
+
                 await _unitOfWork.CommitAsync();
-                
+
                 _logger.LogInformation("Deleted {Count} parts in bulk", ids.Count());
             }
             catch (Exception ex)

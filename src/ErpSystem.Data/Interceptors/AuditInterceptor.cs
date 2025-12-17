@@ -1,11 +1,11 @@
 using System.Text.Json;
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Shared.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using ErpSystem.Core.Entities;
-using ErpSystem.Core.Interfaces;
-using ErpSystem.Shared.Interfaces;
 
 namespace ErpSystem.Data.Interceptors;
 
@@ -40,12 +40,14 @@ public class AuditInterceptor : SaveChangesInterceptor
     private void CreateAuditEntries(DbContext? context)
     {
         if (context is not ApplicationDbContext dbContext)
+        {
             return;
+        }
 
         try
         {
             var auditEntries = GetAuditEntries(dbContext);
-            
+
             if (auditEntries.Any())
             {
                 // Add audit entries directly to the context
@@ -65,12 +67,14 @@ public class AuditInterceptor : SaveChangesInterceptor
     private async Task CreateAuditEntriesAsync(DbContext? context, CancellationToken cancellationToken = default)
     {
         if (context is not ApplicationDbContext dbContext)
+        {
             return;
+        }
 
         try
         {
             var auditEntries = await GetAuditEntriesAsync(dbContext, cancellationToken);
-            
+
             if (auditEntries.Any())
             {
                 // Add audit entries directly to the context
@@ -131,11 +135,15 @@ public class AuditInterceptor : SaveChangesInterceptor
 
         // Don't audit the audit logs themselves
         if (entity is AuditLog or SecurityLog)
+        {
             return false;
+        }
 
         // Don't audit certain system entities if configured
         if (_auditConfiguration.ExcludedEntityTypes.Contains(entityType))
+        {
             return false;
+        }
 
         // Only audit entities that implement IAuditable or are explicitly included
         if (_auditConfiguration.OnlyAuditableEntities)
@@ -149,7 +157,7 @@ public class AuditInterceptor : SaveChangesInterceptor
     private AuditLog? CreateAuditEntry(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry)
     {
         var userContext = GetUserContext();
-        
+
         if (!userContext.HasValue)
         {
             _logger.LogDebug("Skipping audit entry creation - no user context available");
@@ -209,7 +217,7 @@ public class AuditInterceptor : SaveChangesInterceptor
         {
             using var scope = _serviceProvider.CreateScope();
             var currentUserService = scope.ServiceProvider.GetService<ICurrentUserService>();
-            
+
             if (currentUserService == null)
             {
                 return null;
@@ -250,7 +258,7 @@ public class AuditInterceptor : SaveChangesInterceptor
     private static object? GetEntityId(object entity)
     {
         var entityType = entity.GetType();
-        
+
         // Try to get Id property
         var idProperty = entityType.GetProperty("Id");
         if (idProperty != null)
@@ -290,17 +298,21 @@ public class AuditInterceptor : SaveChangesInterceptor
 
                 // Skip sensitive properties
                 if (_auditConfiguration.ExcludedProperties.Contains(propertyName, StringComparer.OrdinalIgnoreCase))
+                {
                     continue;
+                }
 
                 try
                 {
                     var value = valuesType == "OriginalValues" ? property.OriginalValue : property.CurrentValue;
-                    
+
                     // Only include properties that have changed for updates
                     if (entry.State == EntityState.Modified && valuesType == "CurrentValues")
                     {
                         if (!property.IsModified)
+                        {
                             continue;
+                        }
                     }
 
                     values[propertyName] = value;
@@ -351,7 +363,7 @@ public class AuditConfiguration
     /// </summary>
     public HashSet<string> ExcludedProperties { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
-        "Password", "PasswordHash", "SecurityStamp", "ConcurrencyStamp", 
+        "Password", "PasswordHash", "SecurityStamp", "ConcurrencyStamp",
         "AuthenticatorKey", "RecoveryCodes", "TwoFactorSecret",
         "Salt", "Hash", "Token", "RefreshToken", "AccessToken"
     };
@@ -362,13 +374,13 @@ public class AuditConfiguration
     public static AuditConfiguration CreateDefault()
     {
         var config = new AuditConfiguration();
-        
+
         // Exclude common system entities that don't need auditing
         config.ExcludedEntityTypes.Add(typeof(AuditLog));
         config.ExcludedEntityTypes.Add(typeof(SecurityLog));
         config.ExcludedEntityTypes.Add(typeof(RefreshToken));
         config.ExcludedEntityTypes.Add(typeof(BlacklistedToken));
-        
+
         return config;
     }
 }

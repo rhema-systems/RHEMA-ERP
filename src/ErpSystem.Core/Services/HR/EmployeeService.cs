@@ -1,10 +1,10 @@
 using ErpSystem.Core.DTOs.HR;
-using MaintenanceDTOs = ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.Extensions.Logging;
-using ErpSystem.Core.Entities.HR;
+using MaintenanceDTOs = ErpSystem.Core.DTOs.Maintenance;
 
 namespace ErpSystem.Core.Services.HR;
 
@@ -190,7 +190,7 @@ public class EmployeeService : IEmployeeService
         };
 
         var createdEmployee = await _employeeRepository.AddAsync(employee);
-        _logger.LogInformation("Employee created successfully: {EmployeeNumber} - {FullName}", 
+        _logger.LogInformation("Employee created successfully: {EmployeeNumber} - {FullName}",
             createdEmployee.EmployeeNumber, createdEmployee.FullName);
 
         return MapToDto(createdEmployee);
@@ -198,14 +198,10 @@ public class EmployeeService : IEmployeeService
 
     public async Task<EmployeeDto> UpdateEmployeeAsync(Guid id, UpdateEmployeeDto updateDto)
     {
-        var employee = await _employeeRepository.GetByIdAsync(id);
-        if (employee == null)
-        {
-            throw new InvalidOperationException($"Employee with ID {id} not found.");
-        }
+        var employee = await _employeeRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Employee with ID {id} not found.");
 
         // Check email uniqueness if email is being changed
-        if (!string.IsNullOrEmpty(updateDto.EmailAddress) && 
+        if (!string.IsNullOrEmpty(updateDto.EmailAddress) &&
             updateDto.EmailAddress != employee.EmailAddress)
         {
             if (await _employeeRepository.EmailExistsAsync(updateDto.EmailAddress))
@@ -217,110 +213,176 @@ public class EmployeeService : IEmployeeService
 
         // Update fields
         if (updateDto.CorporateEmployeeID != null)
+        {
             employee.CorporateEmployeeID = updateDto.CorporateEmployeeID;
-        
+        }
+
         if (updateDto.Title != null)
+        {
             employee.Title = updateDto.Title;
-        
+        }
+
         if (updateDto.Gender.HasValue)
+        {
             employee.Gender = updateDto.Gender;
-        
+        }
+
         if (updateDto.DateOfBirth.HasValue)
+        {
             employee.DateOfBirth = updateDto.DateOfBirth;
-        
+        }
+
         if (updateDto.MaritalStatus.HasValue)
+        {
             employee.MaritalStatus = updateDto.MaritalStatus;
-        
+        }
+
         if (updateDto.Religion != null)
+        {
             employee.Religion = updateDto.Religion;
-        
+        }
+
         employee.IsFullTime = updateDto.IsFullTime;
-        
+
         // Update contact information
         if (updateDto.Address != null)
+        {
             employee.Address = updateDto.Address;
-        
+        }
+
         if (updateDto.City != null)
+        {
             employee.City = updateDto.City;
-        
+        }
+
         if (updateDto.State != null)
+        {
             employee.State = updateDto.State;
-        
+        }
+
         if (updateDto.PostalCode != null)
+        {
             employee.PostalCode = updateDto.PostalCode;
-        
+        }
+
         if (updateDto.CountryId.HasValue)
+        {
             employee.CountryId = updateDto.CountryId;
-        
+        }
+
         if (updateDto.TelephoneNumber != null)
+        {
             employee.TelephoneNumber = updateDto.TelephoneNumber;
-        
+        }
+
         if (updateDto.BusinessNumber != null)
+        {
             employee.BusinessNumber = updateDto.BusinessNumber;
-        
+        }
+
         if (updateDto.MobileNumber != null)
+        {
             employee.MobileNumber = updateDto.MobileNumber;
-        
+        }
+
         if (updateDto.Extension != null)
+        {
             employee.Extension = updateDto.Extension;
+        }
 
         // Update employment details
         if (updateDto.ContractType.HasValue)
+        {
             employee.ContractType = updateDto.ContractType.Value;
-        
+        }
+
         if (updateDto.ProbationPeriodDays.HasValue)
+        {
             employee.ProbationPeriodDays = updateDto.ProbationPeriodDays.Value;
-        
+        }
+
         if (updateDto.ConfirmationDate.HasValue)
+        {
             employee.ConfirmationDate = updateDto.ConfirmationDate;
-        
+        }
+
         if (updateDto.RetirementDate.HasValue)
+        {
             employee.RetirementDate = updateDto.RetirementDate;
-        
+        }
+
         if (updateDto.DepartmentId.HasValue)
+        {
             employee.DepartmentId = updateDto.DepartmentId.Value;
-        
+        }
+
         if (updateDto.SectionId.HasValue)
+        {
             employee.SectionId = updateDto.SectionId;
-        
+        }
+
         if (updateDto.PositionId.HasValue)
+        {
             employee.PositionId = updateDto.PositionId.Value;
-        
+        }
+
         if (updateDto.StaffStatus.HasValue)
+        {
             employee.StaffStatus = updateDto.StaffStatus.Value;
-        
+        }
+
         if (updateDto.StationId.HasValue)
+        {
             employee.StationId = updateDto.StationId;
-        
+        }
+
         if (updateDto.TaxNumber != null)
+        {
             employee.TaxNumber = updateDto.TaxNumber;
-        
+        }
+
         if (updateDto.BloodType.HasValue)
+        {
             employee.BloodType = updateDto.BloodType;
-        
+        }
+
         if (updateDto.ShiftId.HasValue)
+        {
             employee.ShiftId = updateDto.ShiftId;
-        
+        }
+
         if (updateDto.Salary.HasValue)
+        {
             employee.Salary = updateDto.Salary;
-        
+        }
+
         if (updateDto.BadgeNumber != null)
+        {
             employee.BadgeNumber = updateDto.BadgeNumber;
-        
+        }
+
         if (updateDto.LastPromotionDate.HasValue)
+        {
             employee.LastPromotionDate = updateDto.LastPromotionDate;
-        
+        }
+
         if (updateDto.LastReviewDate.HasValue)
+        {
             employee.LastReviewDate = updateDto.LastReviewDate;
-        
+        }
+
         if (updateDto.NextReviewDate.HasValue)
+        {
             employee.NextReviewDate = updateDto.NextReviewDate;
-        
+        }
+
         if (updateDto.IsActive.HasValue)
+        {
             employee.IsActive = updateDto.IsActive.Value;
+        }
 
         await _employeeRepository.UpdateAsync(employee);
-        _logger.LogInformation("Employee updated successfully: {EmployeeNumber} - {FullName}", 
+        _logger.LogInformation("Employee updated successfully: {EmployeeNumber} - {FullName}",
             employee.EmployeeNumber, employee.FullName);
 
         return MapToDto(employee);
@@ -340,13 +402,16 @@ public class EmployeeService : IEmployeeService
     public async Task<bool> DeactivateEmployeeAsync(Guid id)
     {
         var employee = await _employeeRepository.GetByIdAsync(id);
-        if (employee == null) return false;
+        if (employee == null)
+        {
+            return false;
+        }
 
         employee.IsActive = false;
         employee.StaffStatus = StaffStatus.Inactive;
         await _employeeRepository.UpdateAsync(employee);
 
-        _logger.LogInformation("Employee deactivated: {EmployeeNumber} - {FullName}", 
+        _logger.LogInformation("Employee deactivated: {EmployeeNumber} - {FullName}",
             employee.EmployeeNumber, employee.FullName);
         return true;
     }
@@ -354,13 +419,16 @@ public class EmployeeService : IEmployeeService
     public async Task<bool> ActivateEmployeeAsync(Guid id)
     {
         var employee = await _employeeRepository.GetByIdAsync(id);
-        if (employee == null) return false;
+        if (employee == null)
+        {
+            return false;
+        }
 
         employee.IsActive = true;
         employee.StaffStatus = StaffStatus.Active;
         await _employeeRepository.UpdateAsync(employee);
 
-        _logger.LogInformation("Employee activated: {EmployeeNumber} - {FullName}", 
+        _logger.LogInformation("Employee activated: {EmployeeNumber} - {FullName}",
             employee.EmployeeNumber, employee.FullName);
         return true;
     }
@@ -419,7 +487,9 @@ public class EmployeeService : IEmployeeService
     {
         var employee = await _employeeRepository.GetByIdWithDetailsAsync(employeeId);
         if (employee == null || !employee.CanBeAssignedToMaintenance)
+        {
             return null;
+        }
 
         return MapToMaintenanceTechnicianDto(employee);
     }
@@ -428,7 +498,9 @@ public class EmployeeService : IEmployeeService
     {
         var employee = await _employeeRepository.GetByIdAsync(employeeId);
         if (employee == null || !employee.CanBeAssignedToMaintenance)
+        {
             return null;
+        }
 
         // This would typically check against work orders, schedules, etc.
         // For now, return basic availability based on status
@@ -617,7 +689,7 @@ public class EmployeeService : IEmployeeService
                 CertificationNumber = es.CertificationNumber,
                 CertifyingBody = es.CertifyingBody,
                 IsVerified = es.IsVerified,
-                IsCertificationExpired = es.CertificationExpiryDate.HasValue && 
+                IsCertificationExpired = es.CertificationExpiryDate.HasValue &&
                                        es.CertificationExpiryDate < DateOnly.FromDateTime(DateTime.Now),
                 Notes = es.Notes
             }).ToList() ?? new List<EmployeeSkillDto>()

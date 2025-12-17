@@ -13,14 +13,14 @@ public class EnhancedWorkOrderCreationResult
     public string WorkOrderNumber { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
     public string CreatedBy { get; set; } = string.Empty;
-    
+
     // Workflow-related properties
     public Guid? WorkflowInstanceId { get; set; }
     public string SelectedWorkflowKey { get; set; } = string.Empty;
     public WorkflowInstanceStatus InitialWorkflowStatus { get; set; }
     public Guid? CurrentStepId { get; set; }
     public List<WorkflowExecutionError> WorkflowErrors { get; set; } = new();
-    
+
     public List<string> SuccessMessages { get; set; } = new();
     public List<string> WarningMessages { get; set; } = new();
 }
@@ -35,13 +35,13 @@ public class EnhancedWorkflowStepResult
     public DateTime ProcessedAt { get; set; }
     public string ProcessedBy { get; set; } = string.Empty;
     public bool Success { get; set; } = true;
-    
+
     // Workflow execution details
     public WorkflowExecutionResult? WorkflowExecutionResult { get; set; }
     public WorkflowInstanceStatus NewWorkflowStatus { get; set; }
     public Guid? NewCurrentStepId { get; set; }
     public List<WorkflowExecutionError> WorkflowErrors { get; set; } = new();
-    
+
     public List<string> SuccessMessages { get; set; } = new();
     public List<string> ErrorMessages { get; set; } = new();
 }
@@ -59,7 +59,7 @@ public class EnhancedMaintenanceWorkflowStatusDto
     public Guid? AssignedTechnicianId { get; set; }
     public string Priority { get; set; } = string.Empty;
     public string MaintenanceType { get; set; } = string.Empty;
-    
+
     // Workflow Information
     public Guid? WorkflowInstanceId { get; set; }
     public string WorkflowName { get; set; } = string.Empty;
@@ -69,7 +69,7 @@ public class EnhancedMaintenanceWorkflowStatusDto
     public WorkflowProgressDto? Progress { get; set; }
     public List<WorkflowStepStatusDto> Steps { get; set; } = new();
     public List<WorkflowApprovalStatusDto> PendingApprovals { get; set; } = new();
-    
+
     // Maintenance-Specific Context
     public bool RequiresQualityControl { get; set; }
     public bool RequiresManagerApproval { get; set; }
@@ -85,7 +85,7 @@ public class WorkflowTemplateConfigurationResult
     public string TenantId { get; set; } = string.Empty;
     public DateTime ConfiguredAt { get; set; }
     public bool Success { get; set; } = true;
-    
+
     public List<string> ConfiguredWorkflows { get; set; } = new();
     public List<string> SuccessMessages { get; set; } = new();
     public List<string> ErrorMessages { get; set; } = new();

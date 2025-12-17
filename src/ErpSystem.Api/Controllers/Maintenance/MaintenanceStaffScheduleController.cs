@@ -77,7 +77,10 @@ public class MaintenanceStaffScheduleController : ControllerBase
         {
             var result = await _scheduleService.GetScheduleByIdAsync(id);
             if (result == null)
+            {
                 return NotFound();
+            }
+
             return Ok(result);
         }
         catch (Exception ex)

@@ -1,9 +1,9 @@
 using ErpSystem.Core.DTOs.Inventory;
-using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Inventory;
-using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Inventory;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Inventory;
@@ -50,7 +50,7 @@ public class InventoryManagementService : IInventoryManagementService
 
             if (!string.IsNullOrEmpty(searchTerm))
             {
-                items = items.Where(i => 
+                items = items.Where(i =>
                     i.ItemCode.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
                     i.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
                     (i.Description?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false));
@@ -88,7 +88,10 @@ public class InventoryManagementService : IInventoryManagementService
         try
         {
             var item = await _itemRepository.GetByIdWithDetailsAsync(itemId);
-            if (item == null) return null;
+            if (item == null)
+            {
+                return null;
+            }
 
             var locations = await _locationRepository.GetByInventoryItemAsync(itemId);
             var recentMovements = await _movementRepository.GetRecentMovementsAsync(itemId, 50);
@@ -162,17 +165,14 @@ public class InventoryManagementService : IInventoryManagementService
         try
         {
             // Validate inventory item exists and has sufficient stock
-            var item = await _itemRepository.GetByIdAsync(request.InventoryItemId);
-            if (item == null)
-                throw new ArgumentException($"Inventory item {request.InventoryItemId} not found");
-
+            var item = await _itemRepository.GetByIdAsync(request.InventoryItemId) ?? throw new ArgumentException($"Inventory item {request.InventoryItemId} not found");
             if (item.AvailableStock < request.Quantity)
+            {
                 throw new InvalidOperationException($"Insufficient stock. Available: {item.AvailableStock}, Requested: {request.Quantity}");
+            }
 
             // Find best location for allocation
-            var bestLocation = await FindBestAllocationLocationAsync(request.InventoryItemId, request.Quantity);
-            if (bestLocation == null)
-                throw new InvalidOperationException("No suitable location found for allocation");
+            var bestLocation = await FindBestAllocationLocationAsync(request.InventoryItemId, request.Quantity) ?? throw new InvalidOperationException("No suitable location found for allocation");
 
             // Create allocation record
             var allocation = new InventoryAllocation
@@ -250,18 +250,19 @@ public class InventoryManagementService : IInventoryManagementService
     {
         try
         {
-            var allocation = await _allocationRepository.GetByIdAsync(allocationId);
-            if (allocation == null)
-                throw new ArgumentException($"Allocation {allocationId} not found");
-
+            var allocation = await _allocationRepository.GetByIdAsync(allocationId) ?? throw new ArgumentException($"Allocation {allocationId} not found");
             if (quantity > allocation.RemainingQuantity)
+            {
                 throw new InvalidOperationException($"Cannot consume more than remaining quantity. Remaining: {allocation.RemainingQuantity}, Requested: {quantity}");
+            }
 
             // Update allocation
             allocation.ConsumedQuantity += quantity;
             allocation.RemainingQuantity -= quantity;
             if (allocation.RemainingQuantity == 0)
+            {
                 allocation.Status = "Consumed";
+            }
 
             await _allocationRepository.UpdateAsync(allocation);
 
@@ -308,12 +309,11 @@ public class InventoryManagementService : IInventoryManagementService
     {
         try
         {
-            var allocation = await _allocationRepository.GetByIdAsync(allocationId);
-            if (allocation == null)
-                throw new ArgumentException($"Allocation {allocationId} not found");
-
+            var allocation = await _allocationRepository.GetByIdAsync(allocationId) ?? throw new ArgumentException($"Allocation {allocationId} not found");
             if (allocation.Status != "Active")
+            {
                 throw new InvalidOperationException($"Cannot release allocation with status {allocation.Status}");
+            }
 
             var remainingQuantity = allocation.RemainingQuantity;
 
@@ -383,8 +383,8 @@ public class InventoryManagementService : IInventoryManagementService
             }
 
             var isAvailable = item.AvailableStock >= requiredQuantity;
-            var message = isAvailable 
-                ? "Stock available" 
+            var message = isAvailable
+                ? "Stock available"
                 : $"Insufficient stock. Available: {item.AvailableStock}, Required: {requiredQuantity}, Shortage: {requiredQuantity - item.AvailableStock}";
 
             return new StockAvailabilityDto
@@ -419,7 +419,7 @@ public class InventoryManagementService : IInventoryManagementService
         try
         {
             var itemsNeedingReorder = await _itemRepository.GetItemsBelowReorderLevelAsync();
-            
+
             return itemsNeedingReorder.Select(item => new ReorderRequiredDto
             {
                 InventoryItemId = item.Id,
@@ -450,7 +450,7 @@ public class InventoryManagementService : IInventoryManagementService
     private async Task<InventoryLocation?> FindBestAllocationLocationAsync(Guid inventoryItemId, decimal requiredQuantity)
     {
         var locations = await _locationRepository.GetByInventoryItemAsync(inventoryItemId);
-        
+
         // Prefer locations that are picking locations and have sufficient available quantity
         return locations
             .Where(loc => loc.AvailableQuantity >= requiredQuantity && loc.Location.IsPickingLocation)
@@ -467,7 +467,7 @@ public class InventoryManagementService : IInventoryManagementService
             item.AllocatedStock += allocatedStockChange;
             item.AvailableStock = item.CurrentStock - item.AllocatedStock;
             item.LastStockDate = DateTime.UtcNow;
-            
+
             await _itemRepository.UpdateAsync(item);
         }
     }
@@ -481,7 +481,7 @@ public class InventoryManagementService : IInventoryManagementService
             inventoryLocation.AllocatedQuantity += allocatedChange;
             inventoryLocation.AvailableQuantity = inventoryLocation.Quantity - inventoryLocation.AllocatedQuantity;
             inventoryLocation.LastMovementDate = DateTime.UtcNow;
-            
+
             await _locationRepository.UpdateAsync(inventoryLocation);
         }
     }
@@ -491,19 +491,19 @@ public class InventoryManagementService : IInventoryManagementService
         await _movementRepository.AddAsync(movement);
     }
 
-    private decimal CalculateRecommendedOrderQuantity(InventoryItem item)
+    private static decimal CalculateRecommendedOrderQuantity(InventoryItem item)
     {
         // Simple EOQ-like calculation
         // In a real system, this would consider demand patterns, carrying costs, etc.
         var shortfall = item.ReorderLevel - item.CurrentStock;
         var recommendedQuantity = Math.Max(item.ReorderQuantity, shortfall);
-        
+
         // Round up to nearest reorder quantity multiple
         if (item.ReorderQuantity > 0)
         {
             recommendedQuantity = Math.Ceiling(recommendedQuantity / item.ReorderQuantity) * item.ReorderQuantity;
         }
-        
+
         return recommendedQuantity;
     }
 

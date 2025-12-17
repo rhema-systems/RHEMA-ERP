@@ -1,10 +1,10 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
+using System.Net;
+using System.Net.Mail;
+using System.Reflection;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
-using System.Net.Mail;
-using System.Net;
-using System.Reflection;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services;
 
@@ -13,13 +13,13 @@ public interface ISettingsService
     Task<EmailSettings?> GetEmailSettingsAsync();
     Task<EmailSettings> UpdateEmailSettingsAsync(EmailSettings settings);
     Task<bool> TestEmailSettingsAsync(EmailSettings settings, string testEmail);
-    
-    
+
+
     Task<Security?> GetSecuritySettingsAsync();
     Task<Security?> GetSecuritySettingsAsync(Guid tenantId);
     Task<Security?> GetPublicSecuritySettingsAsync();
     Task<Security> UpdateSecuritySettingsAsync(Security settings);
-    
+
     Task<SystemSettings?> GetSystemSettingAsync(string key);
     Task<SystemSettings> SetSystemSettingAsync(string key, string value, string? description = null);
     Task<IEnumerable<SystemSettings>> GetAllSystemSettingsAsync();
@@ -56,7 +56,7 @@ public class SettingsService : ISettingsService
             // This works even for anonymous requests where TenantId is not available
             var emailSettings = await _unitOfWork.Repository<EmailSettings>()
                 .FirstOrDefaultAsync(e => true); // Simple predicate to get first record
-            
+
             if (emailSettings != null && !string.IsNullOrEmpty(emailSettings.SmtpPassword))
             {
                 // Decrypt the password for use (but don't modify the entity)
@@ -71,7 +71,7 @@ public class SettingsService : ISettingsService
                     // If decryption fails, assume it's plain text (for backwards compatibility)
                 }
             }
-            
+
             return emailSettings;
         }
         catch (Exception ex)
@@ -86,7 +86,7 @@ public class SettingsService : ISettingsService
         try
         {
             var existingSettings = await GetEmailSettingsAsync();
-            
+
             if (existingSettings != null)
             {
                 // Update existing settings
@@ -111,13 +111,13 @@ public class SettingsService : ISettingsService
                 settings.TenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
                 settings.CreatedAt = DateTime.UtcNow;
                 settings.CreatedBy = _currentUserService.UserName;
-                
+
                 // Encrypt the password before storing
                 if (!string.IsNullOrEmpty(settings.SmtpPassword))
                 {
                     settings.SmtpPassword = _cryptoService.Encrypt(settings.SmtpPassword);
                 }
-                
+
                 var createdSettings = await _unitOfWork.Repository<EmailSettings>().AddAsync(settings);
                 await _unitOfWork.SaveChangesAsync();
                 _logger.LogInformation("Created new email settings");
@@ -136,12 +136,12 @@ public class SettingsService : ISettingsService
         try
         {
             using var smtpClient = new SmtpClient(settings.SmtpHost, settings.SmtpPort);
-            
+
             if (!string.IsNullOrEmpty(settings.SmtpUsername))
             {
                 smtpClient.Credentials = new NetworkCredential(settings.SmtpUsername, settings.SmtpPassword);
             }
-            
+
             smtpClient.EnableSsl = settings.UseTLS;
             smtpClient.Timeout = 30000; // 30 seconds
 
@@ -152,7 +152,7 @@ public class SettingsService : ISettingsService
                 Body = "This is a test email to verify your SMTP configuration is working correctly.",
                 IsBodyHtml = false
             };
-            
+
             mailMessage.To.Add(new MailAddress(testEmail));
 
             await smtpClient.SendMailAsync(mailMessage);
@@ -175,12 +175,7 @@ public class SettingsService : ISettingsService
     {
         try
         {
-            var tenantId = _currentUserService.TenantId;
-            if (tenantId == null)
-            {
-                throw new InvalidOperationException("Tenant ID is required");
-            }
-
+            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
             var settings = await _unitOfWork.Repository<Security>().FindAsync(s => s.TenantId == tenantId);
             return settings.FirstOrDefault();
         }
@@ -215,17 +210,17 @@ public class SettingsService : ISettingsService
             // Get settings from default tenant or first available tenant
             var settings = await _unitOfWork.Repository<Security>().GetAllAsync();
             var defaultSettings = settings.FirstOrDefault();
-            
+
             if (defaultSettings != null)
             {
-                _logger.LogInformation("Retrieved public security settings from tenant {TenantId}: CAPTCHA enabled = {CaptchaEnabled}", 
+                _logger.LogInformation("Retrieved public security settings from tenant {TenantId}: CAPTCHA enabled = {CaptchaEnabled}",
                     defaultSettings.TenantId, defaultSettings.CaptchaEnabled);
             }
             else
             {
                 _logger.LogWarning("No security settings found in database for public access");
             }
-            
+
             return defaultSettings;
         }
         catch (Exception ex)
@@ -241,7 +236,7 @@ public class SettingsService : ISettingsService
         {
             var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
             var existingSettings = await GetSecuritySettingsAsync();
-            
+
             if (existingSettings != null)
             {
                 // Update existing settings
@@ -252,7 +247,7 @@ public class SettingsService : ISettingsService
                 existingSettings.PasswordRequireSpecialChars = settings.PasswordRequireSpecialChars;
                 existingSettings.PasswordMaxAge = settings.PasswordMaxAge;
                 existingSettings.PasswordPreventReuse = settings.PasswordPreventReuse;
-                
+
                 // CAPTCHA Settings
                 existingSettings.CaptchaEnabled = settings.CaptchaEnabled;
                 existingSettings.CaptchaProvider = settings.CaptchaProvider;
@@ -260,25 +255,25 @@ public class SettingsService : ISettingsService
                 existingSettings.RecaptchaSecretKey = settings.RecaptchaSecretKey;
                 existingSettings.HCaptchaSiteKey = settings.HCaptchaSiteKey;
                 existingSettings.HCaptchaSecretKey = settings.HCaptchaSecretKey;
-                
+
                 // Session and Token Settings
                 existingSettings.SessionTimeoutMinutes = settings.SessionTimeoutMinutes;
                 existingSettings.JwtTokenLifetimeMinutes = settings.JwtTokenLifetimeMinutes;
                 existingSettings.PreventConcurrentLogin = settings.PreventConcurrentLogin;
-                
+
                 // Lockout Settings
                 existingSettings.MaxFailedLoginAttempts = settings.MaxFailedLoginAttempts;
                 existingSettings.AccountLockoutMinutes = settings.AccountLockoutMinutes;
-                
+
                 // Rate Limiting Settings
                 existingSettings.RateLimitLoginMaxAttempts = settings.RateLimitLoginMaxAttempts;
                 existingSettings.RateLimitLoginWindowMinutes = settings.RateLimitLoginWindowMinutes;
                 existingSettings.RateLimitLoginBlockDurationMinutes = settings.RateLimitLoginBlockDurationMinutes;
-                
+
                 // Legal URLs
                 existingSettings.TermsOfServiceUrl = settings.TermsOfServiceUrl;
                 existingSettings.PrivacyPolicyUrl = settings.PrivacyPolicyUrl;
-                
+
                 existingSettings.UpdatedAt = DateTime.UtcNow;
 
                 await _unitOfWork.Repository<Security>().UpdateAsync(existingSettings);
@@ -293,7 +288,7 @@ public class SettingsService : ISettingsService
                 settings.TenantId = tenantId;
                 settings.CreatedAt = DateTime.UtcNow;
                 settings.CreatedBy = _currentUserService.UserName;
-                
+
                 var createdSettings = await _unitOfWork.Repository<Security>().AddAsync(settings);
                 await _unitOfWork.SaveChangesAsync();
                 _logger.LogInformation("Created new security settings for tenant {TenantId}", tenantId);
@@ -330,13 +325,13 @@ public class SettingsService : ISettingsService
         try
         {
             var existingSetting = await GetSystemSettingAsync(key);
-            
+
             if (existingSetting != null)
             {
                 existingSetting.Value = value;
                 existingSetting.Description = description ?? existingSetting.Description;
                 existingSetting.UpdatedAt = DateTime.UtcNow;
-                
+
                 await _unitOfWork.Repository<SystemSettings>().UpdateAsync(existingSetting);
                 await _unitOfWork.SaveChangesAsync();
                 _logger.LogInformation("Updated system setting {Key}", key);
@@ -354,7 +349,7 @@ public class SettingsService : ISettingsService
                     CreatedAt = DateTime.UtcNow,
                     CreatedBy = _currentUserService.UserName
                 };
-                
+
                 var createdSetting = await _unitOfWork.Repository<SystemSettings>().AddAsync(newSetting);
                 await _unitOfWork.SaveChangesAsync();
                 _logger.LogInformation("Created system setting {Key}", key);

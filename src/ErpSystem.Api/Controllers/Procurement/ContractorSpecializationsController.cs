@@ -58,7 +58,9 @@ public class ContractorSpecializationsController : ControllerBase
         {
             var specialization = await _specializationService.GetByIdAsync(id);
             if (specialization == null)
+            {
                 return NotFound();
+            }
 
             return Ok(specialization);
         }
@@ -75,7 +77,9 @@ public class ContractorSpecializationsController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var specialization = await _specializationService.CreateAsync(createDto);
             return CreatedAtAction(nameof(GetSpecialization), new { id = specialization.Id }, specialization);
@@ -97,7 +101,9 @@ public class ContractorSpecializationsController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var specialization = await _specializationService.UpdateAsync(id, updateDto);
             return Ok(specialization);

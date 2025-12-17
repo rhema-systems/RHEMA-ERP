@@ -66,7 +66,7 @@ public class ReportSchedule : TenantEntity
     public TimeOnly TimeOfDay { get; set; }
     public int? DayOfWeek { get; set; } // 0-6 for weekly schedules
     public int? DayOfMonth { get; set; } // 1-31 for monthly schedules
-    
+
     public DateTime StartDate { get; set; }
     public DateTime? EndDate { get; set; }
     public DateTime? NextExecutionDate { get; set; }
@@ -133,15 +133,15 @@ public class ReportExecution : TenantEntity
     public Guid UserId { get; set; }
 
     public DateTime ExecutedAt { get; set; } = DateTime.UtcNow;
-    
+
     [Required]
     public TimeSpan ExecutionTime { get; set; }
-    
+
     public int TotalRows { get; set; }
-    
+
     [MaxLength(20)]
     public string Status { get; set; } = "success"; // success, failed, cancelled
-    
+
     [MaxLength(1000)]
     public string? ErrorMessage { get; set; }
 

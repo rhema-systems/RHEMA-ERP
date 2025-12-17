@@ -1,8 +1,8 @@
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.Entities.Inventory;
-using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Data.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.Inventory;
 
@@ -24,8 +24,10 @@ public class InventoryItemRepository : GenericRepository<InventoryItem>, IInvent
     public async Task<InventoryItem?> GetByIdWithDetailsAsync(Guid id)
     {
         if (id == Guid.Empty)
+        {
             return null;
-            
+        }
+
         return await _dbSet
             .Where(i => i.Id == id && !i.IsDeleted)
             .Include(i => i.Category)
@@ -40,8 +42,10 @@ public class InventoryItemRepository : GenericRepository<InventoryItem>, IInvent
     public async Task<InventoryItem?> GetByItemCodeAsync(string itemCode)
     {
         if (string.IsNullOrWhiteSpace(itemCode))
+        {
             return null;
-            
+        }
+
         return await _dbSet
             .Where(i => i.ItemCode == itemCode && !i.IsDeleted)
             .Include(i => i.Category)
@@ -51,8 +55,10 @@ public class InventoryItemRepository : GenericRepository<InventoryItem>, IInvent
     public async Task<IEnumerable<InventoryItem>> GetItemsByCategoryAsync(Guid categoryId)
     {
         if (categoryId == Guid.Empty)
+        {
             return new List<InventoryItem>();
-            
+        }
+
         return await _dbSet
             .Where(i => i.CategoryId == categoryId && !i.IsDeleted)
             .Include(i => i.Category)
@@ -63,7 +69,7 @@ public class InventoryItemRepository : GenericRepository<InventoryItem>, IInvent
     public async Task<IEnumerable<InventoryItem>> GetItemsBelowReorderLevelAsync()
     {
         return await _dbSet
-            .Where(i => !i.IsDeleted && 
+            .Where(i => !i.IsDeleted &&
                        i.Status == ItemStatus.Active &&
                        i.CurrentStock <= i.ReorderLevel)
             .Include(i => i.Category)
@@ -75,16 +81,18 @@ public class InventoryItemRepository : GenericRepository<InventoryItem>, IInvent
     public async Task<IEnumerable<InventoryItem>> SearchItemsAsync(string searchTerm)
     {
         if (string.IsNullOrWhiteSpace(searchTerm))
+        {
             return new List<InventoryItem>();
-            
+        }
+
         var lowerSearchTerm = searchTerm.ToLower();
         return await _dbSet
             .Where(i => !i.IsDeleted &&
-                       (i.ItemCode.ToLower().Contains(lowerSearchTerm) ||
+                       (i.ItemCode.Contains(lowerSearchTerm, StringComparison.CurrentCultureIgnoreCase) ||
                         i.Name.ToLower().Contains(lowerSearchTerm) ||
-                        (i.Description != null && i.Description.ToLower().Contains(lowerSearchTerm)) ||
-                        (i.Brand != null && i.Brand.ToLower().Contains(lowerSearchTerm)) ||
-                        (i.Manufacturer != null && i.Manufacturer.ToLower().Contains(lowerSearchTerm))))
+                        (i.Description != null && i.Description.Contains(lowerSearchTerm, StringComparison.CurrentCultureIgnoreCase)) ||
+                        (i.Brand != null && i.Brand.Contains(lowerSearchTerm, StringComparison.CurrentCultureIgnoreCase)) ||
+                        (i.Manufacturer != null && i.Manufacturer.Contains(lowerSearchTerm, StringComparison.CurrentCultureIgnoreCase))))
             .Include(i => i.Category)
             .OrderBy(i => i.ItemCode)
             .ToListAsync();
@@ -115,8 +123,10 @@ public class InventoryCategoryRepository : GenericRepository<InventoryCategory>,
     public async Task<IEnumerable<InventoryCategory>> GetSubCategoriesAsync(Guid parentCategoryId)
     {
         if (parentCategoryId == Guid.Empty)
+        {
             return new List<InventoryCategory>();
-            
+        }
+
         return await _dbSet
             .Where(c => c.ParentCategoryId == parentCategoryId && !c.IsDeleted)
             .OrderBy(c => c.Name)
@@ -131,8 +141,10 @@ public class StockMovementRepository : GenericRepository<StockMovement>, IStockM
     public async Task<IEnumerable<StockMovement>> GetMovementsByItemAsync(Guid inventoryItemId)
     {
         if (inventoryItemId == Guid.Empty)
+        {
             return new List<StockMovement>();
-            
+        }
+
         return await _dbSet
             .Where(sm => sm.InventoryItemId == inventoryItemId && !sm.IsDeleted)
             .Include(sm => sm.InventoryItem)
@@ -145,8 +157,10 @@ public class StockMovementRepository : GenericRepository<StockMovement>, IStockM
     public async Task<IEnumerable<StockMovement>> GetRecentMovementsAsync(Guid inventoryItemId, int count)
     {
         if (inventoryItemId == Guid.Empty)
+        {
             return new List<StockMovement>();
-            
+        }
+
         return await _dbSet
             .Where(sm => sm.InventoryItemId == inventoryItemId && !sm.IsDeleted)
             .Include(sm => sm.InventoryItem)
@@ -159,8 +173,10 @@ public class StockMovementRepository : GenericRepository<StockMovement>, IStockM
     public async Task<IEnumerable<StockMovement>> GetMovementsByDateRangeAsync(DateTime startDate, DateTime endDate)
     {
         if (startDate >= endDate)
+        {
             return new List<StockMovement>();
-            
+        }
+
         return await _dbSet
             .Where(sm => !sm.IsDeleted &&
                         sm.MovementDate >= startDate &&
@@ -174,8 +190,10 @@ public class StockMovementRepository : GenericRepository<StockMovement>, IStockM
     public async Task<IEnumerable<StockMovement>> GetMovementsByReferenceAsync(ReferenceType referenceType, string referenceNumber)
     {
         if (string.IsNullOrWhiteSpace(referenceNumber))
+        {
             return new List<StockMovement>();
-            
+        }
+
         return await _dbSet
             .Where(sm => !sm.IsDeleted &&
                         sm.ReferenceType == referenceType &&
@@ -189,8 +207,10 @@ public class StockMovementRepository : GenericRepository<StockMovement>, IStockM
     public async Task<IEnumerable<StockMovement>> GetMovementsByLocationAsync(Guid locationId)
     {
         if (locationId == Guid.Empty)
+        {
             return new List<StockMovement>();
-            
+        }
+
         return await _dbSet
             .Where(sm => sm.LocationId == locationId && !sm.IsDeleted)
             .Include(sm => sm.InventoryItem)
@@ -207,8 +227,10 @@ public class InventoryLocationRepository : GenericRepository<InventoryLocation>,
     public async Task<IEnumerable<InventoryLocation>> GetByInventoryItemAsync(Guid inventoryItemId)
     {
         if (inventoryItemId == Guid.Empty)
+        {
             return new List<InventoryLocation>();
-            
+        }
+
         return await _dbSet
             .Where(il => il.InventoryItemId == inventoryItemId && !il.IsDeleted)
             .Include(il => il.InventoryItem)
@@ -223,8 +245,10 @@ public class InventoryLocationRepository : GenericRepository<InventoryLocation>,
     public async Task<IEnumerable<InventoryLocation>> GetByLocationAsync(Guid locationId)
     {
         if (locationId == Guid.Empty)
+        {
             return new List<InventoryLocation>();
-            
+        }
+
         return await _dbSet
             .Where(il => il.LocationId == locationId && !il.IsDeleted)
             .Include(il => il.InventoryItem)
@@ -238,11 +262,13 @@ public class InventoryLocationRepository : GenericRepository<InventoryLocation>,
     public async Task<InventoryLocation?> GetByLocationAndItemAsync(Guid locationId, Guid inventoryItemId)
     {
         if (locationId == Guid.Empty || inventoryItemId == Guid.Empty)
+        {
             return null;
-            
+        }
+
         return await _dbSet
-            .Where(il => il.LocationId == locationId && 
-                        il.InventoryItemId == inventoryItemId && 
+            .Where(il => il.LocationId == locationId &&
+                        il.InventoryItemId == inventoryItemId &&
                         !il.IsDeleted)
             .Include(il => il.InventoryItem)
             .Include(il => il.Location)
@@ -283,8 +309,10 @@ public class InventoryAllocationRepository : GenericRepository<InventoryAllocati
     public async Task<IEnumerable<InventoryAllocation>> GetAllocationsByItemAsync(Guid inventoryItemId)
     {
         if (inventoryItemId == Guid.Empty)
+        {
             return new List<InventoryAllocation>();
-            
+        }
+
         return await _dbSet
             .Where(ia => ia.InventoryItemId == inventoryItemId && !ia.IsDeleted)
             .Include(ia => ia.InventoryItem)
@@ -296,11 +324,13 @@ public class InventoryAllocationRepository : GenericRepository<InventoryAllocati
     public async Task<IEnumerable<InventoryAllocation>> GetAllocationsByReferenceAsync(string referenceType, Guid referenceId)
     {
         if (string.IsNullOrWhiteSpace(referenceType) || referenceId == Guid.Empty)
+        {
             return new List<InventoryAllocation>();
-            
+        }
+
         return await _dbSet
-            .Where(ia => ia.AllocationType == referenceType && 
-                        ia.ReferenceId == referenceId && 
+            .Where(ia => ia.AllocationType == referenceType &&
+                        ia.ReferenceId == referenceId &&
                         !ia.IsDeleted)
             .Include(ia => ia.InventoryItem)
             .Include(ia => ia.Location)
@@ -312,7 +342,7 @@ public class InventoryAllocationRepository : GenericRepository<InventoryAllocati
     {
         var today = DateTime.UtcNow.Date;
         return await _dbSet
-            .Where(ia => ia.Status == "Active" && 
+            .Where(ia => ia.Status == "Active" &&
                         !ia.IsDeleted &&
                         ia.ExpirationDate < today)
             .Include(ia => ia.InventoryItem)
@@ -344,8 +374,10 @@ public class WarehouseRepository : GenericRepository<Warehouse>, IWarehouseRepos
     public async Task<Warehouse?> GetByCodeAsync(string code)
     {
         if (string.IsNullOrWhiteSpace(code))
+        {
             return null;
-            
+        }
+
         return await _dbSet
             .Where(w => w.Code == code && !w.IsDeleted)
             .FirstOrDefaultAsync();
@@ -359,8 +391,10 @@ public class WarehouseQuantityRepository : GenericRepository<WarehouseQuantity>,
     public async Task<IEnumerable<WarehouseQuantity>> GetByWarehouseAsync(Guid warehouseId)
     {
         if (warehouseId == Guid.Empty)
+        {
             return new List<WarehouseQuantity>();
-            
+        }
+
         return await _dbSet
             .Where(wq => wq.WarehouseId == warehouseId && !wq.IsDeleted)
             .Include(wq => wq.InventoryItem)
@@ -373,11 +407,13 @@ public class WarehouseQuantityRepository : GenericRepository<WarehouseQuantity>,
     public async Task<IEnumerable<WarehouseQuantity>> GetByWarehouseAndItemTypeAsync(Guid warehouseId, int itemType)
     {
         if (warehouseId == Guid.Empty)
+        {
             return new List<WarehouseQuantity>();
-        
+        }
+
         var itemTypeEnum = (ItemType)itemType;
         return await _dbSet
-            .Where(wq => wq.WarehouseId == warehouseId && 
+            .Where(wq => wq.WarehouseId == warehouseId &&
                         wq.InventoryItem.ItemType == itemTypeEnum &&
                         !wq.IsDeleted)
             .Include(wq => wq.InventoryItem)
@@ -390,11 +426,13 @@ public class WarehouseQuantityRepository : GenericRepository<WarehouseQuantity>,
     public async Task<WarehouseQuantity?> GetByWarehouseAndItemAsync(Guid warehouseId, Guid inventoryItemId)
     {
         if (warehouseId == Guid.Empty || inventoryItemId == Guid.Empty)
+        {
             return null;
-            
+        }
+
         return await _dbSet
-            .Where(wq => wq.WarehouseId == warehouseId && 
-                        wq.InventoryItemId == inventoryItemId && 
+            .Where(wq => wq.WarehouseId == warehouseId &&
+                        wq.InventoryItemId == inventoryItemId &&
                         !wq.IsDeleted)
             .Include(wq => wq.InventoryItem)
                 .ThenInclude(i => i.Category)
@@ -405,8 +443,10 @@ public class WarehouseQuantityRepository : GenericRepository<WarehouseQuantity>,
     public async Task<IEnumerable<WarehouseQuantity>> GetByInventoryItemIdAsync(Guid inventoryItemId)
     {
         if (inventoryItemId == Guid.Empty)
+        {
             return new List<WarehouseQuantity>();
-            
+        }
+
         return await _dbSet
             .Where(wq => wq.InventoryItemId == inventoryItemId && !wq.IsDeleted)
             .Include(wq => wq.InventoryItem)
@@ -419,8 +459,8 @@ public class WarehouseQuantityRepository : GenericRepository<WarehouseQuantity>,
     public async Task<IEnumerable<WarehouseQuantity>> GetItemsWithStockAsync(Guid warehouseId, int? itemType = null)
     {
         var query = _dbSet
-            .Where(wq => wq.WarehouseId == warehouseId && 
-                        wq.AvailableStock > 0 && 
+            .Where(wq => wq.WarehouseId == warehouseId &&
+                        wq.AvailableStock > 0 &&
                         !wq.IsDeleted);
 
         if (itemType.HasValue)
@@ -440,11 +480,13 @@ public class WarehouseQuantityRepository : GenericRepository<WarehouseQuantity>,
     public async Task<IEnumerable<WarehouseQuantity>> GetItemsBelowReorderLevelAsync(Guid warehouseId)
     {
         if (warehouseId == Guid.Empty)
+        {
             return new List<WarehouseQuantity>();
-            
+        }
+
         return await _dbSet
-            .Where(wq => wq.WarehouseId == warehouseId && 
-                        wq.CurrentStock <= wq.ReorderLevel && 
+            .Where(wq => wq.WarehouseId == warehouseId &&
+                        wq.CurrentStock <= wq.ReorderLevel &&
                         !wq.IsDeleted)
             .Include(wq => wq.InventoryItem)
                 .ThenInclude(i => i.Category)
@@ -462,8 +504,10 @@ public class WarehouseLocationRepository : GenericRepository<WarehouseLocation>,
     public async Task<IEnumerable<WarehouseLocation>> GetLocationsByWarehouseAsync(Guid warehouseId)
     {
         if (warehouseId == Guid.Empty)
+        {
             return new List<WarehouseLocation>();
-            
+        }
+
         return await _dbSet
             .Where(wl => wl.WarehouseId == warehouseId && !wl.IsDeleted)
             .Include(wl => wl.Warehouse)
@@ -474,12 +518,14 @@ public class WarehouseLocationRepository : GenericRepository<WarehouseLocation>,
     public async Task<IEnumerable<WarehouseLocation>> GetPickingLocationsAsync(Guid warehouseId)
     {
         if (warehouseId == Guid.Empty)
+        {
             return new List<WarehouseLocation>();
-            
+        }
+
         return await _dbSet
-            .Where(wl => wl.WarehouseId == warehouseId && 
-                        wl.IsPickingLocation && 
-                        wl.IsActive && 
+            .Where(wl => wl.WarehouseId == warehouseId &&
+                        wl.IsPickingLocation &&
+                        wl.IsActive &&
                         !wl.IsDeleted)
             .Include(wl => wl.Warehouse)
             .OrderBy(wl => wl.LocationCode)
@@ -489,12 +535,14 @@ public class WarehouseLocationRepository : GenericRepository<WarehouseLocation>,
     public async Task<IEnumerable<WarehouseLocation>> GetReceivingLocationsAsync(Guid warehouseId)
     {
         if (warehouseId == Guid.Empty)
+        {
             return new List<WarehouseLocation>();
-            
+        }
+
         return await _dbSet
-            .Where(wl => wl.WarehouseId == warehouseId && 
-                        wl.IsReceivingLocation && 
-                        wl.IsActive && 
+            .Where(wl => wl.WarehouseId == warehouseId &&
+                        wl.IsReceivingLocation &&
+                        wl.IsActive &&
                         !wl.IsDeleted)
             .Include(wl => wl.Warehouse)
             .OrderBy(wl => wl.LocationCode)
@@ -504,8 +552,10 @@ public class WarehouseLocationRepository : GenericRepository<WarehouseLocation>,
     public async Task<WarehouseLocation?> GetByLocationCodeAsync(string locationCode)
     {
         if (string.IsNullOrWhiteSpace(locationCode))
+        {
             return null;
-            
+        }
+
         return await _dbSet
             .Where(wl => wl.LocationCode == locationCode && !wl.IsDeleted)
             .Include(wl => wl.Warehouse)
@@ -515,11 +565,13 @@ public class WarehouseLocationRepository : GenericRepository<WarehouseLocation>,
     public async Task<IEnumerable<WarehouseLocation>> GetAvailableLocationsAsync(Guid warehouseId)
     {
         if (warehouseId == Guid.Empty)
+        {
             return new List<WarehouseLocation>();
-            
+        }
+
         return await _dbSet
-            .Where(wl => wl.WarehouseId == warehouseId && 
-                        wl.IsActive && 
+            .Where(wl => wl.WarehouseId == warehouseId &&
+                        wl.IsActive &&
                         !wl.IsDeleted &&
                         (wl.MaxItems == null || wl.CurrentItemCount < wl.MaxItems) &&
                         (wl.MaxWeight == null || wl.CurrentWeight < wl.MaxWeight) &&

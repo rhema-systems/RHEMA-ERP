@@ -1,17 +1,17 @@
+using System.IdentityModel.Tokens.Jwt;
+using ErpSystem.Api.Models;
+using ErpSystem.Api.Services;
+using ErpSystem.Core.DTOs.Auth;
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Common;
+using ErpSystem.Core.Services;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using ErpSystem.Core.Entities;
-using ErpSystem.Core.Services;
-using ErpSystem.Core.Interfaces;
-using ErpSystem.Api.Services;
-using ErpSystem.Api.Models;
-using ErpSystem.Shared;
-using ErpSystem.Data;
-using System.IdentityModel.Tokens.Jwt;
 using Microsoft.EntityFrameworkCore;
-using ErpSystem.Core.DTOs.Auth;
-using ErpSystem.Core.Interfaces.Common;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -106,29 +106,41 @@ namespace ErpSystem.Api.Controllers
                 ApplicationUser? user = null;
                 bool isLdapAuthenticated = false;
                 LdapUser? ldapUser = null;
-                
+
                 // First try to find existing user in database
-                user = await _userManager.FindByNameAsync(request.Username) ?? 
+                user = await _userManager.FindByNameAsync(request.Username) ??
                        await _userManager.FindByEmailAsync(request.Username);
-                
-                // If LDAP is enabled for this tenant and user is not found or password check fails,
-                // try LDAP authentication
+
+                // If LDAP is enabled for this tenant, try LDAP authentication
                 if (tenant?.LdapEnabled == true)
                 {
-                    _logger.LogInformation("Attempting LDAP authentication for user: {Username}", request.Username);
-                    
+                    _logger.LogInformation(
+                        "Attempting LDAP authentication for user {Username} using tenant {TenantId}. Server={LdapServer}, Port={LdapPort}, BaseDn={LdapBaseDn}",
+                        request.Username,
+                        tenant.Id,
+                        tenant.LdapServer,
+                        tenant.LdapPort ?? 389,
+                        tenant.LdapBaseDn);
+
                     var ldapResult = await _ldapAuthService.AuthenticateAsync(request.Username, request.Password, tenant);
+
+                    _logger.LogInformation(
+                        "LDAP authentication call completed for user {Username}. Success={Success}, Error={Error}",
+                        request.Username,
+                        ldapResult.Success,
+                        ldapResult.ErrorMessage);
+
                     if (ldapResult.Success && ldapResult.User != null)
                     {
                         isLdapAuthenticated = true;
                         ldapUser = ldapResult.User;
                         _logger.LogInformation("LDAP authentication successful for user: {Username}", request.Username);
-                        
+
                         // If user doesn't exist locally, create them from LDAP data
                         if (user == null)
                         {
                             _logger.LogInformation("Creating local user from LDAP data for: {Username}", request.Username);
-                            
+
                             user = new ApplicationUser
                             {
                                 UserName = ldapUser.Username,
@@ -140,15 +152,15 @@ namespace ErpSystem.Api.Controllers
                                 EmailConfirmed = true, // Trust LDAP email
                                 AuthenticationProvider = AuthenticationProvider.LDAP
                             };
-                            
+
                             var createResult = await _userManager.CreateAsync(user);
                             if (!createResult.Succeeded)
                             {
-                                _logger.LogError("Failed to create local user from LDAP: {Errors}", 
+                                _logger.LogError("Failed to create local user from LDAP: {Errors}",
                                     string.Join(", ", createResult.Errors.Select(e => e.Description)));
                                 return StatusCode(500, new { message = "Failed to create user account" });
                             }
-                            
+
                             // Assign default role (Employee) for new LDAP users
                             await _userManager.AddToRoleAsync(user, "Employee");
                         }
@@ -165,9 +177,9 @@ namespace ErpSystem.Api.Controllers
                     else if (user == null)
                     {
                         // Both LDAP and local user lookup failed
-                        _logger.LogWarning("Login failed: User not found in LDAP or local database for {Username}. LDAP Error: {LdapError}", 
+                        _logger.LogWarning("Login failed: User not found in LDAP or local database for {Username}. LDAP Error: {LdapError}",
                             request.Username, ldapResult.ErrorMessage);
-                        
+
                         var userNotFoundSecurityLog = new SecurityLog
                         {
                             Action = SecurityAction.LoginFailure.ToString(),
@@ -178,19 +190,26 @@ namespace ErpSystem.Api.Controllers
                             Details = $"User not found in LDAP or local database. LDAP: {ldapResult.ErrorMessage}",
                             FailureReason = "Invalid credentials - user not found",
                             UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
-                            TenantId = tenant?.Id ?? Guid.Empty
+                            TenantId = tenant?.Id ?? Constants.Tenants.DefaultTenantId
                         };
                         await _securityLogService.CreateSecurityLogAsync(userNotFoundSecurityLog);
-                        
+
                         return Unauthorized(new { message = "Invalid credentials" });
                     }
                 }
-                
+                else
+                {
+                    _logger.LogDebug(
+                        "LDAP authentication skipped for user {Username}. Tenant is null or LDAP is disabled (TenantCode={TenantCode}).",
+                        request.Username,
+                        request.TenantCode);
+                }
+
                 // If user still not found and LDAP is not enabled or failed
                 if (user == null)
                 {
                     _logger.LogWarning("Login failed: User not found for {Username}", request.Username);
-                    
+
                     var userNotFoundSecurityLog = new SecurityLog
                     {
                         Action = SecurityAction.LoginFailure.ToString(),
@@ -201,13 +220,13 @@ namespace ErpSystem.Api.Controllers
                         Details = "User not found",
                         FailureReason = "Invalid credentials - user not found",
                         UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
-                        TenantId = tenant?.Id ?? Guid.Empty
+                        TenantId = tenant?.Id ?? Constants.Tenants.DefaultTenantId
                     };
                     await _securityLogService.CreateSecurityLogAsync(userNotFoundSecurityLog);
-                    
+
                     return Unauthorized(new { message = "Invalid credentials" });
                 }
-                
+
                 // If tenant code provided, validate that user belongs to the tenant
                 if (tenant != null)
                 {
@@ -215,9 +234,9 @@ namespace ErpSystem.Api.Controllers
                     if (userTenant == null || !await _userTenantService.HasActiveAccessAsync(user.Id, tenant.Id))
                     {
                         var statusMessage = userTenant == null ? "not assigned" : "no active access";
-                        _logger.LogWarning("Login failed: User {Username} {Status} for tenant {TenantCode}", 
+                        _logger.LogWarning("Login failed: User {Username} {Status} for tenant {TenantCode}",
                             request.Username, statusMessage, request.TenantCode);
-                        
+
                         // Log security event for tenant mismatch
                         var tenantMismatchSecurityLog = new SecurityLog
                         {
@@ -232,13 +251,13 @@ namespace ErpSystem.Api.Controllers
                             TenantId = tenant.Id
                         };
                         await _securityLogService.CreateSecurityLogAsync(tenantMismatchSecurityLog);
-                        
+
                         return Unauthorized(new { message = "Invalid credentials" });
                     }
                 }
 
                 Microsoft.AspNetCore.Identity.SignInResult result;
-                
+
                 // If LDAP authentication succeeded, skip local password check
                 if (isLdapAuthenticated)
                 {
@@ -253,7 +272,7 @@ namespace ErpSystem.Api.Controllers
                 if (!result.Succeeded)
                 {
                     _logger.LogWarning("Login failed for user {Username}: {Reason}", request.Username, result.ToString());
-                    
+
                     if (result.IsLockedOut)
                     {
                         // Log account lockout event using user's tenant context
@@ -270,10 +289,10 @@ namespace ErpSystem.Api.Controllers
                             TenantId = user.TenantId
                         };
                         await _securityLogService.CreateSecurityLogAsync(lockoutSecurityLog);
-                            
+
                         return Unauthorized(new { message = "Account is locked out" });
                     }
-                    
+
                     // Log failed login attempt using user's tenant context
                     var loginFailureSecurityLog = new SecurityLog
                     {
@@ -288,23 +307,23 @@ namespace ErpSystem.Api.Controllers
                         TenantId = user.TenantId
                     };
                     await _securityLogService.CreateSecurityLogAsync(loginFailureSecurityLog);
-                    
+
                     return Unauthorized(new { message = "Invalid credentials" });
                 }
 
                 // Check if user has Two-Factor Authentication enabled
                 var hasTwoFactorEnabled = await _userManager.GetTwoFactorEnabledAsync(user) && !string.IsNullOrEmpty(user.AuthenticatorKey);
-                
+
                 if (hasTwoFactorEnabled)
                 {
                     // If 2FA code is not provided, return response indicating 2FA is required
                     if (string.IsNullOrWhiteSpace(request.TwoFactorCode))
                     {
                         _logger.LogInformation("User {Username} requires 2FA verification", request.Username);
-                        
+
                         // Generate a temporary token for 2FA verification
                         var tempToken = Guid.NewGuid().ToString("N");
-                        
+
                         // Store the temporary login state (you might want to use a cache like Redis in production)
                         // For now, we'll use a simple approach with a temporary JWT
                         var tempLoginInfo = new
@@ -315,7 +334,7 @@ namespace ErpSystem.Api.Controllers
                             RememberMe = request.RememberMe,
                             Timestamp = DateTime.UtcNow
                         };
-                        
+
                         return Ok(new LoginResponse
                         {
                             RequiresTwoFactor = true,
@@ -326,20 +345,20 @@ namespace ErpSystem.Api.Controllers
                             User = null
                         });
                     }
-                    
+
                     // Validate the provided 2FA code format first
                     if (request.TwoFactorCode.Length != 6 || !request.TwoFactorCode.All(char.IsDigit))
                     {
                         _logger.LogWarning("Invalid 2FA code format for user {Username}: length={Length}, code='{Code}'", request.Username, request.TwoFactorCode.Length, request.TwoFactorCode);
                         return BadRequest(new { message = "Two-factor authentication code must be exactly 6 digits" });
                     }
-                    
+
                     // Validate the provided 2FA code
                     var isValid2FA = await _twoFactorService.ValidateTotpAsync(user, request.TwoFactorCode);
                     if (!isValid2FA)
                     {
                         _logger.LogWarning("Invalid 2FA code provided for user {Username}", request.Username);
-                        
+
                         var invalid2FASecurityLog = new SecurityLog
                         {
                             Action = SecurityAction.LoginFailure.ToString(),
@@ -353,16 +372,44 @@ namespace ErpSystem.Api.Controllers
                             TenantId = user.TenantId
                         };
                         await _securityLogService.CreateSecurityLogAsync(invalid2FASecurityLog);
-                        
+
                         return Unauthorized(new { message = "Invalid two-factor authentication code" });
                     }
-                    
+
                     _logger.LogInformation("2FA verification successful for user {Username}", request.Username);
                 }
 
                 // Determine the effective tenant ID for this login session
                 var effectiveTenantId = tenant?.Id ?? user.TenantId;
-                
+
+                // If effectiveTenantId is still empty, try to get from UserTenants table
+                if (effectiveTenantId == Guid.Empty)
+                {
+                    // Get active user tenants ordered by IsDefault
+                    var userTenants = await _context.UserTenants
+                        .Where(ut => ut.UserId == user.Id && !ut.IsDeleted && ut.Status == UserTenantStatus.Active)
+                        .OrderByDescending(ut => ut.IsDefault)
+                        .ToListAsync();
+
+                    if (userTenants.Any())
+                    {
+                        effectiveTenantId = userTenants.First().TenantId;
+                        var isDefault = userTenants.First().IsDefault;
+                        _logger.LogInformation("Using {TenantType} tenant {TenantId} from UserTenants for user {Username}",
+                            isDefault ? "default" : "first active", effectiveTenantId, user.UserName);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("User {Username} has no tenant assigned in User.TenantId or UserTenants table", user.UserName);
+                        return Unauthorized(new { message = "User has no tenant assigned. Please contact administrator." });
+                    }
+
+                    // Update user's TenantId field for future logins
+                    user.TenantId = effectiveTenantId;
+                    await _userManager.UpdateAsync(user);
+                    _logger.LogInformation("Updated user {Username} TenantId to {TenantId}", user.UserName, effectiveTenantId);
+                }
+
                 // Update user's current tenant if tenant was specified in login
                 if (tenant != null && user.TenantId != tenant.Id)
                 {
@@ -370,18 +417,18 @@ namespace ErpSystem.Api.Controllers
                     await _userManager.UpdateAsync(user);
                     _logger.LogInformation("Updated user {Username} tenant to {TenantId}", user.UserName, tenant.Id);
                 }
-                
+
                 // Get security settings for concurrent login prevention from user's tenant
                 var securitySettings = await _settingsService.GetSecuritySettingsAsync(effectiveTenantId);
                 var preventConcurrentLogin = securitySettings?.PreventConcurrentLogin.ToString() ?? "Disabled";
-                
+
                 // Check if user can login based on concurrent login prevention settings
                 var canLogin = await _userSessionService.CanUserLoginAsync(user.Id, preventConcurrentLogin);
                 if (!canLogin)
                 {
-                    _logger.LogWarning("Login prevented for user {Username}: Active session exists and prevention mode is {Mode}", 
+                    _logger.LogWarning("Login prevented for user {Username}: Active session exists and prevention mode is {Mode}",
                         request.Username, preventConcurrentLogin);
-                    
+
                     var preventedLoginSecurityLog = new SecurityLog
                     {
                         Action = SecurityAction.LoginFailure.ToString(),
@@ -395,31 +442,32 @@ namespace ErpSystem.Api.Controllers
                         TenantId = user.TenantId
                     };
                     await _securityLogService.CreateSecurityLogAsync(preventedLoginSecurityLog);
-                    
-                    return Unauthorized(new { 
+
+                    return Unauthorized(new
+                    {
                         message = "You already have an active session. Please logout from other devices first.",
                         code = "CONCURRENT_SESSION_PREVENTED"
                     });
                 }
-                
+
                 // Get device information for session tracking
                 var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
                 var userAgent = Request.Headers["User-Agent"].FirstOrDefault() ?? "Unknown";
                 var deviceFingerprint = GenerateDeviceFingerprint(ipAddress, userAgent);
-                
+
                 // Create user session (this handles concurrent login prevention logic)
                 var userSession = await _userSessionService.CreateSessionAsync(
-                    user.Id, 
+                    user.Id,
                     effectiveTenantId,
-                    ipAddress, 
-                    userAgent, 
-                    deviceFingerprint, 
+                    ipAddress,
+                    userAgent,
+                    deviceFingerprint,
                     preventConcurrentLogin
                 );
 
                 // Generate token with session ID included
                 var token = await _tokenService.GenerateTokenAsync(user, userSession.SessionId);
-                
+
                 // Extract JTI from the generated token and update the session
                 try
                 {
@@ -428,7 +476,7 @@ namespace ErpSystem.Api.Controllers
                     {
                         var jsonToken = tokenHandler.ReadJwtToken(token);
                         var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
-                    
+
                         if (!string.IsNullOrEmpty(jti))
                         {
                             userSession.JwtTokenId = jti;
@@ -438,8 +486,8 @@ namespace ErpSystem.Api.Controllers
                     }
                     else
                     {
-                        _logger.LogWarning("Generated JWT token cannot be read: {TokenPreview}", 
-                            token.Length > 50 ? token.Substring(0, 50) + "..." : token);
+                        _logger.LogWarning("Generated JWT token cannot be read: {TokenPreview}",
+                            token.Length > 50 ? string.Concat(token.AsSpan(0, 50), "...") : token);
                     }
                 }
                 catch (Exception ex)
@@ -454,7 +502,7 @@ namespace ErpSystem.Api.Controllers
                 var refreshToken = _tokenService.GenerateRefreshToken();
 
                 // TODO: Store refresh token in database for security
-                
+
                 _logger.LogInformation("Login successful for user: {Username}", request.Username);
 
                 // Log login success using user's tenant context
@@ -565,7 +613,7 @@ namespace ErpSystem.Api.Controllers
                 var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
                 var currentTenantId = _currentUserService.TenantId;
                 var username = _currentUserService.UserName;
-                
+
                 if (!currentUserId.HasValue)
                 {
                     _logger.LogWarning("Logout attempted but no current user found");
@@ -583,8 +631,8 @@ namespace ErpSystem.Api.Controllers
                         var tokenHandler = new JwtSecurityTokenHandler();
                         if (!tokenHandler.CanReadToken(jwt))
                         {
-                            _logger.LogWarning("Cannot read JWT token during logout. Token preview: {TokenPreview}", 
-                                jwt.Length > 50 ? jwt.Substring(0, 50) + "..." : jwt);
+                            _logger.LogWarning("Cannot read JWT token during logout. Token preview: {TokenPreview}",
+                                jwt.Length > 50 ? string.Concat(jwt.AsSpan(0, 50), "...") : jwt);
                         }
                         else
                         {
@@ -592,7 +640,7 @@ namespace ErpSystem.Api.Controllers
                             var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
                             var exp = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Exp)?.Value;
                             sessionId = jsonToken.Claims.FirstOrDefault(x => x.Type == "sid")?.Value; // Session ID claim
-                            
+
                             if (!string.IsNullOrEmpty(jti) && !string.IsNullOrEmpty(exp))
                             {
                                 var expiresAt = DateTimeOffset.FromUnixTimeSeconds(long.Parse(exp)).DateTime;
@@ -603,12 +651,12 @@ namespace ErpSystem.Api.Controllers
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to blacklist JWT token during logout. Token preview: {TokenPreview}", 
-                            jwt.Length > 50 ? jwt.Substring(0, 50) + "..." : jwt);
+                        _logger.LogWarning(ex, "Failed to blacklist JWT token during logout. Token preview: {TokenPreview}",
+                            jwt.Length > 50 ? string.Concat(jwt.AsSpan(0, 50), "...") : jwt);
                         // Continue with logout even if blacklisting fails
                     }
                 }
-                
+
                 // Terminate user session if session ID found
                 if (!string.IsNullOrEmpty(sessionId))
                 {
@@ -645,26 +693,29 @@ namespace ErpSystem.Api.Controllers
                 {
                     // Revoke specific refresh token if provided
                     var success = await _refreshTokenService.RevokeRefreshTokenAsync(
-                        request.RefreshToken, 
-                        currentUserId.Value, 
+                        request.RefreshToken,
+                        currentUserId.Value,
                         "User logout");
-                    if (success) revokedTokens = 1;
+                    if (success)
+                    {
+                        revokedTokens = 1;
+                    }
                 }
                 else
                 {
                     // Revoke all refresh tokens for the user
                     revokedTokens = await _refreshTokenService.RevokeAllUserRefreshTokensAsync(
-                        currentUserId.Value, 
-                        currentUserId.Value, 
+                        currentUserId.Value,
+                        currentUserId.Value,
                         "User logout - all sessions");
                 }
 
-                _logger.LogInformation("Revoked {RevokedTokens} refresh tokens for user {UserId} during logout", 
+                _logger.LogInformation("Revoked {RevokedTokens} refresh tokens for user {UserId} during logout",
                     revokedTokens, currentUserId.Value);
 
                 // Traditional sign out (for any server-side sessions)
                 await _signInManager.SignOutAsync();
-                
+
                 // Log logout success
                 if (currentUserId.HasValue && currentTenantId.HasValue && !string.IsNullOrEmpty(username))
                 {
@@ -682,7 +733,7 @@ namespace ErpSystem.Api.Controllers
                     };
                     await _securityLogService.CreateSecurityLogAsync(logoutSecurityLog);
                 }
-                
+
                 _logger.LogInformation("User {UserId} logged out successfully", currentUserId.Value);
                 return Ok(new { message = "Logged out successfully", revokedSessions = revokedTokens });
             }
@@ -701,9 +752,9 @@ namespace ErpSystem.Api.Controllers
             {
                 _logger.LogInformation("Getting tenants for user: {Username}", request.Username);
 
-                var user = await _userManager.FindByNameAsync(request.Username) ?? 
+                var user = await _userManager.FindByNameAsync(request.Username) ??
                            await _userManager.FindByEmailAsync(request.Username);
-                
+
                 if (user == null)
                 {
                     _logger.LogWarning("User not found: {Username}", request.Username);
@@ -728,16 +779,16 @@ namespace ErpSystem.Api.Controllers
                             IsDefault = ut.IsDefault,
                             AccessLevel = ut.AccessLevel.ToString()
                         };
-                        
+
                         tenantInfoList.Add(tenantInfo);
-                        
+
                         if (ut.IsDefault)
                         {
                             defaultTenant = tenantInfo;
                         }
                     }
                 }
-                
+
                 // If no explicit UserTenant relationships exist, include the user's primary tenant
                 if (!tenantInfoList.Any() && user.TenantId != Guid.Empty)
                 {
@@ -752,11 +803,11 @@ namespace ErpSystem.Api.Controllers
                             IsDefault = true, // User's primary tenant is always default
                             AccessLevel = "Standard" // Default access level for primary tenant
                         };
-                        
+
                         tenantInfoList.Add(tenantInfo);
                         defaultTenant = tenantInfo;
-                        
-                        _logger.LogInformation("Added user's primary tenant {TenantCode} as accessible tenant for user {Username} (no explicit UserTenant relationships found)", 
+
+                        _logger.LogInformation("Added user's primary tenant {TenantCode} as accessible tenant for user {Username} (no explicit UserTenant relationships found)",
                             primaryTenant.Code, request.Username);
                     }
                 }
@@ -798,7 +849,7 @@ namespace ErpSystem.Api.Controllers
                 // Get user's accessible tenants
                 var userTenants = await _userTenantService.GetActiveUserTenantsAsync(user.Id);
                 var accessibleTenants = new List<UserTenantInfo>();
-                
+
                 foreach (var ut in userTenants)
                 {
                     var tenant = await _tenantService.GetTenantByIdAsync(ut.TenantId);
@@ -814,7 +865,7 @@ namespace ErpSystem.Api.Controllers
                         });
                     }
                 }
-                
+
                 // If no explicit UserTenant relationships exist, include the user's primary tenant
                 if (!accessibleTenants.Any() && user.TenantId != Guid.Empty)
                 {
@@ -829,8 +880,8 @@ namespace ErpSystem.Api.Controllers
                             IsDefault = true, // User's primary tenant is always default
                             AccessLevel = "Standard" // Default access level for primary tenant
                         });
-                        
-                        _logger.LogInformation("Added user's primary tenant {TenantCode} as accessible tenant for user {UserId} (no explicit UserTenant relationships found)", 
+
+                        _logger.LogInformation("Added user's primary tenant {TenantCode} as accessible tenant for user {UserId} (no explicit UserTenant relationships found)",
                             primaryTenant.Code, user.Id);
                     }
                 }
@@ -893,7 +944,7 @@ namespace ErpSystem.Api.Controllers
                 // Check both explicit UserTenant relationships and user's primary tenant
                 var hasExplicitAccess = await _userTenantService.HasActiveAccessAsync(Guid.Parse(userId), tenant.Id);
                 var isPrimaryTenant = user.TenantId == tenant.Id;
-                
+
                 if (!hasExplicitAccess && !isPrimaryTenant)
                 {
                     _logger.LogWarning("User {UserId} attempted to access tenant {TenantCode} without permission", userId, request.TenantCode);
@@ -916,7 +967,7 @@ namespace ErpSystem.Api.Controllers
 
                 // Generate new JWT token with updated tenant context
                 var newToken = await _tokenService.GenerateTokenAsync(user);
-                
+
                 // Extract JTI from the new token and update the current session
                 try
                 {
@@ -925,25 +976,25 @@ namespace ErpSystem.Api.Controllers
                     {
                         var currentSession = await _context.UserSessions
                             .FirstOrDefaultAsync(s => s.SessionId == sessionGuid.ToString() && s.IsActive);
-                        
+
                         if (currentSession != null)
                         {
                             var tokenHandler = new JwtSecurityTokenHandler();
                             if (!tokenHandler.CanReadToken(newToken))
                             {
-                                _logger.LogWarning("Cannot read new JWT token after tenant selection. Token preview: {TokenPreview}", 
-                                    newToken.Length > 50 ? newToken.Substring(0, 50) + "..." : newToken);
+                                _logger.LogWarning("Cannot read new JWT token after tenant selection. Token preview: {TokenPreview}",
+                                    newToken.Length > 50 ? string.Concat(newToken.AsSpan(0, 50), "...") : newToken);
                             }
                             else
                             {
                                 var jsonToken = tokenHandler.ReadJwtToken(newToken);
                                 var newJti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
-                            
+
                                 if (!string.IsNullOrEmpty(newJti))
                                 {
                                     currentSession.JwtTokenId = newJti;
                                     await _context.SaveChangesAsync();
-                                    _logger.LogDebug("Updated session {SessionId} with new JTI {Jti} after tenant selection", 
+                                    _logger.LogDebug("Updated session {SessionId} with new JTI {Jti} after tenant selection",
                                         sessionGuid, newJti);
                                 }
                             }
@@ -959,7 +1010,7 @@ namespace ErpSystem.Api.Controllers
                 // Get updated user info with new tenant context
                 var userTenants = await _userTenantService.GetActiveUserTenantsAsync(user.Id);
                 var accessibleTenants = new List<UserTenantInfo>();
-                
+
                 foreach (var ut in userTenants)
                 {
                     var t = await _tenantService.GetTenantByIdAsync(ut.TenantId);
@@ -975,7 +1026,7 @@ namespace ErpSystem.Api.Controllers
                         });
                     }
                 }
-                
+
                 // If no explicit UserTenant relationships exist, include the user's primary tenant
                 if (!accessibleTenants.Any() && user.TenantId != Guid.Empty)
                 {
@@ -990,8 +1041,8 @@ namespace ErpSystem.Api.Controllers
                             IsDefault = true, // User's primary tenant is always default
                             AccessLevel = "Standard" // Default access level for primary tenant
                         });
-                        
-                        _logger.LogInformation("Added user's primary tenant {TenantCode} as accessible tenant for user {UserId} during tenant selection (no explicit UserTenant relationships found)", 
+
+                        _logger.LogInformation("Added user's primary tenant {TenantCode} as accessible tenant for user {UserId} during tenant selection (no explicit UserTenant relationships found)",
                             primaryTenant.Code, user.Id);
                     }
                 }
@@ -1041,7 +1092,7 @@ namespace ErpSystem.Api.Controllers
 
                 // Get all users mapped to this tenant
                 var tenantUsers = await _userTenantService.GetActiveTenantUsersAsync(tenantId);
-                
+
                 var userMappings = new List<TenantUserMapping>();
                 foreach (var user in tenantUsers)
                 {
@@ -1111,7 +1162,7 @@ namespace ErpSystem.Api.Controllers
                 // Later this can be enhanced to support tenant selection during registration
                 var availableTenants = await _tenantService.GetAllTenantsAsync();
                 var registrationTenant = availableTenants.FirstOrDefault(t => t.Status == TenantStatus.Active && t.AllowSelfRegistration);
-                
+
                 if (registrationTenant == null)
                 {
                     return BadRequest(new { message = "Self-registration is not currently available." });
@@ -1203,7 +1254,7 @@ namespace ErpSystem.Api.Controllers
                 // Find user by phone number
                 var users = _userManager.Users.Where(u => u.PhoneNumber == request.PhoneNumber && !u.IsActive).ToList();
                 var user = users.FirstOrDefault();
-                
+
                 if (user == null)
                 {
                     return BadRequest(new { message = "Invalid phone number or user already verified." });
@@ -1221,7 +1272,7 @@ namespace ErpSystem.Api.Controllers
                 user.PhoneNumberConfirmed = true;
                 user.UpdatedAt = DateTime.UtcNow;
                 user.UpdatedBy = "OTP-Verification";
-                
+
                 var updateResult = await _userManager.UpdateAsync(user);
                 if (!updateResult.Succeeded)
                 {
@@ -1267,20 +1318,20 @@ namespace ErpSystem.Api.Controllers
             {
                 // This endpoint provides public security settings needed for registration and login
                 // (password policy, CAPTCHA settings, etc.) without requiring authentication
-                
+
                 // Try to get actual security settings from the database
                 Core.Entities.Security? settings = null;
                 try
                 {
                     settings = await _settingsService.GetPublicSecuritySettingsAsync();
-                    _logger.LogInformation("Retrieved public security settings from database: CAPTCHA enabled = {CaptchaEnabled}, Site key = {SiteKeyPrefix}...", 
+                    _logger.LogInformation("Retrieved public security settings from database: CAPTCHA enabled = {CaptchaEnabled}, Site key = {SiteKeyPrefix}...",
                         settings?.CaptchaEnabled, settings?.RecaptchaSiteKey?.Length > 10 ? settings.RecaptchaSiteKey[..10] : settings?.RecaptchaSiteKey);
                 }
                 catch (Exception settingsEx)
                 {
                     _logger.LogWarning(settingsEx, "Failed to retrieve public security settings from database, using defaults");
                 }
-                
+
                 // Return actual security settings or defaults
                 var publicSettings = new
                 {
@@ -1296,17 +1347,17 @@ namespace ErpSystem.Api.Controllers
                     termsOfServiceUrl = settings?.TermsOfServiceUrl,
                     privacyPolicyUrl = settings?.PrivacyPolicyUrl
                 };
-                
-                _logger.LogInformation("Public security settings retrieved: CAPTCHA enabled = {CaptchaEnabled}, Provider = {CaptchaProvider}, Site Key = {SiteKeyPrefix}...", 
-                    publicSettings.captchaEnabled, 
-                    publicSettings.captchaProvider, 
+
+                _logger.LogInformation("Public security settings retrieved: CAPTCHA enabled = {CaptchaEnabled}, Provider = {CaptchaProvider}, Site Key = {SiteKeyPrefix}...",
+                    publicSettings.captchaEnabled,
+                    publicSettings.captchaProvider,
                     publicSettings.recaptchaSiteKey?.Length > 10 ? publicSettings.recaptchaSiteKey[..10] : publicSettings.recaptchaSiteKey);
                 return Ok(publicSettings);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error retrieving public security settings");
-                
+
                 // Return defaults even on error to ensure registration page works
                 var fallbackSettings = new
                 {
@@ -1322,7 +1373,7 @@ namespace ErpSystem.Api.Controllers
                     termsOfServiceUrl = (string?)null,
                     privacyPolicyUrl = (string?)null
                 };
-                
+
                 return Ok(fallbackSettings);
             }
         }
@@ -1338,7 +1389,7 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var security = await _settingsService.GetSecuritySettingsAsync();
-                
+
                 if (security == null)
                 {
                     // Return default policy if none exists
@@ -1371,7 +1422,7 @@ namespace ErpSystem.Api.Controllers
                 return StatusCode(500, new { message = "An error occurred while retrieving password policy" });
             }
         }
-        
+
         /// <summary>
         /// Request password reset email
         /// </summary>
@@ -1395,17 +1446,17 @@ namespace ErpSystem.Api.Controllers
                 {
                     // Don't reveal if email exists (security best practice)
                     _logger.LogWarning("Password reset requested for non-existent email: {Email}", request.Email);
-                    return Ok(new ErpSystem.Core.DTOs.Auth.ForgotPasswordResponse 
-                    { 
-                        Success = true, 
-                        Message = "If an account with this email exists, you will receive password reset instructions" 
+                    return Ok(new ErpSystem.Core.DTOs.Auth.ForgotPasswordResponse
+                    {
+                        Success = true,
+                        Message = "If an account with this email exists, you will receive password reset instructions"
                     });
                 }
 
                 // Generate reset token
                 var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
                 var userAgent = Request.Headers["User-Agent"].FirstOrDefault() ?? "Unknown";
-                
+
                 string resetToken;
                 try
                 {
@@ -1429,9 +1480,9 @@ namespace ErpSystem.Api.Controllers
                     // Read frontend URL from configuration
                     var frontendUrl = _configuration["FrontendUrl"] ?? "http://localhost:3000";
                     var resetUrl = $"{frontendUrl}/reset-password?token={Uri.EscapeDataString(resetToken)}&email={Uri.EscapeDataString(user.Email)}";
-                    
+
                     _logger.LogInformation("Generated password reset URL: {ResetUrl}", resetUrl);
-                    
+
                     var emailDto = new ErpSystem.Core.Interfaces.Common.EmailDto
                     {
                         To = user.Email,
@@ -1537,7 +1588,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var isValid = await _passwordResetService.ValidateResetTokenAsync(user.Id, request.ResetToken);
-                
+
                 if (isValid)
                 {
                     return Ok(new ErpSystem.Core.DTOs.Auth.ValidateResetTokenResponse
@@ -1562,16 +1613,15 @@ namespace ErpSystem.Api.Controllers
             }
         }
 
-        private string GenerateDeviceFingerprint(string ipAddress, string userAgent)
+        private static string GenerateDeviceFingerprint(string ipAddress, string userAgent)
         {
             // Create a simple device fingerprint using IP and User Agent
             var combined = $"{ipAddress}|{userAgent}";
-            using var sha256 = System.Security.Cryptography.SHA256.Create();
-            var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(combined));
+            var hashBytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(combined));
             return Convert.ToBase64String(hashBytes)[..16]; // Take first 16 characters
         }
 
-        private string GeneratePasswordResetEmailBody(string firstName, string resetUrl)
+        private static string GeneratePasswordResetEmailBody(string firstName, string resetUrl)
         {
             return $@"
                 <!DOCTYPE html>

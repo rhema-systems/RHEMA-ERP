@@ -1,11 +1,11 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
-using ErpSystem.Core.Entities.HR;
-using ErpSystem.Core.Interfaces.HR;
-using ErpSystem.Core.Enums;
-using ErpSystem.Core.DTOs.HR;
-using AutoMapper;
 using System.ComponentModel.DataAnnotations;
+using AutoMapper;
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.HR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -74,9 +74,9 @@ namespace ErpSystem.Api.Controllers
 
                 var employeeDtos = _mapper.Map<IEnumerable<EmployeeDto>>(paginatedEmployees);
 
-                Response.Headers.Add("X-Total-Count", employees.Count().ToString());
-                Response.Headers.Add("X-Page", page.ToString());
-                Response.Headers.Add("X-Page-Size", pageSize.ToString());
+                Response.Headers.Append("X-Total-Count", employees.Count().ToString());
+                Response.Headers.Append("X-Page", page.ToString());
+                Response.Headers.Append("X-Page-Size", pageSize.ToString());
 
                 return Ok(employeeDtos);
             }
@@ -97,12 +97,12 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var employee = await _employeeRepository.GetByIdAsync(id, 
-                    e => e.Department, 
-                    e => e.Position, 
-                    e => e.Section, 
-                    e => e.Manager, 
-                    e => e.Country, 
+                var employee = await _employeeRepository.GetByIdAsync(id,
+                    e => e.Department,
+                    e => e.Position,
+                    e => e.Section,
+                    e => e.Manager,
+                    e => e.Country,
                     e => e.Shift);
 
                 if (employee == null)
@@ -184,15 +184,15 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var employee = _mapper.Map<Employee>(createEmployeeDto);
-                
+
                 var createdEmployee = await _employeeRepository.AddAsync(employee);
                 await _employeeRepository.SaveChangesAsync();
 
                 // Retrieve the created employee with related data
                 var employeeWithRelations = await _employeeRepository.GetByIdAsync(createdEmployee.Id,
-                    e => e.Department, 
-                    e => e.Position, 
-                    e => e.Section, 
+                    e => e.Department,
+                    e => e.Position,
+                    e => e.Section,
                     e => e.Manager);
 
                 var employeeDto = _mapper.Map<EmployeeDetailDto>(employeeWithRelations);
@@ -230,15 +230,15 @@ namespace ErpSystem.Api.Controllers
                 // For now, skip these validations during updates
 
                 _mapper.Map(updateEmployeeDto, existingEmployee);
-                
+
                 await _employeeRepository.UpdateAsync(existingEmployee);
                 await _employeeRepository.SaveChangesAsync();
 
                 // Retrieve updated employee with related data
                 var updatedEmployee = await _employeeRepository.GetByIdAsync(id,
-                    e => e.Department, 
-                    e => e.Position, 
-                    e => e.Section, 
+                    e => e.Department,
+                    e => e.Position,
+                    e => e.Section,
                     e => e.Manager);
 
                 var employeeDto = _mapper.Map<EmployeeDetailDto>(updatedEmployee);
@@ -321,5 +321,26 @@ namespace ErpSystem.Api.Controllers
         //         return StatusCode(500, "An error occurred while retrieving employees");
         //     }
         // }
+
+        /// <summary>
+        /// Get all active departments for dropdown selection
+        /// </summary>
+        [HttpGet("departments")]
+        [ProducesResponseType(typeof(IEnumerable<DepartmentDto>), 200)]
+        public async Task<ActionResult<IEnumerable<DepartmentDto>>> GetDepartments()
+        {
+            try
+            {
+                var departments = await _departmentRepository.GetActiveDepartmentsAsync();
+                var departmentDtos = _mapper.Map<IEnumerable<DepartmentDto>>(departments);
+
+                return Ok(departmentDtos);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving departments");
+                return StatusCode(500, "An error occurred while retrieving departments");
+            }
+        }
     }
 }

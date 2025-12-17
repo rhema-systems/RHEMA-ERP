@@ -1,6 +1,6 @@
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories;
 
@@ -105,7 +105,7 @@ public class ReportScheduleRepository : GenericRepository<ReportSchedule>, IRepo
     {
         var now = DateTime.UtcNow;
         return await _context.ReportSchedules
-            .Where(s => !s.IsDeleted && s.IsActive && 
+            .Where(s => !s.IsDeleted && s.IsActive &&
                        s.NextExecutionDate.HasValue && s.NextExecutionDate <= now)
             .Include(s => s.Report)
             .ToListAsync();
@@ -226,7 +226,7 @@ public class UserReportFavoriteRepository : GenericRepository<UserReportFavorite
     public async Task<bool> ToggleFavoriteAsync(Guid reportId, Guid userId, Guid tenantId)
     {
         var favorite = await GetFavoriteAsync(reportId, userId, tenantId);
-        
+
         if (favorite == null)
         {
             // Add to favorites
@@ -342,12 +342,14 @@ public class ReportRoleAssignmentRepository : GenericRepository<ReportRoleAssign
             .ToListAsync();
 
         if (!userRoleIds.Any())
+        {
             return new List<Guid>();
+        }
 
         // Get reports accessible by user's roles
         return await _context.ReportRoleAssignments
-            .Where(rra => userRoleIds.Contains(rra.RoleId) && 
-                         rra.TenantId == tenantId && 
+            .Where(rra => userRoleIds.Contains(rra.RoleId) &&
+                         rra.TenantId == tenantId &&
                          !rra.IsDeleted &&
                          rra.CanRead)
             .Select(rra => rra.ReportId)
@@ -364,7 +366,9 @@ public class ReportRoleAssignmentRepository : GenericRepository<ReportRoleAssign
             .ToListAsync();
 
         if (!userRoleIds.Any())
+        {
             return false;
+        }
 
         // Check if user has any role assignments for this report with the required permission
         var query = _context.ReportRoleAssignments

@@ -1,6 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
-using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.HR;
 
@@ -253,20 +253,20 @@ public interface IHRReportingService
     Task<Dictionary<string, object>> GetEmployeeStatisticsAsync();
     Task<Dictionary<string, object>> GetDepartmentStatisticsAsync();
     Task<Dictionary<string, object>> GetSkillStatisticsAsync();
-    
+
     // Turnover and retention
     Task<Dictionary<string, object>> GetTurnoverAnalysisAsync(int months = 12);
     Task<IEnumerable<EmployeeDto>> GetNewHiresAsync(DateOnly fromDate, DateOnly? toDate = null);
     Task<IEnumerable<EmployeeDto>> GetTerminatedEmployeesAsync(DateOnly fromDate, DateOnly? toDate = null);
-    
+
     // Certification and compliance
     Task<IEnumerable<EmployeeSkillDto>> GetExpiringCertificationsAsync(int withinDays = 30);
     Task<IEnumerable<EmployeeDto>> GetEmployeesWithoutRequiredSkillsAsync(Guid positionId);
-    
+
     // Contract management
     Task<IEnumerable<EmployeeContractDetailDto>> GetExpiringContractsAsync(int withinDays = 60);
     Task<IEnumerable<EmployeeDto>> GetProbationaryEmployeesAsync();
-    
+
     // Organizational analysis
     Task<Dictionary<string, object>> GetOrganizationalChartDataAsync();
     Task<Dictionary<string, object>> GetHeadcountByDepartmentAsync();

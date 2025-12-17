@@ -3,8 +3,8 @@ using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.Maintenance;
-using Microsoft.Extensions.Logging;
 using ErpSystem.Core.Services;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -80,44 +80,91 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
     {
         try
         {
-            var schedule = await _scheduleRepository.GetByIdAsync(id);
-            if (schedule == null)
-                throw new ArgumentException($"Schedule {id} not found");
-
+            var schedule = await _scheduleRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Schedule {id} not found");
             if (updateDto.StartDateTime.HasValue)
+            {
                 schedule.StartDateTime = updateDto.StartDateTime.Value;
+            }
+
             if (updateDto.EndDateTime.HasValue)
+            {
                 schedule.EndDateTime = updateDto.EndDateTime.Value;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.Status))
+            {
                 schedule.Status = updateDto.Status;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.WorkLocation))
+            {
                 schedule.WorkLocation = updateDto.WorkLocation;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.Address))
+            {
                 schedule.Address = updateDto.Address;
+            }
+
             if (updateDto.Latitude.HasValue)
+            {
                 schedule.Latitude = updateDto.Latitude;
+            }
+
             if (updateDto.Longitude.HasValue)
+            {
                 schedule.Longitude = updateDto.Longitude;
+            }
+
             if (updateDto.RequiresTravel.HasValue)
+            {
                 schedule.RequiresTravel = updateDto.RequiresTravel.Value;
+            }
+
             if (updateDto.DepartureTime.HasValue)
+            {
                 schedule.DepartureTime = updateDto.DepartureTime;
+            }
+
             if (updateDto.ArrivalTime.HasValue)
+            {
                 schedule.ArrivalTime = updateDto.ArrivalTime;
+            }
+
             if (updateDto.EstimatedTravelMinutes.HasValue)
+            {
                 schedule.EstimatedTravelMinutes = updateDto.EstimatedTravelMinutes;
+            }
+
             if (updateDto.ActualTravelMinutes.HasValue)
+            {
                 schedule.ActualTravelMinutes = updateDto.ActualTravelMinutes;
+            }
+
             if (updateDto.AssignedVehicleId.HasValue)
+            {
                 schedule.AssignedVehicleId = updateDto.AssignedVehicleId;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.TransportationType))
+            {
                 schedule.TransportationType = updateDto.TransportationType;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.Notes))
+            {
                 schedule.Notes = updateDto.Notes;
+            }
+
             if (updateDto.ActualStartTime.HasValue)
+            {
                 schedule.ActualStartTime = updateDto.ActualStartTime;
+            }
+
             if (updateDto.ActualEndTime.HasValue)
+            {
                 schedule.ActualEndTime = updateDto.ActualEndTime;
+            }
 
             schedule.UpdatedAt = DateTime.UtcNow;
 
@@ -231,10 +278,7 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
     {
         try
         {
-            var schedule = await _scheduleRepository.GetByIdAsync(id);
-            if (schedule == null)
-                throw new ArgumentException($"Schedule {id} not found");
-
+            var schedule = await _scheduleRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Schedule {id} not found");
             schedule.Status = "InProgress";
             schedule.ActualStartTime = DateTime.UtcNow;
             schedule.UpdatedAt = DateTime.UtcNow;
@@ -255,14 +299,14 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
     {
         try
         {
-            var schedule = await _scheduleRepository.GetByIdAsync(id);
-            if (schedule == null)
-                throw new ArgumentException($"Schedule {id} not found");
-
+            var schedule = await _scheduleRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Schedule {id} not found");
             schedule.Status = "Completed";
             schedule.ActualEndTime = DateTime.UtcNow;
             if (actualTravelMinutes.HasValue)
+            {
                 schedule.ActualTravelMinutes = actualTravelMinutes;
+            }
+
             schedule.UpdatedAt = DateTime.UtcNow;
 
             await _scheduleRepository.UpdateAsync(schedule);

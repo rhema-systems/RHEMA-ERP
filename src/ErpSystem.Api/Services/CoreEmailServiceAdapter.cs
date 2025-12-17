@@ -1,5 +1,5 @@
-using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.Interfaces.Common;
 
 namespace ErpSystem.Api.Services;
 
@@ -40,14 +40,16 @@ public class CoreEmailServiceAdapter : ErpSystem.Core.Interfaces.Common.IEmailSe
     public async Task<int> SendBulkEmailsAsync(List<EmailDto> emails)
     {
         int successCount = 0;
-        
+
         foreach (var email in emails)
         {
             try
             {
                 var success = await SendEmailAsync(email);
                 if (success)
+                {
                     successCount++;
+                }
             }
             catch (Exception ex)
             {
@@ -65,7 +67,7 @@ public class CoreEmailServiceAdapter : ErpSystem.Core.Interfaces.Common.IEmailSe
             // For now, just send a simple message about the template
             // In a full implementation, this would load and process the template
             var body = $"Template: {templateEmail.TemplateName}\nData: {string.Join(", ", templateEmail.TemplateData.Select(kv => $"{kv.Key}={kv.Value}"))}";
-            
+
             return await _simpleEmailService.SendEmailAsync(
                 to: templateEmail.To,
                 subject: $"Template Email: {templateEmail.TemplateName}",

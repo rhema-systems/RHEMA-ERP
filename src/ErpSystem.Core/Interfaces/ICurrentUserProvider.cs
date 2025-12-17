@@ -46,4 +46,14 @@ public interface ICurrentUserProvider
     /// Gets user claims
     /// </summary>
     IDictionary<string, string> Claims { get; }
+
+    /// <summary>
+    /// Gets whether the current user is an external user (AuthenticationProvider = Local)
+    /// </summary>
+    bool IsExternalUser { get; }
+
+    /// <summary>
+    /// Gets the authentication provider for the current user
+    /// </summary>
+    string AuthenticationProvider { get; }
 }

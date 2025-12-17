@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Core.Entities.Inventory;
 
@@ -57,7 +57,7 @@ public class InventoryItem : TenantEntity
     public decimal AvailableStock { get; set; } = 0; // Current - Allocated
     public decimal AllocatedStock { get; set; } = 0; // Reserved for orders/work orders
     public decimal OnOrderStock { get; set; } = 0; // In purchase orders
-    
+
     // Stock Level Controls
     public decimal MinimumLevel { get; set; } = 0;
     public decimal MaximumLevel { get; set; } = 0;
@@ -97,7 +97,7 @@ public class InventoryItem : TenantEntity
     // Supplier Information
     [MaxLength(200)]
     public string? PrimarySupplier { get; set; }
-    
+
     [MaxLength(100)]
     public string? SupplierItemCode { get; set; }
 
@@ -147,7 +147,7 @@ public class InventoryCategory : TenantEntity
     // Default settings for items in this category
     [MaxLength(20)]
     public string? DefaultUnitOfMeasure { get; set; }
-    
+
     public bool DefaultSerialTracking { get; set; } = false;
     public bool DefaultLotTracking { get; set; } = false;
     public bool DefaultRequiresInspection { get; set; } = false;
@@ -172,7 +172,7 @@ public class StockMovement : TenantEntity
 
     [Required]
     [MaxLength(50)]
-    public string MovementType { get; set; } = string.Empty; 
+    public string MovementType { get; set; } = string.Empty;
     // Inbound: Receipt, Return, Adjustment+, Transfer-In, Production
     // Outbound: Issue, Sale, Adjustment-, Transfer-Out, Consumption, Waste
 

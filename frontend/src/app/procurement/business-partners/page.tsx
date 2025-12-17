@@ -8,18 +8,21 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { 
-  Search, 
-  Eye, 
-  Edit, 
+import {
+  Search,
+  Eye,
+  Edit,
   Ban,
   Star,
   Filter,
   RefreshCw,
-  Plus
+  Plus,
+  Download
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 
 export default function BusinessPartnersPage() {
   const router = useRouter();
@@ -66,6 +69,55 @@ export default function BusinessPartnersPage() {
 
   const handleEdit = (id: string) => {
     router.push(`/procurement/business-partners/${id}/edit`);
+  };
+
+  const handleExportToExcel = () => {
+    try {
+      if (partners.length === 0) {
+        toast.error('No data to export');
+        return;
+      }
+
+      // Prepare data for export
+      const exportData = partners.map(partner => ({
+        'Partner Code': partner.partnerCode,
+        'Company Name': partner.companyName,
+        'Trading Name': partner.tradingName || '',
+        'Partner Type': partner.partnerType,
+        'Status': partner.status,
+        'Email': partner.email || '',
+        'Phone': partner.phone || '',
+        'City': partner.city || '',
+        'Country': partner.country || '',
+        'Is Preferred': partner.isPreferred ? 'Yes' : 'No',
+        'Is Blacklisted': partner.isBlacklisted ? 'Yes' : 'No',
+        'Registration Date': partner.createdAt ? new Date(partner.createdAt).toLocaleDateString() : '',
+      }));
+
+      // Create worksheet
+      const ws = XLSX.utils.json_to_sheet(exportData);
+
+      // Auto-adjust column widths
+      const colWidths = Object.keys(exportData[0] || {}).map(key => ({
+        wch: Math.max(key.length, 15)
+      }));
+      ws['!cols'] = colWidths;
+
+      // Create workbook
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Business Partners');
+
+      // Generate filename with current date
+      const filename = `business_partners_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+      // Save file
+      XLSX.writeFile(wb, filename);
+
+      toast.success(`Exported ${partners.length} business partner(s) to Excel`);
+    } catch (error) {
+      console.error('Error exporting to Excel:', error);
+      toast.error('Failed to export to Excel');
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -143,7 +195,11 @@ export default function BusinessPartnersPage() {
             </Select>
           </div>
 
-          <div className="flex justify-end mt-4">
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={handleExportToExcel} disabled={partners.length === 0}>
+              <Download className="w-4 h-4 mr-2" />
+              Export to Excel
+            </Button>
             <Button variant="outline" onClick={loadPartners}>
               <RefreshCw className="w-4 h-4 mr-2" />
               Refresh
@@ -186,7 +242,7 @@ export default function BusinessPartnersPage() {
                         <div className="flex items-center gap-2">
                           {partner.isPreferred && <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />}
                           <div>
-                            <div className="font-medium">{partner.companyName}</div>
+                            <div className="font-medium">{partner.partnerName || partner.companyName}</div>
                             {partner.tradingName && (
                               <div className="text-sm text-gray-500">{partner.tradingName}</div>
                             )}

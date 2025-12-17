@@ -1,8 +1,8 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
-using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance.Mobile;
 
@@ -37,10 +37,12 @@ public class MobileWorkOrderController : ControllerBase
         {
             var currentUserIdString = _currentUserService.UserId;
             if (string.IsNullOrEmpty(currentUserIdString) || !Guid.TryParse(currentUserIdString, out var currentUserId))
+            {
                 return Unauthorized("User not authenticated");
+            }
 
             var workOrders = await _workOrderService.GetWorkOrdersByTechnicianAsync(currentUserId);
-            
+
             if (!string.IsNullOrEmpty(status))
             {
                 workOrders = workOrders.Where(wo => wo.Status.Equals(status, StringComparison.OrdinalIgnoreCase));
@@ -84,15 +86,21 @@ public class MobileWorkOrderController : ControllerBase
         {
             var workOrder = await _workOrderService.GetWorkOrderByIdAsync(id);
             if (workOrder == null)
+            {
                 return NotFound($"Work order with ID {id} not found");
+            }
 
             // Check if current user is assigned to this work order
             var currentUserIdString = _currentUserService.UserId;
             if (string.IsNullOrEmpty(currentUserIdString) || !Guid.TryParse(currentUserIdString, out var currentUserId))
+            {
                 return Unauthorized("User not authenticated");
-                
+            }
+
             if (workOrder.AssignedTechnicianId != currentUserId)
+            {
                 return Forbid("You are not assigned to this work order");
+            }
 
             var mobileDetail = new MobileWorkOrderDetailDto
             {
@@ -142,9 +150,9 @@ public class MobileWorkOrderController : ControllerBase
         try
         {
             var workOrder = await _workOrderService.StartWorkOrderAsync(id);
-            
+
             // Log mobile start action
-            _logger.LogInformation("Work order {WorkOrderId} started from mobile device by user {UserId} at location {Location}", 
+            _logger.LogInformation("Work order {WorkOrderId} started from mobile device by user {UserId} at location {Location}",
                 id, _currentUserService.UserId, startDto.Location);
 
             var mobileResult = new MobileWorkOrderDto
@@ -191,8 +199,8 @@ public class MobileWorkOrderController : ControllerBase
             };
 
             var workOrder = await _workOrderService.CompleteWorkOrderAsync(id, completeWorkOrderDto);
-            
-            _logger.LogInformation("Work order {WorkOrderId} completed from mobile device by user {UserId}", 
+
+            _logger.LogInformation("Work order {WorkOrderId} completed from mobile device by user {UserId}",
                 id, _currentUserService.UserId);
 
             var mobileResult = new MobileWorkOrderDto
@@ -231,7 +239,7 @@ public class MobileWorkOrderController : ControllerBase
         try
         {
             // This would typically update a progress tracking table
-            _logger.LogInformation("Progress update for work order {WorkOrderId}: {Progress}% - {Notes}", 
+            _logger.LogInformation("Progress update for work order {WorkOrderId}: {Progress}% - {Notes}",
                 id, progressDto.ProgressPercentage, progressDto.ProgressNotes);
 
             // For now, just acknowledge the update
@@ -254,8 +262,10 @@ public class MobileWorkOrderController : ControllerBase
         {
             var currentUserIdString = _currentUserService.UserId;
             if (string.IsNullOrEmpty(currentUserIdString) || !Guid.TryParse(currentUserIdString, out var currentUserId))
+            {
                 return Unauthorized("User not authenticated");
-                
+            }
+
             var today = DateTime.Today;
             var tomorrow = today.AddDays(1);
 
@@ -324,7 +334,7 @@ public class MobileWorkOrderController : ControllerBase
                 }
             }
 
-            _logger.LogInformation("Offline sync completed: {Successful}/{Total} items processed successfully", 
+            _logger.LogInformation("Offline sync completed: {Successful}/{Total} items processed successfully",
                 results.SuccessfulItems, results.ProcessedItems);
 
             return Ok(results);
@@ -364,13 +374,19 @@ public class MobileWorkOrderController : ControllerBase
     private static string GetUrgencyLevel(string priority, DateTime? scheduledEndDate)
     {
         if (priority.Equals("Emergency", StringComparison.OrdinalIgnoreCase))
+        {
             return "Critical";
+        }
 
         if (scheduledEndDate.HasValue && scheduledEndDate.Value < DateTime.Now)
+        {
             return "Overdue";
+        }
 
         if (scheduledEndDate.HasValue && scheduledEndDate.Value < DateTime.Now.AddHours(4))
+        {
             return "Urgent";
+        }
 
         return priority.Equals("High", StringComparison.OrdinalIgnoreCase) ? "High" : "Normal";
     }

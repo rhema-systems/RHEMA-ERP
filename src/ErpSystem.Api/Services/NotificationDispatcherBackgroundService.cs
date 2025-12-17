@@ -1,8 +1,8 @@
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Configuration;
 
 namespace ErpSystem.Api.Services;
 
@@ -15,7 +15,7 @@ public class NotificationDispatcherBackgroundService : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly IConfiguration _configuration;
     private readonly ILogger<NotificationDispatcherBackgroundService> _logger;
-    
+
     private readonly int _maxRetryAttempts;
     private readonly TimeSpan _dispatchInterval;
     private readonly TimeSpan _initialBackoffDelay;
@@ -29,11 +29,11 @@ public class NotificationDispatcherBackgroundService : BackgroundService
         _serviceProvider = serviceProvider;
         _configuration = configuration;
         _logger = logger;
-        
+
         // Load configuration with sensible defaults
         _maxRetryAttempts = int.TryParse(_configuration["Notifications:MaxRetryAttempts"], out var max) ? max : 5;
-        _dispatchInterval = int.TryParse(_configuration["Notifications:DispatchIntervalMinutes"], out var interval) 
-            ? TimeSpan.FromMinutes(interval) 
+        _dispatchInterval = int.TryParse(_configuration["Notifications:DispatchIntervalMinutes"], out var interval)
+            ? TimeSpan.FromMinutes(interval)
             : TimeSpan.FromMinutes(5);
         _initialBackoffDelay = int.TryParse(_configuration["Notifications:InitialBackoffSeconds"], out var backoff)
             ? TimeSpan.FromSeconds(backoff)
@@ -47,6 +47,12 @@ public class NotificationDispatcherBackgroundService : BackgroundService
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
+
+        // Initialize with default values since configuration is not provided
+        _maxRetryAttempts = 5;
+        _dispatchInterval = TimeSpan.FromMinutes(5);
+        _initialBackoffDelay = TimeSpan.FromSeconds(30);
+        _backoffMultiplier = 1.5;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -95,14 +101,14 @@ public class NotificationDispatcherBackgroundService : BackgroundService
         _logger.LogInformation("Starting pending notification dispatch");
 
         using var scope = _serviceProvider.CreateScope();
-        
+
         try
         {
             var notificationService = scope.ServiceProvider
                 .GetRequiredService<IMaintenanceNotificationService>();
 
             var sentCount = await notificationService.SendPendingNotificationsAsync();
-            
+
             if (sentCount > 0)
             {
                 _logger.LogInformation("Notification dispatch completed. Sent {Count} pending notifications", sentCount);
@@ -124,13 +130,13 @@ public class NotificationDispatcherBackgroundService : BackgroundService
         {
             using var scope = _serviceProvider.CreateScope();
             var unitOfWork = scope.ServiceProvider.GetRequiredService<ErpSystem.Core.Interfaces.IUnitOfWork>();
-            
+
             var repo = unitOfWork.Repository<ErpSystem.Core.Entities.Maintenance.MaintenanceNotification>();
-            
+
             // Find notifications that have exceeded max retries
             var expiredNotifications = await repo.FindAsync(n =>
                 n.Status == "Pending" && n.AttemptCount >= _maxRetryAttempts);
-            
+
             var archivedCount = 0;
             foreach (var notification in expiredNotifications)
             {
@@ -138,7 +144,7 @@ public class NotificationDispatcherBackgroundService : BackgroundService
                 await repo.UpdateAsync(notification);
                 archivedCount++;
             }
-            
+
             if (archivedCount > 0)
             {
                 await unitOfWork.SaveChangesAsync();

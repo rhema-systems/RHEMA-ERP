@@ -34,17 +34,34 @@ public class AssetAdmissionService : IAssetAdmissionService
             a => a.AdmittedBy);
 
         if (!string.IsNullOrWhiteSpace(query.Status))
+        {
             admissions = admissions.Where(a => a.Status == query.Status);
+        }
+
         if (!string.IsNullOrWhiteSpace(query.AdmissionType))
+        {
             admissions = admissions.Where(a => a.AdmissionType == query.AdmissionType);
+        }
+
         if (query.AssetId.HasValue)
+        {
             admissions = admissions.Where(a => a.AssetId == query.AssetId.Value);
+        }
+
         if (query.WorkOrderId.HasValue)
+        {
             admissions = admissions.Where(a => a.WorkOrderId == query.WorkOrderId.Value);
+        }
+
         if (query.FromDate.HasValue)
+        {
             admissions = admissions.Where(a => a.AdmissionDate >= query.FromDate.Value);
+        }
+
         if (query.ToDate.HasValue)
+        {
             admissions = admissions.Where(a => a.AdmissionDate <= query.ToDate.Value);
+        }
 
         var totalCount = admissions.Count();
         var items = admissions
@@ -76,7 +93,9 @@ public class AssetAdmissionService : IAssetAdmissionService
             a => a.Id == id && a.TenantId == tenantId,
             a => a.AdmittedBy);
         if (admission == null)
+        {
             return null;
+        }
 
         var asset = await _assetService.GetAssetByIdAsync(admission.AssetId);
         return MapToDto(admission, asset);
@@ -238,11 +257,19 @@ public class AssetAdmissionService : IAssetAdmissionService
         var admissions = await repo.FindAsync(a => a.TenantId == tenantId);
 
         if (query.AssetId.HasValue)
+        {
             admissions = admissions.Where(a => a.AssetId == query.AssetId.Value);
+        }
+
         if (query.StartDate.HasValue)
+        {
             admissions = admissions.Where(a => a.AdmissionDate >= query.StartDate.Value);
+        }
+
         if (query.EndDate.HasValue)
+        {
             admissions = admissions.Where(a => a.AdmissionDate <= query.EndDate.Value);
+        }
 
         var list = admissions.ToList();
         var stats = new AdmissionStatsDto
@@ -322,7 +349,7 @@ public class AssetAdmissionService : IAssetAdmissionService
         return summary;
     }
 
-    private AssetAdmissionDto MapToDto(AssetAdmission admission, MaintenanceAssetDto? asset)
+    private static AssetAdmissionDto MapToDto(AssetAdmission admission, MaintenanceAssetDto? asset)
     {
         // Get the user name from the AdmittedBy navigation property if loaded
         var admittedByName = admission.AdmittedBy != null

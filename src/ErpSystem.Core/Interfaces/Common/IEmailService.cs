@@ -13,14 +13,14 @@ public interface IEmailService
     /// <param name="email">Email details</param>
     /// <returns>True if email sent successfully</returns>
     Task<bool> SendEmailAsync(EmailDto email);
-    
+
     /// <summary>
     /// Sends bulk emails asynchronously
     /// </summary>
     /// <param name="emails">List of emails to send</param>
     /// <returns>Number of emails sent successfully</returns>
     Task<int> SendBulkEmailsAsync(List<EmailDto> emails);
-    
+
     /// <summary>
     /// Sends email using template
     /// </summary>

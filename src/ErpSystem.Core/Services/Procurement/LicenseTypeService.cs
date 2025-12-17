@@ -1,4 +1,4 @@
-﻿using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -62,6 +62,7 @@ public class LicenseTypeService : ILicenseTypeService
         };
 
         var created = await _repository.CreateAsync(licenseType);
+        await _repository.SaveChangesAsync();
         _logger.LogInformation("Created license type {LicenseCode} - {LicenseName}",
             created.LicenseCode, created.LicenseName);
 
@@ -70,12 +71,7 @@ public class LicenseTypeService : ILicenseTypeService
 
     public async Task<LicenseTypeDto> UpdateAsync(Guid id, UpdateLicenseTypeDto dto)
     {
-        var licenseType = await _repository.GetByIdAsync(id);
-        if (licenseType == null)
-        {
-            throw new InvalidOperationException($"License type with ID {id} not found.");
-        }
-
+        var licenseType = await _repository.GetByIdAsync(id) ?? throw new InvalidOperationException($"License type with ID {id} not found.");
         licenseType.LicenseName = dto.LicenseName;
         licenseType.Description = dto.Description;
         licenseType.IsMandatory = dto.IsMandatory;
@@ -84,6 +80,7 @@ public class LicenseTypeService : ILicenseTypeService
         licenseType.UpdatedAt = DateTime.UtcNow;
 
         var updated = await _repository.UpdateAsync(licenseType);
+        await _repository.SaveChangesAsync();
         _logger.LogInformation("Updated license type {LicenseCode} - {LicenseName}",
             updated.LicenseCode, updated.LicenseName);
 
@@ -93,6 +90,7 @@ public class LicenseTypeService : ILicenseTypeService
     public async Task DeleteAsync(Guid id)
     {
         await _repository.DeleteAsync(id);
+        await _repository.SaveChangesAsync();
         _logger.LogInformation("Deleted license type with ID {LicenseTypeId}", id);
     }
 

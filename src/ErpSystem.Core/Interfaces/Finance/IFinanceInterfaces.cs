@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities.Finance;
 
 namespace ErpSystem.Core.Interfaces.Finance
 {

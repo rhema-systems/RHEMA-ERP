@@ -39,12 +39,12 @@ public class MaintenanceTriggerTestController : ControllerBase
         {
             // Use provided tenantId or current user's tenant
             var targetTenantId = tenantId ?? _currentUserProvider.TenantId;
-            
+
             _logger.LogInformation("Manual trigger evaluation requested for tenant {TenantId}", targetTenantId);
             var generatedCount = await _evaluationService.EvaluateAllSchedulesAsync(targetTenantId);
-            
-            return Ok(new 
-            { 
+
+            return Ok(new
+            {
                 message = $"Evaluation completed for tenant {targetTenantId}. Generated {generatedCount} work orders.",
                 workOrdersGenerated = generatedCount,
                 tenantId = targetTenantId,

@@ -1,7 +1,8 @@
-using Microsoft.EntityFrameworkCore;
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces.Procurement;
-using ErpSystem.Core.DTOs.Common;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Data.Repositories.Procurement;
 
@@ -27,7 +28,7 @@ public class BusinessPartnerDocumentRepository : GenericRepository<BusinessPartn
 
     public async Task<BusinessPartnerDocument> UpdateAsync(BusinessPartnerDocument document)
     {
-        await UpdateAsync(document);
+        await base.UpdateAsync(document);
         return document;
     }
 
@@ -93,7 +94,7 @@ public class BusinessPartnerDocumentRepository : GenericRepository<BusinessPartn
             document.VerifiedById = verifiedById;
             document.VerifiedDate = DateTime.UtcNow;
             document.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            // Note: SaveChangesAsync should be called by the service layer using Unit of Work
         }
     }
 }
@@ -120,7 +121,7 @@ public class BusinessPartnerFinancialRepository : GenericRepository<BusinessPart
 
     public async Task<BusinessPartnerFinancial> UpdateAsync(BusinessPartnerFinancial financial)
     {
-        await UpdateAsync(financial);
+        await base.UpdateAsync(financial);
         return financial;
     }
 
@@ -176,7 +177,12 @@ public class BusinessPartnerFinancialRepository : GenericRepository<BusinessPart
 
 public class BusinessPartnerRegistrationRepository : GenericRepository<BusinessPartnerRegistration>, IBusinessPartnerRegistrationRepository
 {
-    public BusinessPartnerRegistrationRepository(ApplicationDbContext context) : base(context) { }
+    private readonly ILogger<BusinessPartnerRegistrationRepository> _logger;
+
+    public BusinessPartnerRegistrationRepository(ApplicationDbContext context, ILogger<BusinessPartnerRegistrationRepository> logger) : base(context)
+    {
+        _logger = logger;
+    }
 
     public async Task<BusinessPartnerRegistration?> GetByIdAsync(Guid id)
     {
@@ -197,6 +203,16 @@ public class BusinessPartnerRegistrationRepository : GenericRepository<BusinessP
             .FirstOrDefaultAsync();
     }
 
+    public override async Task<IEnumerable<BusinessPartnerRegistration>> GetAllAsync()
+    {
+        // Override to ignore query filters for debugging
+        _logger.LogInformation("GetAllAsync called - ignoring query filters");
+        return await _dbSet
+            .IgnoreQueryFilters()
+            .Where(r => !r.IsDeleted)
+            .ToListAsync();
+    }
+
     public async Task<BusinessPartnerRegistration> CreateAsync(BusinessPartnerRegistration registration)
     {
         return await AddAsync(registration);
@@ -204,7 +220,7 @@ public class BusinessPartnerRegistrationRepository : GenericRepository<BusinessP
 
     public async Task<BusinessPartnerRegistration> UpdateAsync(BusinessPartnerRegistration registration)
     {
-        await UpdateAsync(registration);
+        await base.UpdateAsync(registration);
         return registration;
     }
 
@@ -226,28 +242,37 @@ public class BusinessPartnerRegistrationRepository : GenericRepository<BusinessP
         DateTime? startDate = null,
         DateTime? endDate = null)
     {
-        var query = _dbSet.Where(r => !r.IsDeleted);
+        // Exclude Draft registrations from admin UI - they should only be visible to the user who created them
+        var query = _dbSet.Where(r => !r.IsDeleted && r.Status != "Draft");
 
         if (!string.IsNullOrWhiteSpace(search))
         {
             var searchLower = search.ToLower();
             query = query.Where(r =>
-                r.ApplicantName.ToLower().Contains(searchLower) ||
+                r.ApplicantName.Contains(searchLower, StringComparison.CurrentCultureIgnoreCase) ||
                 r.ApplicantEmail.ToLower().Contains(searchLower) ||
-                r.RegistrationNumber.ToLower().Contains(searchLower));
+                r.RegistrationNumber.Contains(searchLower, StringComparison.CurrentCultureIgnoreCase));
         }
 
         if (!string.IsNullOrWhiteSpace(status))
+        {
             query = query.Where(r => r.Status == status);
+        }
 
         if (!string.IsNullOrWhiteSpace(partnerType))
+        {
             query = query.Where(r => r.PartnerType == partnerType);
+        }
 
         if (startDate.HasValue)
+        {
             query = query.Where(r => r.CreatedAt >= startDate.Value);
+        }
 
         if (endDate.HasValue)
+        {
             query = query.Where(r => r.CreatedAt <= endDate.Value);
+        }
 
         var totalCount = await query.CountAsync();
 
@@ -276,10 +301,36 @@ public class BusinessPartnerRegistrationRepository : GenericRepository<BusinessP
 
     public async Task<IEnumerable<BusinessPartnerRegistration>> GetRegistrationsByUserAsync(Guid userId)
     {
-        return await _dbSet
+        _logger.LogInformation("GetRegistrationsByUserAsync called for userId: {UserId}", userId);
+
+        // First, check total count without filters to diagnose
+        var totalInDb = await _dbSet.IgnoreQueryFilters().CountAsync(r => !r.IsDeleted);
+        _logger.LogInformation("Total non-deleted registrations in DB (ignoring filters): {Count}", totalInDb);
+
+        var matchingCreatedById = await _dbSet.IgnoreQueryFilters()
+            .Where(r => r.CreatedById == userId && !r.IsDeleted)
+            .ToListAsync();
+        _logger.LogInformation("Registrations matching CreatedById={UserId} (ignoring filters): {Count}", userId, matchingCreatedById.Count);
+
+        if (matchingCreatedById.Any())
+        {
+            foreach (var reg in matchingCreatedById)
+            {
+                _logger.LogInformation("Found registration: Id={Id}, TenantId={TenantId}, CreatedById={CreatedById}, Status={Status}",
+                    reg.Id, reg.TenantId, reg.CreatedById, reg.Status);
+            }
+        }
+
+        // Use IgnoreQueryFilters to bypass tenant filtering for external registrations
+        // External users may not have tenant context properly set during registration
+        var results = await _dbSet
+            .IgnoreQueryFilters()
             .Where(r => r.CreatedById == userId && !r.IsDeleted)
             .OrderByDescending(r => r.CreatedAt)
             .ToListAsync();
+
+        _logger.LogInformation("Returning {Count} registrations for user {UserId}", results.Count, userId);
+        return results;
     }
 
     public async Task<IEnumerable<BusinessPartnerRegistration>> GetPendingReviewRegistrationsAsync()
@@ -309,10 +360,11 @@ public class BusinessPartnerRegistrationRepository : GenericRepository<BusinessP
     public async Task<BusinessPartnerRegistration?> GetWithDocumentsAsync(Guid id)
     {
         // Use IgnoreQueryFilters to bypass tenant filtering for external registrations
+        // Note: IgnoreQueryFilters applies to the entire query including related entities
         return await _dbSet
             .IgnoreQueryFilters()
             .Where(r => r.Id == id && !r.IsDeleted)
-            .Include(r => r.Documents)
+            .Include(r => r.Documents.Where(d => !d.IsDeleted))
             .FirstOrDefaultAsync();
     }
 
@@ -390,7 +442,7 @@ public class BusinessPartnerRegistrationRepository : GenericRepository<BusinessP
                 await _context.BusinessPartnerRegistrationStatusHistories.AddAsync(history);
             }
 
-            await _context.SaveChangesAsync();
+            // Note: SaveChangesAsync should be called by the service layer using Unit of Work
         }
     }
 
@@ -425,7 +477,7 @@ public class BusinessPartnerRegistrationDocumentRepository : GenericRepository<B
 
     public async Task<BusinessPartnerRegistrationDocument> UpdateAsync(BusinessPartnerRegistrationDocument document)
     {
-        await UpdateAsync(document);
+        await base.UpdateAsync(document);
         return document;
     }
 
@@ -444,6 +496,11 @@ public class BusinessPartnerRegistrationDocumentRepository : GenericRepository<B
             .Where(d => d.RegistrationId == registrationId && !d.IsDeleted)
             .OrderByDescending(d => d.CreatedAt)
             .ToListAsync();
+    }
+
+    public async Task<IEnumerable<BusinessPartnerRegistrationDocument>> GetByRegistrationIdAsync(Guid registrationId)
+    {
+        return await GetDocumentsByRegistrationAsync(registrationId);
     }
 
     public async Task<IEnumerable<BusinessPartnerRegistrationDocument>> GetDocumentsByTypeAsync(Guid registrationId, string documentType)
@@ -471,7 +528,7 @@ public class BusinessPartnerRegistrationDocumentRepository : GenericRepository<B
             document.VerifiedById = verifiedById;
             document.VerifiedDate = DateTime.UtcNow;
             document.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            // Note: SaveChangesAsync should be called by the service layer using Unit of Work
         }
     }
 }

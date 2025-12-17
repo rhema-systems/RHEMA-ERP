@@ -1,9 +1,9 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using ErpSystem.Core.DTOs.Reports;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
-using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -142,7 +142,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var report = await _reportsService.CreateReportAsync(createReportDto, tenantId.Value, userId.Value);
-                
+
                 return CreatedAtAction(nameof(GetReport), new { reportId = report.Id }, report);
             }
             catch (Exception ex)
@@ -174,9 +174,9 @@ namespace ErpSystem.Api.Controllers
 
                 // Check if user is admin (SuperAdmin role bypasses role/module filtering)
                 var isAdminUser = _currentUserService.IsInRole("SuperAdmin");
-                
+
                 var report = await _reportsService.UpdateReportAsync(reportId, updateReportDto, tenantId.Value, userId.Value, isAdminUser);
-                
+
                 if (report == null)
                 {
                     return NotFound();
@@ -212,7 +212,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var success = await _reportsService.DeleteReportAsync(reportId, tenantId.Value, userId.Value);
-                
+
                 if (!success)
                 {
                     return NotFound();
@@ -249,9 +249,9 @@ namespace ErpSystem.Api.Controllers
 
                 // Check if user is admin (SuperAdmin role bypasses role/module filtering)
                 var isAdminUser = _currentUserService.IsInRole("SuperAdmin");
-                
+
                 var result = await _reportsService.ExecuteReportAsync(reportId, executeReportDto, tenantId.Value, userId.Value, isAdminUser);
-                
+
                 return Ok(result);
             }
             catch (UnauthorizedAccessException ex)
@@ -293,12 +293,12 @@ namespace ErpSystem.Api.Controllers
 
                 // Check if user is admin (SuperAdmin role bypasses role/module filtering)
                 var isAdminUser = _currentUserService.IsInRole("SuperAdmin");
-                
+
                 var exportResult = await _reportsService.ExportReportAsync(reportId, exportReportDto, tenantId.Value, userId.Value, isAdminUser);
 
                 return File(
-                    exportResult.Data, 
-                    exportResult.ContentType, 
+                    exportResult.Data,
+                    exportResult.ContentType,
                     exportResult.FileName);
             }
             catch (Exception ex)
@@ -329,7 +329,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var schedule = await _reportsService.ScheduleReportAsync(reportId, scheduleDto, tenantId.Value, userId.Value);
-                
+
                 return CreatedAtAction(nameof(GetReportSchedule), new { reportId, scheduleId = schedule.Id }, schedule);
             }
             catch (Exception ex)
@@ -400,7 +400,7 @@ namespace ErpSystem.Api.Controllers
         public async Task<ActionResult<ReportTemplateDto>> CreateReportTemplate(CreateReportTemplateDto createTemplateDto)
         {
             _logger.LogInformation("🏁 CreateReportTemplate API endpoint called with data: {@CreateTemplateDto}", createTemplateDto);
-            
+
             try
             {
                 var tenantId = _currentUserService.TenantId;
@@ -419,11 +419,11 @@ namespace ErpSystem.Api.Controllers
 
                 _logger.LogInformation("🔑 Authenticated user: TenantId={TenantId}, UserId={UserId}", tenantId.Value, userId.Value);
                 _logger.LogInformation("🔄 Calling reports service CreateReportTemplateAsync...");
-                
+
                 var template = await _reportsService.CreateReportTemplateAsync(createTemplateDto, tenantId.Value, userId.Value);
-                
+
                 _logger.LogInformation("✅ Report template created successfully: {@Template}", template);
-                
+
                 return CreatedAtAction(nameof(GetReportTemplates), new { category = template.Category }, template);
             }
             catch (Exception ex)
@@ -451,7 +451,7 @@ namespace ErpSystem.Api.Controllers
 
                 var isSuperAdmin = User.IsInRole("SuperAdmin");
                 var analytics = await _reportsService.GetReportAnalyticsAsync(tenantId.Value, period, tenantFilter, isSuperAdmin);
-                
+
                 return Ok(analytics);
             }
             catch (Exception ex)
@@ -482,7 +482,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var isFavorite = await _reportsService.ToggleFavoriteAsync(reportId, tenantId.Value, userId.Value);
-                
+
                 return Ok(new { isFavorite });
             }
             catch (Exception ex)
@@ -513,7 +513,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var result = await _reportsService.PublishReportAsync(reportId, tenantId.Value, userId.Value);
-                
+
                 return Ok(new { reportId, publishedAt = result });
             }
             catch (Exception ex)
@@ -544,7 +544,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var result = await _reportsService.UnpublishReportAsync(reportId, tenantId.Value, userId.Value);
-                
+
                 return Ok(new { reportId, unpublishedAt = result });
             }
             catch (Exception ex)
@@ -575,7 +575,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var result = await _reportsService.AssignReportToModuleAsync(reportId, assignModuleDto.ModuleId, tenantId.Value, userId.Value);
-                
+
                 return Ok(new { reportId, moduleId = assignModuleDto.ModuleId, assignedAt = result });
             }
             catch (Exception ex)
@@ -606,7 +606,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 var result = await _reportsService.UnassignReportFromModuleAsync(reportId, tenantId.Value, userId.Value);
-                
+
                 return Ok(new { reportId, unassignedAt = result });
             }
             catch (Exception ex)

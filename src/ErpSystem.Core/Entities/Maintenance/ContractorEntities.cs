@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Base;
+using ErpSystem.Core.Entities.HR;
 
 namespace ErpSystem.Core.Entities.Maintenance;
 
@@ -129,7 +129,7 @@ public class ContractorWorkOrder
     // Navigation properties
     [ForeignKey("ContractorId")]
     public virtual MaintenanceContractor Contractor { get; set; } = null!;
-    
+
     // Note: WorkOrder navigation handled by existing WorkOrder entity
 }
 
@@ -238,7 +238,7 @@ public class ContractorPerformanceMetrics : TenantEntity
 
     // Overall performance score (calculated)
     public double PerformanceScore { get; set; } = 0; // 0-100 score
-    
+
     [MaxLength(20)]
     public string PerformanceRating { get; set; } = "Satisfactory"; // Excellent, Good, Satisfactory, Poor, Unsatisfactory
 
@@ -283,7 +283,7 @@ public class ContractorInvoiceApproval : TenantEntity
     // Delegation tracking
     public Guid? DelegatedToId { get; set; }
     public DateTime? DelegatedDate { get; set; }
-    
+
     [MaxLength(500)]
     public string? DelegationReason { get; set; }
 
@@ -293,7 +293,7 @@ public class ContractorInvoiceApproval : TenantEntity
     // Navigation properties
     [ForeignKey("InvoiceId")]
     public virtual ContractorInvoice Invoice { get; set; } = null!;
-    
+
     public virtual Employee Approver { get; set; } = null!;
     public virtual Employee? DelegatedTo { get; set; }
 }
@@ -364,7 +364,7 @@ public class ContractorLogistics : TenantEntity
 
     // Accommodation (for multi-day jobs)
     public bool RequiresAccommodation { get; set; } = false;
-    
+
     [MaxLength(200)]
     public string? AccommodationLocation { get; set; }
 
@@ -376,7 +376,7 @@ public class ContractorLogistics : TenantEntity
     public string? EquipmentList { get; set; } // JSON: List of tools/equipment transported
 
     public bool SpecialEquipmentRequired { get; set; } = false;
-    
+
     [MaxLength(1000)]
     public string? SpecialRequirements { get; set; }
 
@@ -432,7 +432,7 @@ public class ContractorLogisticsExpense : TenantEntity
 
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedDate { get; set; }
-    
+
     [MaxLength(1000)]
     public string? ApprovalComments { get; set; }
 
@@ -447,7 +447,7 @@ public class ContractorLogisticsExpense : TenantEntity
     // Navigation properties
     [ForeignKey("LogisticsId")]
     public virtual ContractorLogistics Logistics { get; set; } = null!;
-    
+
     public virtual Employee? ApprovedBy { get; set; }
 }
 

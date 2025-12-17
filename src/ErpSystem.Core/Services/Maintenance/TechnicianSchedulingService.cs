@@ -1,10 +1,10 @@
 using ErpSystem.Core.DTOs.Maintenance;
-using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Entities;
-using Microsoft.Extensions.Logging;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -42,7 +42,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
         {
             // Get maintenance technicians from HR Employee service
             var technicians = await _employeeService.GetAvailableTechniciansAsync();
-            
+
             return technicians.Select(t => new TechnicianDto
             {
                 Id = t.Id,
@@ -79,23 +79,29 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
         {
             // Input validation
             if (startTime >= endTime)
+            {
                 throw new ArgumentException("Start time must be before end time");
-                
+            }
+
             if (startTime < DateTime.UtcNow.AddMinutes(-5)) // Allow 5 minute grace period for current time
+            {
                 return false; // Cannot schedule in the past
+            }
 
             // Check if technician exists and is active
             var technician = await _employeeService.GetTechnicianByIdAsync(technicianId);
             if (technician == null || !technician.IsActive)
+            {
                 return false;
+            }
 
             // Use optimized repository methods for better performance
             var unavailablePeriods = await _availabilityRepository.GetUnavailablePeriodsByTechnicianAsync(
                 technicianId, startTime, endTime);
-                
+
             if (unavailablePeriods.Any())
             {
-                _logger.LogInformation("Technician {TechnicianId} has unavailable periods during {StartTime} - {EndTime}", 
+                _logger.LogInformation("Technician {TechnicianId} has unavailable periods during {StartTime} - {EndTime}",
                     technicianId, startTime, endTime);
                 return false;
             }
@@ -103,10 +109,10 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
             // Check for conflicting schedules with proper time overlap logic
             var hasConflict = await _scheduleRepository.HasConflictingScheduleAsync(
                 technicianId, startTime, endTime);
-                
+
             if (hasConflict)
             {
-                _logger.LogInformation("Technician {TechnicianId} has conflicting schedules during {StartTime} - {EndTime}", 
+                _logger.LogInformation("Technician {TechnicianId} has conflicting schedules during {StartTime} - {EndTime}",
                     technicianId, startTime, endTime);
                 return false;
             }
@@ -144,25 +150,28 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
         {
             // Input validation
             if (technicianId == Guid.Empty)
+            {
                 throw new ArgumentException("Valid technician ID is required", nameof(technicianId));
+            }
+
             if (startDate >= endDate)
+            {
                 throw new ArgumentException("Start date must be before end date");
-                
-            var technician = await _employeeService.GetTechnicianByIdAsync(technicianId);
-            if (technician == null)
-                throw new ArgumentException($"Technician with ID {technicianId} not found");
+            }
+
+            var technician = await _employeeService.GetTechnicianByIdAsync(technicianId) ?? throw new ArgumentException($"Technician with ID {technicianId} not found");
 
             // Simplified data retrieval using basic repository methods
             var allAvailability = await _availabilityRepository.GetAllAsync();
-            var availability = allAvailability.Where(a => 
-                a.TechnicianId == technicianId && 
-                a.StartDate <= endDate && 
+            var availability = allAvailability.Where(a =>
+                a.TechnicianId == technicianId &&
+                a.StartDate <= endDate &&
                 a.EndDate >= startDate).ToList();
-            
+
             var allSchedules = await _scheduleRepository.GetAllAsync();
-            var schedules = allSchedules.Where(s => 
-                s.TechnicianId == technicianId && 
-                s.StartDate <= endDate && 
+            var schedules = allSchedules.Where(s =>
+                s.TechnicianId == technicianId &&
+                s.StartDate <= endDate &&
                 s.EndDate >= startDate).ToList();
 
             // Calculate available time slots
@@ -175,7 +184,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
                 StartDate = startDate,
                 EndDate = endDate,
                 AvailableSlots = availableSlots,
-                TotalAvailableHours = availableSlots.Sum(slot => 
+                TotalAvailableHours = availableSlots.Sum(slot =>
                     (slot.EndTime - slot.StartTime).TotalHours),
                 ScheduledHours = schedules.Sum(s => s.EstimatedHours),
                 Utilization = (decimal)CalculateUtilization(availability, schedules, startDate, endDate)
@@ -196,26 +205,33 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
         try
         {
             // Input validation
-            if (request == null)
-                throw new ArgumentNullException(nameof(request));
-                
+            ArgumentNullException.ThrowIfNull(request);
+
             if (request.TechnicianId == Guid.Empty)
+            {
                 throw new ArgumentException("Valid technician ID is required", nameof(request));
-                
+            }
+
             if (request.WorkOrderId == Guid.Empty)
+            {
                 throw new ArgumentException("Valid work order ID is required", nameof(request));
-                
+            }
+
             if (request.StartTime >= request.EndTime)
+            {
                 throw new ArgumentException("Start time must be before end time", nameof(request));
-                
+            }
+
             if (request.EstimatedHours <= 0)
+            {
                 throw new ArgumentException("Estimated hours must be greater than zero", nameof(request));
-                
+            }
+
             // Business rule validation
             var actualHours = (request.EndTime - request.StartTime).TotalHours;
             if (Math.Abs(actualHours - (double)request.EstimatedHours) > 0.5) // Allow 30 minute variance
             {
-                _logger.LogWarning("Time span ({ActualHours:F2}h) differs significantly from estimated hours ({EstimatedHours:F2}h) for work order {WorkOrderId}", 
+                _logger.LogWarning("Time span ({ActualHours:F2}h) differs significantly from estimated hours ({EstimatedHours:F2}h) for work order {WorkOrderId}",
                     actualHours, request.EstimatedHours, request.WorkOrderId);
             }
 
@@ -226,9 +242,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
             }
 
             // Get work order details
-            var workOrder = await _workOrderRepository.GetByIdAsync(request.WorkOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order with ID {request.WorkOrderId} not found");
+            var workOrder = await _workOrderRepository.GetByIdAsync(request.WorkOrderId) ?? throw new ArgumentException($"Work order with ID {request.WorkOrderId} not found");
 
             // Create schedule entry
             var schedule = new TechnicianSchedule
@@ -273,7 +287,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error scheduling work order {WorkOrderId} for technician {TechnicianId}", 
+            _logger.LogError(ex, "Error scheduling work order {WorkOrderId} for technician {TechnicianId}",
                 request.WorkOrderId, request.TechnicianId);
             throw;
         }
@@ -289,16 +303,21 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
         {
             // Input validation
             if (workOrderId == Guid.Empty)
+            {
                 throw new ArgumentException("Valid work order ID is required", nameof(workOrderId));
-            if (estimatedHours <= 0)
-                throw new ArgumentException("Estimated hours must be greater than zero", nameof(estimatedHours));
-            if (preferredStartTime < DateTime.UtcNow.AddMinutes(-5))
-                throw new ArgumentException("Preferred start time cannot be in the past", nameof(preferredStartTime));
-                
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order with ID {workOrderId} not found");
+            }
 
+            if (estimatedHours <= 0)
+            {
+                throw new ArgumentException("Estimated hours must be greater than zero", nameof(estimatedHours));
+            }
+
+            if (preferredStartTime < DateTime.UtcNow.AddMinutes(-5))
+            {
+                throw new ArgumentException("Preferred start time cannot be in the past", nameof(preferredStartTime));
+            }
+
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order with ID {workOrderId} not found");
             var preferredEndTime = preferredStartTime.AddHours(estimatedHours);
             var technicians = await GetAvailableTechniciansAsync();
 
@@ -307,11 +326,14 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
             foreach (var technician in technicians)
             {
                 var isAvailable = await IsTechnicianAvailableAsync(technician.Id, preferredStartTime, preferredEndTime);
-                if (!isAvailable) continue;
+                if (!isAvailable)
+                {
+                    continue;
+                }
 
                 // Get technician's current workload
                 var workload = await CalculateWorkloadAsync(technician.Id, preferredStartTime.Date, preferredStartTime.Date.AddDays(7));
-                
+
                 // Calculate score based on availability, workload, and skills using advanced algorithm
                 var score = await CalculateTechnicianScoreAsync(technician, workload, workOrder);
 
@@ -354,10 +376,15 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
         {
             // Input validation
             if (technicianId == Guid.Empty)
+            {
                 throw new ArgumentException("Valid technician ID is required", nameof(technicianId));
+            }
+
             if (startDate >= endDate)
+            {
                 throw new ArgumentException("Start date must be before end date");
-                
+            }
+
             return await CalculateWorkloadAsync(technicianId, startDate, endDate);
         }
         catch (Exception ex)
@@ -375,17 +402,28 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
         try
         {
             // Input validation
-            if (request == null)
-                throw new ArgumentNullException(nameof(request));
+            ArgumentNullException.ThrowIfNull(request);
+
             if (request.TechnicianId == Guid.Empty)
+            {
                 throw new ArgumentException("Valid technician ID is required", nameof(request));
+            }
+
             if (request.StartDate >= request.EndDate)
+            {
                 throw new ArgumentException("Start date must be before end date", nameof(request));
+            }
+
             if (string.IsNullOrWhiteSpace(request.AvailabilityType))
+            {
                 throw new ArgumentException("Availability type is required", nameof(request));
+            }
+
             if (string.IsNullOrWhiteSpace(request.Reason))
+            {
                 throw new ArgumentException("Reason is required", nameof(request));
-            
+            }
+
             var availability = new TechnicianAvailability
             {
                 TechnicianId = request.TechnicianId,
@@ -434,7 +472,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
         DateTime endDate)
     {
         var availableSlots = new List<TimeSlotDto>();
-        
+
         // This is a simplified implementation
         // In a real scenario, this would be more complex with proper time slot calculation
         var currentDate = startDate.Date;
@@ -444,14 +482,14 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
             var dayEnd = currentDate.AddHours(17);   // 5 PM end
 
             // Check if technician is available for this day
-            var dayAvailability = availability.Where(a => 
+            var dayAvailability = availability.Where(a =>
                 a.StartDate.Date <= currentDate && a.EndDate.Date >= currentDate &&
                 a.AvailabilityType == "Available").ToList();
 
             if (dayAvailability.Any())
             {
                 // Check for conflicts with existing schedules
-                var daySchedules = schedules.Where(s => 
+                var daySchedules = schedules.Where(s =>
                     s.StartDate.Date <= currentDate && s.EndDate.Date >= currentDate).ToList();
 
                 if (!daySchedules.Any() || !HasTimeConflict(dayStart, dayEnd, daySchedules))
@@ -471,15 +509,15 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
         return availableSlots;
     }
 
-    private bool HasTimeConflict(DateTime startTime, DateTime endTime, IEnumerable<TechnicianSchedule> schedules)
+    private static bool HasTimeConflict(DateTime startTime, DateTime endTime, IEnumerable<TechnicianSchedule> schedules)
     {
-        return schedules.Any(s => 
+        return schedules.Any(s =>
             (startTime >= s.StartDate && startTime < s.EndDate) ||
             (endTime > s.StartDate && endTime <= s.EndDate) ||
             (startTime <= s.StartDate && endTime >= s.EndDate));
     }
 
-    private double CalculateUtilization(
+    private static double CalculateUtilization(
         IEnumerable<TechnicianAvailability> availability,
         IEnumerable<TechnicianSchedule> schedules,
         DateTime startDate,
@@ -495,15 +533,15 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
     {
         // Simplified data retrieval using basic repository methods
         var allSchedules = await _scheduleRepository.GetAllAsync();
-        var schedules = allSchedules.Where(s => 
-            s.TechnicianId == technicianId && 
-            s.StartDate <= endDate && 
+        var schedules = allSchedules.Where(s =>
+            s.TechnicianId == technicianId &&
+            s.StartDate <= endDate &&
             s.EndDate >= startDate).ToList();
-            
+
         var allAvailability = await _availabilityRepository.GetAllAsync();
-        var availability = allAvailability.Where(a => 
-            a.TechnicianId == technicianId && 
-            a.StartDate <= endDate && 
+        var availability = allAvailability.Where(a =>
+            a.TechnicianId == technicianId &&
+            a.StartDate <= endDate &&
             a.EndDate >= startDate).ToList();
 
         var totalScheduledHours = schedules.Sum(s => s.EstimatedHours);
@@ -532,23 +570,23 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
             const double workloadWeight = 0.30;   // 30% workload balancing  
             const double priorityWeight = 0.20;   // 20% priority consideration
             const double availabilityWeight = 0.15; // 15% availability factors
-            
+
             // Calculate individual component scores
             var skillScore = await CalculateSkillMatchScoreAsync(technician, workOrder);
             var workloadScore = CalculateWorkloadScore(workload);
             var priorityScore = CalculatePriorityScore(workOrder, workload);
             var availabilityScore = CalculateAvailabilityScore(technician, workload);
-            
+
             // Weighted composite score
-            var compositeScore = 
+            var compositeScore =
                 (skillScore * skillWeight) +
                 (workloadScore * workloadWeight) +
                 (priorityScore * priorityWeight) +
                 (availabilityScore * availabilityWeight);
-            
-            _logger.LogDebug("Technician {TechnicianId} scoring: Skill={Skill:F1}, Workload={Workload:F1}, Priority={Priority:F1}, Availability={Availability:F1}, Composite={Composite:F1}", 
+
+            _logger.LogDebug("Technician {TechnicianId} scoring: Skill={Skill:F1}, Workload={Workload:F1}, Priority={Priority:F1}, Availability={Availability:F1}, Composite={Composite:F1}",
                 technician.Id, skillScore, workloadScore, priorityScore, availabilityScore, compositeScore);
-                
+
             return Math.Max(0, Math.Min(100, compositeScore));
         }
         catch (Exception ex)
@@ -557,57 +595,71 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
             return 50.0; // Return neutral score on error
         }
     }
-    
+
     /// <summary>
     /// Calculates availability-based scoring factors
     /// </summary>
-    private double CalculateAvailabilityScore(TechnicianDto technician, TechnicianWorkloadDto workload)
+    private static double CalculateAvailabilityScore(TechnicianDto technician, TechnicianWorkloadDto workload)
     {
         double score = 100.0;
-        
+
         // Penalize if technician has too many active work orders
         if (workload.ActiveWorkOrders > 5)
+        {
             score -= (workload.ActiveWorkOrders - 5) * 5;
-            
+        }
+
         // Penalize if technician has too many pending work orders
         if (workload.PendingWorkOrders > 10)
+        {
             score -= (workload.PendingWorkOrders - 10) * 2;
-        
+        }
+
         // Bonus for technicians with some availability buffer
         if (workload.UtilizationPercentage < 70)
+        {
             score += 10; // Bonus for having capacity
-            
+        }
+
         return Math.Max(0, Math.Min(100, score));
     }
 
-    private string GenerateRecommendationReason(double score, TechnicianWorkloadDto workload)
+    private static string GenerateRecommendationReason(double score, TechnicianWorkloadDto workload)
     {
         if (score >= 90)
+        {
             return "Excellent choice: Low workload and high availability";
+        }
         else if (score >= 70)
+        {
             return "Good choice: Moderate workload";
+        }
         else if (score >= 50)
+        {
             return "Acceptable choice: Higher workload";
+        }
         else
+        {
             return "Last resort: Very high workload";
+        }
     }
 
     /// <summary>
     /// Checks if the requested time is within the technician's working hours
     /// </summary>
-    private bool IsWithinWorkingHours(Guid technicianId, DateTime startTime, DateTime endTime)
+    private static bool IsWithinWorkingHours(Guid technicianId, DateTime startTime, DateTime endTime)
     {
         // Business rule: Standard working hours are 6 AM to 10 PM
         var dayStartHour = 6;
         var dayEndHour = 22;
-        
+
         var startHour = startTime.Hour + (startTime.Minute / 60.0);
         var endHour = endTime.Hour + (endTime.Minute / 60.0);
-        
+
         // Check if the entire time span is within working hours
         return startHour >= dayStartHour && endHour <= dayEndHour;
     }
-    
+
     /// <summary>
     /// Checks if scheduling this work would exceed maximum daily or weekly hour limits
     /// </summary>
@@ -616,37 +668,37 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
         try
         {
             var requestedHours = (endTime - startTime).TotalHours;
-            
+
             // Business rules for maximum hours
             const double maxDailyHours = 12.0; // Maximum 12 hours per day
             const double maxWeeklyHours = 50.0; // Maximum 50 hours per week
-            
+
             // Check daily limit
             var dayStart = startTime.Date;
             var dayEnd = dayStart.AddDays(1).AddTicks(-1);
             var dailyScheduledHours = await _scheduleRepository.GetTotalScheduledHoursAsync(
                 technicianId, dayStart, dayEnd);
-                
+
             if (dailyScheduledHours + requestedHours > maxDailyHours)
             {
-                _logger.LogInformation("Daily hour limit would be exceeded for technician {TechnicianId}. Current: {Current}, Requested: {Requested}, Limit: {Limit}", 
+                _logger.LogInformation("Daily hour limit would be exceeded for technician {TechnicianId}. Current: {Current}, Requested: {Requested}, Limit: {Limit}",
                     technicianId, dailyScheduledHours, requestedHours, maxDailyHours);
                 return false;
             }
-            
+
             // Check weekly limit
             var weekStart = startTime.Date.AddDays(-(int)startTime.DayOfWeek);
             var weekEnd = weekStart.AddDays(7).AddTicks(-1);
             var weeklyScheduledHours = await _scheduleRepository.GetTotalScheduledHoursAsync(
                 technicianId, weekStart, weekEnd);
-                
+
             if (weeklyScheduledHours + requestedHours > maxWeeklyHours)
             {
-                _logger.LogInformation("Weekly hour limit would be exceeded for technician {TechnicianId}. Current: {Current}, Requested: {Requested}, Limit: {Limit}", 
+                _logger.LogInformation("Weekly hour limit would be exceeded for technician {TechnicianId}. Current: {Current}, Requested: {Requested}, Limit: {Limit}",
                     technicianId, weeklyScheduledHours, requestedHours, maxWeeklyHours);
                 return false;
             }
-            
+
             return true;
         }
         catch (Exception ex)
@@ -655,7 +707,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
             return false; // Err on the side of caution
         }
     }
-    
+
     /// <summary>
     /// Advanced skill matching algorithm that calculates skill compatibility score
     /// </summary>
@@ -665,18 +717,20 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
         {
             // Base score for having any skills
             double skillScore = 50.0;
-            
+
             // If no required skills specified, return base score
-            if (workOrder.CustomFields == null) 
+            if (workOrder.CustomFields == null)
+            {
                 return skillScore;
-            
+            }
+
             // TODO: When CustomFields contain skill requirements, enhance this logic
             // For now, apply basic scoring based on available technician skills
             if (technician.Skills?.Any() == true)
             {
-                var skillCount = technician.Skills.Count();
-                var avgSkillLevel = technician.Skills.Average(s => 
-                    s.Level switch 
+                var skillCount = technician.Skills.Count;
+                var avgSkillLevel = technician.Skills.Average(s =>
+                    s.Level switch
                     {
                         1 => 1.0,
                         2 => 2.0,
@@ -684,14 +738,14 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
                         4 => 4.0,
                         _ => 1.0
                     });
-                    
+
                 skillScore = 30 + (skillCount * 5) + (avgSkillLevel * 10);
-                
+
                 // Bonus for certified skills
                 var certifiedSkills = technician.Skills.Count(s => s.IsCertified);
                 skillScore += certifiedSkills * 5;
             }
-            
+
             return Math.Min(100, skillScore);
         }
         catch (Exception ex)
@@ -700,16 +754,16 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
             return 50.0; // Return average score on error
         }
     }
-    
+
     /// <summary>
     /// Advanced workload balancing algorithm
     /// </summary>
-    private double CalculateWorkloadScore(TechnicianWorkloadDto workload)
+    private static double CalculateWorkloadScore(TechnicianWorkloadDto workload)
     {
         // Optimal utilization is around 75-85%
         const double optimalUtilization = 80.0;
         const double maxAcceptableUtilization = 90.0;
-        
+
         if (workload.UtilizationPercentage <= optimalUtilization)
         {
             // Score decreases as we get further from optimal
@@ -726,11 +780,11 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
             return Math.Max(0, 20 - (workload.UtilizationPercentage - maxAcceptableUtilization));
         }
     }
-    
+
     /// <summary>
     /// Priority-based scheduling algorithm that considers work order urgency
     /// </summary>
-    private double CalculatePriorityScore(WorkOrder workOrder, TechnicianWorkloadDto workload)
+    private static double CalculatePriorityScore(WorkOrder workOrder, TechnicianWorkloadDto workload)
     {
         // Base priority scoring
         var priorityScore = workOrder.PriorityLevel?.Level switch
@@ -742,7 +796,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
             5 => 40.0,  // Very Low
             _ => 60.0   // Default
         };
-        
+
         // Adjust based on current workload - critical items can override workload concerns
         if (workOrder.PriorityLevel?.Level == 1) // Critical priority
         {
@@ -755,7 +809,7 @@ public class TechnicianSchedulingService : ITechnicianSchedulingService
             return priorityScore * workloadFactor;
         }
     }
-    
+
     #endregion
 
     #region Interface Matching Methods

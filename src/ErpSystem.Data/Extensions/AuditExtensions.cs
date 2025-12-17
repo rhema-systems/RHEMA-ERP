@@ -1,8 +1,8 @@
+using ErpSystem.Data.Interceptors;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using ErpSystem.Data.Interceptors;
 
 namespace ErpSystem.Data.Extensions;
 
@@ -146,7 +146,7 @@ public class AuditOptions
     /// </summary>
     public List<string> ExcludedProperties { get; set; } = new()
     {
-        "Password", "PasswordHash", "SecurityStamp", "ConcurrencyStamp", 
+        "Password", "PasswordHash", "SecurityStamp", "ConcurrencyStamp",
         "AuthenticatorKey", "RecoveryCodes", "TwoFactorSecret",
         "Salt", "Hash", "Token", "RefreshToken", "AccessToken",
         "NormalizedUserName", "NormalizedEmail", "EmailConfirmationToken",

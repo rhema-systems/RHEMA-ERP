@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Plus, Search, Edit, Trash2, Tag, Settings } from 'lucide-react';
-import { partnerCategoryService, PartnerCategoryDto, CreatePartnerCategoryDto } from '@/services/partnerConfigService';
+import { partnerCategoryService, PartnerCategoryDto, CreatePartnerCategoryDto, UpdatePartnerCategoryDto } from '@/services/partnerConfigService';
 import { useToast } from '@/components/ui/use-toast';
 
 export default function PartnerCategoriesPage() {
@@ -26,12 +26,21 @@ export default function PartnerCategoriesPage() {
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   
-  // Form state
+  // Form state for create
   const [formData, setFormData] = useState<CreatePartnerCategoryDto>({
-    name: '',
-    code: '',
+    categoryName: '',
+    categoryCode: '',
     description: '',
-    isActive: true
+    categoryType: 'Supplier',
+    displayOrder: 0
+  });
+
+  // Form state for edit
+  const [editFormData, setEditFormData] = useState<UpdatePartnerCategoryDto>({
+    categoryName: '',
+    description: '',
+    isActive: true,
+    displayOrder: 0
   });
 
   // Fetch categories
@@ -100,11 +109,11 @@ export default function PartnerCategoriesPage() {
 
   const handleEdit = (category: PartnerCategoryDto) => {
     setSelectedCategory(category);
-    setFormData({
-      name: category.name,
-      code: category.code,
+    setEditFormData({
+      categoryName: category.categoryName,
       description: category.description || '',
-      isActive: category.isActive
+      isActive: category.isActive,
+      displayOrder: category.displayOrder
     });
     setIsEditDialogOpen(true);
   };
@@ -113,7 +122,7 @@ export default function PartnerCategoriesPage() {
     if (!selectedCategory?.id) return;
 
     try {
-      await partnerCategoryService.update(selectedCategory.id, formData);
+      await partnerCategoryService.update(selectedCategory.id, editFormData);
       toast({
         title: 'Success',
         description: 'Partner category updated successfully'
@@ -153,10 +162,17 @@ export default function PartnerCategoriesPage() {
 
   const resetForm = () => {
     setFormData({
-      name: '',
-      code: '',
+      categoryName: '',
+      categoryCode: '',
       description: '',
-      isActive: true
+      categoryType: 'Supplier',
+      displayOrder: 0
+    });
+    setEditFormData({
+      categoryName: '',
+      description: '',
+      isActive: true,
+      displayOrder: 0
     });
     setSelectedCategory(null);
   };
@@ -188,23 +204,37 @@ export default function PartnerCategoriesPage() {
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="name">Category Name</Label>
+                  <Label htmlFor="categoryName">Category Name</Label>
                   <Input
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    id="categoryName"
+                    value={formData.categoryName}
+                    onChange={(e) => setFormData({...formData, categoryName: e.target.value})}
                     placeholder="Enter category name"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="code">Category Code</Label>
+                  <Label htmlFor="categoryCode">Category Code</Label>
                   <Input
-                    id="code"
-                    value={formData.code}
-                    onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
+                    id="categoryCode"
+                    value={formData.categoryCode}
+                    onChange={(e) => setFormData({...formData, categoryCode: e.target.value.toUpperCase()})}
                     placeholder="e.g., CONST, ELEC"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="categoryType">Category Type</Label>
+                <select
+                  id="categoryType"
+                  value={formData.categoryType}
+                  onChange={(e) => setFormData({...formData, categoryType: e.target.value})}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2"
+                >
+                  <option value="Supplier">Supplier</option>
+                  <option value="Contractor">Contractor</option>
+                  <option value="Both">Both</option>
+                </select>
               </div>
 
               <div className="space-y-2">
@@ -216,17 +246,6 @@ export default function PartnerCategoriesPage() {
                   placeholder="Describe this category..."
                   rows={3}
                 />
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="isActive"
-                  checked={formData.isActive}
-                  onChange={(e) => setFormData({...formData, isActive: e.target.checked})}
-                  className="rounded border-gray-300"
-                />
-                <Label htmlFor="isActive" className="text-sm font-medium">Active</Label>
               </div>
             </div>
             <DialogFooter>
@@ -365,8 +384,9 @@ export default function PartnerCategoriesPage() {
                     <div className="flex items-start justify-between">
                       <div className="space-y-2 flex-1">
                         <div className="flex items-center space-x-3">
-                          <h3 className="font-semibold">{category.name}</h3>
-                          <Badge variant="outline">{category.code}</Badge>
+                          <h3 className="font-semibold">{category.categoryName}</h3>
+                          <Badge variant="outline">{category.categoryCode}</Badge>
+                          <Badge variant="outline">{category.categoryType}</Badge>
                           <Badge className={category.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
                             {category.isActive ? 'Active' : 'Inactive'}
                           </Badge>
@@ -420,33 +440,22 @@ export default function PartnerCategoriesPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-name">Category Name</Label>
-                <Input
-                  id="edit-name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
-                  placeholder="Enter category name"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-code">Category Code</Label>
-                <Input
-                  id="edit-code"
-                  value={formData.code}
-                  onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
-                  placeholder="e.g., CONST, ELEC"
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-categoryName">Category Name</Label>
+              <Input
+                id="edit-categoryName"
+                value={editFormData.categoryName}
+                onChange={(e) => setEditFormData({...editFormData, categoryName: e.target.value})}
+                placeholder="Enter category name"
+              />
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="edit-description">Description</Label>
               <Textarea
                 id="edit-description"
-                value={formData.description}
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                value={editFormData.description}
+                onChange={(e) => setEditFormData({...editFormData, description: e.target.value})}
                 placeholder="Describe this category..."
                 rows={3}
               />
@@ -456,11 +465,22 @@ export default function PartnerCategoriesPage() {
               <input
                 type="checkbox"
                 id="edit-isActive"
-                checked={formData.isActive}
-                onChange={(e) => setFormData({...formData, isActive: e.target.checked})}
+                checked={editFormData.isActive}
+                onChange={(e) => setEditFormData({...editFormData, isActive: e.target.checked})}
                 className="rounded border-gray-300"
               />
               <Label htmlFor="edit-isActive" className="text-sm font-medium">Active</Label>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-displayOrder">Display Order</Label>
+              <Input
+                id="edit-displayOrder"
+                type="number"
+                value={editFormData.displayOrder}
+                onChange={(e) => setEditFormData({...editFormData, displayOrder: parseInt(e.target.value) || 0})}
+                placeholder="0"
+              />
             </div>
           </div>
           <DialogFooter>

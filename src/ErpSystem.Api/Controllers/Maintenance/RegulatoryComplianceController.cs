@@ -1,6 +1,6 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -379,13 +379,13 @@ public class RegulatoryComplianceController : ControllerBase
 
             if (!string.IsNullOrEmpty(assetCategory))
             {
-                filteredRequirements = filteredRequirements.Where(r => 
+                filteredRequirements = filteredRequirements.Where(r =>
                     r.assetCategories.Any(ac => ac.Equals(assetCategory, StringComparison.OrdinalIgnoreCase)));
             }
 
             if (!string.IsNullOrEmpty(regulatoryBody))
             {
-                filteredRequirements = filteredRequirements.Where(r => 
+                filteredRequirements = filteredRequirements.Where(r =>
                     r.regulatoryBody.Equals(regulatoryBody, StringComparison.OrdinalIgnoreCase));
             }
 

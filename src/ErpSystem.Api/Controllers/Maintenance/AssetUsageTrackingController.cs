@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -69,7 +69,9 @@ public class AssetUsageTrackingController : ControllerBase
     {
         var record = await _usageTrackingService.GetUsageRecordByIdAsync(id);
         if (record == null)
+        {
             return NotFound($"Usage record with ID {id} not found");
+        }
 
         return Ok(record);
     }
@@ -216,8 +218,10 @@ public class AssetUsageTrackingController : ControllerBase
     {
         var success = await _usageTrackingService.ImportUsageDataFromSourceAsync(dataSource, externalData);
         if (success)
+        {
             return Ok(new { message = "Usage data imported successfully" });
-        
+        }
+
         return BadRequest(new { message = "Failed to import usage data" });
     }
 

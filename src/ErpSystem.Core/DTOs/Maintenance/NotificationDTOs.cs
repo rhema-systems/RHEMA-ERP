@@ -64,13 +64,13 @@ public class MaintenanceNotificationDto
     public string? AdditionalData { get; set; }
     public string? ActionUrl { get; set; }
     public DateTime CreatedDate { get; set; }
-    
+
     // Calculated properties
     public bool IsRead { get; set; }
     public bool IsOverdue { get; set; }
     public string RecipientName { get; set; } = string.Empty;
     public string EntityName { get; set; } = string.Empty;
-    
+
     // Additional properties for service compatibility
     public NotificationType Type { get; set; }
     public string RelatedEntityType { get; set; } = string.Empty;
@@ -87,38 +87,38 @@ public class CreateMaintenanceNotificationDto
     [Required]
     [StringLength(50)]
     public string NotificationType { get; set; } = string.Empty;
-    
+
     [Required]
     [StringLength(50)]
     public string EntityType { get; set; } = string.Empty;
-    
+
     [Required]
     public Guid EntityId { get; set; }
-    
+
     [Required]
     public Guid RecipientId { get; set; }
-    
+
     [StringLength(100)]
     public string? RecipientRole { get; set; }
-    
+
     [Required]
     [StringLength(200)]
     public string Title { get; set; } = string.Empty;
-    
+
     [Required]
     [StringLength(1000)]
     public string Message { get; set; } = string.Empty;
-    
+
     [StringLength(20)]
     public string Priority { get; set; } = "Normal";
-    
+
     public DateTime? ScheduledFor { get; set; }
-    
+
     public string? AdditionalData { get; set; }
-    
+
     [StringLength(500)]
     public string? ActionUrl { get; set; }
-    
+
     /// <summary>
     /// Tenant ID - used for background service context (when current user is null).
     /// If not provided, will use current user's tenant from context.
@@ -135,30 +135,30 @@ public class BulkCreateNotificationDto
     [Required]
     [StringLength(50)]
     public string NotificationType { get; set; } = string.Empty;
-    
+
     [Required]
     [StringLength(50)]
     public string EntityType { get; set; } = string.Empty;
-    
+
     [Required]
     public List<Guid> EntityIds { get; set; } = new();
-    
+
     public List<Guid>? RecipientIds { get; set; }
-    
+
     [StringLength(100)]
     public string? RecipientRole { get; set; }
-    
+
     [Required]
     [StringLength(200)]
     public string Title { get; set; } = string.Empty;
-    
+
     [Required]
     [StringLength(1000)]
     public string Message { get; set; } = string.Empty;
-    
+
     [StringLength(20)]
     public string Priority { get; set; } = "Normal";
-    
+
     public DateTime? ScheduledFor { get; set; }
 }
 
@@ -218,32 +218,32 @@ public class CreateNotificationTemplateDto
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [Required]
     [StringLength(50)]
     public string NotificationType { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string? Description { get; set; }
-    
+
     [Required]
     [StringLength(200)]
     public string TitleTemplate { get; set; } = string.Empty;
-    
+
     [Required]
     [StringLength(2000)]
     public string MessageTemplate { get; set; } = string.Empty;
-    
+
     [StringLength(20)]
     public string DefaultPriority { get; set; } = "Normal";
-    
+
     public int LeadTimeMinutes { get; set; } = 1440;
-    
+
     public bool IsActive { get; set; } = true;
-    
+
     [StringLength(500)]
     public string? DefaultRoles { get; set; }
-    
+
     [StringLength(200)]
     public string DeliveryMethods { get; set; } = "InApp";
 }
@@ -256,28 +256,28 @@ public class UpdateNotificationTemplateDto
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string? Description { get; set; }
-    
+
     [Required]
     [StringLength(200)]
     public string TitleTemplate { get; set; } = string.Empty;
-    
+
     [Required]
     [StringLength(2000)]
     public string MessageTemplate { get; set; } = string.Empty;
-    
+
     [StringLength(20)]
     public string DefaultPriority { get; set; } = "Normal";
-    
+
     public int LeadTimeMinutes { get; set; }
-    
+
     public bool IsActive { get; set; }
-    
+
     [StringLength(500)]
     public string? DefaultRoles { get; set; }
-    
+
     [StringLength(200)]
     public string DeliveryMethods { get; set; } = "InApp";
 }
@@ -304,7 +304,7 @@ public class MaintenanceEscalationRuleDto
     public int Priority { get; set; }
     public DateTime CreatedDate { get; set; }
     public DateTime? LastModifiedDate { get; set; }
-    
+
     // Navigation properties
     public string? EscalationUserName { get; set; }
     public string? NotificationTemplateName { get; set; }
@@ -320,29 +320,29 @@ public class CreateEscalationRuleDto
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [Required]
     [StringLength(50)]
     public string EntityType { get; set; } = string.Empty;
-    
+
     [Required]
     public string TriggerCondition { get; set; } = string.Empty;
-    
+
     public int HoursOverdue { get; set; } = 24;
-    
+
     [StringLength(20)]
     public string? TriggerPriority { get; set; }
-    
+
     [Required]
     [StringLength(100)]
     public string EscalationRole { get; set; } = string.Empty;
-    
+
     public Guid? EscalationUserId { get; set; }
-    
+
     public Guid? NotificationTemplateId { get; set; }
-    
+
     public bool IsActive { get; set; } = true;
-    
+
     public int Priority { get; set; } = 0;
 }
 
@@ -354,25 +354,25 @@ public class UpdateEscalationRuleDto
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [Required]
     public string TriggerCondition { get; set; } = string.Empty;
-    
+
     public int HoursOverdue { get; set; }
-    
+
     [StringLength(20)]
     public string? TriggerPriority { get; set; }
-    
+
     [Required]
     [StringLength(100)]
     public string EscalationRole { get; set; } = string.Empty;
-    
+
     public Guid? EscalationUserId { get; set; }
-    
+
     public Guid? NotificationTemplateId { get; set; }
-    
+
     public bool IsActive { get; set; }
-    
+
     public int Priority { get; set; }
 }
 

@@ -41,6 +41,9 @@ export interface BusinessPartnerRegistrationDocumentDto {
   filePath: string;
   fileSize: number;
   isVerified: boolean;
+  isRejected: boolean;
+  rejectionReason?: string;
+  rejectedDate?: string;
   uploadedAt: string;
 }
 
@@ -290,15 +293,78 @@ export const businessPartnerRegistrationService = {
   },
 
   /**
+   * Track document download
+   */
+  async trackDocumentDownload(registrationId: string, documentId: string): Promise<void> {
+    const token = typeof window !== 'undefined'
+      ? localStorage.getItem('token') || localStorage.getItem('authToken')
+      : null;
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/procurement/business-partner-registrations/${registrationId}/documents/${documentId}/track-download`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token && { Authorization: `Bearer ${token}` }),
+          },
+        }
+      );
+
+      // Don't throw error if tracking fails - it's not critical
+      if (!response.ok) {
+        console.warn('Failed to track document download:', response.statusText);
+      }
+    } catch (error) {
+      // Silently fail - tracking shouldn't block document download
+      console.warn('Error tracking document download:', error);
+    }
+  },
+
+  /**
+   * Download a document and track the download
+   */
+  async downloadDocument(registrationId: string, documentId: string, documentName: string, filePath: string): Promise<void> {
+    // Track the download first
+    await this.trackDocumentDownload(registrationId, documentId);
+
+    // Then download the file
+    const token = typeof window !== 'undefined'
+      ? localStorage.getItem('token') || localStorage.getItem('authToken')
+      : null;
+
+    const response = await fetch(filePath, {
+      headers: {
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to download document');
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = documentName;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  },
+
+  /**
    * Helper: Convert RegistrationFormData to CreateBusinessPartnerRegistrationDto
    */
   convertFormDataToCreateDto(formData: RegistrationFormData): CreateBusinessPartnerRegistrationDto {
     return {
       partnerType: formData.partnerType,
       companyName: formData.companyName,
-      registrationNumber: formData.registrationNumber,
-      email: formData.email,
-      phone: formData.phone,
+      registrationNumber: formData.registrationNumber || undefined,
+      email: formData.email || undefined,
+      phone: formData.phone || undefined,
       registrationData: JSON.stringify(formData),
     };
   },
@@ -309,9 +375,9 @@ export const businessPartnerRegistrationService = {
   convertFormDataToUpdateDto(formData: RegistrationFormData, completionPercentage: number): UpdateBusinessPartnerRegistrationDto {
     return {
       companyName: formData.companyName,
-      registrationNumber: formData.registrationNumber,
-      email: formData.email,
-      phone: formData.phone,
+      registrationNumber: formData.registrationNumber || undefined,
+      email: formData.email || undefined,
+      phone: formData.phone || undefined,
       registrationData: JSON.stringify(formData),
       completionPercentage,
     };
@@ -320,14 +386,42 @@ export const businessPartnerRegistrationService = {
   /**
    * Helper: Parse registration data from JSON string
    */
-  parseRegistrationData(registrationData?: string): RegistrationFormData | null {
-    if (!registrationData) return null;
-    try {
-      return JSON.parse(registrationData) as RegistrationFormData;
-    } catch {
-      return null;
-    }
-  },
+	  parseRegistrationData(registrationData?: string): RegistrationFormData | null {
+	    if (!registrationData) return null;
+	    try {
+	      let topLevel: any = JSON.parse(registrationData);
+	      let raw: any = topLevel;
+
+	      // Backwards compatibility:
+	      // Older registrations stored the **entire C# DTO** as JSON with a nested
+	      // RegistrationData/registrationData string that contains the real
+	      // RegistrationFormData. Newer ones may store just the form JSON.
+	      if (raw && typeof raw === 'object') {
+	        const nested = raw.RegistrationData ?? raw.registrationData;
+	        if (typeof nested === 'string' && nested.trim().startsWith('{')) {
+	          try {
+	            raw = JSON.parse(nested);
+	          } catch {
+	            // If nested JSON is invalid, fall back to the outer object
+	            raw = topLevel;
+	          }
+	        }
+	      }
+
+	      // Normalise casing and ensure required fields always exist
+	      const result: RegistrationFormData = {
+	        ...(raw || {}),
+	        companyName: (raw?.companyName ?? raw?.CompanyName ?? '').toString(),
+	        partnerType: (raw?.partnerType ?? raw?.PartnerType ?? 'Supplier').toString(),
+	        email: (raw?.email ?? raw?.Email ?? '').toString(),
+	        phone: (raw?.phone ?? raw?.Phone ?? '').toString(),
+	      };
+
+	      return result;
+	    } catch {
+	      return null;
+	    }
+	  },
 
   /**
    * Helper: Calculate completion percentage based on form data

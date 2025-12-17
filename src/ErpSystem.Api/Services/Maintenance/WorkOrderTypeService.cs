@@ -1,11 +1,11 @@
 using AutoMapper;
-using Microsoft.Extensions.Logging;
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.DTOs.Maintenance;
-using ErpSystem.Core.Entities.Maintenance;
-using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Api.Services.Maintenance;
 
@@ -47,7 +47,7 @@ public class WorkOrderTypeService : IWorkOrderTypeService
             var existingByName = await _workOrderTypeRepository.GetQueryable()
                 .Where(w => w.Name == createDto.Name && !w.IsDeleted)
                 .FirstOrDefaultAsync();
-                
+
             if (existingByName != null)
             {
                 throw new ArgumentException($"Work order type with name '{createDto.Name}' already exists");
@@ -55,10 +55,10 @@ public class WorkOrderTypeService : IWorkOrderTypeService
 
             var workOrderType = _mapper.Map<WorkOrderType>(createDto);
             workOrderType.TenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
-            
+
             var createdWorkOrderType = await _workOrderTypeRepository.AddAsync(workOrderType);
             await _unitOfWork.SaveChangesAsync();
-            
+
             _logger.LogInformation("Successfully created work order type with ID: {Id}", createdWorkOrderType.Id);
 
             return _mapper.Map<WorkOrderTypeDto>(createdWorkOrderType);
@@ -76,17 +76,13 @@ public class WorkOrderTypeService : IWorkOrderTypeService
         {
             _logger.LogInformation("Updating work order type: {Id}", id);
 
-            var existingWorkOrderType = await _workOrderTypeRepository.GetByIdAsync(id);
-            if (existingWorkOrderType == null)
-            {
-                throw new ArgumentException($"Work order type with ID {id} not found");
-            }
+            var existingWorkOrderType = await _workOrderTypeRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Work order type with ID {id} not found");
 
             // Validate code uniqueness (exclude current record)
             var existingByCode = await _workOrderTypeRepository.GetQueryable()
                 .Where(w => w.Code == updateDto.Code && w.Id != id && !w.IsDeleted)
                 .FirstOrDefaultAsync();
-            
+
             if (existingByCode != null)
             {
                 throw new ArgumentException($"Work order type with code '{updateDto.Code}' already exists");
@@ -96,7 +92,7 @@ public class WorkOrderTypeService : IWorkOrderTypeService
             var existingByName = await _workOrderTypeRepository.GetQueryable()
                 .Where(w => w.Name == updateDto.Name && w.Id != id && !w.IsDeleted)
                 .FirstOrDefaultAsync();
-            
+
             if (existingByName != null)
             {
                 throw new ArgumentException($"Work order type with name '{updateDto.Name}' already exists");
@@ -123,11 +119,7 @@ public class WorkOrderTypeService : IWorkOrderTypeService
         {
             _logger.LogInformation("Deleting work order type: {Id}", id);
 
-            var workOrderType = await _workOrderTypeRepository.GetByIdAsync(id);
-            if (workOrderType == null)
-            {
-                throw new ArgumentException($"Work order type with ID {id} not found");
-            }
+            var workOrderType = await _workOrderTypeRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Work order type with ID {id} not found");
 
             // Check if work order type is being used by work orders
             var workOrderCount = await _workOrderTypeRepository.GetWorkOrderCountByTypeAsync(id);
@@ -215,7 +207,7 @@ public class WorkOrderTypeService : IWorkOrderTypeService
 
             if (!string.IsNullOrEmpty(filter.SearchTerm))
             {
-                query = query.Where(w => 
+                query = query.Where(w =>
                     w.Name.Contains(filter.SearchTerm) ||
                     w.Code.Contains(filter.SearchTerm) ||
                     (w.Description != null && w.Description.Contains(filter.SearchTerm)));
@@ -259,12 +251,7 @@ public class WorkOrderTypeService : IWorkOrderTypeService
         {
             _logger.LogInformation("Toggling work order type status: {Id}", id);
 
-            var workOrderType = await _workOrderTypeRepository.GetByIdAsync(id);
-            if (workOrderType == null)
-            {
-                throw new ArgumentException($"Work order type with ID {id} not found");
-            }
-
+            var workOrderType = await _workOrderTypeRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Work order type with ID {id} not found");
             workOrderType.IsActive = !workOrderType.IsActive;
             await _workOrderTypeRepository.UpdateAsync(workOrderType);
 

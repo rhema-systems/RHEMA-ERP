@@ -1,5 +1,5 @@
-using ErpSystem.Core.Entities;
 using ErpSystem.Core.DTOs.Notifications;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,74 +15,74 @@ namespace ErpSystem.Data.Repositories
         public NotificationRepository(ApplicationDbContext context) : base(context)
         {
             _context = context;
-    }
+        }
 
-    /// <summary>
-    /// Gets notifications for a user with pagination and filtering
-    /// </summary>
-    public async Task<ErpSystem.Core.DTOs.Notifications.PagedResult<NotificationDto>> GetUserNotificationsAsync(
-        Guid userId, Guid tenantId, int page = 1, int pageSize = 20,
-        bool? unreadOnly = null, string? type = null)
-    {
-        try
+        /// <summary>
+        /// Gets notifications for a user with pagination and filtering
+        /// </summary>
+        public async Task<ErpSystem.Core.DTOs.Notifications.PagedResult<NotificationDto>> GetUserNotificationsAsync(
+            Guid userId, Guid tenantId, int page = 1, int pageSize = 20,
+            bool? unreadOnly = null, string? type = null)
         {
-            var query = _dbSet.AsQueryable()
-                .Where(n => n.RecipientId == userId && n.TenantId == tenantId);
-
-            if (unreadOnly == true)
+            try
             {
-                query = query.Where(n => !n.IsRead);
-            }
+                var query = _dbSet.AsQueryable()
+                    .Where(n => n.RecipientId == userId && n.TenantId == tenantId);
 
-            if (!string.IsNullOrEmpty(type))
-            {
-                query = query.Where(n => n.NotificationType == type);
-            }
-
-            var totalCount = await query.CountAsync();
-
-            var notifications = await query
-                .OrderByDescending(n => n.CreatedAt)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .Select(n => new NotificationDto
+                if (unreadOnly == true)
                 {
-                    Id = n.Id,
-                    Title = n.Title,
-                    Message = n.Message,
-                    Type = n.NotificationType,
-                    Severity = n.Priority,
-                    IsRead = n.IsRead,
-                    Timestamp = n.CreatedAt,
-                    ActionUrl = n.ActionUrl,
-                    EntityType = n.EntityType,
-                    EntityId = n.EntityId,
-                    Metadata = new Dictionary<string, object>
+                    query = query.Where(n => !n.IsRead);
+                }
+
+                if (!string.IsNullOrEmpty(type))
+                {
+                    query = query.Where(n => n.NotificationType == type);
+                }
+
+                var totalCount = await query.CountAsync();
+
+                var notifications = await query
+                    .OrderByDescending(n => n.CreatedAt)
+                    .Skip((page - 1) * pageSize)
+                    .Take(pageSize)
+                    .Select(n => new NotificationDto
                     {
+                        Id = n.Id,
+                        Title = n.Title,
+                        Message = n.Message,
+                        Type = n.NotificationType,
+                        Severity = n.Priority,
+                        IsRead = n.IsRead,
+                        Timestamp = n.CreatedAt,
+                        ActionUrl = n.ActionUrl,
+                        EntityType = n.EntityType,
+                        EntityId = n.EntityId,
+                        Metadata = new Dictionary<string, object>
+                        {
                         { "status", n.Status ?? "" },
                         { "recipientId", n.RecipientId },
                         { "attemptCount", n.AttemptCount },
                         { "sentAt", n.SentAt ?? DateTime.MinValue },
                         { "scheduledFor", n.ScheduledFor },
                         { "lastError", n.LastError ?? "" }
-                    },
-                    ExpiresAt = n.ScheduledFor.AddDays(7) // Default expiry 7 days from scheduled time
-                })
-                .ToListAsync();
+                        },
+                        ExpiresAt = n.ScheduledFor.AddDays(7) // Default expiry 7 days from scheduled time
+                    })
+                    .ToListAsync();
 
-            return new ErpSystem.Core.DTOs.Notifications.PagedResult<NotificationDto>
+                return new ErpSystem.Core.DTOs.Notifications.PagedResult<NotificationDto>
+                {
+                    Items = notifications,
+                    TotalCount = totalCount,
+                    Page = page,
+                    PageSize = pageSize
+                };
+            }
+            catch (Exception ex)
             {
-                Items = notifications,
-                TotalCount = totalCount,
-                Page = page,
-                PageSize = pageSize
-            };
+                throw;
+            }
         }
-        catch (Exception ex)
-        {
-            throw;
-        }
-    }
 
         public async Task<int> GetUnreadCountAsync(Guid userId, Guid tenantId)
         {

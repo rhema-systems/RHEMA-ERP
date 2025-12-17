@@ -1,0 +1,1125 @@
+{
+  "request": {
+    "requestId": "0HNHSSMLBGFRL:00000001",
+    "timestamp": "2025-12-17T00:51:32.8904792Z",
+    "method": "OPTIONS",
+    "path": "/api/auth/security-settings",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Access-Control-Request-Headers": "content-type",
+      "Access-Control-Request-Method": "GET",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": null,
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHSSMLBGFRL:00000001",
+    "timestamp": "2025-12-17T00:51:32.9466951Z",
+    "statusCode": 204,
+    "statusDescription": "No Content",
+    "headers": {
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Headers": "content-type",
+      "Access-Control-Allow-Methods": "GET",
+      "Access-Control-Allow-Origin": "http://localhost:3000",
+      "Vary": "Origin",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": null,
+    "contentLength": 0,
+    "body": null,
+    "elapsedMilliseconds": 58
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHSSMLBGFRL:00000002",
+    "timestamp": "2025-12-17T00:51:33.1304603Z",
+    "method": "GET",
+    "path": "/api/auth/security-settings",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Content-Type": "application/json",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": "application/json",
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHSSMLBGFRL:00000002",
+    "timestamp": "2025-12-17T00:51:33.7925232Z",
+    "statusCode": 200,
+    "statusDescription": "OK",
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": "application/json; charset=utf-8",
+    "contentLength": 433,
+    "body": "{\r\n  \u0022passwordMinLength\u0022: 8,\r\n  \u0022passwordRequireUppercase\u0022: true,\r\n  \u0022passwordRequireLowercase\u0022: true,\r\n  \u0022passwordRequireDigits\u0022: true,\r\n  \u0022passwordRequireSpecialChars\u0022: true,\r\n  \u0022captchaEnabled\u0022: false,\r\n  \u0022captchaProvider\u0022: \u0022recaptcha\u0022,\r\n  \u0022recaptchaSiteKey\u0022: null,\r\n  \u0022hCaptchaSiteKey\u0022: null,\r\n  \u0022termsOfServiceUrl\u0022: \u0022https://rhema-systems.com.gh/disclaimer/\u0022,\r\n  \u0022privacyPolicyUrl\u0022: \u0022https://rhema-systems.com.gh/disclaimer/\u0022\r\n}",
+    "elapsedMilliseconds": 660
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHSSMLBGFRM:00000001",
+    "timestamp": "2025-12-17T01:07:55.7974368Z",
+    "method": "OPTIONS",
+    "path": "/api/auth/security-settings",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Access-Control-Request-Headers": "content-type",
+      "Access-Control-Request-Method": "GET",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": null,
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHSSMLBGFRM:00000001",
+    "timestamp": "2025-12-17T01:07:55.8099815Z",
+    "statusCode": 204,
+    "statusDescription": "No Content",
+    "headers": {
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Headers": "content-type",
+      "Access-Control-Allow-Methods": "GET",
+      "Access-Control-Allow-Origin": "http://localhost:3000",
+      "Vary": "Origin",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": null,
+    "contentLength": 0,
+    "body": null,
+    "elapsedMilliseconds": 16
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHSSMLBGFRM:00000002",
+    "timestamp": "2025-12-17T01:07:55.8913301Z",
+    "method": "GET",
+    "path": "/api/auth/security-settings",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Content-Type": "application/json",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": "application/json",
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHSSMLBGFRM:00000002",
+    "timestamp": "2025-12-17T01:07:56.6588721Z",
+    "statusCode": 200,
+    "statusDescription": "OK",
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": "application/json; charset=utf-8",
+    "contentLength": 433,
+    "body": "{\r\n  \u0022passwordMinLength\u0022: 8,\r\n  \u0022passwordRequireUppercase\u0022: true,\r\n  \u0022passwordRequireLowercase\u0022: true,\r\n  \u0022passwordRequireDigits\u0022: true,\r\n  \u0022passwordRequireSpecialChars\u0022: true,\r\n  \u0022captchaEnabled\u0022: false,\r\n  \u0022captchaProvider\u0022: \u0022recaptcha\u0022,\r\n  \u0022recaptchaSiteKey\u0022: null,\r\n  \u0022hCaptchaSiteKey\u0022: null,\r\n  \u0022termsOfServiceUrl\u0022: \u0022https://rhema-systems.com.gh/disclaimer/\u0022,\r\n  \u0022privacyPolicyUrl\u0022: \u0022https://rhema-systems.com.gh/disclaimer/\u0022\r\n}",
+    "elapsedMilliseconds": 761
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHSSMLBGFRN:00000001",
+    "timestamp": "2025-12-17T01:11:37.2250035Z",
+    "method": "OPTIONS",
+    "path": "/api/auth/login",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Access-Control-Request-Headers": "content-type",
+      "Access-Control-Request-Method": "POST",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": null,
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHSSMLBGFRN:00000001",
+    "timestamp": "2025-12-17T01:11:37.2255187Z",
+    "statusCode": 204,
+    "statusDescription": "No Content",
+    "headers": {
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Headers": "content-type",
+      "Access-Control-Allow-Methods": "POST",
+      "Access-Control-Allow-Origin": "http://localhost:3000",
+      "Vary": "Origin",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": null,
+    "contentLength": 0,
+    "body": null,
+    "elapsedMilliseconds": 0
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHSSMLBGFRN:00000002",
+    "timestamp": "2025-12-17T01:11:37.2801338Z",
+    "method": "POST",
+    "path": "/api/auth/login",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Content-Type": "application/json",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "Content-Length": "62",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=0"
+    },
+    "contentType": "application/json",
+    "contentLength": 62,
+    "body": "{\u0022username\u0022:\u0022admin\u0022,\u0022password\u0022:\u0022Admin123!\u0022,\u0022rememberMe\u0022:false}",
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHSSMLBGFRN:00000002",
+    "timestamp": "2025-12-17T01:11:40.0691298Z",
+    "statusCode": 200,
+    "statusDescription": "OK",
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": "application/json; charset=utf-8",
+    "contentLength": 1255,
+    "body": "{\r\n  \u0022token\u0022: \u0022eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiI4Y2E0MzhiMi0yOTg4LTRhN2YtNWQ5NS0wOGRlMmRmZTM5OWQiLCJ1bmlxdWVfbmFtZSI6ImFkbWluIiwiZW1haWwiOiJhZG1pbkBkZWZhdWx0LmNvbSIsInRlbmFudF9pZCI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwMDAwMSIsImp0aSI6IjM1ZjZiNzhiLTU5NTctNDgwNS1hNmQ5LTYzODUyOGZiMTA5ZSIsImF1dGhfcHJvdmlkZXIiOiJMREFQIiwic2lkIjoiNGJlZWNlZjktOWEwMy00OWFhLTg3ZWYtZDVhMmEzZDcxMDZmIiwicm9sZSI6IlN1cGVyQWRtaW4iLCJuYmYiOjE3NjU5MzM4OTgsImV4cCI6MTc2NjAyMDI5OCwiaWF0IjoxNzY1OTMzODk4LCJpc3MiOiJFcnBTeXN0ZW0iLCJhdWQiOiJFcnBTeXN0ZW1Vc2VycyJ9.tP-uN56wKI25CTj1CRRDOHqGi43Z650lnUm0LIrUg2o\u0022,\r\n  \u0022refreshToken\u0022: \u0022Is88TegQ0hD/sxSwEo53qEjEAVBuo2nINM85YMVHRMg=\u0022,\r\n  \u0022expiresAt\u0022: \u00222025-12-18T01:11:40.0304941Z\u0022,\r\n  \u0022user\u0022: {\r\n    \u0022id\u0022: \u00228ca438b2-2988-4a7f-5d95-08de2dfe399d\u0022,\r\n    \u0022username\u0022: \u0022admin\u0022,\r\n    \u0022email\u0022: \u0022admin@default.com\u0022,\r\n    \u0022firstName\u0022: \u0022System\u0022,\r\n    \u0022lastName\u0022: \u0022Administrator\u0022,\r\n    \u0022phoneNumber\u0022: null,\r\n    \u0022currentTenantId\u0022: \u002200000000-0000-0000-0000-000000000001\u0022,\r\n    \u0022currentTenantCode\u0022: null,\r\n    \u0022currentTenantName\u0022: null,\r\n    \u0022accessibleTenants\u0022: [],\r\n    \u0022isActive\u0022: true,\r\n    \u0022roles\u0022: [\r\n      \u0022SuperAdmin\u0022\r\n    ],\r\n    \u0022authenticationProvider\u0022: \u0022LDAP\u0022\r\n  },\r\n  \u0022requiresTwoFactor\u0022: false,\r\n  \u0022twoFactorToken\u0022: null\r\n}",
+    "elapsedMilliseconds": 2801
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOMJ:00000001",
+    "timestamp": "2025-12-17T01:12:12.9304322Z",
+    "method": "OPTIONS",
+    "path": "/api/auth/me",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Access-Control-Request-Headers": "authorization,content-type",
+      "Access-Control-Request-Method": "GET",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": null,
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOMJ:00000001",
+    "timestamp": "2025-12-17T01:12:13.0240074Z",
+    "statusCode": 204,
+    "statusDescription": "No Content",
+    "headers": {
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Headers": "authorization,content-type",
+      "Access-Control-Allow-Methods": "GET",
+      "Access-Control-Allow-Origin": "http://localhost:3000",
+      "Vary": "Origin",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": null,
+    "contentLength": 0,
+    "body": null,
+    "elapsedMilliseconds": 103
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOMK:00000001",
+    "timestamp": "2025-12-17T01:12:12.9304319Z",
+    "method": "OPTIONS",
+    "path": "/api/notifications",
+    "queryString": "?pageNumber=1\u0026pageSize=10\u0026page=1\u0026isRead=false",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Access-Control-Request-Headers": "authorization",
+      "Access-Control-Request-Method": "GET",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": null,
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOMK:00000001",
+    "timestamp": "2025-12-17T01:12:13.0240948Z",
+    "statusCode": 204,
+    "statusDescription": "No Content",
+    "headers": {
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Headers": "authorization",
+      "Access-Control-Allow-Methods": "GET",
+      "Access-Control-Allow-Origin": "http://localhost:3000",
+      "Vary": "Origin",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": null,
+    "contentLength": 0,
+    "body": null,
+    "elapsedMilliseconds": 105
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOML:00000001",
+    "timestamp": "2025-12-17T01:12:12.9304323Z",
+    "method": "OPTIONS",
+    "path": "/api/tenant",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Access-Control-Request-Headers": "authorization,content-type",
+      "Access-Control-Request-Method": "GET",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": null,
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOML:00000001",
+    "timestamp": "2025-12-17T01:12:13.0240966Z",
+    "statusCode": 204,
+    "statusDescription": "No Content",
+    "headers": {
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Headers": "authorization,content-type",
+      "Access-Control-Allow-Methods": "GET",
+      "Access-Control-Allow-Origin": "http://localhost:3000",
+      "Vary": "Origin",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": null,
+    "contentLength": 0,
+    "body": null,
+    "elapsedMilliseconds": 105
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOMK:00000002",
+    "timestamp": "2025-12-17T01:12:13.1546778Z",
+    "method": "GET",
+    "path": "/api/notifications",
+    "queryString": "?pageNumber=1\u0026pageSize=10\u0026page=1\u0026isRead=false",
+    "headers": {
+      "Accept": "application/json, text/plain, */*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Authorization": "[REDACTED]",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site"
+    },
+    "contentType": null,
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOMK:00000002",
+    "timestamp": "2025-12-17T01:12:13.9525492Z",
+    "statusCode": 200,
+    "statusDescription": "OK",
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": "application/json; charset=utf-8",
+    "contentLength": 4523,
+    "body": "{\r\n  \u0022items\u0022: [\r\n    {\r\n      \u0022id\u0022: \u0022d414af9a-4efc-450d-a3bd-5834ca3e92e6\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022Tender Evaluation Assignment\u0022,\r\n      \u0022message\u0022: \u0022You have been assigned to evaluate tender TND-2025-0003 - Supply of Printers\u0022,\r\n      \u0022severity\u0022: \u0022High\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-16T13:11:46.8822483\u0022,\r\n      \u0022isRead\u0022: false,\r\n      \u0022actionUrl\u0022: \u0022/tenders/27429f56-3a5d-4a75-9ba6-b3a86c64beae/evaluations\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-23T13:11:46.8719793\u0022,\r\n      \u0022entityType\u0022: \u0022Tender\u0022,\r\n      \u0022entityId\u0022: \u002227429f56-3a5d-4a75-9ba6-b3a86c64beae\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u00224ccca3a2-4237-4ab2-85c9-ef8d9a27be5d\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Bid Submitted\u0022,\r\n      \u0022message\u0022: \u0022A new bid (BID-2025-0005) has been submitted for tender TND-2025-0003\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-16T12:36:48.6728462\u0022,\r\n      \u0022isRead\u0022: false,\r\n      \u0022actionUrl\u0022: \u0022/tenders/27429f56-3a5d-4a75-9ba6-b3a86c64beae/bids/304624c6-a5ee-48c1-bdc5-cee2a5abc62f\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-23T12:36:48.6712121\u0022,\r\n      \u0022entityType\u0022: \u0022TenderBid\u0022,\r\n      \u0022entityId\u0022: \u0022304624c6-a5ee-48c1-bdc5-cee2a5abc62f\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u002273d69a40-3d3b-4a48-9910-b553e01ca8c8\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Bid Submitted\u0022,\r\n      \u0022message\u0022: \u0022A new bid (BID-2025-0005) has been submitted for tender TND-2025-0003\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-16T12:09:38.1260246\u0022,\r\n      \u0022isRead\u0022: true,\r\n      \u0022actionUrl\u0022: \u0022/tenders/27429f56-3a5d-4a75-9ba6-b3a86c64beae/bids/304624c6-a5ee-48c1-bdc5-cee2a5abc62f\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-23T12:09:38.1108545\u0022,\r\n      \u0022entityType\u0022: \u0022TenderBid\u0022,\r\n      \u0022entityId\u0022: \u0022304624c6-a5ee-48c1-bdc5-cee2a5abc62f\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u0022dceb73fd-766f-4baf-b65d-2f97e66a2774\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022Tender Evaluation Assignment\u0022,\r\n      \u0022message\u0022: \u0022You have been assigned to evaluate tender TND-2025-0002 - Supply of Hardware\u0022,\r\n      \u0022severity\u0022: \u0022High\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-13T19:22:31.0422887\u0022,\r\n      \u0022isRead\u0022: true,\r\n      \u0022actionUrl\u0022: \u0022/tenders/75e33134-6794-42e5-be3e-4aaf3f3f3537/evaluations\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-20T19:22:31.0413012\u0022,\r\n      \u0022entityType\u0022: \u0022Tender\u0022,\r\n      \u0022entityId\u0022: \u002275e33134-6794-42e5-be3e-4aaf3f3f3537\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u0022bdf5cdb3-bdd6-4be9-b54f-c8d99afd16a6\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Bid Submitted\u0022,\r\n      \u0022message\u0022: \u0022A new bid (BID-2025-0004) has been submitted for tender TND-2025-0002\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-11T17:49:02.1510957\u0022,\r\n      \u0022isRead\u0022: true,\r\n      \u0022actionUrl\u0022: \u0022/tenders/75e33134-6794-42e5-be3e-4aaf3f3f3537/bids/06a536ec-6da5-48c1-88f3-c616fec5d9ef\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-18T17:49:02.0139671\u0022,\r\n      \u0022entityType\u0022: \u0022TenderBid\u0022,\r\n      \u0022entityId\u0022: \u002206a536ec-6da5-48c1-88f3-c616fec5d9ef\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u00223d79b0cc-92e7-442a-8fd3-a127f8265c39\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Bid Submitted\u0022,\r\n      \u0022message\u0022: \u0022A new bid (BID-2025-0003) has been submitted for tender TND-2025-0001\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-03T08:11:59.7188041\u0022,\r\n      \u0022isRead\u0022: false,\r\n      \u0022actionUrl\u0022: \u0022/tenders/cbddd3f7-6c09-43b2-9c19-d55e7324ac4b/bids/a4263945-4f90-4701-b077-08be635158ea\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-10T08:11:59.7105974\u0022,\r\n      \u0022entityType\u0022: \u0022TenderBid\u0022,\r\n      \u0022entityId\u0022: \u0022a4263945-4f90-4701-b077-08be635158ea\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u0022097242c8-55ad-4c99-b514-3febd62e4417\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Clarification Request\u0022,\r\n      \u0022message\u0022: \u0022A new clarification request has been received for tender TND-2025-0001.\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-03T02:04:27.1912647\u0022,\r\n      \u0022isRead\u0022: false,\r\n      \u0022actionUrl\u0022: \u0022/tenders/cbddd3f7-6c09-43b2-9c19-d55e7324ac4b/clarifications/5fa5b74a-2602-41d9-84f1-fc13c847c3e3\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-10T02:04:27.1783097\u0022,\r\n      \u0022entityType\u0022: \u0022TenderClarification\u0022,\r\n      \u0022entityId\u0022: \u00225fa5b74a-2602-41d9-84f1-fc13c847c3e3\u0022\r\n    }\r\n  ],\r\n  \u0022totalCount\u0022: 7,\r\n  \u0022page\u0022: 1,\r\n  \u0022pageSize\u0022: 10,\r\n  \u0022totalPages\u0022: 1,\r\n  \u0022hasNext\u0022: false,\r\n  \u0022hasPrevious\u0022: false\r\n}",
+    "elapsedMilliseconds": 796
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOML:00000002",
+    "timestamp": "2025-12-17T01:12:13.1552354Z",
+    "method": "GET",
+    "path": "/api/tenant",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Authorization": "[REDACTED]",
+      "Content-Type": "application/json",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": "application/json",
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOML:00000002",
+    "timestamp": "2025-12-17T01:12:14.3249378Z",
+    "statusCode": 200,
+    "statusDescription": "OK",
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": "application/json; charset=utf-8",
+    "contentLength": 1165,
+    "body": "[\r\n  {\r\n    \u0022id\u0022: \u002200000000-0000-0000-0000-000000000001\u0022,\r\n    \u0022name\u0022: \u0022Default Tenant\u0022,\r\n    \u0022code\u0022: \u0022DEFAULT\u0022,\r\n    \u0022description\u0022: \u0022Default system tenant\u0022,\r\n    \u0022isActive\u0022: true,\r\n    \u0022status\u0022: \u0022Active\u0022,\r\n    \u0022createdAt\u0022: \u00222025-12-16T14:15:01.5862874\u0022,\r\n    \u0022updatedAt\u0022: \u00222025-11-28T01:57:02.2346833\u0022,\r\n    \u0022domain\u0022: null,\r\n    \u0022contactEmail\u0022: null,\r\n    \u0022contactPhone\u0022: null,\r\n    \u0022address\u0022: null,\r\n    \u0022logoUrl\u0022: null,\r\n    \u0022primaryColor\u0022: null,\r\n    \u0022secondaryColor\u0022: null,\r\n    \u0022faviconUrl\u0022: null,\r\n    \u0022coverImageUrl\u0022: null,\r\n    \u0022subscriptionStartDate\u0022: null,\r\n    \u0022subscriptionEndDate\u0022: null,\r\n    \u0022ldapServer\u0022: \u0022197.253.124.88\u0022,\r\n    \u0022ldapPort\u0022: 389,\r\n    \u0022ldapBaseDn\u0022: \u0022dc=rhema-systems,dc=local\u0022,\r\n    \u0022ldapBindDn\u0022: \u0022CN=rhema-admin,CN=Users,DC=rhema-systems,DC=local\u0022,\r\n    \u0022ldapBindPassword\u0022: \u0022Rj45td852#\u0022,\r\n    \u0022ldapEnabled\u0022: true,\r\n    \u0022isDefaultForPublicUsers\u0022: false,\r\n    \u0022isDefaultForInternalUsers\u0022: false,\r\n    \u0022allowSelfRegistration\u0022: false,\r\n    \u0022publicRegistrationDomains\u0022: null,\r\n    \u0022requireEmailVerification\u0022: false,\r\n    \u0022userAudience\u0022: 2,\r\n    \u0022welcomeMessage\u0022: null,\r\n    \u0022defaultPriority\u0022: 10,\r\n    \u0022enableAutoSelection\u0022: false\r\n  }\r\n]",
+    "elapsedMilliseconds": 1169
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOMJ:00000002",
+    "timestamp": "2025-12-17T01:12:13.1547431Z",
+    "method": "GET",
+    "path": "/api/auth/me",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Authorization": "[REDACTED]",
+      "Content-Type": "application/json",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": "application/json",
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOMJ:00000002",
+    "timestamp": "2025-12-17T01:12:14.3955952Z",
+    "statusCode": 200,
+    "statusDescription": "OK",
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": "application/json; charset=utf-8",
+    "contentLength": 661,
+    "body": "{\r\n  \u0022id\u0022: \u00228ca438b2-2988-4a7f-5d95-08de2dfe399d\u0022,\r\n  \u0022username\u0022: \u0022admin\u0022,\r\n  \u0022email\u0022: \u0022admin@default.com\u0022,\r\n  \u0022firstName\u0022: \u0022System\u0022,\r\n  \u0022lastName\u0022: \u0022Administrator\u0022,\r\n  \u0022phoneNumber\u0022: null,\r\n  \u0022currentTenantId\u0022: \u002200000000-0000-0000-0000-000000000001\u0022,\r\n  \u0022currentTenantCode\u0022: \u0022DEFAULT\u0022,\r\n  \u0022currentTenantName\u0022: \u0022Default Tenant\u0022,\r\n  \u0022accessibleTenants\u0022: [\r\n    {\r\n      \u0022tenantId\u0022: \u002200000000-0000-0000-0000-000000000001\u0022,\r\n      \u0022tenantCode\u0022: \u0022DEFAULT\u0022,\r\n      \u0022tenantName\u0022: \u0022Default Tenant\u0022,\r\n      \u0022isDefault\u0022: true,\r\n      \u0022accessLevel\u0022: \u0022Standard\u0022\r\n    }\r\n  ],\r\n  \u0022isActive\u0022: true,\r\n  \u0022roles\u0022: [\r\n    \u0022SuperAdmin\u0022\r\n  ],\r\n  \u0022authenticationProvider\u0022: \u0022LDAP\u0022\r\n}",
+    "elapsedMilliseconds": 1240
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOMK:00000003",
+    "timestamp": "2025-12-17T01:12:22.1307798Z",
+    "method": "OPTIONS",
+    "path": "/api/auth/select-tenant",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Access-Control-Request-Headers": "authorization,content-type",
+      "Access-Control-Request-Method": "POST",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": null,
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOMK:00000003",
+    "timestamp": "2025-12-17T01:12:22.1315781Z",
+    "statusCode": 204,
+    "statusDescription": "No Content",
+    "headers": {
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Headers": "authorization,content-type",
+      "Access-Control-Allow-Methods": "POST",
+      "Access-Control-Allow-Origin": "http://localhost:3000",
+      "Vary": "Origin",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": null,
+    "contentLength": 0,
+    "body": null,
+    "elapsedMilliseconds": 0
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOMK:00000004",
+    "timestamp": "2025-12-17T01:12:22.1627484Z",
+    "method": "POST",
+    "path": "/api/auth/select-tenant",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Authorization": "[REDACTED]",
+      "Content-Type": "application/json",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "Content-Length": "45",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": "application/json",
+    "contentLength": 45,
+    "body": "{\u0022tenantCode\u0022:\u0022DEFAULT\u0022,\u0022setAsDefault\u0022:false}",
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOMK:00000004",
+    "timestamp": "2025-12-17T01:12:23.150597Z",
+    "statusCode": 200,
+    "statusDescription": "OK",
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": "application/json; charset=utf-8",
+    "contentLength": 1310,
+    "body": "{\r\n  \u0022token\u0022: \u0022eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiI4Y2E0MzhiMi0yOTg4LTRhN2YtNWQ5NS0wOGRlMmRmZTM5OWQiLCJ1bmlxdWVfbmFtZSI6ImFkbWluIiwiZW1haWwiOiJhZG1pbkBkZWZhdWx0LmNvbSIsInRlbmFudF9pZCI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwMDAwMSIsImp0aSI6ImU0YzU0ZmY1LWYyNDQtNDZmMS1iYjlmLTk5OGU3MjQ3NTk1OCIsImF1dGhfcHJvdmlkZXIiOiJMREFQIiwicm9sZSI6IlN1cGVyQWRtaW4iLCJuYmYiOjE3NjU5MzM5NDIsImV4cCI6MTc2NjAyMDM0MiwiaWF0IjoxNzY1OTMzOTQyLCJpc3MiOiJFcnBTeXN0ZW0iLCJhdWQiOiJFcnBTeXN0ZW1Vc2VycyJ9.d_piuh98Ks_tw5JBajxXww1Q3haVqRK_zurI62zgU20\u0022,\r\n  \u0022expiresAt\u0022: \u00222025-12-18T01:12:23.1371869Z\u0022,\r\n  \u0022user\u0022: {\r\n    \u0022id\u0022: \u00228ca438b2-2988-4a7f-5d95-08de2dfe399d\u0022,\r\n    \u0022username\u0022: \u0022admin\u0022,\r\n    \u0022email\u0022: \u0022admin@default.com\u0022,\r\n    \u0022firstName\u0022: \u0022System\u0022,\r\n    \u0022lastName\u0022: \u0022Administrator\u0022,\r\n    \u0022phoneNumber\u0022: null,\r\n    \u0022currentTenantId\u0022: \u002200000000-0000-0000-0000-000000000001\u0022,\r\n    \u0022currentTenantCode\u0022: \u0022DEFAULT\u0022,\r\n    \u0022currentTenantName\u0022: \u0022Default Tenant\u0022,\r\n    \u0022accessibleTenants\u0022: [\r\n      {\r\n        \u0022tenantId\u0022: \u002200000000-0000-0000-0000-000000000001\u0022,\r\n        \u0022tenantCode\u0022: \u0022DEFAULT\u0022,\r\n        \u0022tenantName\u0022: \u0022Default Tenant\u0022,\r\n        \u0022isDefault\u0022: true,\r\n        \u0022accessLevel\u0022: \u0022Standard\u0022\r\n      }\r\n    ],\r\n    \u0022isActive\u0022: true,\r\n    \u0022roles\u0022: [\r\n      \u0022SuperAdmin\u0022\r\n    ],\r\n    \u0022authenticationProvider\u0022: \u0022LDAP\u0022\r\n  }\r\n}",
+    "elapsedMilliseconds": 993
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOMK:00000005",
+    "timestamp": "2025-12-17T01:12:25.877078Z",
+    "method": "OPTIONS",
+    "path": "/api/auth/me",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Access-Control-Request-Headers": "authorization,content-type",
+      "Access-Control-Request-Method": "GET",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": null,
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOMK:00000005",
+    "timestamp": "2025-12-17T01:12:25.877554Z",
+    "statusCode": 204,
+    "statusDescription": "No Content",
+    "headers": {
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Headers": "authorization,content-type",
+      "Access-Control-Allow-Methods": "GET",
+      "Access-Control-Allow-Origin": "http://localhost:3000",
+      "Vary": "Origin",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": null,
+    "contentLength": 0,
+    "body": null,
+    "elapsedMilliseconds": 0
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOML:00000003",
+    "timestamp": "2025-12-17T01:12:25.8796407Z",
+    "method": "OPTIONS",
+    "path": "/api/notifications",
+    "queryString": "?pageNumber=1\u0026pageSize=10\u0026page=1\u0026isRead=false",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Access-Control-Request-Headers": "authorization",
+      "Access-Control-Request-Method": "GET",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": null,
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOML:00000003",
+    "timestamp": "2025-12-17T01:12:25.8798884Z",
+    "statusCode": 204,
+    "statusDescription": "No Content",
+    "headers": {
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Headers": "authorization",
+      "Access-Control-Allow-Methods": "GET",
+      "Access-Control-Allow-Origin": "http://localhost:3000",
+      "Vary": "Origin",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": null,
+    "contentLength": 0,
+    "body": null,
+    "elapsedMilliseconds": 0
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOML:00000004",
+    "timestamp": "2025-12-17T01:12:25.9164352Z",
+    "method": "GET",
+    "path": "/api/notifications",
+    "queryString": "?pageNumber=1\u0026pageSize=10\u0026page=1\u0026isRead=false",
+    "headers": {
+      "Accept": "application/json, text/plain, */*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Authorization": "[REDACTED]",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site"
+    },
+    "contentType": null,
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOML:00000004",
+    "timestamp": "2025-12-17T01:12:26.0634844Z",
+    "statusCode": 200,
+    "statusDescription": "OK",
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": "application/json; charset=utf-8",
+    "contentLength": 4523,
+    "body": "{\r\n  \u0022items\u0022: [\r\n    {\r\n      \u0022id\u0022: \u0022d414af9a-4efc-450d-a3bd-5834ca3e92e6\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022Tender Evaluation Assignment\u0022,\r\n      \u0022message\u0022: \u0022You have been assigned to evaluate tender TND-2025-0003 - Supply of Printers\u0022,\r\n      \u0022severity\u0022: \u0022High\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-16T13:11:46.8822483\u0022,\r\n      \u0022isRead\u0022: false,\r\n      \u0022actionUrl\u0022: \u0022/tenders/27429f56-3a5d-4a75-9ba6-b3a86c64beae/evaluations\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-23T13:11:46.8719793\u0022,\r\n      \u0022entityType\u0022: \u0022Tender\u0022,\r\n      \u0022entityId\u0022: \u002227429f56-3a5d-4a75-9ba6-b3a86c64beae\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u00224ccca3a2-4237-4ab2-85c9-ef8d9a27be5d\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Bid Submitted\u0022,\r\n      \u0022message\u0022: \u0022A new bid (BID-2025-0005) has been submitted for tender TND-2025-0003\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-16T12:36:48.6728462\u0022,\r\n      \u0022isRead\u0022: false,\r\n      \u0022actionUrl\u0022: \u0022/tenders/27429f56-3a5d-4a75-9ba6-b3a86c64beae/bids/304624c6-a5ee-48c1-bdc5-cee2a5abc62f\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-23T12:36:48.6712121\u0022,\r\n      \u0022entityType\u0022: \u0022TenderBid\u0022,\r\n      \u0022entityId\u0022: \u0022304624c6-a5ee-48c1-bdc5-cee2a5abc62f\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u002273d69a40-3d3b-4a48-9910-b553e01ca8c8\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Bid Submitted\u0022,\r\n      \u0022message\u0022: \u0022A new bid (BID-2025-0005) has been submitted for tender TND-2025-0003\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-16T12:09:38.1260246\u0022,\r\n      \u0022isRead\u0022: true,\r\n      \u0022actionUrl\u0022: \u0022/tenders/27429f56-3a5d-4a75-9ba6-b3a86c64beae/bids/304624c6-a5ee-48c1-bdc5-cee2a5abc62f\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-23T12:09:38.1108545\u0022,\r\n      \u0022entityType\u0022: \u0022TenderBid\u0022,\r\n      \u0022entityId\u0022: \u0022304624c6-a5ee-48c1-bdc5-cee2a5abc62f\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u0022dceb73fd-766f-4baf-b65d-2f97e66a2774\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022Tender Evaluation Assignment\u0022,\r\n      \u0022message\u0022: \u0022You have been assigned to evaluate tender TND-2025-0002 - Supply of Hardware\u0022,\r\n      \u0022severity\u0022: \u0022High\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-13T19:22:31.0422887\u0022,\r\n      \u0022isRead\u0022: true,\r\n      \u0022actionUrl\u0022: \u0022/tenders/75e33134-6794-42e5-be3e-4aaf3f3f3537/evaluations\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-20T19:22:31.0413012\u0022,\r\n      \u0022entityType\u0022: \u0022Tender\u0022,\r\n      \u0022entityId\u0022: \u002275e33134-6794-42e5-be3e-4aaf3f3f3537\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u0022bdf5cdb3-bdd6-4be9-b54f-c8d99afd16a6\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Bid Submitted\u0022,\r\n      \u0022message\u0022: \u0022A new bid (BID-2025-0004) has been submitted for tender TND-2025-0002\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-11T17:49:02.1510957\u0022,\r\n      \u0022isRead\u0022: true,\r\n      \u0022actionUrl\u0022: \u0022/tenders/75e33134-6794-42e5-be3e-4aaf3f3f3537/bids/06a536ec-6da5-48c1-88f3-c616fec5d9ef\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-18T17:49:02.0139671\u0022,\r\n      \u0022entityType\u0022: \u0022TenderBid\u0022,\r\n      \u0022entityId\u0022: \u002206a536ec-6da5-48c1-88f3-c616fec5d9ef\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u00223d79b0cc-92e7-442a-8fd3-a127f8265c39\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Bid Submitted\u0022,\r\n      \u0022message\u0022: \u0022A new bid (BID-2025-0003) has been submitted for tender TND-2025-0001\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-03T08:11:59.7188041\u0022,\r\n      \u0022isRead\u0022: false,\r\n      \u0022actionUrl\u0022: \u0022/tenders/cbddd3f7-6c09-43b2-9c19-d55e7324ac4b/bids/a4263945-4f90-4701-b077-08be635158ea\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-10T08:11:59.7105974\u0022,\r\n      \u0022entityType\u0022: \u0022TenderBid\u0022,\r\n      \u0022entityId\u0022: \u0022a4263945-4f90-4701-b077-08be635158ea\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u0022097242c8-55ad-4c99-b514-3febd62e4417\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Clarification Request\u0022,\r\n      \u0022message\u0022: \u0022A new clarification request has been received for tender TND-2025-0001.\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-03T02:04:27.1912647\u0022,\r\n      \u0022isRead\u0022: false,\r\n      \u0022actionUrl\u0022: \u0022/tenders/cbddd3f7-6c09-43b2-9c19-d55e7324ac4b/clarifications/5fa5b74a-2602-41d9-84f1-fc13c847c3e3\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-10T02:04:27.1783097\u0022,\r\n      \u0022entityType\u0022: \u0022TenderClarification\u0022,\r\n      \u0022entityId\u0022: \u00225fa5b74a-2602-41d9-84f1-fc13c847c3e3\u0022\r\n    }\r\n  ],\r\n  \u0022totalCount\u0022: 7,\r\n  \u0022page\u0022: 1,\r\n  \u0022pageSize\u0022: 10,\r\n  \u0022totalPages\u0022: 1,\r\n  \u0022hasNext\u0022: false,\r\n  \u0022hasPrevious\u0022: false\r\n}",
+    "elapsedMilliseconds": 147
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOML:00000005",
+    "timestamp": "2025-12-17T01:12:26.0884374Z",
+    "method": "OPTIONS",
+    "path": "/api/settings/security",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Access-Control-Request-Headers": "authorization,content-type",
+      "Access-Control-Request-Method": "GET",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": null,
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOML:00000005",
+    "timestamp": "2025-12-17T01:12:26.0887002Z",
+    "statusCode": 204,
+    "statusDescription": "No Content",
+    "headers": {
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Headers": "authorization,content-type",
+      "Access-Control-Allow-Methods": "GET",
+      "Access-Control-Allow-Origin": "http://localhost:3000",
+      "Vary": "Origin",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": null,
+    "contentLength": 0,
+    "body": null,
+    "elapsedMilliseconds": 0
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOMJ:00000003",
+    "timestamp": "2025-12-17T01:12:26.082771Z",
+    "method": "GET",
+    "path": "/api/notifications",
+    "queryString": "?pageNumber=1\u0026pageSize=10\u0026page=1\u0026isRead=false",
+    "headers": {
+      "Accept": "application/json, text/plain, */*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Authorization": "[REDACTED]",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site"
+    },
+    "contentType": null,
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOMJ:00000003",
+    "timestamp": "2025-12-17T01:12:26.1651762Z",
+    "statusCode": 200,
+    "statusDescription": "OK",
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": "application/json; charset=utf-8",
+    "contentLength": 4523,
+    "body": "{\r\n  \u0022items\u0022: [\r\n    {\r\n      \u0022id\u0022: \u0022d414af9a-4efc-450d-a3bd-5834ca3e92e6\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022Tender Evaluation Assignment\u0022,\r\n      \u0022message\u0022: \u0022You have been assigned to evaluate tender TND-2025-0003 - Supply of Printers\u0022,\r\n      \u0022severity\u0022: \u0022High\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-16T13:11:46.8822483\u0022,\r\n      \u0022isRead\u0022: false,\r\n      \u0022actionUrl\u0022: \u0022/tenders/27429f56-3a5d-4a75-9ba6-b3a86c64beae/evaluations\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-23T13:11:46.8719793\u0022,\r\n      \u0022entityType\u0022: \u0022Tender\u0022,\r\n      \u0022entityId\u0022: \u002227429f56-3a5d-4a75-9ba6-b3a86c64beae\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u00224ccca3a2-4237-4ab2-85c9-ef8d9a27be5d\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Bid Submitted\u0022,\r\n      \u0022message\u0022: \u0022A new bid (BID-2025-0005) has been submitted for tender TND-2025-0003\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-16T12:36:48.6728462\u0022,\r\n      \u0022isRead\u0022: false,\r\n      \u0022actionUrl\u0022: \u0022/tenders/27429f56-3a5d-4a75-9ba6-b3a86c64beae/bids/304624c6-a5ee-48c1-bdc5-cee2a5abc62f\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-23T12:36:48.6712121\u0022,\r\n      \u0022entityType\u0022: \u0022TenderBid\u0022,\r\n      \u0022entityId\u0022: \u0022304624c6-a5ee-48c1-bdc5-cee2a5abc62f\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u002273d69a40-3d3b-4a48-9910-b553e01ca8c8\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Bid Submitted\u0022,\r\n      \u0022message\u0022: \u0022A new bid (BID-2025-0005) has been submitted for tender TND-2025-0003\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-16T12:09:38.1260246\u0022,\r\n      \u0022isRead\u0022: true,\r\n      \u0022actionUrl\u0022: \u0022/tenders/27429f56-3a5d-4a75-9ba6-b3a86c64beae/bids/304624c6-a5ee-48c1-bdc5-cee2a5abc62f\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-23T12:09:38.1108545\u0022,\r\n      \u0022entityType\u0022: \u0022TenderBid\u0022,\r\n      \u0022entityId\u0022: \u0022304624c6-a5ee-48c1-bdc5-cee2a5abc62f\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u0022dceb73fd-766f-4baf-b65d-2f97e66a2774\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022Tender Evaluation Assignment\u0022,\r\n      \u0022message\u0022: \u0022You have been assigned to evaluate tender TND-2025-0002 - Supply of Hardware\u0022,\r\n      \u0022severity\u0022: \u0022High\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-13T19:22:31.0422887\u0022,\r\n      \u0022isRead\u0022: true,\r\n      \u0022actionUrl\u0022: \u0022/tenders/75e33134-6794-42e5-be3e-4aaf3f3f3537/evaluations\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-20T19:22:31.0413012\u0022,\r\n      \u0022entityType\u0022: \u0022Tender\u0022,\r\n      \u0022entityId\u0022: \u002275e33134-6794-42e5-be3e-4aaf3f3f3537\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u0022bdf5cdb3-bdd6-4be9-b54f-c8d99afd16a6\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Bid Submitted\u0022,\r\n      \u0022message\u0022: \u0022A new bid (BID-2025-0004) has been submitted for tender TND-2025-0002\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-11T17:49:02.1510957\u0022,\r\n      \u0022isRead\u0022: true,\r\n      \u0022actionUrl\u0022: \u0022/tenders/75e33134-6794-42e5-be3e-4aaf3f3f3537/bids/06a536ec-6da5-48c1-88f3-c616fec5d9ef\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-18T17:49:02.0139671\u0022,\r\n      \u0022entityType\u0022: \u0022TenderBid\u0022,\r\n      \u0022entityId\u0022: \u002206a536ec-6da5-48c1-88f3-c616fec5d9ef\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u00223d79b0cc-92e7-442a-8fd3-a127f8265c39\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Bid Submitted\u0022,\r\n      \u0022message\u0022: \u0022A new bid (BID-2025-0003) has been submitted for tender TND-2025-0001\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-03T08:11:59.7188041\u0022,\r\n      \u0022isRead\u0022: false,\r\n      \u0022actionUrl\u0022: \u0022/tenders/cbddd3f7-6c09-43b2-9c19-d55e7324ac4b/bids/a4263945-4f90-4701-b077-08be635158ea\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-10T08:11:59.7105974\u0022,\r\n      \u0022entityType\u0022: \u0022TenderBid\u0022,\r\n      \u0022entityId\u0022: \u0022a4263945-4f90-4701-b077-08be635158ea\u0022\r\n    },\r\n    {\r\n      \u0022id\u0022: \u0022097242c8-55ad-4c99-b514-3febd62e4417\u0022,\r\n      \u0022type\u0022: \u0022InApp\u0022,\r\n      \u0022title\u0022: \u0022New Clarification Request\u0022,\r\n      \u0022message\u0022: \u0022A new clarification request has been received for tender TND-2025-0001.\u0022,\r\n      \u0022severity\u0022: \u0022Normal\u0022,\r\n      \u0022timestamp\u0022: \u00222025-12-03T02:04:27.1912647\u0022,\r\n      \u0022isRead\u0022: false,\r\n      \u0022actionUrl\u0022: \u0022/tenders/cbddd3f7-6c09-43b2-9c19-d55e7324ac4b/clarifications/5fa5b74a-2602-41d9-84f1-fc13c847c3e3\u0022,\r\n      \u0022metadata\u0022: null,\r\n      \u0022iconUrl\u0022: null,\r\n      \u0022expiresAt\u0022: \u00222025-12-10T02:04:27.1783097\u0022,\r\n      \u0022entityType\u0022: \u0022TenderClarification\u0022,\r\n      \u0022entityId\u0022: \u00225fa5b74a-2602-41d9-84f1-fc13c847c3e3\u0022\r\n    }\r\n  ],\r\n  \u0022totalCount\u0022: 7,\r\n  \u0022page\u0022: 1,\r\n  \u0022pageSize\u0022: 10,\r\n  \u0022totalPages\u0022: 1,\r\n  \u0022hasNext\u0022: false,\r\n  \u0022hasPrevious\u0022: false\r\n}",
+    "elapsedMilliseconds": 82
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOML:00000006",
+    "timestamp": "2025-12-17T01:12:26.1094644Z",
+    "method": "GET",
+    "path": "/api/settings/security",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Authorization": "[REDACTED]",
+      "Content-Type": "application/json",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": "application/json",
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOML:00000006",
+    "timestamp": "2025-12-17T01:12:26.3092416Z",
+    "statusCode": 200,
+    "statusDescription": "OK",
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": "application/json; charset=utf-8",
+    "contentLength": 838,
+    "body": "{\r\n  \u0022passwordMinLength\u0022: 8,\r\n  \u0022passwordRequireUppercase\u0022: true,\r\n  \u0022passwordRequireLowercase\u0022: true,\r\n  \u0022passwordRequireDigits\u0022: true,\r\n  \u0022passwordRequireSpecialChars\u0022: true,\r\n  \u0022passwordMaxAge\u0022: 90,\r\n  \u0022passwordPreventReuse\u0022: 5,\r\n  \u0022sessionTimeoutMinutes\u0022: 30,\r\n  \u0022jwtTokenLifetimeMinutes\u0022: 60,\r\n  \u0022preventConcurrentLogin\u0022: \u0022Disabled\u0022,\r\n  \u0022maxFailedLoginAttempts\u0022: 5,\r\n  \u0022accountLockoutMinutes\u0022: 30,\r\n  \u0022rateLimitLoginMaxAttempts\u0022: 5,\r\n  \u0022rateLimitLoginWindowMinutes\u0022: 15,\r\n  \u0022rateLimitLoginBlockDurationMinutes\u0022: 30,\r\n  \u0022captchaEnabled\u0022: false,\r\n  \u0022captchaProvider\u0022: \u0022recaptcha\u0022,\r\n  \u0022recaptchaSiteKey\u0022: null,\r\n  \u0022recaptchaSecretKey\u0022: null,\r\n  \u0022hCaptchaSiteKey\u0022: null,\r\n  \u0022hCaptchaSecretKey\u0022: null,\r\n  \u0022termsOfServiceUrl\u0022: \u0022https://rhema-systems.com.gh/disclaimer/\u0022,\r\n  \u0022privacyPolicyUrl\u0022: \u0022https://rhema-systems.com.gh/disclaimer/\u0022\r\n}",
+    "elapsedMilliseconds": 199
+  }
+}
+{
+  "request": {
+    "requestId": "0HNHT157LFOMK:00000006",
+    "timestamp": "2025-12-17T01:12:25.9148444Z",
+    "method": "GET",
+    "path": "/api/auth/me",
+    "queryString": "",
+    "headers": {
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Host": "localhost:5000",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Authorization": "[REDACTED]",
+      "Content-Type": "application/json",
+      "Origin": "http://localhost:3000",
+      "Referer": "http://localhost:3000/",
+      "DNT": "1",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "Priority": "u=4"
+    },
+    "contentType": "application/json",
+    "contentLength": null,
+    "body": null,
+    "remoteIp": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+    "user": "Anonymous"
+  },
+  "response": {
+    "requestId": "0HNHT157LFOMK:00000006",
+    "timestamp": "2025-12-17T01:12:26.7076776Z",
+    "statusCode": 200,
+    "statusDescription": "OK",
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Security-Policy": "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-inline\u0027 \u0027unsafe-eval\u0027 https:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https:; img-src \u0027self\u0027 data: https:; font-src \u0027self\u0027 https:; connect-src \u0027self\u0027 https: wss: ws:; frame-ancestors \u0027none\u0027; base-uri \u0027self\u0027; form-action \u0027self\u0027",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      "X-Permitted-Cross-Domain-Policies": "none"
+    },
+    "contentType": "application/json; charset=utf-8",
+    "contentLength": 661,
+    "body": "{\r\n  \u0022id\u0022: \u00228ca438b2-2988-4a7f-5d95-08de2dfe399d\u0022,\r\n  \u0022username\u0022: \u0022admin\u0022,\r\n  \u0022email\u0022: \u0022admin@default.com\u0022,\r\n  \u0022firstName\u0022: \u0022System\u0022,\r\n  \u0022lastName\u0022: \u0022Administrator\u0022,\r\n  \u0022phoneNumber\u0022: null,\r\n  \u0022currentTenantId\u0022: \u002200000000-0000-0000-0000-000000000001\u0022,\r\n  \u0022currentTenantCode\u0022: \u0022DEFAULT\u0022,\r\n  \u0022currentTenantName\u0022: \u0022Default Tenant\u0022,\r\n  \u0022accessibleTenants\u0022: [\r\n    {\r\n      \u0022tenantId\u0022: \u002200000000-0000-0000-0000-000000000001\u0022,\r\n      \u0022tenantCode\u0022: \u0022DEFAULT\u0022,\r\n      \u0022tenantName\u0022: \u0022Default Tenant\u0022,\r\n      \u0022isDefault\u0022: true,\r\n      \u0022accessLevel\u0022: \u0022Standard\u0022\r\n    }\r\n  ],\r\n  \u0022isActive\u0022: true,\r\n  \u0022roles\u0022: [\r\n    \u0022SuperAdmin\u0022\r\n  ],\r\n  \u0022authenticationProvider\u0022: \u0022LDAP\u0022\r\n}",
+    "elapsedMilliseconds": 792
+  }
+}

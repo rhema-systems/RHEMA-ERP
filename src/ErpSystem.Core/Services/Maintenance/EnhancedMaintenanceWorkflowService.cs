@@ -80,9 +80,9 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
             // Prepare workflow context data
             var workflowData = await PrepareWorkflowContextAsync(workOrder);
 
-        // Start the workflow - using existing interface (temporarily stubbed)
-        var workflowResult = await StartWorkflowWithExistingEngineAsync(
-            workflowKey, workOrder.Id, Guid.Parse(userId), workflowData);
+            // Start the workflow - using existing interface (temporarily stubbed)
+            var workflowResult = await StartWorkflowWithExistingEngineAsync(
+                workflowKey, workOrder.Id, Guid.Parse(userId), workflowData);
 
             if (workflowResult.Success)
             {
@@ -90,7 +90,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
                 result.InitialWorkflowStatus = workflowResult.Status;
                 result.CurrentStepId = null; // TODO: Get from workflow result
                 result.SuccessMessages.Add("Work order created and workflow initiated successfully");
-                
+
                 // Apply initial workflow decisions
                 await ApplyInitialWorkflowDecisionsAsync(workOrder, workflowResult, workflowData);
             }
@@ -100,7 +100,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
                 result.WorkflowErrors = workflowResult.Errors?.ToList() ?? new List<WorkflowExecutionError>();
             }
 
-            _logger.LogInformation("Work order {WorkOrderId} created with workflow {WorkflowKey}", 
+            _logger.LogInformation("Work order {WorkOrderId} created with workflow {WorkflowKey}",
                 workOrder.Id, workflowKey);
 
             return result;
@@ -120,15 +120,11 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
     {
         try
         {
-            _logger.LogInformation("Advancing workflow for work order {WorkOrderId} with action {StepAction}", 
+            _logger.LogInformation("Advancing workflow for work order {WorkOrderId} with action {StepAction}",
                 workOrderId, stepAction);
 
             var userId = _currentUserService.UserId;
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {workOrderId} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
             var result = new EnhancedWorkflowStepResult
             {
                 WorkOrderId = workOrderId,
@@ -181,7 +177,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
             // Process workflow execution result
             result.WorkflowExecutionResult = workflowResult;
             result.Success = workflowResult.Success;
-            
+
             if (workflowResult.Success)
             {
                 result.NewWorkflowStatus = workflowResult.Status;
@@ -197,7 +193,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
                 result.WorkflowErrors = workflowResult.Errors?.ToList() ?? new List<WorkflowExecutionError>();
             }
 
-            _logger.LogInformation("Workflow step {StepAction} for work order {WorkOrderId} executed. Success: {Success}", 
+            _logger.LogInformation("Workflow step {StepAction} for work order {WorkOrderId} executed. Success: {Success}",
                 stepAction, workOrderId, result.Success);
 
             return result;
@@ -216,12 +212,9 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
     {
         try
         {
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {workOrderId} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
             var workflowStatus = await GetWorkflowStatusAsync(workOrderId.ToString(), "WorkOrder");
-            
+
             var result = new EnhancedMaintenanceWorkflowStatusDto
             {
                 WorkOrderId = workOrderId,
@@ -235,7 +228,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
 
             if (workflowStatus != null)
             {
-        result.WorkflowInstanceId = workflowStatus?.WorkflowInstanceId;
+                result.WorkflowInstanceId = workflowStatus?.WorkflowInstanceId;
                 result.WorkflowName = workflowStatus.WorkflowName;
                 result.WorkflowStatus = workflowStatus.Status;
                 result.StartedDate = workflowStatus.StartedDate;
@@ -303,7 +296,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
 
             result.SuccessMessages.Add($"Successfully configured {result.ConfiguredWorkflows.Count} maintenance workflow templates");
 
-            _logger.LogInformation("Configured {Count} maintenance workflow templates for tenant {TenantId}", 
+            _logger.LogInformation("Configured {Count} maintenance workflow templates for tenant {TenantId}",
                 result.ConfiguredWorkflows.Count, tenantId);
 
             return result;
@@ -323,27 +316,27 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
     {
         // Load full work order details
         var asset = await _assetRepository.GetByIdAsync(workOrder.AssetId);
-        
+
         // Determine workflow based on work order and asset characteristics
         if (workOrder.PriorityLevel?.Level == 1) // Emergency priority
         {
             return EMERGENCY_MAINTENANCE_WORKFLOW;
         }
 
-        if (workOrder.MaintenanceType?.Name?.ToLower().Contains("safety") == true ||
+        if (workOrder.MaintenanceType?.Name?.ToLower().Contains("safety", StringComparison.CurrentCultureIgnoreCase) == true ||
             asset?.Criticality == AssetCriticality.Critical)
         {
             return SAFETY_INSPECTION_WORKFLOW;
         }
 
-        if (workOrder.MaintenanceType?.Name?.ToLower().Contains("preventive") == true ||
-            workOrder.MaintenanceType?.Name?.ToLower().Contains("scheduled") == true)
+        if (workOrder.MaintenanceType?.Name?.ToLower().Contains("preventive", StringComparison.CurrentCultureIgnoreCase) == true ||
+            workOrder.MaintenanceType?.Name?.ToLower().Contains("scheduled", StringComparison.CurrentCultureIgnoreCase) == true)
         {
             return PREVENTIVE_MAINTENANCE_WORKFLOW;
         }
 
-        if (workOrder.MaintenanceType?.Name?.ToLower().Contains("corrective") == true ||
-            workOrder.MaintenanceType?.Name?.ToLower().Contains("breakdown") == true)
+        if (workOrder.MaintenanceType?.Name?.ToLower().Contains("corrective", StringComparison.CurrentCultureIgnoreCase) == true ||
+            workOrder.MaintenanceType?.Name?.ToLower().Contains("breakdown", StringComparison.CurrentCultureIgnoreCase) == true)
         {
             return CORRECTIVE_MAINTENANCE_WORKFLOW;
         }
@@ -355,7 +348,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
     private async Task<Dictionary<string, object>> PrepareWorkflowContextAsync(WorkOrder workOrder)
     {
         var asset = await _assetRepository.GetByIdAsync(workOrder.AssetId);
-        
+
         return new Dictionary<string, object>
         {
             ["workOrderId"] = workOrder.Id,
@@ -439,7 +432,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
 
     #region Private Workflow Template Creation Methods
 
-    private async Task<CreateWorkflowDefinitionDto> CreateWorkOrderCreationWorkflowTemplateAsync()
+    private static async Task<CreateWorkflowDefinitionDto> CreateWorkOrderCreationWorkflowTemplateAsync()
     {
         return new CreateWorkflowDefinitionDto
         {
@@ -487,7 +480,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
         };
     }
 
-    private async Task<CreateWorkflowDefinitionDto> CreatePreventiveMaintenanceWorkflowTemplateAsync()
+    private static async Task<CreateWorkflowDefinitionDto> CreatePreventiveMaintenanceWorkflowTemplateAsync()
     {
         return new CreateWorkflowDefinitionDto
         {
@@ -552,7 +545,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
         };
     }
 
-    private async Task<CreateWorkflowDefinitionDto> CreateEmergencyMaintenanceWorkflowTemplateAsync()
+    private static async Task<CreateWorkflowDefinitionDto> CreateEmergencyMaintenanceWorkflowTemplateAsync()
     {
         return new CreateWorkflowDefinitionDto
         {
@@ -624,7 +617,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
         };
     }
 
-    private async Task<CreateWorkflowDefinitionDto> CreateCorrectiveMaintenanceWorkflowTemplateAsync()
+    private static async Task<CreateWorkflowDefinitionDto> CreateCorrectiveMaintenanceWorkflowTemplateAsync()
     {
         return new CreateWorkflowDefinitionDto
         {
@@ -698,7 +691,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
         };
     }
 
-    private async Task<CreateWorkflowDefinitionDto> CreateSafetyInspectionWorkflowTemplateAsync()
+    private static async Task<CreateWorkflowDefinitionDto> CreateSafetyInspectionWorkflowTemplateAsync()
     {
         return new CreateWorkflowDefinitionDto
         {
@@ -760,7 +753,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
 
     #region Private Support Methods
 
-    private async Task<WorkOrder> CreateBasicWorkOrderAsync(CreateWorkOrderDto createDto)
+    private static async Task<WorkOrder> CreateBasicWorkOrderAsync(CreateWorkOrderDto createDto)
     {
         // This would typically call the existing WorkOrderService or repository
         // For now, return a mock work order - in real implementation, integrate with existing service
@@ -805,10 +798,10 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
             // Handle workflow completion
             await HandleWorkflowCompletionAsync(workOrder);
         }
-        else if (executionData.ContainsKey("workStatus"))
+        else if (executionData.TryGetValue("workStatus", out object? value))
         {
             // Update work order status based on workflow step
-            var newStatus = executionData["workStatus"].ToString();
+            var newStatus = value.ToString();
             if (!string.IsNullOrEmpty(newStatus) && newStatus != workOrder.Status)
             {
                 workOrder.Status = newStatus;
@@ -823,11 +816,11 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
         workOrder.Status = "Completed";
         workOrder.ActualCompletionDate = DateTime.UtcNow;
         await _workOrderRepository.UpdateAsync(workOrder);
-        
+
         _logger.LogInformation("Work order {WorkOrderId} workflow completed", workOrder.Id);
     }
 
-    private async Task<Dictionary<string, object>> EnhanceStepExecutionDataAsync(
+    private static async Task<Dictionary<string, object>> EnhanceStepExecutionDataAsync(
         WorkOrder workOrder, Dictionary<string, object> stepData, string stepAction)
     {
         stepData["workOrderId"] = workOrder.Id;
@@ -838,14 +831,14 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
         return stepData;
     }
 
-    private async Task<bool> RequiresQualityControlAsync(WorkOrder workOrder)
+    private static async Task<bool> RequiresQualityControlAsync(WorkOrder workOrder)
     {
         // Determine if quality control is required based on work order characteristics
-        return workOrder.MaintenanceType?.Name?.ToLower().Contains("safety") == true ||
+        return workOrder.MaintenanceType?.Name?.ToLower().Contains("safety", StringComparison.CurrentCultureIgnoreCase) == true ||
                workOrder.PriorityLevel?.Level <= 2;
     }
 
-    private async Task<bool> RequiresManagerApprovalAsync(WorkOrder workOrder)
+    private static async Task<bool> RequiresManagerApprovalAsync(WorkOrder workOrder)
     {
         // Determine if manager approval is required
         return workOrder.EstimatedCost > 5000 || workOrder.EstimatedHours > 16;
@@ -856,14 +849,16 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
         // Determine if safety inspection is required
         var asset = await _assetRepository.GetByIdAsync(workOrder.AssetId);
         return asset?.Criticality == AssetCriticality.Critical ||
-               workOrder.MaintenanceType?.Name?.ToLower().Contains("safety") == true;
+               workOrder.MaintenanceType?.Name?.ToLower().Contains("safety", StringComparison.CurrentCultureIgnoreCase) == true;
     }
 
-    private async Task<TimeSpan?> EstimateCompletionTimeAsync(WorkOrder workOrder, WorkflowStatusDto workflowStatus)
+    private static async Task<TimeSpan?> EstimateCompletionTimeAsync(WorkOrder workOrder, WorkflowStatusDto workflowStatus)
     {
         // Calculate estimated completion time based on workflow progress and work order characteristics
         if (workflowStatus.Status == WorkflowInstanceStatus.Completed)
+        {
             return TimeSpan.Zero;
+        }
 
         var remainingHours = workOrder.EstimatedHours == 0 ? 4.0 : workOrder.EstimatedHours;
         var progressPercent = workflowStatus.Progress?.PercentComplete ?? 0;
@@ -885,10 +880,10 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
             // In the future, we need to either:
             // 1. Extend IWorkflowEngine to support the methods we need, or
             // 2. Create a proper workflow engine service that wraps the existing one
-            
+
             var workflowInstance = await _workflowEngine.StartWorkflowAsync(
                 workflowKey, entityId, userId, workflowData);
-            
+
             return new WorkflowExecutionResult
             {
                 Success = true,
@@ -914,19 +909,19 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
         }
     }
 
-    private async Task<WorkflowInstance?> GetActiveWorkflowInstanceAsync(string entityId, string entityType)
+    private static async Task<WorkflowInstance?> GetActiveWorkflowInstanceAsync(string entityId, string entityType)
     {
         // TODO: Implement proper lookup using IWorkflowInstanceService
         return null; // Temporary stub
     }
 
-    private async Task<WorkflowStatusDto?> GetWorkflowStatusAsync(string entityId, string entityType)
+    private static async Task<WorkflowStatusDto?> GetWorkflowStatusAsync(string entityId, string entityType)
     {
         // TODO: Implement proper lookup using existing workflow services
         return null; // Temporary stub
     }
 
-    private async Task<WorkflowExecutionResult> ExecuteWorkflowStepAsync(
+    private static async Task<WorkflowExecutionResult> ExecuteWorkflowStepAsync(
         Guid workflowInstanceId, string stepAction, Dictionary<string, object> executionData, string userId)
     {
         // TODO: Implement proper step execution using existing workflow services

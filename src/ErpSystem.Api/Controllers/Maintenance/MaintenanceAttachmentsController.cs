@@ -1,10 +1,10 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
+using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Models;
-using ErpSystem.Core.DTOs.Maintenance;
-using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using SixLabors.ImageSharp.Processing;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
@@ -50,14 +50,18 @@ public class MaintenanceAttachmentsController : ControllerBase
         try
         {
             if (!files.Any())
+            {
                 return BadRequest("No files provided");
+            }
 
             var allowedTypes = new[] { "WorkOrder", "Asset", "Inspection" };
             if (!allowedTypes.Contains(entityType, StringComparer.OrdinalIgnoreCase))
+            {
                 return BadRequest($"Entity type must be one of: {string.Join(", ", allowedTypes)}");
+            }
 
             var maxFileSize = _configuration.GetValue<long>("FileUpload:MaxFileSizeBytes", 52428800); // 50MB
-            var allowedExtensions = _configuration.GetSection("FileUpload:AllowedExtensions").Get<string[]>() 
+            var allowedExtensions = _configuration.GetSection("FileUpload:AllowedExtensions").Get<string[]>()
                                   ?? new[] { ".jpg", ".jpeg", ".png", ".pdf", ".doc", ".docx", ".xlsx" };
 
             var uploadedAttachments = new List<MaintenanceAttachmentDto>();
@@ -80,15 +84,15 @@ public class MaintenanceAttachmentsController : ControllerBase
                 // Upload file to storage
                 var containerName = GetContainerName(entityType);
                 var filePath = $"{entityId}/{Guid.NewGuid()}{extension}";
-                
+
                 using var fileStream = file.OpenReadStream();
                 var uploadedPath = await _storageService.UploadFileAsync(fileStream, file.FileName, filePath);
-                
-                var uploadResult = new StorageResult 
-                { 
-                    Success = !string.IsNullOrEmpty(uploadedPath), 
+
+                var uploadResult = new StorageResult
+                {
+                    Success = !string.IsNullOrEmpty(uploadedPath),
                     Url = uploadedPath,
-                    StoragePath = filePath 
+                    StoragePath = filePath
                 };
 
                 if (!uploadResult.Success)
@@ -155,7 +159,7 @@ public class MaintenanceAttachmentsController : ControllerBase
                 };
                 uploadedAttachments.Add(controllerAttachmentDto);
 
-                _logger.LogInformation("File uploaded successfully: {FileName} for {EntityType} {EntityId}", 
+                _logger.LogInformation("File uploaded successfully: {FileName} for {EntityType} {EntityId}",
                     file.FileName, entityType, entityId);
             }
 
@@ -173,7 +177,7 @@ public class MaintenanceAttachmentsController : ControllerBase
     /// </summary>
     [HttpGet("{entityType}/{entityId:guid}")]
     public async Task<ActionResult<IEnumerable<MaintenanceAttachmentDto>>> GetAttachments(
-        string entityType, 
+        string entityType,
         Guid entityId,
         [FromQuery] string? category = null,
         [FromQuery] string? attachmentType = null)
@@ -200,7 +204,9 @@ public class MaintenanceAttachmentsController : ControllerBase
         {
             var attachment = await _attachmentService.GetAttachmentByIdAsync(id);
             if (attachment == null)
+            {
                 return NotFound($"Attachment with ID {id} not found");
+            }
 
             return Ok(attachment);
         }
@@ -221,7 +227,9 @@ public class MaintenanceAttachmentsController : ControllerBase
         {
             var attachment = await _attachmentService.GetAttachmentByIdAsync(id);
             if (attachment == null)
+            {
                 return NotFound($"Attachment with ID {id} not found");
+            }
 
             // Log access
             if (Guid.TryParse(_currentUserService.UserId, out var downloadUserId))
@@ -256,10 +264,14 @@ public class MaintenanceAttachmentsController : ControllerBase
         {
             var attachment = await _attachmentService.GetAttachmentByIdAsync(id);
             if (attachment == null)
+            {
                 return NotFound($"Attachment with ID {id} not found");
+            }
 
             if (string.IsNullOrEmpty(attachment.ThumbnailPath))
+            {
                 return NotFound("Thumbnail not available for this attachment");
+            }
 
             // Log access
             if (Guid.TryParse(_currentUserService.UserId, out var previewUserId))
@@ -292,7 +304,9 @@ public class MaintenanceAttachmentsController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var attachment = await _attachmentService.UpdateAttachmentAsync(id, updateDto);
             return Ok(attachment);
@@ -318,7 +332,9 @@ public class MaintenanceAttachmentsController : ControllerBase
         {
             var attachment = await _attachmentService.GetAttachmentByIdAsync(id);
             if (attachment == null)
+            {
                 return NotFound($"Attachment with ID {id} not found");
+            }
 
             // Delete file from storage
             await _storageService.DeleteFileAsync(attachment.FilePath);
@@ -411,13 +427,13 @@ public class MaintenanceAttachmentsController : ControllerBase
         return contentType.StartsWith("image/");
     }
 
-    private async Task<ImageMetadata> ExtractImageMetadata(IFormFile file)
+    private static async Task<ImageMetadata> ExtractImageMetadata(IFormFile file)
     {
         try
         {
             using var stream = file.OpenReadStream();
             using var image = await SixLabors.ImageSharp.Image.LoadAsync(stream);
-            
+
             return new ImageMetadata
             {
                 Width = image.Width,
@@ -436,7 +452,7 @@ public class MaintenanceAttachmentsController : ControllerBase
         {
             using var stream = file.OpenReadStream();
             using var image = await SixLabors.ImageSharp.Image.LoadAsync(stream);
-            
+
             // Resize to max 300x300 while maintaining aspect ratio
             image.Mutate(x => x.Resize(new SixLabors.ImageSharp.Processing.ResizeOptions
             {
@@ -449,7 +465,7 @@ public class MaintenanceAttachmentsController : ControllerBase
             thumbnailStream.Position = 0;
 
             var thumbnailPath = originalPath.Replace(Path.GetExtension(originalPath), "_thumb.jpg");
-            
+
             // Create IFormFile for thumbnail
             var thumbnailFile = new FormFile(thumbnailStream, 0, thumbnailStream.Length, "thumbnail", "thumbnail.jpg")
             {
@@ -459,12 +475,12 @@ public class MaintenanceAttachmentsController : ControllerBase
 
             thumbnailStream.Position = 0;
             var uploadedThumbnailPath = await _storageService.UploadFileAsync(thumbnailStream, "thumbnail.jpg", thumbnailPath);
-            
-            return new StorageResult 
-            { 
-                Success = !string.IsNullOrEmpty(uploadedThumbnailPath), 
+
+            return new StorageResult
+            {
+                Success = !string.IsNullOrEmpty(uploadedThumbnailPath),
                 Url = uploadedThumbnailPath,
-                StoragePath = thumbnailPath 
+                StoragePath = thumbnailPath
             };
         }
         catch (Exception ex)
@@ -481,25 +497,25 @@ public class CreateMaintenanceAttachmentDto
 {
     [Required]
     public string FileName { get; set; } = string.Empty;
-    
+
     [Required]
     public string FilePath { get; set; } = string.Empty;
-    
+
     [Required]
     public string ContentType { get; set; } = string.Empty;
-    
+
     public long FileSizeBytes { get; set; }
     public string? Description { get; set; }
-    
+
     [Required]
     public string AttachmentType { get; set; } = string.Empty;
-    
+
     [Required]
     public string EntityType { get; set; } = string.Empty;
-    
+
     [Required]
     public Guid EntityId { get; set; }
-    
+
     public bool IsMainImage { get; set; }
     public int? ImageWidth { get; set; }
     public int? ImageHeight { get; set; }

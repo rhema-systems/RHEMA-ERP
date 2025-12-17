@@ -20,7 +20,7 @@ public class WorkflowDefinitionAdminDto
     public DateTime? LastModifiedDate { get; set; }
     public string CreatedByName { get; set; } = string.Empty;
     public string? LastModifiedByName { get; set; }
-    
+
     // Additional administrative properties
     public int StepCount { get; set; }
     public int ActiveInstancesCount { get; set; }
@@ -35,16 +35,16 @@ public class CreateWorkflowDefinitionAdminDto
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string? Description { get; set; }
-    
+
     [Required]
     [StringLength(50)]
     public string EntityType { get; set; } = string.Empty;
-    
+
     public bool IsActive { get; set; } = true;
-    
+
     public string? Configuration { get; set; }
 }
 
@@ -56,12 +56,12 @@ public class UpdateWorkflowDefinitionAdminDto
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string? Description { get; set; }
-    
+
     public bool IsActive { get; set; }
-    
+
     public string? Configuration { get; set; }
 }
 
@@ -85,7 +85,7 @@ public class WorkflowStepAdminDto
     public double? EstimatedHours { get; set; }
     public string? Configuration { get; set; }
     public DateTime CreatedDate { get; set; }
-    
+
     // Additional administrative properties
     public List<WorkflowTransitionAdminDto> OutgoingTransitions { get; set; } = new();
     public List<WorkflowTransitionAdminDto> IncomingTransitions { get; set; } = new();
@@ -98,27 +98,27 @@ public class CreateWorkflowStepAdminDto
 {
     [Required]
     public Guid WorkflowDefinitionId { get; set; }
-    
+
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string? Description { get; set; }
-    
+
     [Required]
     [StringLength(50)]
     public string StepType { get; set; } = string.Empty;
-    
+
     public int Order { get; set; }
-    
+
     public bool IsRequired { get; set; } = true;
-    
+
     [StringLength(100)]
     public string? RequiredRole { get; set; }
-    
+
     public double? EstimatedHours { get; set; }
-    
+
     public string? Configuration { get; set; }
 }
 
@@ -130,23 +130,23 @@ public class UpdateWorkflowStepDto
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string? Description { get; set; }
-    
+
     [Required]
     [StringLength(50)]
     public string StepType { get; set; } = string.Empty;
-    
+
     public int Order { get; set; }
-    
+
     public bool IsRequired { get; set; }
-    
+
     [StringLength(100)]
     public string? RequiredRole { get; set; }
-    
+
     public double? EstimatedHours { get; set; }
-    
+
     public string? Configuration { get; set; }
 }
 
@@ -168,7 +168,7 @@ public class WorkflowTransitionAdminDto
     public bool IsDefault { get; set; }
     public int Priority { get; set; }
     public DateTime CreatedDate { get; set; }
-    
+
     // Additional navigation properties for administration
     public string FromStepName { get; set; } = string.Empty;
     public string ToStepName { get; set; } = string.Empty;
@@ -181,21 +181,21 @@ public class CreateWorkflowTransitionAdminDto
 {
     [Required]
     public Guid FromStepId { get; set; }
-    
+
     [Required]
     public Guid ToStepId { get; set; }
-    
+
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string? Description { get; set; }
-    
+
     public string? Condition { get; set; }
-    
+
     public bool IsDefault { get; set; } = false;
-    
+
     public int Priority { get; set; } = 0;
 }
 
@@ -207,14 +207,14 @@ public class UpdateWorkflowTransitionDto
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string? Description { get; set; }
-    
+
     public string? Condition { get; set; }
-    
+
     public bool IsDefault { get; set; }
-    
+
     public int Priority { get; set; }
 }
 
@@ -317,12 +317,12 @@ public class MaintenanceWorkflowConfigDto
     public string InspectionApprovalWorkflow { get; set; } = string.Empty;
     public string ContractorApprovalWorkflow { get; set; } = string.Empty;
     public string ExpenseApprovalWorkflow { get; set; } = string.Empty;
-    
+
     public bool AutoStartWorkOrderApproval { get; set; } = true;
     public bool RequireInspectionApproval { get; set; } = true;
     public decimal ContractorApprovalThreshold { get; set; } = 1000;
     public decimal ExpenseApprovalThreshold { get; set; } = 500;
-    
+
     public string DefaultApprovalRole { get; set; } = "MaintenanceManager";
     public string EscalationRole { get; set; } = "MaintenanceDirector";
     public int ApprovalTimeoutHours { get; set; } = 48;
@@ -337,12 +337,12 @@ public class UpdateMaintenanceWorkflowConfigDto
     public string? InspectionApprovalWorkflow { get; set; }
     public string? ContractorApprovalWorkflow { get; set; }
     public string? ExpenseApprovalWorkflow { get; set; }
-    
+
     public bool AutoStartWorkOrderApproval { get; set; }
     public bool RequireInspectionApproval { get; set; }
     public decimal ContractorApprovalThreshold { get; set; }
     public decimal ExpenseApprovalThreshold { get; set; }
-    
+
     public string DefaultApprovalRole { get; set; } = string.Empty;
     public string EscalationRole { get; set; } = string.Empty;
     public int ApprovalTimeoutHours { get; set; }

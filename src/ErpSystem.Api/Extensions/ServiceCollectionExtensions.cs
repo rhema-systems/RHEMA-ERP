@@ -1,27 +1,27 @@
-using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi.Models;
 using System.Text;
-using Serilog;
-using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
+using ErpSystem.Api.HealthChecks;
+using ErpSystem.Api.Services;
 using ErpSystem.Core.Entities;
-using ErpSystem.Core.Services;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Models;
+using ErpSystem.Core.Services;
 using ErpSystem.Data;
 using ErpSystem.Data.Repositories;
-using ErpSystem.Web.Services;
-using ErpSystem.Web.Middleware;
-using ErpSystem.Web.HealthChecks;
 using ErpSystem.Web.Configuration;
-using ErpSystem.Api.HealthChecks;
+using ErpSystem.Web.HealthChecks;
+using ErpSystem.Web.Middleware;
+using ErpSystem.Web.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using Serilog;
 using StackExchange.Redis;
-using ErpSystem.Api.Services;
-using ErpSystem.Core.Models;
 using static ErpSystem.Core.Services.StorageServiceExtensions;
 
 namespace ErpSystem.Api.Extensions
@@ -190,6 +190,55 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IBusinessPartnerRegistrationDocumentRepository, ErpSystem.Data.Repositories.Procurement.BusinessPartnerRegistrationDocumentRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IBusinessPartnerRegistrationStatusHistoryRepository, ErpSystem.Data.Repositories.Procurement.BusinessPartnerRegistrationStatusHistoryRepository>();
 
+            // Performance Tracking repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierPerformanceMetricRepository, ErpSystem.Data.Repositories.Procurement.SupplierPerformanceMetricRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IQualityIncidentRepository, ErpSystem.Data.Repositories.Procurement.QualityIncidentRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPerformanceReviewRepository, ErpSystem.Data.Repositories.Procurement.PerformanceReviewRepository>();
+
+            // Blacklist Appeal repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IBlacklistAppealRepository, ErpSystem.Data.Repositories.Procurement.BlacklistAppealRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IBlacklistHistoryRepository, ErpSystem.Data.Repositories.Procurement.BlacklistHistoryRepository>();
+
+            // Tender Management repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderRepository, ErpSystem.Data.Repositories.Procurement.TenderRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderItemRepository, ErpSystem.Data.Repositories.Procurement.TenderItemRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderDocumentRepository, ErpSystem.Data.Repositories.Procurement.TenderDocumentRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderInvitationRepository, ErpSystem.Data.Repositories.Procurement.TenderInvitationRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderBidRepository, ErpSystem.Data.Repositories.Procurement.TenderBidRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderBidItemRepository, ErpSystem.Data.Repositories.Procurement.TenderBidItemRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderBidDocumentRepository, ErpSystem.Data.Repositories.Procurement.TenderBidDocumentRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderFeeRepository, ErpSystem.Data.Repositories.Procurement.TenderFeeRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderPaymentRepository, ErpSystem.Data.Repositories.Procurement.TenderPaymentRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderEvaluatorRepository, ErpSystem.Data.Repositories.Procurement.TenderEvaluatorRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderEvaluationRepository, ErpSystem.Data.Repositories.Procurement.TenderEvaluationRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderInterviewRepository, ErpSystem.Data.Repositories.Procurement.TenderInterviewRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderClarificationRepository, ErpSystem.Data.Repositories.Procurement.TenderClarificationRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderRevisionRepository, ErpSystem.Data.Repositories.Procurement.TenderRevisionRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderTemplateRepository, ErpSystem.Data.Repositories.Procurement.TenderTemplateRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderViewLogRepository, ErpSystem.Data.Repositories.Procurement.TenderViewLogRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderAwardRepository, ErpSystem.Data.Repositories.Procurement.TenderAwardRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IEvaluationCriterionRepository, ErpSystem.Data.Repositories.Procurement.EvaluationCriterionRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IEvaluationTemplateRepository, ErpSystem.Data.Repositories.Procurement.EvaluationTemplateRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IEvaluationTemplateCriterionRepository, ErpSystem.Data.Repositories.Procurement.EvaluationTemplateCriterionRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IBusinessPartnerUserRepository, ErpSystem.Data.Repositories.Procurement.BusinessPartnerUserRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderAssignmentRepository, ErpSystem.Data.Repositories.Procurement.TenderAssignmentRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderDocumentTypeRepository, ErpSystem.Data.Repositories.Procurement.TenderDocumentTypeRepository>();
+
+            // Procurement Planning repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPlanRepository, ErpSystem.Data.Repositories.Procurement.ProcurementPlanRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPlanItemRepository, ErpSystem.Data.Repositories.Procurement.ProcurementPlanItemRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPlanItemSupplierRepository, ErpSystem.Data.Repositories.Procurement.ProcurementPlanItemSupplierRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementBudgetRepository, ErpSystem.Data.Repositories.Procurement.ProcurementBudgetRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementBudgetAllocationRepository, ErpSystem.Data.Repositories.Procurement.ProcurementBudgetAllocationRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementBudgetRevisionRepository, ErpSystem.Data.Repositories.Procurement.ProcurementBudgetRevisionRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementScheduleRepository, ErpSystem.Data.Repositories.Procurement.ProcurementScheduleRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IMarketAnalysisRepository, ErpSystem.Data.Repositories.Procurement.MarketAnalysisRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPriceHistoryRepository, ErpSystem.Data.Repositories.Procurement.PriceHistoryRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierConsolidationRepository, ErpSystem.Data.Repositories.Procurement.SupplierConsolidationRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IEmergencyProcurementPlanRepository, ErpSystem.Data.Repositories.Procurement.EmergencyProcurementPlanRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IEmergencyProcurementItemRepository, ErpSystem.Data.Repositories.Procurement.EmergencyProcurementItemRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IEmergencySupplierRepository, ErpSystem.Data.Repositories.Procurement.EmergencySupplierRepository>();
+
             // Maintenance repositories
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetRepository, ErpSystem.Data.Repositories.Maintenance.MaintenanceAssetRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetCategoryRepository, ErpSystem.Data.Repositories.Maintenance.MaintenanceAssetCategoryRepository>();
@@ -322,6 +371,7 @@ namespace ErpSystem.Api.Extensions
             services.AddHttpContextAccessor();
             services.AddScoped<ICurrentUserService, ErpSystem.Api.Services.CurrentUserService>();
             services.AddScoped<ICurrentUserProvider, ErpSystem.Api.Services.CurrentUserService>();
+            services.AddScoped<ITenantContext, ErpSystem.Api.Services.TenantContext>();
 
             // Dashboard service
             services.AddScoped<ErpSystem.Core.Services.IDashboardService, ErpSystem.Data.Services.DashboardService>();
@@ -468,15 +518,52 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IContractorSpecializationService, ErpSystem.Core.Services.Procurement.ContractorSpecializationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ILicenseTypeService, ErpSystem.Core.Services.Procurement.LicenseTypeService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IBusinessPartnerRegistrationService, ErpSystem.Core.Services.Procurement.BusinessPartnerRegistrationService>();
+
+            // Performance Tracking Services
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierPerformanceService, ErpSystem.Core.Services.Procurement.SupplierPerformanceService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IQualityIncidentService, ErpSystem.Core.Services.Procurement.QualityIncidentService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPerformanceReviewService, ErpSystem.Core.Services.Procurement.PerformanceReviewService>();
+
+            services.AddScoped<ErpSystem.Core.Interfaces.IUnitOfWork, ErpSystem.Data.UnitOfWork>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPartnerVerificationService, ErpSystem.Core.Services.Procurement.PartnerVerificationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPartnerPerformanceService, ErpSystem.Core.Services.Procurement.PartnerPerformanceService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPartnerBlacklistService, ErpSystem.Core.Services.Procurement.PartnerBlacklistService>();
+            services.AddScoped<ErpSystem.Core.Services.Procurement.ISupplierValidationService, ErpSystem.Core.Services.Procurement.SupplierValidationService>();
+            services.AddScoped<ErpSystem.Core.Services.Procurement.ISupplierReportingService, ErpSystem.Core.Services.Procurement.SupplierReportingService>();
 
-            // Maintenance background services - NOW ENABLED
+            // Blacklist Appeal Services
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IBlacklistAppealService, ErpSystem.Core.Services.Procurement.BlacklistAppealService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IBlacklistHistoryService, ErpSystem.Core.Services.Procurement.BlacklistHistoryService>();
+
+            // Tender Management Services
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderService, ErpSystem.Core.Services.Procurement.TenderService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderBidService, ErpSystem.Core.Services.Procurement.TenderBidService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderEvaluationService, ErpSystem.Core.Services.Procurement.TenderEvaluationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderAwardService, ErpSystem.Core.Services.Procurement.TenderAwardService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderNotificationService, ErpSystem.Core.Services.Procurement.TenderNotificationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderTemplateService, ErpSystem.Core.Services.Procurement.TenderTemplateService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IEvaluationCriterionService, ErpSystem.Core.Services.Procurement.EvaluationCriterionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IEvaluationTemplateService, ErpSystem.Core.Services.Procurement.EvaluationTemplateService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderDocumentTypeService, ErpSystem.Core.Services.Procurement.TenderDocumentTypeService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IBusinessPartnerUserService, ErpSystem.Core.Services.Procurement.BusinessPartnerUserService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderAssignmentService, ErpSystem.Core.Services.Procurement.TenderAssignmentService>();
+
+            // Procurement Planning Services
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPlanService, ErpSystem.Core.Services.Procurement.ProcurementPlanService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementBudgetService, ErpSystem.Core.Services.Procurement.ProcurementBudgetService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementScheduleService, ErpSystem.Core.Services.Procurement.ProcurementScheduleService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IMarketAnalysisService, ErpSystem.Core.Services.Procurement.MarketAnalysisService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierConsolidationService, ErpSystem.Core.Services.Procurement.SupplierConsolidationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IEmergencyProcurementPlanService, ErpSystem.Core.Services.Procurement.EmergencyProcurementPlanService>();
+
+            // Maintenance background services
             services.AddHostedService<ErpSystem.Api.Services.Maintenance.MaintenanceTriggerEvaluationBackgroundService>();
 
             // Notification dispatcher background service - sends pending notifications on schedule with dead-letter support
             services.AddHostedService<ErpSystem.Api.Services.NotificationDispatcherBackgroundService>();
+
+            // Blacklist expiry background service
+            services.AddHostedService<ErpSystem.Core.Services.Procurement.BlacklistExpiryBackgroundService>();
 
             // Notification template and escalation services
             services.AddScoped<ErpSystem.Core.Services.Maintenance.IMaintenanceNotificationTemplateService,
@@ -494,43 +581,31 @@ namespace ErpSystem.Api.Extensions
 
         public static IServiceCollection AddErpSystemAuthorization(this IServiceCollection services)
         {
-            services.AddAuthorization(options =>
-            {
-                // Role-based policies
-                options.AddPolicy("SuperAdmin", policy =>
-                    policy.RequireRole("SuperAdmin"));
-
-                options.AddPolicy("TenantAdmin", policy =>
-                    policy.RequireRole("TenantAdmin", "SuperAdmin"));
-
-                options.AddPolicy("Manager", policy =>
-                    policy.RequireRole("Manager", "TenantAdmin", "SuperAdmin"));
-
-                options.AddPolicy("Employee", policy =>
-                    policy.RequireRole("Employee", "Manager", "TenantAdmin", "SuperAdmin"));
-
-                // Module-based policies
-                options.AddPolicy("Finance", policy =>
-                    policy.RequireClaim("module", "Finance"));
-
-                options.AddPolicy("HR", policy =>
-                    policy.RequireClaim("module", "HR"));
-
-                options.AddPolicy("Sales", policy =>
-                    policy.RequireClaim("module", "Sales"));
-
-                options.AddPolicy("Inventory", policy =>
-                    policy.RequireClaim("module", "Inventory"));
-
-                options.AddPolicy("Procurement", policy =>
-                    policy.RequireClaim("module", "Procurement"));
-
-                options.AddPolicy("Marketing", policy =>
+            services.AddAuthorizationBuilder()
+                .AddPolicy("SuperAdmin", policy =>
+                    policy.RequireRole("SuperAdmin"))
+                .AddPolicy("TenantAdmin", policy =>
+                    policy.RequireRole("TenantAdmin", "SuperAdmin"))
+                .AddPolicy("Manager", policy =>
+                    policy.RequireRole("Manager", "TenantAdmin", "SuperAdmin"))
+                .AddPolicy("Employee", policy =>
+                    policy.RequireRole("Employee", "Manager", "TenantAdmin", "SuperAdmin"))
+                .AddPolicy("Finance", policy =>
+                    policy.RequireClaim("module", "Finance"))
+                .AddPolicy("HR", policy =>
+                    policy.RequireClaim("module", "HR"))
+                .AddPolicy("Sales", policy =>
+                    policy.RequireClaim("module", "Sales"))
+                .AddPolicy("Inventory", policy =>
+                    policy.RequireClaim("module", "Inventory"))
+                .AddPolicy("Procurement", policy =>
+                    policy.RequireClaim("module", "Procurement"))
+                .AddPolicy("Marketing", policy =>
                     policy.RequireClaim("module", "Marketing"));
-            });
 
             return services;
         }
+        private static readonly string[] stringArray = new[] { "🔐 Authentication & Security" };
 
         public static IServiceCollection AddErpSystemApi(this IServiceCollection services)
         {
@@ -621,7 +696,7 @@ namespace ErpSystem.Api.Extensions
                     return controllerName switch
                     {
                         // Authentication & Authorization
-                        "Auth" or "Security" or "Users" or "Roles" or "Permissions" => new[] { "🔐 Authentication & Security" },
+                        "Auth" or "Security" or "Users" or "Roles" or "Permissions" => stringArray,
 
                         // Administration
                         "Tenants" or "Settings" or "AuditLogs" or "SecurityLogs" => new[] { "⚙️ Administration" },
@@ -683,6 +758,7 @@ namespace ErpSystem.Api.Extensions
 
             return services;
         }
+        private static readonly string[] tags = new[] { "db", "sql", "ready" };
 
         public static IServiceCollection AddErpSystemHealthChecks(this IServiceCollection services, IConfiguration configuration)
         {
@@ -697,7 +773,7 @@ namespace ErpSystem.Api.Extensions
             if (!string.IsNullOrEmpty(connectionString))
             {
                 healthChecksBuilder.AddDbContextCheck<ErpSystem.Data.ApplicationDbContext>("database",
-                    tags: new[] { "db", "sql", "ready" });
+                    tags: tags);
             }
 
             // Add Redis health check if configured
@@ -901,6 +977,17 @@ namespace ErpSystem.Api.Extensions
 
             return services;
         }
+        private static readonly string[] collection = new[]
+                {
+                    "http://localhost:3000",
+                    "https://localhost:3000",
+                    "http://localhost:3001",
+                    "https://localhost:3001",
+                    "http://localhost:4200",
+                    "https://localhost:4200",
+                    "http://127.0.0.1:3000",
+                    "https://127.0.0.1:3000"
+                };
 
         public static IServiceCollection AddErpSystemCors(this IServiceCollection services, IConfiguration configuration)
         {
@@ -927,17 +1014,7 @@ namespace ErpSystem.Api.Extensions
             // If no origins configured, use development defaults
             if (!allowedOrigins.Any())
             {
-                allowedOrigins.AddRange(new[]
-                {
-                    "http://localhost:3000",
-                    "https://localhost:3000",
-                    "http://localhost:3001",
-                    "https://localhost:3001",
-                    "http://localhost:4200",
-                    "https://localhost:4200",
-                    "http://127.0.0.1:3000",
-                    "https://127.0.0.1:3000"
-                });
+                allowedOrigins.AddRange(collection);
             }
 
             services.AddCors(options =>

@@ -14,6 +14,10 @@ import {
   LogOut,
   ChevronDown,
   Menu,
+  Briefcase,
+  ClipboardList,
+  Users,
+  ListTodo,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -48,6 +52,26 @@ const menuItems: MenuItem[] = [
     icon: Building2,
   },
   {
+    title: 'Available Tenders',
+    href: '/external-portal/tenders',
+    icon: Briefcase,
+  },
+  {
+    title: 'My Bids',
+    href: '/external-portal/my-bids',
+    icon: ClipboardList,
+  },
+  {
+    title: 'My Tasks',
+    href: '/external-portal/task-list',
+    icon: ListTodo,
+  },
+  {
+    title: 'User Management',
+    href: '/external-portal/user-management',
+    icon: Users,
+  },
+  {
     title: 'Permit Applications',
     href: '/external-portal/permits',
     icon: FileText,
@@ -68,7 +92,6 @@ const menuItems: MenuItem[] = [
     title: 'Notifications',
     href: '/external-portal/notifications',
     icon: Bell,
-    badge: '3',
   },
 ];
 
@@ -108,51 +131,7 @@ export function ExternalSidebar() {
         </Button>
       </div>
 
-      {/* User Info */}
-      {!isCollapsed && user && (
-        <div className="p-4 border-b border-slate-700">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                className="w-full justify-start text-white hover:bg-slate-800"
-              >
-                <div className="flex items-center space-x-3 w-full">
-                  <div className="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center">
-                    <span className="text-sm font-medium">
-                      {user.firstName?.[0]}{user.lastName?.[0]}
-                    </span>
-                  </div>
-                  <div className="flex-1 text-left">
-                    <p className="text-sm font-medium">
-                      {user.firstName} {user.lastName}
-                    </p>
-                    <p className="text-xs text-slate-400">{user.email}</p>
-                  </div>
-                  <ChevronDown className="h-4 w-4" />
-                </div>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>My Account</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => router.push('/external-portal/profile')}>
-                <User className="mr-2 h-4 w-4" />
-                Profile
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => router.push('/external-portal/settings')}>
-                <Settings className="mr-2 h-4 w-4" />
-                Settings
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleLogout} className="text-red-600">
-                <LogOut className="mr-2 h-4 w-4" />
-                Logout
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      )}
+
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto p-4 space-y-2">

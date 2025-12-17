@@ -23,7 +23,7 @@ public class ApiResponse<T>
     public string? Message { get; set; }
     public T? Data { get; set; }
     public string? Error { get; set; }
-    
+
     public static ApiResponse<T> SuccessResponse(T data, string? message = null)
     {
         return new ApiResponse<T>
@@ -33,7 +33,7 @@ public class ApiResponse<T>
             Message = message
         };
     }
-    
+
     public static ApiResponse<T> ErrorResponse(string error)
     {
         return new ApiResponse<T>
@@ -52,7 +52,7 @@ public class ApiResponse
     public bool Success { get; set; } = true;
     public string? Message { get; set; }
     public string? Error { get; set; }
-    
+
     public static ApiResponse SuccessResponse(string? message = null)
     {
         return new ApiResponse
@@ -61,7 +61,7 @@ public class ApiResponse
             Message = message
         };
     }
-    
+
     public static ApiResponse ErrorResponse(string error)
     {
         return new ApiResponse

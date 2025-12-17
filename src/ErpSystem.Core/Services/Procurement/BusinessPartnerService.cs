@@ -26,7 +26,10 @@ public class BusinessPartnerService : IBusinessPartnerService
     public async Task<BusinessPartnerDetailDto?> GetByIdAsync(Guid id)
     {
         var partner = await _partnerRepository.GetWithAllRelatedDataAsync(id);
-        if (partner == null) return null;
+        if (partner == null)
+        {
+            return null;
+        }
 
         return MapToDetailDto(partner);
     }
@@ -34,9 +37,23 @@ public class BusinessPartnerService : IBusinessPartnerService
     public async Task<BusinessPartnerDto?> GetByCodeAsync(string partnerCode)
     {
         var partner = await _partnerRepository.GetByCodeAsync(partnerCode);
-        if (partner == null) return null;
+        if (partner == null)
+        {
+            return null;
+        }
 
         return MapToDto(partner);
+    }
+
+    public async Task<BusinessPartnerDetailDto?> GetByUserIdAsync(Guid userId)
+    {
+        var partner = await _partnerRepository.GetByUserIdAsync(userId);
+        if (partner == null)
+        {
+            return null;
+        }
+
+        return MapToDetailDto(partner);
     }
 
     public async Task<BusinessPartnerDetailDto> CreateAsync(CreateBusinessPartnerDto dto)
@@ -73,10 +90,7 @@ public class BusinessPartnerService : IBusinessPartnerService
 
     public async Task<BusinessPartnerDetailDto> UpdateAsync(Guid id, UpdateBusinessPartnerDto dto)
     {
-        var partner = await _partnerRepository.GetByIdAsync(id);
-        if (partner == null)
-            throw new InvalidOperationException($"Business partner with ID {id} not found");
-
+        var partner = await _partnerRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Business partner with ID {id} not found");
         partner.PartnerName = dto.PartnerName;
         partner.LegalName = dto.PartnerName;
         partner.BusinessRegistrationNumber = dto.RegistrationNumber;
@@ -172,8 +186,16 @@ public class BusinessPartnerService : IBusinessPartnerService
     public async Task<bool> IsPartnerCodeUniqueAsync(string partnerCode, Guid? excludeId = null)
     {
         var partner = await _partnerRepository.GetByCodeAsync(partnerCode);
-        if (partner == null) return true;
-        if (excludeId.HasValue && partner.Id == excludeId.Value) return true;
+        if (partner == null)
+        {
+            return true;
+        }
+
+        if (excludeId.HasValue && partner.Id == excludeId.Value)
+        {
+            return true;
+        }
+
         return false;
     }
     public async Task UpdateStatusAsync(Guid partnerId, string status)
@@ -213,7 +235,10 @@ public class BusinessPartnerService : IBusinessPartnerService
     public async Task<IEnumerable<BusinessPartnerContactDto>> GetContactsAsync(Guid partnerId)
     {
         var partner = await _partnerRepository.GetWithAllRelatedDataAsync(partnerId);
-        if (partner?.Contacts == null) return Enumerable.Empty<BusinessPartnerContactDto>();
+        if (partner?.Contacts == null)
+        {
+            return Enumerable.Empty<BusinessPartnerContactDto>();
+        }
 
         return partner.Contacts.Select(c => new BusinessPartnerContactDto
         {
@@ -258,7 +283,10 @@ public class BusinessPartnerService : IBusinessPartnerService
     public async Task<IEnumerable<BusinessPartnerLicenseDto>> GetLicensesAsync(Guid partnerId)
     {
         var partner = await _partnerRepository.GetWithAllRelatedDataAsync(partnerId);
-        if (partner?.Licenses == null) return Enumerable.Empty<BusinessPartnerLicenseDto>();
+        if (partner?.Licenses == null)
+        {
+            return Enumerable.Empty<BusinessPartnerLicenseDto>();
+        }
 
         return partner.Licenses.Select(l => new BusinessPartnerLicenseDto
         {
@@ -305,7 +333,10 @@ public class BusinessPartnerService : IBusinessPartnerService
     public async Task<IEnumerable<BusinessPartnerDocumentDto>> GetDocumentsAsync(Guid partnerId)
     {
         var partner = await _partnerRepository.GetWithAllRelatedDataAsync(partnerId);
-        if (partner?.Documents == null) return Enumerable.Empty<BusinessPartnerDocumentDto>();
+        if (partner?.Documents == null)
+        {
+            return Enumerable.Empty<BusinessPartnerDocumentDto>();
+        }
 
         return partner.Documents.Select(d => new BusinessPartnerDocumentDto
         {
@@ -347,7 +378,10 @@ public class BusinessPartnerService : IBusinessPartnerService
     public async Task<IEnumerable<BusinessPartnerFinancialDto>> GetFinancialsAsync(Guid partnerId)
     {
         var partner = await _partnerRepository.GetWithAllRelatedDataAsync(partnerId);
-        if (partner?.Financials == null) return Enumerable.Empty<BusinessPartnerFinancialDto>();
+        if (partner?.Financials == null)
+        {
+            return Enumerable.Empty<BusinessPartnerFinancialDto>();
+        }
 
         return partner.Financials.Select(f => new BusinessPartnerFinancialDto
         {
@@ -397,11 +431,14 @@ public class BusinessPartnerService : IBusinessPartnerService
             Id = partner.Id,
             PartnerCode = partner.PartnerCode,
             PartnerName = partner.PartnerName,
+            CompanyName = partner.PartnerName, // Alias for frontend compatibility
             PartnerType = partner.PartnerType,
             RegistrationNumber = partner.BusinessRegistrationNumber,
             TaxNumber = partner.TaxIdentificationNumber,
+            VatNumber = partner.VATNumber,
             Email = partner.PrimaryEmail,
             Phone = partner.PrimaryPhone,
+            AlternatePhone = partner.SecondaryPhone,
             Website = partner.Website,
             PhysicalAddress = partner.PhysicalAddress,
             City = partner.PhysicalCity,
@@ -415,7 +452,7 @@ public class BusinessPartnerService : IBusinessPartnerService
         };
     }
 
-    private BusinessPartnerDetailDto MapToDetailDto(BusinessPartner partner)
+    private static BusinessPartnerDetailDto MapToDetailDto(BusinessPartner partner)
     {
         var dto = new BusinessPartnerDetailDto
         {
@@ -428,11 +465,38 @@ public class BusinessPartnerService : IBusinessPartnerService
             VatNumber = partner.VATNumber,
             Email = partner.PrimaryEmail,
             Phone = partner.PrimaryPhone,
+            AlternatePhone = partner.SecondaryPhone,
             Website = partner.Website,
             PhysicalAddress = partner.PhysicalAddress,
             City = partner.PhysicalCity,
             Country = partner.PhysicalCountry,
             PhysicalPostalCode = partner.PhysicalPostalCode,
+            PhysicalState = partner.PhysicalState,
+            MailingAddress = partner.MailingAddress,
+            MailingCity = partner.MailingCity,
+            MailingState = partner.MailingState,
+            MailingCountry = partner.MailingCountry,
+            MailingPostalCode = partner.MailingPostalCode,
+            // User Account Link
+            UserId = partner.UserId,
+            UserEmail = partner.User?.Email,
+            UserFullName = partner.User != null ? $"{partner.User.FirstName} {partner.User.LastName}" : null,
+            // Banking Information
+            BankName = partner.BankName,
+            BankBranch = partner.BankBranch,
+            AccountNumber = partner.BankAccountNumber,
+            AccountName = partner.BankAccountName,
+            SwiftCode = partner.BankSwiftCode,
+            Iban = partner.BankIBAN,
+            // Contact Person
+            ContactPerson = partner.PrimaryContactName,
+            ContactTitle = partner.PrimaryContactTitle,
+            // Classification
+            IndustryType = partner.IndustryClassification,
+            CompanySize = partner.CompanySize,
+            AnnualRevenue = partner.AnnualTurnover,
+            GeographicCoverage = partner.GeographicCoverage,
+            // Status
             Status = partner.RegistrationStatus,
             ApprovalStatus = partner.ApprovalStatus,
             IsPreferred = partner.IsPreferred,
@@ -441,6 +505,10 @@ public class BusinessPartnerService : IBusinessPartnerService
             BlacklistDate = partner.BlacklistDate,
             BlacklistExpiryDate = partner.BlacklistExpiryDate,
             PerformanceRating = partner.PerformanceRating,
+            RegistrationDate = partner.RegistrationDate,
+            ApprovedDate = partner.ApprovedDate,
+            InsuranceCoverageAmount = partner.InsuranceCoverage,
+            Notes = partner.Notes,
             CreatedAt = partner.CreatedAt
         };
 

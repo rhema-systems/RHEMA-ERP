@@ -1,12 +1,12 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
-using ErpSystem.Core.Entities;
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Data;
 using ErpSystem.Shared;
-using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -56,7 +56,7 @@ namespace ErpSystem.Api.Controllers
                 // Apply filters
                 if (!string.IsNullOrEmpty(query.Username))
                 {
-                    sessionsQuery = sessionsQuery.Where(s => 
+                    sessionsQuery = sessionsQuery.Where(s =>
                         s.User != null && s.User.UserName.Contains(query.Username));
                 }
 
@@ -87,9 +87,9 @@ namespace ErpSystem.Api.Controllers
                         SessionId = s.SessionId,
                         UserId = s.UserId,
                         Username = s.User != null ? s.User.UserName : "Unknown",
-                        Role = s.User != null ? s.User.UserRoles.OrderByDescending(ur => ur.Role.Name == "SuperAdmin" ? 10 : 
-                                                    ur.Role.Name == "TenantAdmin" ? 9 : 
-                                                    ur.Role.Name == "Manager" ? 8 : 
+                        Role = s.User != null ? s.User.UserRoles.OrderByDescending(ur => ur.Role.Name == "SuperAdmin" ? 10 :
+                                                    ur.Role.Name == "TenantAdmin" ? 9 :
+                                                    ur.Role.Name == "Manager" ? 8 :
                                                     ur.Role.Name == "Employee" ? 7 : 0)
                                                 .Select(ur => ur.Role.Name).FirstOrDefault() ?? "Unknown" : "Unknown",
                         Email = s.User != null ? s.User.Email : "Unknown",
@@ -124,12 +124,12 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var currentUserId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
-                
+
                 // Role-based access is handled by the [Authorize] attribute
                 // Additional logic can be added here if needed
 
                 var sessions = await _userSessionService.GetActiveUserSessionsAsync(userId);
-                
+
                 var sessionDtos = sessions.Select(s => new ActiveSessionDto
                 {
                     SessionId = s.SessionId,
@@ -176,7 +176,7 @@ namespace ErpSystem.Api.Controllers
 
                 await _userSessionService.TerminateSessionAsync(sessionId, request.Reason ?? "Terminated by administrator");
 
-                _logger.LogInformation("Session {SessionId} terminated by admin {AdminId} ({AdminUsername}). Reason: {Reason}", 
+                _logger.LogInformation("Session {SessionId} terminated by admin {AdminId} ({AdminUsername}). Reason: {Reason}",
                     sessionId, currentUserId.Value, currentUsername, request.Reason);
 
                 return Ok(new { message = "Session terminated successfully", sessionId });
@@ -205,10 +205,10 @@ namespace ErpSystem.Api.Controllers
                     return Unauthorized();
                 }
 
-                await _userSessionService.TerminateAllUserSessionsAsync(userId, null, 
+                await _userSessionService.TerminateAllUserSessionsAsync(userId, null,
                     request.Reason ?? "All sessions terminated by administrator");
 
-                _logger.LogInformation("All sessions for user {UserId} terminated by admin {AdminId} ({AdminUsername}). Reason: {Reason}", 
+                _logger.LogInformation("All sessions for user {UserId} terminated by admin {AdminId} ({AdminUsername}). Reason: {Reason}",
                     userId, currentUserId.Value, currentUsername, request.Reason);
 
                 return Ok(new { message = "All user sessions terminated successfully", userId });
@@ -273,7 +273,7 @@ namespace ErpSystem.Api.Controllers
                 var failureCount = results.Count(r => !r.Success);
 
                 _logger.LogInformation("Bulk session termination completed by admin {AdminId} ({AdminUsername}). " +
-                    "Success: {SuccessCount}, Failures: {FailureCount}. Reason: {Reason}", 
+                    "Success: {SuccessCount}, Failures: {FailureCount}. Reason: {Reason}",
                     currentUserId.Value, currentUsername, successCount, failureCount, reason);
 
                 return Ok(new BulkSessionOperationResponse
@@ -389,7 +389,7 @@ namespace ErpSystem.Api.Controllers
                 var failureCount = results.Count(r => !r.Success);
 
                 _logger.LogInformation("Criteria-based session termination completed by admin {AdminId} ({AdminUsername}). " +
-                    "Criteria: {Criteria}, Success: {SuccessCount}, Failures: {FailureCount}. Reason: {Reason}", 
+                    "Criteria: {Criteria}, Success: {SuccessCount}, Failures: {FailureCount}. Reason: {Reason}",
                     currentUserId.Value, currentUsername, request.GetCriteriaDescription(), successCount, failureCount, reason);
 
                 return Ok(new BulkSessionOperationResponse
@@ -417,14 +417,14 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
-                
+
                 if (!currentUserId.HasValue)
                 {
                     return Unauthorized();
                 }
 
                 var sessions = await _userSessionService.GetActiveUserSessionsAsync(currentUserId.Value);
-                
+
                 var sessionDtos = sessions.Select(s => new UserSessionDto
                 {
                     SessionId = s.SessionId,
@@ -458,7 +458,7 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
-                
+
                 if (!currentUserId.HasValue)
                 {
                     return Unauthorized();
@@ -467,7 +467,7 @@ namespace ErpSystem.Api.Controllers
                 // Verify that the session belongs to the current user
                 var userSessions = await _userSessionService.GetActiveUserSessionsAsync(currentUserId.Value);
                 var sessionToTerminate = userSessions.FirstOrDefault(s => s.SessionId == sessionId);
-                
+
                 if (sessionToTerminate == null)
                 {
                     return NotFound(new { message = "Session not found or does not belong to you" });
@@ -475,7 +475,7 @@ namespace ErpSystem.Api.Controllers
 
                 await _userSessionService.TerminateSessionAsync(sessionId, "Terminated by user");
 
-                _logger.LogInformation("User {UserId} terminated their own session {SessionId}", 
+                _logger.LogInformation("User {UserId} terminated their own session {SessionId}",
                     currentUserId.Value, sessionId);
 
                 return Ok(new { message = "Session terminated successfully", sessionId });
@@ -497,12 +497,12 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var currentUserId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId3) ? (Guid?)parsedUserId3 : null;
-                
+
                 // Role-based access is handled by the [Authorize] attribute
                 // Additional logic can be added here if needed
 
                 var sessions = await _userSessionService.GetUserSessionHistoryAsync(userId, days);
-                
+
                 var sessionDtos = sessions.Select(s => new SessionHistoryDto
                 {
                     SessionId = s.SessionId,
@@ -593,7 +593,7 @@ namespace ErpSystem.Api.Controllers
     {
         [Required]
         public IEnumerable<string> SessionIds { get; set; } = new List<string>();
-        
+
         [StringLength(500, ErrorMessage = "Reason cannot exceed 500 characters")]
         public string? Reason { get; set; }
     }
@@ -606,24 +606,38 @@ namespace ErpSystem.Api.Controllers
         public DateTime? LoginTimeBefore { get; set; }
         public DateTime? LastActivityBefore { get; set; }
         public bool IncludeCurrentUser { get; set; } = false;
-        
+
         [StringLength(500, ErrorMessage = "Reason cannot exceed 500 characters")]
         public string? Reason { get; set; }
 
         public string GetCriteriaDescription()
         {
             var criteria = new List<string>();
-            
+
             if (!string.IsNullOrEmpty(IpAddressPattern))
+            {
                 criteria.Add($"IP contains '{IpAddressPattern}'");
+            }
+
             if (!string.IsNullOrEmpty(DeviceType))
+            {
                 criteria.Add($"Device type is '{DeviceType}'");
+            }
+
             if (!string.IsNullOrEmpty(Browser))
+            {
                 criteria.Add($"Browser contains '{Browser}'");
+            }
+
             if (LoginTimeBefore.HasValue)
+            {
                 criteria.Add($"Login before {LoginTimeBefore.Value:yyyy-MM-dd HH:mm}");
+            }
+
             if (LastActivityBefore.HasValue)
+            {
                 criteria.Add($"Last activity before {LastActivityBefore.Value:yyyy-MM-dd HH:mm}");
+            }
 
             return criteria.Any() ? string.Join(", ", criteria) : "No criteria specified";
         }

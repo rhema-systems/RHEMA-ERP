@@ -57,15 +57,15 @@ public class CreateSupplierDto
 {
     [Required]
     public string SupplierCode { get; set; } = string.Empty;
-    
+
     [Required]
     public string Name { get; set; } = string.Empty;
-    
+
     public string? Description { get; set; }
-    
+
     [Required]
     public string SupplierType { get; set; } = "Vendor";
-    
+
     public string? Address { get; set; }
     public string? City { get; set; }
     public string? State { get; set; }
@@ -74,22 +74,22 @@ public class CreateSupplierDto
     public string? Phone { get; set; }
     public string? Email { get; set; }
     public string? Website { get; set; }
-    
+
     public string? PrimaryContactName { get; set; }
     public string? PrimaryContactTitle { get; set; }
     public string? PrimaryContactPhone { get; set; }
     public string? PrimaryContactEmail { get; set; }
-    
+
     public string? TaxId { get; set; }
     public string PaymentTerms { get; set; } = "Net 30";
     public string? ShippingTerms { get; set; }
     public decimal? CreditLimit { get; set; }
     public int LeadTimeDays { get; set; } = 7;
-    
+
     public bool IsPreferred { get; set; } = false;
     public int? Rating { get; set; }
     public string? Notes { get; set; }
-    
+
     public DateTime? ContractStartDate { get; set; }
     public DateTime? ContractEndDate { get; set; }
 }
@@ -118,7 +118,7 @@ public class CreateSupplierContactDto
 {
     [Required]
     public string Name { get; set; } = string.Empty;
-    
+
     public string? Title { get; set; }
     public string? Department { get; set; }
     public string? Phone { get; set; }
@@ -196,12 +196,12 @@ public class PurchaseOrderDetailDto : PurchaseOrderSummaryDto
     public string? DeliveryInstructions { get; set; }
     public string? SupplierOrderNumber { get; set; }
     public string? ReferenceNumber { get; set; }
-    
+
     // Supplier details
     public string? SupplierPhone { get; set; }
     public string? SupplierEmail { get; set; }
     public string? SupplierAddress { get; set; }
-    
+
     public List<PurchaseOrderItemDto> Items { get; set; } = new();
     public List<PurchaseOrderReceiptDto> Receipts { get; set; } = new();
 }
@@ -234,23 +234,23 @@ public class CreatePurchaseOrderDto
 {
     [Required]
     public Guid SupplierId { get; set; }
-    
+
     public DateTime? RequiredDate { get; set; }
     public DateTime? PromisedDate { get; set; }
-    
+
     public string? PaymentTerms { get; set; }
     public string? ShippingTerms { get; set; }
     public string? Terms { get; set; }
     public string? Notes { get; set; }
-    
+
     public Guid? DeliveryWarehouseId { get; set; }
     public string? DeliveryAddress { get; set; }
     public string? DeliveryInstructions { get; set; }
     public string? ReferenceNumber { get; set; }
-    
+
     [Required]
     public Guid RequestedById { get; set; }
-    
+
     [Required]
     public List<CreatePurchaseOrderItemDto> Items { get; set; } = new();
 }
@@ -262,16 +262,16 @@ public class CreatePurchaseOrderItemDto
 {
     [Required]
     public Guid InventoryItemId { get; set; }
-    
+
     public string? SupplierItemCode { get; set; }
     public string? ItemDescription { get; set; }
-    
+
     [Required]
     public decimal OrderedQuantity { get; set; }
-    
+
     [Required]
     public decimal UnitPrice { get; set; }
-    
+
     public DateTime? ExpectedDeliveryDate { get; set; }
     public string? Notes { get; set; }
 }
@@ -336,18 +336,18 @@ public class ReceivePurchaseOrderDto
 {
     [Required]
     public Guid PurchaseOrderId { get; set; }
-    
+
     public string? DeliveryNote { get; set; }
     public string? CarrierName { get; set; }
     public string? TrackingNumber { get; set; }
-    
+
     [Required]
     public Guid ReceivedById { get; set; }
-    
+
     public Guid? InspectedById { get; set; }
     public string? Notes { get; set; }
     public bool RequiresInspection { get; set; } = false;
-    
+
     [Required]
     public List<ReceivePurchaseOrderItemDto> Items { get; set; } = new();
 }
@@ -359,10 +359,10 @@ public class ReceivePurchaseOrderItemDto
 {
     [Required]
     public Guid PurchaseOrderItemId { get; set; }
-    
+
     [Required]
     public decimal ReceivedQuantity { get; set; }
-    
+
     public decimal AcceptedQuantity { get; set; }
     public decimal RejectedQuantity { get; set; }
     public Guid? LocationId { get; set; }
@@ -446,10 +446,10 @@ public class CreatePurchaseRequisitionDto
     public string? CostCenter { get; set; }
     public string? Justification { get; set; }
     public string? Notes { get; set; }
-    
+
     [Required]
     public Guid RequestedById { get; set; }
-    
+
     [Required]
     public List<CreatePurchaseRequisitionItemDto> Items { get; set; } = new();
 }
@@ -460,13 +460,13 @@ public class CreatePurchaseRequisitionDto
 public class CreatePurchaseRequisitionItemDto
 {
     public Guid? InventoryItemId { get; set; }
-    
+
     [Required]
     public string ItemDescription { get; set; } = string.Empty;
-    
+
     [Required]
     public decimal Quantity { get; set; }
-    
+
     public string UnitOfMeasure { get; set; } = "EA";
     public decimal EstimatedUnitPrice { get; set; } = 0;
     public DateTime? RequiredDate { get; set; }
@@ -486,7 +486,7 @@ public class UpdateStatusDto
 {
     [Required]
     public string Status { get; set; } = string.Empty;
-    
+
     public string? Notes { get; set; }
 }
 
@@ -497,7 +497,7 @@ public class ApprovalDto
 {
     [Required]
     public bool Approved { get; set; }
-    
+
     public string? Comments { get; set; }
     public string? RejectionReason { get; set; }
 }

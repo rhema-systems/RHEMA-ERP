@@ -1,8 +1,8 @@
+using ErpSystem.Data;
+using Microsoft.EntityFrameworkCore;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
-using ErpSystem.Data;
-using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services;
 
@@ -15,7 +15,7 @@ public class QualityCertificateService
     {
         _context = context;
         _logger = logger;
-        
+
         // Set QuestPDF license (Community license for free use)
         QuestPDF.Settings.License = LicenseType.Community;
     }
@@ -27,12 +27,7 @@ public class QualityCertificateService
             // Load quality check with all related data
             var qualityCheck = await _context.WorkOrderQualityChecks
                 .Include(qc => qc.Checklist)
-                .FirstOrDefaultAsync(qc => qc.Id == qualityCheckId);
-
-            if (qualityCheck == null)
-            {
-                throw new Exception($"Quality check {qualityCheckId} not found");
-            }
+                .FirstOrDefaultAsync(qc => qc.Id == qualityCheckId) ?? throw new Exception($"Quality check {qualityCheckId} not found");
 
             // Load work order
             var workOrder = await _context.WorkOrders
@@ -41,12 +36,7 @@ public class QualityCertificateService
                 .Include(wo => wo.MaintenanceType)
                 .Include(wo => wo.PriorityLevel)
                 .Include(wo => wo.JobCard)
-                .FirstOrDefaultAsync(wo => wo.Id == qualityCheck.WorkOrderId);
-
-            if (workOrder == null)
-            {
-                throw new Exception($"Work order {qualityCheck.WorkOrderId} not found");
-            }
+                .FirstOrDefaultAsync(wo => wo.Id == qualityCheck.WorkOrderId) ?? throw new Exception($"Work order {qualityCheck.WorkOrderId} not found");
 
             // Parse checklist items and results
             var checklistItems = new List<ChecklistItemData>();
@@ -55,11 +45,11 @@ public class QualityCertificateService
                 if (!string.IsNullOrEmpty(qualityCheck.Checklist?.ChecklistItems))
                 {
                     var items = System.Text.Json.JsonSerializer.Deserialize<List<ChecklistItemJson>>(qualityCheck.Checklist.ChecklistItems);
-                    checklistItems = items?.Select(i => new ChecklistItemData 
-                    { 
-                        Item = i.item, 
-                        Description = i.description, 
-                        Weight = i.weight 
+                    checklistItems = items?.Select(i => new ChecklistItemData
+                    {
+                        Item = i.item,
+                        Description = i.description,
+                        Weight = i.weight
                     }).ToList() ?? new List<ChecklistItemData>();
                 }
             }
@@ -131,7 +121,7 @@ public class QualityCertificateService
             row.ConstantItem(100).Height(100).Element(c => ComposeResultBadge(c, qualityCheck));
         });
     }
-    private void ComposeContent(IContainer container, 
+    private void ComposeContent(IContainer container,
         ErpSystem.Core.Entities.Maintenance.WorkOrder workOrder,
         ErpSystem.Core.Entities.Maintenance.WorkOrderQualityCheck qualityCheck,
         List<ChecklistItemData> checklistItems,
@@ -202,10 +192,10 @@ public class QualityCertificateService
 
     private void ComposeResultBadge(IContainer container, ErpSystem.Core.Entities.Maintenance.WorkOrderQualityCheck qualityCheck)
     {
-        var imagePath = qualityCheck.OverallResult == "Pass" 
+        var imagePath = qualityCheck.OverallResult == "Pass"
             ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Images", "pass-stamp.png")
             : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Images", "fail-stamp.png");
-        
+
         // Check if image file exists
         if (File.Exists(imagePath))
         {
@@ -216,10 +206,10 @@ public class QualityCertificateService
         {
             // Fallback to smaller text-based badge
             _logger.LogWarning($"Stamp image not found at {imagePath}. Using text fallback.");
-            
+
             var bgColor = qualityCheck.OverallResult == "Pass" ? Colors.Green.Lighten3 : Colors.Red.Lighten3;
             var textColor = qualityCheck.OverallResult == "Pass" ? Colors.Green.Darken2 : Colors.Red.Darken2;
-            
+
             container.Width(100).Height(100).AlignCenter().AlignMiddle().Border(4)
                 .BorderColor(qualityCheck.OverallResult == "Pass" ? Colors.Green.Darken1 : Colors.Red.Darken1)
                 .Background(bgColor)
@@ -234,7 +224,7 @@ public class QualityCertificateService
         }
     }
 
-    private void ComposeSection(IContainer container, string title, Action<TableDescriptor> tableContent)
+    private static void ComposeSection(IContainer container, string title, Action<TableDescriptor> tableContent)
     {
         container.Column(column =>
         {
@@ -243,13 +233,13 @@ public class QualityCertificateService
         });
     }
 
-    private void AddRow(TableDescriptor table, string label, string value)
+    private static void AddRow(TableDescriptor table, string label, string value)
     {
         table.Cell().Text(label).Bold();
         table.Cell().Text(value);
     }
 
-    private void ComposeChecklistResults(IContainer container, List<ChecklistItemData> items, List<CheckResultData> results)
+    private static void ComposeChecklistResults(IContainer container, List<ChecklistItemData> items, List<CheckResultData> results)
     {
         container.Column(column =>
         {
@@ -280,7 +270,7 @@ public class QualityCertificateService
                     var result = results.FirstOrDefault(r => r.ItemId == $"item-{i}");
 
                     var bgColor = i % 2 == 0 ? Colors.White : Colors.Grey.Lighten4;
-                    var resultColor = result?.Result == "Pass" ? Colors.Green.Medium : 
+                    var resultColor = result?.Result == "Pass" ? Colors.Green.Medium :
                                      result?.Result == "Fail" ? Colors.Red.Medium : Colors.Grey.Medium;
 
                     table.Cell().Background(bgColor).Padding(5).Text($"{i + 1}");

@@ -1,11 +1,11 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
+using System.ComponentModel.DataAnnotations;
 using AutoMapper;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
-using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Enums;
-using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Interfaces.Inventory;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers;
 
@@ -59,13 +59,13 @@ public class InventoryItemsController : ControllerBase
         try
         {
             var items = (await _inventoryItemRepository.GetActiveItemsAsync()).ToList();
-            
+
             // Filter by item type if specified
             if (itemType.HasValue)
             {
                 items = items.Where(i => i.ItemType == itemType.Value).ToList();
             }
-            
+
             var itemDtos = _mapper.Map<IEnumerable<InventoryItemDto>>(items);
             return Ok(itemDtos);
         }
@@ -191,7 +191,7 @@ public class InventoryItemsController : ControllerBase
                 LeadTimeDays = item.LeadTimeDays,
                 LastPurchaseDate = item.LastPurchaseDate
             });
-            
+
             return Ok(reorderDtos);
         }
         catch (Exception ex)
@@ -210,7 +210,7 @@ public class InventoryItemsController : ControllerBase
         try
         {
             var results = new List<StockAvailabilityDto>();
-            
+
             foreach (var checkItem in items)
             {
                 var item = await _inventoryItemRepository.GetByIdAsync(checkItem.InventoryItemId);
@@ -276,7 +276,7 @@ public class InventoryItemsController : ControllerBase
 
             var inventoryItem = _mapper.Map<InventoryItem>(createDto);
             inventoryItem.TenantId = GetTenantId(); // Assuming you have a method to get tenant ID
-            
+
             var createdItem = await _inventoryItemRepository.AddAsync(inventoryItem);
             await _inventoryItemRepository.SaveChangesAsync();
 
@@ -472,7 +472,7 @@ public class InventoryItemsController : ControllerBase
     /// <param name="itemType">Optional item type filter (1=Consumable, 4=Tool)</param>
     [HttpGet("by-warehouse/{warehouseId:guid}")]
     public async Task<ActionResult<IEnumerable<WarehouseInventoryDto>>> GetInventoryByWarehouse(
-        Guid warehouseId, 
+        Guid warehouseId,
         [FromQuery] int? itemType = null)
     {
         try
@@ -484,7 +484,7 @@ public class InventoryItemsController : ControllerBase
             }
 
             var warehouseQuantities = await _warehouseQuantityRepository.GetItemsWithStockAsync(warehouseId, itemType);
-            
+
             var inventoryDtos = warehouseQuantities.Select(wq => new WarehouseInventoryDto
             {
                 InventoryItemId = wq.InventoryItemId,
@@ -499,7 +499,7 @@ public class InventoryItemsController : ControllerBase
                 UnitCost = wq.InventoryItem.StandardCost,
                 CategoryName = wq.InventoryItem.Category?.Name
             });
-            
+
             return Ok(inventoryDtos);
         }
         catch (Exception ex)
@@ -518,7 +518,7 @@ public class InventoryItemsController : ControllerBase
         try
         {
             IEnumerable<WarehouseLocation> locations;
-            
+
             if (warehouseId.HasValue)
             {
                 locations = await _warehouseLocationRepository.GetLocationsByWarehouseAsync(warehouseId.Value);
@@ -527,7 +527,7 @@ public class InventoryItemsController : ControllerBase
             {
                 locations = await _warehouseLocationRepository.GetAllAsync();
             }
-            
+
             var locationDtos = _mapper.Map<IEnumerable<WarehouseLocationDto>>(locations);
             return Ok(locationDtos);
         }
@@ -541,7 +541,7 @@ public class InventoryItemsController : ControllerBase
     /// <summary>
     /// Helper method to get tenant ID from claims
     /// </summary>
-    private Guid GetTenantId()
+    private static Guid GetTenantId()
     {
         // Implementation would extract tenant ID from JWT claims or session
         // For now, returning a placeholder
@@ -556,7 +556,7 @@ public class StockAvailabilityCheckDto
 {
     [Required]
     public Guid InventoryItemId { get; set; }
-    
+
     [Required]
     public decimal RequiredQuantity { get; set; }
 }

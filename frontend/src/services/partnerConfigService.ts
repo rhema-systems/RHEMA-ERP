@@ -20,60 +20,93 @@ const getAuthHeaders = () => {
 
 export interface PartnerCategoryDto {
   id: string;
-  name: string;
-  code: string;
+  categoryName: string;
+  categoryCode: string;
   description?: string;
+  categoryType: string;
+  parentCategoryId?: string;
+  parentCategoryName?: string;
   isActive: boolean;
+  displayOrder: number;
+  subCategories?: PartnerCategoryDto[];
   partnerCount?: number;
   createdAt?: string;
   updatedAt?: string;
 }
 
 export interface CreatePartnerCategoryDto {
-  name: string;
-  code: string;
+  categoryName: string;
+  categoryCode: string;
+  description?: string;
+  categoryType: string;
+  parentCategoryId?: string;
+  displayOrder?: number;
+}
+
+export interface UpdatePartnerCategoryDto {
+  categoryName: string;
   description?: string;
   isActive: boolean;
+  displayOrder: number;
 }
 
 export interface ContractorSpecializationDto {
   id: string;
-  name: string;
-  code: string;
+  specializationName: string;
+  specializationCode: string;
   description?: string;
   isActive: boolean;
+  displayOrder: number;
   contractorCount?: number;
   createdAt?: string;
   updatedAt?: string;
 }
 
 export interface CreateContractorSpecializationDto {
-  name: string;
-  code: string;
+  specializationName: string;
+  specializationCode: string;
+  description?: string;
+  displayOrder?: number;
+}
+
+export interface UpdateContractorSpecializationDto {
+  specializationName: string;
   description?: string;
   isActive: boolean;
+  displayOrder: number;
 }
 
 export interface LicenseTypeDto {
   id: string;
-  name: string;
-  code: string;
+  licenseName: string;
+  licenseCode: string;
   description?: string;
   applicableTo: string; // Supplier, Contractor, Both
   isMandatory: boolean;
   validityPeriodMonths?: number;
+  requiresRenewal: boolean;
+  renewalReminderDays?: number;
   isActive: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
 
 export interface CreateLicenseTypeDto {
-  name: string;
-  code: string;
+  licenseName: string;
+  licenseCode: string;
   description?: string;
   applicableTo: string;
   isMandatory: boolean;
   validityPeriodMonths?: number;
+}
+
+export interface UpdateLicenseTypeDto {
+  licenseName: string;
+  description?: string;
+  isMandatory: boolean;
+  validityPeriodMonths?: number;
+  requiresRenewal: boolean;
+  renewalReminderDays?: number;
   isActive: boolean;
 }
 
@@ -125,7 +158,7 @@ export const partnerCategoryService = {
   },
 
   // Update category
-  async update(id: string, data: CreatePartnerCategoryDto): Promise<PartnerCategoryDto> {
+  async update(id: string, data: UpdatePartnerCategoryDto): Promise<PartnerCategoryDto> {
     const response = await fetch(`${API_BASE_URL}/procurement/partner-categories/${id}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
@@ -195,7 +228,7 @@ export const contractorSpecializationService = {
   },
 
   // Update specialization
-  async update(id: string, data: CreateContractorSpecializationDto): Promise<ContractorSpecializationDto> {
+  async update(id: string, data: UpdateContractorSpecializationDto): Promise<ContractorSpecializationDto> {
     const response = await fetch(`${API_BASE_URL}/procurement/contractor-specializations/${id}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
@@ -275,7 +308,7 @@ export const licenseTypeService = {
   },
 
   // Update license type
-  async update(id: string, data: CreateLicenseTypeDto): Promise<LicenseTypeDto> {
+  async update(id: string, data: UpdateLicenseTypeDto): Promise<LicenseTypeDto> {
     const response = await fetch(`${API_BASE_URL}/procurement/license-types/${id}`, {
       method: 'PUT',
       headers: getAuthHeaders(),

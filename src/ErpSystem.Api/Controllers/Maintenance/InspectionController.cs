@@ -1,9 +1,9 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
+using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.ComponentModel.DataAnnotations;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -61,20 +61,20 @@ public class InspectionController : ControllerBase
             var activeInspections = qualityChecks.Select(qc =>
             {
                 workOrders.TryGetValue(qc.WorkOrderId, out var workOrder);
-                
+
                 // Parse CheckResults JSON to calculate progress
                 List<System.Text.Json.JsonElement>? checkResults = null;
                 try
                 {
-                    checkResults = string.IsNullOrEmpty(qc.CheckResults) || qc.CheckResults == "[]" 
-                        ? new List<System.Text.Json.JsonElement>() 
+                    checkResults = string.IsNullOrEmpty(qc.CheckResults) || qc.CheckResults == "[]"
+                        ? new List<System.Text.Json.JsonElement>()
                         : System.Text.Json.JsonSerializer.Deserialize<List<System.Text.Json.JsonElement>>(qc.CheckResults);
                 }
                 catch
                 {
                     checkResults = new List<System.Text.Json.JsonElement>();
                 }
-                
+
                 List<System.Text.Json.JsonElement>? checklistItems = null;
                 try
                 {
@@ -86,7 +86,7 @@ public class InspectionController : ControllerBase
                 {
                     checklistItems = new List<System.Text.Json.JsonElement>();
                 }
-                
+
                 var completedItems = checkResults.Count;
                 var totalItems = checklistItems.Count;
                 var progress = totalItems > 0 ? (completedItems * 100 / totalItems) : 0;
@@ -180,7 +180,7 @@ public class InspectionController : ControllerBase
                     },
                     new
                     {
-                        itemId = "item-2", 
+                        itemId = "item-2",
                         itemText = "Thermostat calibration",
                         result = (string?)null,
                         score = 8,
@@ -192,7 +192,7 @@ public class InspectionController : ControllerBase
                 createdAt = DateTime.Today.AddDays(-1),
                 updatedAt = DateTime.Now.AddMinutes(-30),
                 workflowStatus = "In Progress",
-                signatures = new object[0]
+                signatures = Array.Empty<object>()
             };
 
             return Ok(inspection);

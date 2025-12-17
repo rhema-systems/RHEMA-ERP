@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.ResponseCaching;
-using Microsoft.Net.Http.Headers;
-using Microsoft.Extensions.Options;
 using System.Text;
+using Microsoft.AspNetCore.ResponseCaching;
+using Microsoft.Extensions.Options;
+using Microsoft.Net.Http.Headers;
 
 namespace ErpSystem.Api.Middleware;
 
@@ -45,10 +45,12 @@ public class AdvancedResponseCachingMiddleware
     private static bool ShouldCache(HttpContext context)
     {
         var request = context.Request;
-        
+
         // Don't cache non-GET requests
         if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method))
+        {
             return false;
+        }
 
         // Don't cache requests with authorization unless explicitly allowed
         if (request.Headers.ContainsKey(HeaderNames.Authorization))
@@ -56,17 +58,21 @@ public class AdvancedResponseCachingMiddleware
             // Allow caching for public API endpoints
             var path = request.Path.Value?.ToLower();
             if (!path?.Contains("/api/public/") == true)
+            {
                 return false;
+            }
         }
 
         // Don't cache requests with query parameters that indicate dynamic content
         if (request.QueryString.HasValue)
         {
             var queryString = request.QueryString.Value?.ToLower();
-            if (queryString?.Contains("nocache") == true || 
+            if (queryString?.Contains("nocache") == true ||
                 queryString?.Contains("refresh") == true ||
                 queryString?.Contains("timestamp") == true)
+            {
                 return false;
+            }
         }
 
         return true;
@@ -82,7 +88,7 @@ public class AdvancedResponseCachingMiddleware
         {
             // Generate ETag based on route and user context
             var etag = GenerateETag(context);
-            
+
             if (ifNoneMatch.ToString().Contains(etag))
             {
                 response.StatusCode = 304; // Not Modified
@@ -114,11 +120,14 @@ public class AdvancedResponseCachingMiddleware
         var response = context.Response;
         var path = request.Path.Value?.ToLower();
 
-        if (string.IsNullOrEmpty(path)) return;
+        if (string.IsNullOrEmpty(path))
+        {
+            return;
+        }
 
         // Set cache headers based on content type and path
         var cacheProfile = GetCacheProfile(path);
-        
+
         if (cacheProfile != null)
         {
             if (cacheProfile.Duration.HasValue)
@@ -144,7 +153,7 @@ public class AdvancedResponseCachingMiddleware
         }
     }
 
-    private CacheProfile? GetCacheProfile(string path)
+    private static CacheProfile? GetCacheProfile(string path)
     {
         return path switch
         {
@@ -194,16 +203,16 @@ public class AdvancedResponseCachingMiddleware
         };
     }
 
-    private string GenerateETag(HttpContext context)
+    private static string GenerateETag(HttpContext context)
     {
         var request = context.Request;
         var path = request.Path.Value ?? "";
         var query = request.QueryString.Value ?? "";
         var userContext = context.User?.Identity?.Name ?? "anonymous";
-        
+
         // Include tenant context if available
         var tenantId = request.Headers["X-Tenant-Id"].FirstOrDefault() ?? "";
-        
+
         var etag = $"{path}{query}{userContext}{tenantId}";
         var hash = System.Security.Cryptography.MD5.HashData(Encoding.UTF8.GetBytes(etag));
         return $"\"{Convert.ToHexString(hash)}\"";
@@ -270,7 +279,7 @@ public static class ResponseCachingExtensions
     /// Add advanced response caching services
     /// </summary>
     public static IServiceCollection AddAdvancedResponseCaching(
-        this IServiceCollection services, 
+        this IServiceCollection services,
         IConfiguration configuration)
     {
         // Configure response caching options

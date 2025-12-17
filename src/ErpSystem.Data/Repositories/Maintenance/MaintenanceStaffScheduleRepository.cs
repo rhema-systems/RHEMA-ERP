@@ -48,8 +48,8 @@ public class MaintenanceStaffScheduleRepository : GenericRepository<MaintenanceS
         return await _context.MaintenanceStaffSchedules
             .Include(s => s.WorkOrder)
             .Include(s => s.AssignedVehicle)
-            .Where(s => s.TechnicianId == technicianId 
-                && s.StartDateTime >= startDate 
+            .Where(s => s.TechnicianId == technicianId
+                && s.StartDateTime >= startDate
                 && s.StartDateTime <= endDate)
             .OrderBy(s => s.StartDateTime)
             .ToListAsync();

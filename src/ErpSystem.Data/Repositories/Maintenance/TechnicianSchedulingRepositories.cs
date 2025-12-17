@@ -1,9 +1,9 @@
-using Microsoft.EntityFrameworkCore;
-using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.HR;
-using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Data.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.Maintenance;
 
@@ -16,8 +16,10 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
     public async Task<IEnumerable<TechnicianSchedule>> GetByTechnicianIdAsync(Guid technicianId)
     {
         if (technicianId == Guid.Empty)
+        {
             throw new ArgumentException("Technician ID cannot be empty", nameof(technicianId));
-            
+        }
+
         return await _dbSet
             .Where(ts => ts.TechnicianId == technicianId && !ts.IsDeleted)
             .Include(ts => ts.WorkOrder)
@@ -32,8 +34,10 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
     public async Task<IEnumerable<TechnicianSchedule>> GetByWorkOrderIdAsync(Guid workOrderId)
     {
         if (workOrderId == Guid.Empty)
+        {
             throw new ArgumentException("Work Order ID cannot be empty", nameof(workOrderId));
-            
+        }
+
         return await _dbSet
             .Where(ts => ts.WorkOrderId == workOrderId && !ts.IsDeleted)
             .Include(ts => ts.WorkOrder)
@@ -44,8 +48,10 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
     public async Task<IEnumerable<TechnicianSchedule>> GetByDateRangeAsync(DateTime startDate, DateTime endDate)
     {
         if (startDate >= endDate)
+        {
             throw new ArgumentException("Start date must be before end date");
-            
+        }
+
         return await _dbSet
             .Where(ts => !ts.IsDeleted &&
                 ts.StartDate >= startDate && ts.StartDate <= endDate)
@@ -57,10 +63,15 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
     public async Task<IEnumerable<TechnicianSchedule>> GetByTechnicianAndDateRangeAsync(Guid technicianId, DateTime startDate, DateTime endDate)
     {
         if (technicianId == Guid.Empty)
+        {
             throw new ArgumentException("Technician ID cannot be empty", nameof(technicianId));
+        }
+
         if (startDate >= endDate)
+        {
             throw new ArgumentException("Start date must be before end date");
-            
+        }
+
         return await _dbSet
             .Where(ts => ts.TechnicianId == technicianId && !ts.IsDeleted &&
                 ts.StartDate >= startDate && ts.StartDate <= endDate)
@@ -73,8 +84,10 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
     public async Task<IEnumerable<TechnicianSchedule>> GetByStatusAsync(string status)
     {
         if (string.IsNullOrWhiteSpace(status))
+        {
             throw new ArgumentException("Status cannot be null or empty", nameof(status));
-            
+        }
+
         return await _dbSet
             .Where(ts => ts.Status == status && !ts.IsDeleted)
             .Include(ts => ts.WorkOrder)
@@ -86,7 +99,7 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
     {
         var currentDate = DateTime.UtcNow;
         return await _dbSet
-            .Where(ts => !ts.IsDeleted && 
+            .Where(ts => !ts.IsDeleted &&
                 (ts.Status == "Scheduled" || ts.Status == "InProgress") &&
                 ts.EndDate < currentDate)
             .Include(ts => ts.WorkOrder)
@@ -103,7 +116,9 @@ public class TechnicianScheduleRepository : GenericRepository<TechnicianSchedule
              (startDate <= ts.StartDate && endDate >= ts.EndDate)));
 
         if (excludeScheduleId.HasValue)
+        {
             query = query.Where(ts => ts.Id != excludeScheduleId.Value);
+        }
 
         return await query.AnyAsync();
     }
@@ -154,8 +169,10 @@ public class TechnicianAvailabilityRepository : GenericRepository<TechnicianAvai
     public async Task<IEnumerable<TechnicianAvailability>> GetByTechnicianIdAsync(Guid technicianId)
     {
         if (technicianId == Guid.Empty)
+        {
             throw new ArgumentException("Technician ID cannot be empty", nameof(technicianId));
-            
+        }
+
         return await _dbSet
             .Where(ta => ta.TechnicianId == technicianId && !ta.IsDeleted)
             .OrderBy(ta => ta.StartDate)
@@ -165,10 +182,15 @@ public class TechnicianAvailabilityRepository : GenericRepository<TechnicianAvai
     public async Task<IEnumerable<TechnicianAvailability>> GetByTechnicianAndDateRangeAsync(Guid technicianId, DateTime startDate, DateTime endDate)
     {
         if (technicianId == Guid.Empty)
+        {
             throw new ArgumentException("Technician ID cannot be empty", nameof(technicianId));
+        }
+
         if (startDate >= endDate)
+        {
             throw new ArgumentException("Start date must be before end date");
-            
+        }
+
         return await _dbSet
             .Where(ta => ta.TechnicianId == technicianId && !ta.IsDeleted &&
                 ta.StartDate <= endDate && ta.EndDate >= startDate)
@@ -179,8 +201,10 @@ public class TechnicianAvailabilityRepository : GenericRepository<TechnicianAvai
     public async Task<IEnumerable<TechnicianAvailability>> GetByAvailabilityTypeAsync(string availabilityType)
     {
         if (string.IsNullOrWhiteSpace(availabilityType))
+        {
             throw new ArgumentException("Availability type cannot be null or empty", nameof(availabilityType));
-            
+        }
+
         return await _dbSet
             .Where(ta => ta.AvailabilityType == availabilityType && !ta.IsDeleted)
             .OrderBy(ta => ta.StartDate)
@@ -236,14 +260,14 @@ public class TechnicianAvailabilityRepository : GenericRepository<TechnicianAvai
 
         return availabilityRecords.Sum(ta => ta.AvailableHours ?? 0.0);
     }
-    
+
     /// <summary>
     /// Validates business rules for technician availability
     /// </summary>
     public async Task<(bool IsValid, string[] ValidationErrors)> ValidateAvailabilityAsync(TechnicianAvailability availability)
     {
         var errors = new List<string>();
-        
+
         try
         {
             if (availability == null)
@@ -251,46 +275,62 @@ public class TechnicianAvailabilityRepository : GenericRepository<TechnicianAvai
                 errors.Add("Availability record cannot be null");
                 return (false, errors.ToArray());
             }
-            
+
             // Basic validation
             if (availability.TechnicianId == Guid.Empty)
+            {
                 errors.Add("Valid technician ID is required");
-                
+            }
+
             if (availability.StartDate >= availability.EndDate)
+            {
                 errors.Add("Start date must be before end date");
-                
+            }
+
             if (string.IsNullOrWhiteSpace(availability.AvailabilityType))
+            {
                 errors.Add("Availability type is required");
-                
+            }
+
             if (string.IsNullOrWhiteSpace(availability.Reason))
+            {
                 errors.Add("Reason for availability change is required");
-                
+            }
+
             // Business rule validation
             var validAvailabilityTypes = new[] { "Available", "Unavailable", "PartiallyAvailable" };
             if (!validAvailabilityTypes.Contains(availability.AvailabilityType))
+            {
                 errors.Add($"Invalid availability type. Must be one of: {string.Join(", ", validAvailabilityTypes)}");
-                
+            }
+
             // Validate capacity percentage
-            if (availability.CapacityPercentage.HasValue && 
+            if (availability.CapacityPercentage.HasValue &&
                 (availability.CapacityPercentage < 0 || availability.CapacityPercentage > 100))
+            {
                 errors.Add("Capacity percentage must be between 0 and 100");
-                
+            }
+
             // Validate available hours
             if (availability.AvailableHours.HasValue && availability.AvailableHours < 0)
+            {
                 errors.Add("Available hours cannot be negative");
-                
+            }
+
             // Check for overlapping availability records
             var overlapping = await _dbSet
-                .Where(a => a.TechnicianId == availability.TechnicianId && 
-                           a.Id != availability.Id && 
+                .Where(a => a.TechnicianId == availability.TechnicianId &&
+                           a.Id != availability.Id &&
                            !a.IsDeleted &&
-                           a.StartDate < availability.EndDate && 
+                           a.StartDate < availability.EndDate &&
                            a.EndDate > availability.StartDate)
                 .AnyAsync();
-                
+
             if (overlapping)
+            {
                 errors.Add("Availability period overlaps with existing availability records");
-                
+            }
+
             return (errors.Count == 0, errors.ToArray());
         }
         catch (Exception)
@@ -299,7 +339,7 @@ public class TechnicianAvailabilityRepository : GenericRepository<TechnicianAvai
             return (false, errors.ToArray());
         }
     }
-    
+
     /// <summary>
     /// Overridden Add method with validation
     /// </summary>
@@ -310,10 +350,10 @@ public class TechnicianAvailabilityRepository : GenericRepository<TechnicianAvai
         {
             throw new InvalidOperationException($"Availability validation failed: {string.Join(", ", validation.ValidationErrors)}");
         }
-        
+
         return await base.AddAsync(entity);
     }
-    
+
     /// <summary>
     /// Overridden Update method with validation
     /// </summary>
@@ -324,7 +364,7 @@ public class TechnicianAvailabilityRepository : GenericRepository<TechnicianAvai
         {
             throw new InvalidOperationException($"Availability validation failed: {string.Join(", ", validation.ValidationErrors)}");
         }
-        
+
         await base.UpdateAsync(entity);
     }
 }
@@ -360,7 +400,9 @@ public class TechnicianShiftRepository : GenericRepository<TechnicianShift>, ITe
     {
         var query = _dbSet.Where(ts => ts.Name == name && !ts.IsDeleted);
         if (excludeId.HasValue)
+        {
             query = query.Where(ts => ts.Id != excludeId.Value);
+        }
 
         return !await query.AnyAsync();
     }
@@ -379,7 +421,10 @@ public class TechnicianShiftRepository : GenericRepository<TechnicianShift>, ITe
     public async Task<double> GetTotalShiftHoursAsync(Guid shiftId)
     {
         var shift = await GetByIdAsync(shiftId);
-        if (shift == null) return 0;
+        if (shift == null)
+        {
+            return 0;
+        }
 
         // Calculate hours considering break time
         var totalMinutes = (shift.EndTime - shift.StartTime).TotalMinutes - shift.BreakMinutes;
@@ -401,8 +446,10 @@ public class EmployeeRepository : GenericRepository<Employee>, IEmployeeReposito
     public async Task<IEnumerable<Employee>> GetByDepartmentAsync(string department)
     {
         if (string.IsNullOrWhiteSpace(department))
+        {
             throw new ArgumentException("Department cannot be null or empty", nameof(department));
-            
+        }
+
         return await _dbSet
             .Include(e => e.Department)
             .Where(e => e.Department != null && e.Department.Name == department && !e.IsDeleted)
@@ -414,8 +461,10 @@ public class EmployeeRepository : GenericRepository<Employee>, IEmployeeReposito
     public async Task<Employee?> GetByEmployeeNumberAsync(string employeeNumber)
     {
         if (string.IsNullOrWhiteSpace(employeeNumber))
+        {
             throw new ArgumentException("Employee number cannot be null or empty", nameof(employeeNumber));
-            
+        }
+
         return await _dbSet
             .Where(e => e.EmployeeNumber == employeeNumber && !e.IsDeleted)
             .FirstOrDefaultAsync();
@@ -425,7 +474,9 @@ public class EmployeeRepository : GenericRepository<Employee>, IEmployeeReposito
     {
         var query = _dbSet.Where(e => e.EmployeeNumber == employeeNumber && !e.IsDeleted);
         if (excludeId.HasValue)
+        {
             query = query.Where(e => e.Id != excludeId.Value);
+        }
 
         return !await query.AnyAsync();
     }
@@ -520,9 +571,9 @@ public class EmployeeRepository : GenericRepository<Employee>, IEmployeeReposito
     {
         var startDateOnly = DateOnly.FromDateTime(startDate);
         var endDateOnly = DateOnly.FromDateTime(endDate);
-        
+
         return await _dbSet
-            .Where(e => !e.IsDeleted && 
+            .Where(e => !e.IsDeleted &&
                 e.DateEmployed.HasValue &&
                 e.DateEmployed >= startDateOnly && e.DateEmployed <= endDateOnly)
             .OrderBy(e => e.DateEmployed)

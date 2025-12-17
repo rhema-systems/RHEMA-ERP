@@ -1,7 +1,7 @@
+using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
-using System.Text.Json;
 
 namespace ErpSystem.Api.Services
 {
@@ -44,7 +44,9 @@ namespace ErpSystem.Api.Services
             {
                 var value = await _distributedCache.GetStringAsync(key, cancellationToken);
                 if (string.IsNullOrEmpty(value))
+                {
                     return default;
+                }
 
                 return JsonSerializer.Deserialize<T>(value, _jsonOptions);
             }
@@ -61,7 +63,7 @@ namespace ErpSystem.Api.Services
             {
                 var serializedValue = JsonSerializer.Serialize(value, _jsonOptions);
                 var options = new DistributedCacheEntryOptions();
-                
+
                 if (expiry.HasValue)
                 {
                     options.SetAbsoluteExpiration(expiry.Value);
@@ -72,7 +74,7 @@ namespace ErpSystem.Api.Services
                 }
 
                 await _distributedCache.SetStringAsync(key, serializedValue, options, cancellationToken);
-                
+
                 _logger.LogDebug("Set cache value for key: {Key} with expiry: {Expiry}", key, expiry ?? TimeSpan.FromMinutes(30));
             }
             catch (Exception ex)
@@ -106,10 +108,10 @@ namespace ErpSystem.Api.Services
 
                 var database = _connectionMultiplexer.GetDatabase();
                 var server = _connectionMultiplexer.GetServer(_connectionMultiplexer.GetEndPoints().First());
-                
+
                 var keys = server.Keys(pattern: pattern);
                 var keyArray = keys.ToArray();
-                
+
                 if (keyArray.Any())
                 {
                     await database.KeyDeleteAsync(keyArray);
@@ -152,25 +154,25 @@ namespace ErpSystem.Api.Services
                     // Test with distributed cache
                     var testKey1 = $"health_check_{Guid.NewGuid()}";
                     var testValue1 = "test";
-                    
-                    await _distributedCache.SetStringAsync(testKey1, testValue1, 
-                        new DistributedCacheEntryOptions().SetAbsoluteExpiration(TimeSpan.FromSeconds(10)), 
+
+                    await _distributedCache.SetStringAsync(testKey1, testValue1,
+                        new DistributedCacheEntryOptions().SetAbsoluteExpiration(TimeSpan.FromSeconds(10)),
                         cancellationToken);
-                    
+
                     var retrievedValue1 = await _distributedCache.GetStringAsync(testKey1, cancellationToken);
                     await _distributedCache.RemoveAsync(testKey1, cancellationToken);
-                    
+
                     return testValue1 == retrievedValue1;
                 }
 
                 var database = _connectionMultiplexer.GetDatabase();
                 var testKey2 = $"health_check_{Guid.NewGuid()}";
                 var testValue2 = "test";
-                
+
                 await database.StringSetAsync(testKey2, testValue2, TimeSpan.FromSeconds(10));
                 var retrievedValue2 = await database.StringGetAsync(testKey2);
                 await database.KeyDeleteAsync(testKey2);
-                
+
                 return testValue2 == retrievedValue2;
             }
             catch (Exception ex)
@@ -183,7 +185,7 @@ namespace ErpSystem.Api.Services
         public async Task<Dictionary<string, string>> GetInfoAsync(CancellationToken cancellationToken = default)
         {
             var info = new Dictionary<string, string>();
-            
+
             try
             {
                 if (_connectionMultiplexer == null)
@@ -195,16 +197,16 @@ namespace ErpSystem.Api.Services
 
                 info["Type"] = "Redis";
                 info["Status"] = _connectionMultiplexer.IsConnected ? "Connected" : "Disconnected";
-                
+
                 var server = _connectionMultiplexer.GetServer(_connectionMultiplexer.GetEndPoints().First());
                 var redisInfo = await server.InfoAsync();
-                
+
                 foreach (var group in redisInfo)
                 {
                     foreach (var item in group)
                     {
-                        if (item.Key.Contains("version") || 
-                            item.Key.Contains("memory") || 
+                        if (item.Key.Contains("version") ||
+                            item.Key.Contains("memory") ||
                             item.Key.Contains("clients") ||
                             item.Key.Contains("uptime"))
                         {
@@ -212,7 +214,7 @@ namespace ErpSystem.Api.Services
                         }
                     }
                 }
-                
+
                 var database = _connectionMultiplexer.GetDatabase();
                 info["DatabaseSize"] = (await server.DatabaseSizeAsync()).ToString();
             }
@@ -221,7 +223,7 @@ namespace ErpSystem.Api.Services
                 _logger.LogError(ex, "Error getting Redis info");
                 info["Error"] = ex.Message;
             }
-            
+
             return info;
         }
     }

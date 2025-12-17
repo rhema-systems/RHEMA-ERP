@@ -1,9 +1,9 @@
+using System;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.Extensions.Logging;
-using System;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -60,15 +60,15 @@ public class TechnicianService : ITechnicianService
         {
             // Sync with HR first to ensure we have latest data
             await SyncTechniciansFromHRAsync();
-            
+
             var technicians = await _technicianRepository.GetAllAsync();
             var result = new List<TechnicianDto>();
-            
+
             foreach (var technician in technicians)
             {
                 result.Add(await MapToDto(technician));
             }
-            
+
             return result;
         }
         catch (Exception ex)
@@ -94,19 +94,29 @@ public class TechnicianService : ITechnicianService
             }
 
             if (!string.IsNullOrEmpty(filter.Department))
+            {
                 filtered = filtered.Where(t => t.Department.Name == filter.Department);
+            }
 
             if (!string.IsNullOrEmpty(filter.Specialization))
+            {
                 filtered = filtered.Where(t => t.Specialization == filter.Specialization);
+            }
 
             if (!string.IsNullOrEmpty(filter.CertificationLevel))
+            {
                 filtered = filtered.Where(t => t.CertificationLevel == filter.CertificationLevel);
+            }
 
             if (filter.IsActive.HasValue)
+            {
                 filtered = filtered.Where(t => t.IsActive == filter.IsActive.Value);
+            }
 
             if (filter.IsAvailable.HasValue && filter.IsAvailable.Value)
+            {
                 filtered = filtered.Where(t => t.CurrentWorkload < t.MaxWorkload);
+            }
 
             var totalCount = filtered.Count();
             var techniciansPage = filtered
@@ -145,12 +155,12 @@ public class TechnicianService : ITechnicianService
         {
             var technicians = await _technicianRepository.GetActiveAsync();
             var result = new List<TechnicianDto>();
-            
+
             foreach (var technician in technicians)
             {
                 result.Add(await MapToDto(technician));
             }
-            
+
             return result;
         }
         catch (Exception ex)
@@ -166,12 +176,12 @@ public class TechnicianService : ITechnicianService
         {
             var technicians = await _technicianRepository.GetByDepartmentAsync(department);
             var result = new List<TechnicianDto>();
-            
+
             foreach (var technician in technicians)
             {
                 result.Add(await MapToDto(technician));
             }
-            
+
             return result;
         }
         catch (Exception ex)
@@ -187,12 +197,12 @@ public class TechnicianService : ITechnicianService
         {
             var technicians = await _technicianRepository.GetBySpecializationAsync(specialization);
             var result = new List<TechnicianDto>();
-            
+
             foreach (var technician in technicians)
             {
                 result.Add(await MapToDto(technician));
             }
-            
+
             return result;
         }
         catch (Exception ex)
@@ -208,12 +218,12 @@ public class TechnicianService : ITechnicianService
         {
             var technicians = await _technicianRepository.GetAvailableAsync(DateTime.UtcNow, DateTime.UtcNow.AddDays(30));
             var result = new List<TechnicianDto>();
-            
+
             foreach (var technician in technicians)
             {
                 result.Add(await MapToDto(technician));
             }
-            
+
             return result;
         }
         catch (Exception ex)
@@ -228,7 +238,7 @@ public class TechnicianService : ITechnicianService
         try
         {
             var assignments = await _skillAssignmentRepository.GetBySkillIdAsync(skillId);
-            
+
             if (minProficiencyLevel.HasValue)
             {
                 assignments = assignments.Where(a => a.ProficiencyLevel >= minProficiencyLevel.Value);
@@ -243,7 +253,7 @@ public class TechnicianService : ITechnicianService
                     result.Add(technician);
                 }
             }
-            
+
             return result;
         }
         catch (Exception ex)
@@ -267,7 +277,7 @@ public class TechnicianService : ITechnicianService
             // For now, we'll simulate the sync with mock data
             var hrTechnicians = await _technicianRepository.SyncFromHRAsync();
             var result = new List<TechnicianDto>();
-            
+
             foreach (var technician in hrTechnicians)
             {
                 technician.LastSyncDate = DateTime.UtcNow;
@@ -276,7 +286,7 @@ public class TechnicianService : ITechnicianService
             }
 
             _logger.LogInformation("Synchronized {Count} technicians from HR module", result.Count);
-            
+
             return result;
         }
         catch (Exception ex)
@@ -319,7 +329,7 @@ public class TechnicianService : ITechnicianService
                     existingTechnician.Phone = hrTechnician.Phone;
                     existingTechnician.IsActive = hrTechnician.IsActive;
                     existingTechnician.LastSyncDate = DateTime.UtcNow;
-                    
+
                     await _technicianRepository.UpdateAsync(existingTechnician);
                 }
             }
@@ -346,7 +356,7 @@ public class TechnicianService : ITechnicianService
                 TotalTechnicians = technicians.Count(),
                 ActiveTechnicians = technicians.Count(t => t.IsActive),
                 TechniciansWithSkills = assignments.Select(a => a.TechnicianId).Distinct().Count(),
-                AverageSkillsPerTechnician = technicians.Any() ? 
+                AverageSkillsPerTechnician = technicians.Any() ?
                     (decimal)assignments.GroupBy(a => a.TechnicianId).Average(g => g.Count()) : 0,
                 DepartmentBreakdown = technicians.GroupBy(t => t.Department?.Name ?? "Unknown")
                     .ToDictionary(g => g.Key, g => g.Count()),
@@ -359,7 +369,7 @@ public class TechnicianService : ITechnicianService
                     // OptimallyUtilizedTechnicians = technicians.Count(t => 
                     //     t.CurrentWorkload >= t.MaxWorkload * 0.8m && t.CurrentWorkload <= t.MaxWorkload),
                     // UnderutilizedTechnicians = technicians.Count(t => t.CurrentWorkload < t.MaxWorkload * 0.8m),
-                    AverageUtilization = technicians.Any() && technicians.Sum(t => t.MaxWorkload) > 0 ? 
+                    AverageUtilization = technicians.Any() && technicians.Sum(t => t.MaxWorkload) > 0 ?
                         (decimal)(technicians.Sum(t => t.CurrentWorkload) / technicians.Sum(t => t.MaxWorkload) * 100) : 0
                 }
             };
@@ -471,9 +481,9 @@ public class TechnicianService : ITechnicianService
             };
 
             await _technicianRepository.AddAsync(employee);
-            
+
             _logger.LogInformation("Created technician {TechnicianId} successfully", employee.Id);
-            
+
             return await MapToDto(employee);
         }
         catch (Exception ex)
@@ -489,10 +499,7 @@ public class TechnicianService : ITechnicianService
         {
             _logger.LogInformation("Updating technician: {TechnicianId}", id);
 
-            var employee = await _technicianRepository.GetByIdAsync(id);
-            if (employee == null)
-                throw new ArgumentException($"Technician with ID {id} not found");
-
+            var employee = await _technicianRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Technician with ID {id} not found");
             employee.FirstName = updateDto.FirstName;
             employee.LastName = updateDto.LastName;
             employee.EmailAddress = updateDto.Email;
@@ -508,9 +515,9 @@ public class TechnicianService : ITechnicianService
             employee.LastModifiedById = _currentUserProvider.UserId;
 
             await _technicianRepository.UpdateAsync(employee);
-            
+
             _logger.LogInformation("Updated technician {TechnicianId} successfully", id);
-            
+
             return await MapToDto(employee);
         }
         catch (Exception ex)
@@ -526,12 +533,9 @@ public class TechnicianService : ITechnicianService
         {
             _logger.LogInformation("Deleting technician: {TechnicianId}", id);
 
-            var technician = await _technicianRepository.GetByIdAsync(id);
-            if (technician == null)
-                throw new ArgumentException($"Technician with ID {id} not found");
-
+            var technician = await _technicianRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Technician with ID {id} not found");
             await _technicianRepository.DeleteAsync(id);
-            
+
             _logger.LogInformation("Deleted technician {TechnicianId} successfully", id);
         }
         catch (Exception ex)
@@ -547,13 +551,13 @@ public class TechnicianService : ITechnicianService
         {
             // Use the repository method that directly returns technicians by skill
             var technicians = await _technicianRepository.GetTechniciansBySkillAsync(skillId);
-            
+
             var result = new List<TechnicianDto>();
             foreach (var technician in technicians)
             {
                 result.Add(await MapToDto(technician));
             }
-            
+
             return result;
         }
         catch (Exception ex)
@@ -569,12 +573,12 @@ public class TechnicianService : ITechnicianService
         {
             var technicians = await _technicianRepository.GetAvailableAsync(startTime, endTime);
             var result = new List<TechnicianDto>();
-            
+
             foreach (var technician in technicians)
             {
                 result.Add(await MapToDto(technician));
             }
-            
+
             return result;
         }
         catch (Exception ex)
@@ -617,12 +621,12 @@ public class TechnicianService : ITechnicianService
         {
             var technicians = await _technicianRepository.GetTechniciansByTeamAsync(teamId);
             var result = new List<TechnicianDto>();
-            
+
             foreach (var technician in technicians)
             {
                 result.Add(await MapToDto(technician));
             }
-            
+
             return result;
         }
         catch (Exception ex)
@@ -698,12 +702,12 @@ public class TechnicianService : ITechnicianService
         {
             var technicians = await _technicianRepository.GetTechniciansByLocationAsync(locationId);
             var result = new List<TechnicianDto>();
-            
+
             foreach (var technician in technicians)
             {
                 result.Add(await MapToDto(technician));
             }
-            
+
             return result;
         }
         catch (Exception ex)
@@ -718,11 +722,7 @@ public class TechnicianService : ITechnicianService
         try
         {
             // Get technician details
-            var technician = await _technicianRepository.GetByIdAsync(technicianId);
-            if (technician == null)
-            {
-                throw new ArgumentException($"Technician with ID {technicianId} not found");
-            }
+            var technician = await _technicianRepository.GetByIdAsync(technicianId) ?? throw new ArgumentException($"Technician with ID {technicianId} not found");
 
             // For now, return basic analytics - this would normally aggregate from work orders
             return new TechnicianAnalyticsDto
@@ -758,7 +758,7 @@ public class TechnicianService : ITechnicianService
             // Get skill assignments to calculate utilization
             var assignments = await _skillAssignmentRepository.GetBySkillIdAsync(skillId);
             var techniciansWithSkill = assignments.Count();
-            
+
             // For now, return basic utilization data - this would normally aggregate from work orders
             return new SkillUtilizationDto
             {
@@ -782,12 +782,12 @@ public class TechnicianService : ITechnicianService
             // For now, return all active technicians - this would normally filter by skills, availability, etc.
             var technicians = await _technicianRepository.GetActiveTechniciansAsync();
             var result = new List<TechnicianDto>();
-            
+
             foreach (var technician in technicians)
             {
                 result.Add(await MapToDto(technician));
             }
-            
+
             return result;
         }
         catch (Exception ex)

@@ -93,7 +93,7 @@ public class TrendDataPointDto
     public DateTime Date { get; set; }
     public double Value { get; set; }
     public string? Label { get; set; }
-    
+
     // Additional property for service compatibility
     public string MetricType { get; set; } = string.Empty;
 }
@@ -511,12 +511,12 @@ public class CreateScheduledReportDto
 {
     [Required]
     public string Name { get; set; } = string.Empty;
-    
+
     public string? Description { get; set; }
-    
+
     [Required]
     public string Schedule { get; set; } = string.Empty;
-    
+
     public string ReportType { get; set; } = string.Empty;
     public List<string> Parameters { get; set; } = new();
 }
@@ -528,12 +528,12 @@ public class CreateMaintenanceReportTemplateDto
 {
     [Required]
     public string Name { get; set; } = string.Empty;
-    
+
     public string? Description { get; set; }
-    
+
     [Required]
     public string ReportType { get; set; } = string.Empty;
-    
+
     public string Template { get; set; } = string.Empty;
     public List<string> Parameters { get; set; } = new();
 }

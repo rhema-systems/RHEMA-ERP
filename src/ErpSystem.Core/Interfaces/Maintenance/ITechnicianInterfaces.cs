@@ -1,7 +1,7 @@
-using ErpSystem.Core.Entities.Maintenance;
-using ErpSystem.Core.Entities.HR;
-using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Core.Interfaces.Maintenance;
 
@@ -12,11 +12,11 @@ public interface ITechnicianSchedulingService
     Task<IEnumerable<object>> GetAvailableTechniciansAsync(DateTime startDate, DateTime endDate, string? requiredSkills = null);
     Task<bool> IsTechnicianAvailableAsync(Guid technicianId, DateTime startDate, DateTime endDate);
     Task<TechnicianAvailabilityDto> GetTechnicianAvailabilityAsync(Guid technicianId, DateTime startDate, DateTime endDate);
-    
+
     // Scheduling methods
     Task<object> ScheduleWorkOrderAsync(Guid workOrderId, Guid technicianId, DateTime scheduledDate);
     Task<object> FindBestTechnicianAsync(Guid workOrderId, DateTime scheduledDate);
-    
+
     // Workload management
     Task<TechnicianWorkloadDto> GetTechnicianWorkloadAsync(Guid technicianId, DateTime startDate, DateTime endDate);
     Task SetTechnicianAvailabilityAsync(Guid technicianId, DateTime startDate, DateTime endDate, string availabilityType, string? reason = null);
@@ -32,7 +32,7 @@ public interface ITechnicianScheduleRepository : IGenericRepository<TechnicianSc
     Task<IEnumerable<TechnicianSchedule>> GetOverdueSchedulesAsync();
     Task<bool> HasConflictingScheduleAsync(Guid technicianId, DateTime startDate, DateTime endDate, Guid? excludeScheduleId = null);
     Task<double> GetTotalScheduledHoursAsync(Guid technicianId, DateTime startDate, DateTime endDate);
-    
+
     // Optimized navigation property loading methods
     Task<IEnumerable<TechnicianSchedule>> GetByTechnicianIdLightweightAsync(Guid technicianId);
     Task<IEnumerable<TechnicianSchedule>> GetByTechnicianIdWithFullDetailsAsync(Guid technicianId);
@@ -73,7 +73,7 @@ public interface IEmployeeRepository : IGenericRepository<Employee>
     Task<IEnumerable<Employee>> SearchEmployeesAsync(string searchTerm);
     Task<IEnumerable<Employee>> GetByHireDateRangeAsync(DateTime startDate, DateTime endDate);
     Task<int> GetEmployeeCountByDepartmentAsync(string department);
-    
+
     // Optimized navigation property loading methods
     Task<IEnumerable<Employee>> GetActiveEmployeesLightweightAsync();
     Task<IEnumerable<Employee>> GetActiveEmployeesWithHierarchyAsync();

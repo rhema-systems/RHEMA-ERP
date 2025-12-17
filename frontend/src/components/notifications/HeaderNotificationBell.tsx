@@ -29,6 +29,14 @@ const HeaderNotificationBell: React.FC<HeaderNotificationBellProps> = ({ classNa
     enableRealTime: true
   });
 
+  // Helper function to strip HTML tags from notification message
+  const stripHtml = (html: string) => {
+    if (!html) return '';
+    const tmp = document.createElement('DIV');
+    tmp.innerHTML = html;
+    return tmp.textContent || tmp.innerText || '';
+  };
+
   // Show browser notification when new notification arrives
   React.useEffect(() => {
     if (notifications.length > 0) {
@@ -197,7 +205,7 @@ const HeaderNotificationBell: React.FC<HeaderNotificationBellProps> = ({ classNa
                               {notification.title}
                             </h4>
                             <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 line-clamp-2">
-                              {notification.message}
+                              {stripHtml(notification.message)}
                             </p>
                             <div className="flex items-center space-x-2 mt-2">
                               <span className={cn('text-xs', getPriorityColor(notification.priority))}>

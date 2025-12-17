@@ -1,6 +1,6 @@
-using Novell.Directory.Ldap;
-using Microsoft.Extensions.Logging;
 using ErpSystem.Core.Entities;
+using Microsoft.Extensions.Logging;
+using Novell.Directory.Ldap;
 
 namespace ErpSystem.Core.Services;
 
@@ -14,6 +14,7 @@ public interface ILdapAuthenticationService
 public class LdapAuthenticationService : ILdapAuthenticationService
 {
     private readonly ILogger<LdapAuthenticationService> _logger;
+    private static readonly string[] attrs = new[] { "distinguishedName", "displayName", "mail", "givenName", "sn" };
 
     public LdapAuthenticationService(ILogger<LdapAuthenticationService> logger)
     {
@@ -22,51 +23,103 @@ public class LdapAuthenticationService : ILdapAuthenticationService
 
     public async Task<LdapAuthenticationResult> AuthenticateAsync(string username, string password, Tenant tenant)
     {
-        if (!tenant.LdapEnabled || string.IsNullOrEmpty(tenant.LdapServer))
-        {
-            return new LdapAuthenticationResult { Success = false, ErrorMessage = "LDAP is not configured for this tenant" };
-        }
+	        if (!tenant.LdapEnabled || string.IsNullOrEmpty(tenant.LdapServer))
+	        {
+	            _logger.LogInformation(
+	                "Skipping LDAP authentication for user {Username}: LDAP is disabled or server not configured for tenant {TenantId} ({TenantCode}).",
+	                username,
+	                tenant.Id,
+	                tenant.Code);
+	            return new LdapAuthenticationResult
+	            {
+	                Success = false,
+	                ErrorMessage = "LDAP is not configured for this tenant"
+	            };
+	        }
 
         return await Task.Run(() =>
         {
             try
             {
+	                _logger.LogInformation(
+	                    "Starting LDAP authentication for user {Username} against server {Server}:{Port} (TenantId={TenantId}).",
+	                    username,
+	                    tenant.LdapServer,
+	                    tenant.LdapPort ?? 389,
+	                    tenant.Id);
+
                 using var connection = new LdapConnection();
-                
+
                 // Connect to LDAP server
                 connection.Connect(tenant.LdapServer, tenant.LdapPort ?? 389);
-                
+	                _logger.LogDebug(
+	                    "LDAP connection established to {Server}:{Port} for user {Username}.",
+	                    tenant.LdapServer,
+	                    tenant.LdapPort ?? 389,
+	                    username);
+
                 // First, bind with the service account to search for the user
-                if (!string.IsNullOrEmpty(tenant.LdapBindDn) && !string.IsNullOrEmpty(tenant.LdapBindPassword))
-                {
-                    connection.Bind(tenant.LdapBindDn, tenant.LdapBindPassword);
-                }
+	                if (!string.IsNullOrEmpty(tenant.LdapBindDn) && !string.IsNullOrEmpty(tenant.LdapBindPassword))
+	                {
+	                    _logger.LogDebug("Binding to LDAP with service account DN {BindDn}", tenant.LdapBindDn);
+	                    connection.Bind(tenant.LdapBindDn, tenant.LdapBindPassword);
+	                }
+	                else
+	                {
+	                    _logger.LogDebug(
+	                        "No LDAP bind DN/password configured for tenant {TenantId}. Performing anonymous search for user {Username}.",
+	                        tenant.Id,
+	                        username);
+	                }
 
                 // Search for the user
-                var searchFilter = $"(sAMAccountName={username})";
+	                var searchFilter = $"(sAMAccountName={username})";
+	                _logger.LogDebug(
+	                    "Searching LDAP for user {Username} with filter {Filter} in base DN {BaseDn}.",
+	                    username,
+	                    searchFilter,
+	                    tenant.LdapBaseDn);
                 var searchResults = connection.Search(
                     tenant.LdapBaseDn,
                     2, // LdapConnection.SCOPE_SUB
                     searchFilter,
-                    new[] { "distinguishedName", "displayName", "mail", "givenName", "sn" },
+                    attrs,
                     false
                 );
-                
-                if (!searchResults.HasMore())
-                {
-                    return new LdapAuthenticationResult { Success = false, ErrorMessage = "User not found in LDAP" };
-                }
+
+	                if (!searchResults.HasMore())
+	                {
+	                    _logger.LogWarning(
+	                        "LDAP search did not find user {Username} in base DN {BaseDn}.",
+	                        username,
+	                        tenant.LdapBaseDn);
+	                    return new LdapAuthenticationResult
+	                    {
+	                        Success = false,
+	                        ErrorMessage = "User not found in LDAP"
+	                    };
+	                }
 
                 var userEntry = searchResults.Next();
                 var userDn = userEntry.Dn;
+	                _logger.LogDebug(
+	                    "Found LDAP user entry for {Username} with DN {UserDn}.",
+	                    username,
+	                    userDn);
 
                 // Now authenticate the user with their credentials using a new connection
-                using var userConnection = new LdapConnection();
-                userConnection.Connect(tenant.LdapServer, tenant.LdapPort ?? 389);
-                userConnection.Bind(userDn, password);
+	                using var userConnection = new LdapConnection();
+	                userConnection.Connect(tenant.LdapServer, tenant.LdapPort ?? 389);
+	                _logger.LogDebug(
+	                    "Connecting secondary LDAP connection to {Server}:{Port} for user bind of {Username}.",
+	                    tenant.LdapServer,
+	                    tenant.LdapPort ?? 389,
+	                    username);
+	                userConnection.Bind(userDn, password);
+	                _logger.LogInformation("LDAP bind successful for user {Username}", username);
 
                 // If we get here, authentication was successful
-                var ldapUser = new LdapUser
+	                var ldapUser = new LdapUser
                 {
                     Username = username,
                     DistinguishedName = userDn,
@@ -76,17 +129,37 @@ public class LdapAuthenticationService : ILdapAuthenticationService
                     LastName = GetAttributeValue(userEntry, "sn") ?? ""
                 };
 
-                return new LdapAuthenticationResult { Success = true, User = ldapUser };
+	                _logger.LogInformation("LDAP authentication succeeded for user {Username}", username);
+	                return new LdapAuthenticationResult { Success = true, User = ldapUser };
             }
             catch (LdapException ldapEx)
             {
-                _logger.LogWarning(ldapEx, "LDAP authentication failed for user {Username}", username);
-                return new LdapAuthenticationResult { Success = false, ErrorMessage = "Invalid username or password" };
+	                _logger.LogWarning(
+	                    ldapEx,
+	                    "LDAP authentication failed for user {Username} against {Server}:{Port}. LDAP error: {LdapError}",
+	                    username,
+	                    tenant.LdapServer,
+	                    tenant.LdapPort ?? 389,
+	                    ldapEx.LdapErrorMessage);
+	                return new LdapAuthenticationResult
+	                {
+	                    Success = false,
+	                    ErrorMessage = "Invalid username or password"
+	                };
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during LDAP authentication for user {Username}", username);
-                return new LdapAuthenticationResult { Success = false, ErrorMessage = "Authentication service error" };
+	                _logger.LogError(
+	                    ex,
+	                    "Unexpected error during LDAP authentication for user {Username} against {Server}:{Port}",
+	                    username,
+	                    tenant.LdapServer,
+	                    tenant.LdapPort ?? 389);
+	                return new LdapAuthenticationResult
+	                {
+	                    Success = false,
+	                    ErrorMessage = "Authentication service error"
+	                };
             }
         });
     }
@@ -115,10 +188,10 @@ public class LdapAuthenticationService : ILdapAuthenticationService
                     tenant.LdapBaseDn,
                     2, // LdapConnection.SCOPE_SUB
                     searchFilter,
-                    new[] { "distinguishedName", "displayName", "mail", "givenName", "sn" },
+                    attrs,
                     false
                 );
-                
+
                 if (!searchResults.HasMore())
                 {
                     return null;
@@ -155,15 +228,15 @@ public class LdapAuthenticationService : ILdapAuthenticationService
             try
             {
                 using var connection = new LdapConnection();
-                
+
                 // Test basic connection to LDAP server
                 connection.Connect(tenant.LdapServer, tenant.LdapPort ?? 389);
-                
+
                 // Test bind with service account if provided
                 if (!string.IsNullOrEmpty(tenant.LdapBindDn) && !string.IsNullOrEmpty(tenant.LdapBindPassword))
                 {
                     connection.Bind(tenant.LdapBindDn, tenant.LdapBindPassword);
-                    
+
                     // Test a basic search to verify Base DN and permissions
                     if (!string.IsNullOrEmpty(tenant.LdapBaseDn))
                     {
@@ -176,30 +249,30 @@ public class LdapAuthenticationService : ILdapAuthenticationService
                                 new[] { "objectClass" },
                                 false
                             );
-                            
+
                             // If we can search, the configuration is working
-                            return new LdapAuthenticationResult 
-                            { 
-                                Success = true, 
-                                ErrorMessage = "LDAP connection successful. Server accessible, bind successful, and Base DN is valid." 
+                            return new LdapAuthenticationResult
+                            {
+                                Success = true,
+                                ErrorMessage = "LDAP connection successful. Server accessible, bind successful, and Base DN is valid."
                             };
                         }
                         catch (LdapException ldapEx)
                         {
                             _logger.LogWarning(ldapEx, "LDAP search test failed");
-                            return new LdapAuthenticationResult 
-                            { 
-                                Success = false, 
-                                ErrorMessage = $"LDAP connection established but search failed. Please verify Base DN: {ldapEx.LdapErrorMessage}" 
+                            return new LdapAuthenticationResult
+                            {
+                                Success = false,
+                                ErrorMessage = $"LDAP connection established but search failed. Please verify Base DN: {ldapEx.LdapErrorMessage}"
                             };
                         }
                     }
                     else
                     {
-                        return new LdapAuthenticationResult 
-                        { 
-                            Success = true, 
-                            ErrorMessage = "LDAP connection and bind successful. Note: Base DN not configured - add Base DN for full functionality." 
+                        return new LdapAuthenticationResult
+                        {
+                            Success = true,
+                            ErrorMessage = "LDAP connection and bind successful. Note: Base DN not configured - add Base DN for full functionality."
                         };
                     }
                 }
@@ -209,18 +282,18 @@ public class LdapAuthenticationService : ILdapAuthenticationService
                     try
                     {
                         connection.Bind("", ""); // Anonymous bind
-                        return new LdapAuthenticationResult 
-                        { 
-                            Success = true, 
-                            ErrorMessage = "LDAP server accessible (anonymous bind). Consider adding service account credentials for better security." 
+                        return new LdapAuthenticationResult
+                        {
+                            Success = true,
+                            ErrorMessage = "LDAP server accessible (anonymous bind). Consider adding service account credentials for better security."
                         };
                     }
                     catch
                     {
-                        return new LdapAuthenticationResult 
-                        { 
-                            Success = false, 
-                            ErrorMessage = "LDAP server accessible but authentication failed. Please provide valid Bind DN and password." 
+                        return new LdapAuthenticationResult
+                        {
+                            Success = false,
+                            ErrorMessage = "LDAP server accessible but authentication failed. Please provide valid Bind DN and password."
                         };
                     }
                 }
@@ -228,25 +301,25 @@ public class LdapAuthenticationService : ILdapAuthenticationService
             catch (LdapException ldapEx)
             {
                 _logger.LogWarning(ldapEx, "LDAP connection test failed");
-                return new LdapAuthenticationResult 
-                { 
-                    Success = false, 
-                    ErrorMessage = $"LDAP connection failed: {ldapEx.LdapErrorMessage}" 
+                return new LdapAuthenticationResult
+                {
+                    Success = false,
+                    ErrorMessage = $"LDAP connection failed: {ldapEx.LdapErrorMessage}"
                 };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during LDAP connection test");
-                return new LdapAuthenticationResult 
-                { 
-                    Success = false, 
-                    ErrorMessage = $"Connection test failed: {ex.Message}" 
+                return new LdapAuthenticationResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Connection test failed: {ex.Message}"
                 };
             }
         });
     }
 
-    private string? GetAttributeValue(LdapEntry entry, string attributeName)
+    private static string? GetAttributeValue(LdapEntry entry, string attributeName)
     {
         var attribute = entry.GetAttribute(attributeName);
         return attribute?.StringValue;

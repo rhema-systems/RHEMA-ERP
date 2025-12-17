@@ -7,9 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Upload, FileText, X, CheckCircle2 } from 'lucide-react';
-import { type RegistrationFormData } from '@/services/businessPartnerRegistrationService';
+import { Upload, FileText, X, CheckCircle2, Loader2 } from 'lucide-react';
+import { type RegistrationFormData, businessPartnerRegistrationService } from '@/services/businessPartnerRegistrationService';
 import { toast } from 'sonner';
+import { fileUploadService } from '@/services/file-upload.service';
 
 interface DocumentUploadProps {
   formData: RegistrationFormData;
@@ -37,17 +38,30 @@ export default function DocumentUpload({ formData, updateFormData, registrationI
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      // Validate file size (max 10MB)
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error('File size must be less than 10MB');
-        return;
-      }
-      setSelectedFile(file);
+    if (!file) return;
+
+    // Use existing validation service with comprehensive checks
+    const validation = fileUploadService.validateFile(file, 10); // 10MB limit
+    if (!validation.valid) {
+      toast.error(validation.error || 'Invalid file');
+      e.target.value = ''; // Reset file input
+      return;
     }
+
+    // Additional document-specific validation
+    const allowedDocTypes = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
+    const extension = '.' + file.name.split('.').pop()?.toLowerCase();
+    if (!allowedDocTypes.includes(extension)) {
+      toast.error(`Only ${allowedDocTypes.join(', ')} files are allowed for documents`);
+      e.target.value = ''; // Reset file input
+      return;
+    }
+
+    setSelectedFile(file);
+    toast.success(`File selected: ${file.name} (${fileUploadService.formatFileSize(file.size)})`);
   };
 
-  const handleAddDocument = () => {
+  const handleAddDocument = async () => {
     if (!selectedDocumentType) {
       toast.error('Please select a document type');
       return;
@@ -58,21 +72,47 @@ export default function DocumentUpload({ formData, updateFormData, registrationI
       return;
     }
 
-    // Add document to the list
-    const newDocument = {
-      documentType: selectedDocumentType,
-      documentName: selectedFile.name,
-      file: selectedFile,
-    };
+    if (!registrationId) {
+      toast.error('Please save your registration first before uploading documents');
+      return;
+    }
 
-    updateFormData({
-      documents: [...documents, newDocument],
-    });
+    setUploading(true);
+    try {
+      // Upload document to backend
+      await businessPartnerRegistrationService.uploadDocument(
+        registrationId,
+        selectedFile,
+        selectedDocumentType
+      );
 
-    // Reset form
-    setSelectedDocumentType('');
-    setSelectedFile(null);
-    toast.success('Document added successfully');
+      // Add document to the local list
+      const newDocument = {
+        documentType: selectedDocumentType,
+        documentName: selectedFile.name,
+        file: selectedFile,
+        fileSize: selectedFile.size,
+      };
+
+      updateFormData({
+        documents: [...documents, newDocument],
+      });
+
+      // Reset form
+      setSelectedDocumentType('');
+      setSelectedFile(null);
+
+      // Reset file input
+      const fileInput = document.getElementById('file') as HTMLInputElement;
+      if (fileInput) fileInput.value = '';
+
+      toast.success('Document uploaded successfully');
+    } catch (error: any) {
+      console.error('Error uploading document:', error);
+      toast.error(error.message || 'Failed to upload document');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleRemoveDocument = (index: number) => {
@@ -81,8 +121,8 @@ export default function DocumentUpload({ formData, updateFormData, registrationI
     toast.success('Document removed');
   };
 
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 Bytes';
+  const formatFileSize = (bytes?: number): string => {
+    if (!bytes || bytes === 0) return '0 Bytes';
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -155,12 +195,26 @@ export default function DocumentUpload({ formData, updateFormData, registrationI
 
             <Button
               onClick={handleAddDocument}
-              disabled={!selectedDocumentType || !selectedFile}
+              disabled={!selectedDocumentType || !selectedFile || uploading || !registrationId}
               className="w-full"
             >
-              <Upload className="w-4 h-4 mr-2" />
-              Add Document
+              {uploading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Uploading...
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4 mr-2" />
+                  Add Document
+                </>
+              )}
             </Button>
+            {!registrationId && (
+              <p className="text-xs text-amber-600 mt-2">
+                Please save your registration first before uploading documents
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -184,11 +238,9 @@ export default function DocumentUpload({ formData, updateFormData, registrationI
                           <Badge variant="outline" className="text-xs">
                             {doc.documentType}
                           </Badge>
-                          {doc.file && (
-                            <span className="text-xs text-gray-500">
-                              {formatFileSize(doc.file.size)}
-                            </span>
-                          )}
+                          <span className="text-xs text-gray-500">
+                            {formatFileSize(doc.file?.size || doc.fileSize)}
+                          </span>
                         </div>
                       </div>
                     </div>

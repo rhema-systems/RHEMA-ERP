@@ -1,8 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using ErpSystem.Core.Interfaces;
-using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Core.Entities.HR;
 
@@ -171,23 +171,23 @@ public class Employee : TenantEntity
 
     // Computed Properties
     [NotMapped]
-    public string FullName => string.IsNullOrEmpty(MiddleName) 
-        ? $"{FirstName} {LastName}" 
+    public string FullName => string.IsNullOrEmpty(MiddleName)
+        ? $"{FirstName} {LastName}"
         : $"{FirstName} {MiddleName} {LastName}";
 
     [NotMapped]
     public string DisplayName => $"{FullName} ({EmployeeNumber})";
 
     [NotMapped]
-    public int? YearsOfService => DateEmployed.HasValue 
-        ? DateTime.Today.Year - DateEmployed.Value.Year 
+    public int? YearsOfService => DateEmployed.HasValue
+        ? DateTime.Today.Year - DateEmployed.Value.Year
         : null;
 
     [NotMapped]
     public bool IsOnProbation => StaffStatus == StaffStatus.Probation;
 
     [NotMapped]
-    public bool CanBeAssignedToMaintenance => IsActive && 
+    public bool CanBeAssignedToMaintenance => IsActive &&
         (StaffStatus == StaffStatus.Active || StaffStatus == StaffStatus.Probation) &&
         Department?.DepartmentType == DepartmentType.Maintenance;
 

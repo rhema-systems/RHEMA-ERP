@@ -23,7 +23,7 @@ public class InspectionTemplateService : IInspectionTemplateService
         try
         {
             _logger.LogInformation("Creating inspection template: {TemplateName}", createDto.Name);
-            
+
             // Stub implementation - would create actual template
             return new InspectionTemplateDto
             {
@@ -47,7 +47,7 @@ public class InspectionTemplateService : IInspectionTemplateService
         try
         {
             _logger.LogInformation("Updating inspection template: {TemplateId}", id);
-            
+
             // Stub implementation - would update actual template
             return new InspectionTemplateDto
             {

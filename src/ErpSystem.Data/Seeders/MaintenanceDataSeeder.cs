@@ -35,7 +35,7 @@ public class MaintenanceDataSeeder
             if (employees.Count < 4)
             {
                 _logger.LogWarning($"Not enough employees found in the database. Found {employees.Count}, need at least 4. Skipping Job Card seeding.");
-                
+
                 // Seed only base data without Job Cards
                 await SeedAssetCategoriesAsync(defaultTenantId, baseDate);
                 await _context.SaveChangesAsync();
@@ -45,7 +45,7 @@ public class MaintenanceDataSeeder
                 await _context.SaveChangesAsync();
                 await SeedPriorityLevelsAsync(defaultTenantId, baseDate);
                 await _context.SaveChangesAsync();
-                
+
                 _logger.LogInformation("Maintenance data seeding completed (Job Cards skipped due to insufficient employees)!");
                 return;
             }
@@ -54,7 +54,7 @@ public class MaintenanceDataSeeder
             var technicianId = employees[1];
             var qualityCheckerId = employees[2];
             var supervisorId = employees[3];
-            
+
             _logger.LogInformation($"Using employees: Manager={maintenanceManagerId}, Technician={technicianId}, QC={qualityCheckerId}, Supervisor={supervisorId}");
 
             // 1. Seed Asset Categories
@@ -629,7 +629,10 @@ public class MaintenanceDataSeeder
                 .Select(e => new { e.FirstName, e.LastName, e.EmailAddress, e.MobileNumber, e.EmployeeNumber, e.DepartmentId })
                 .FirstOrDefaultAsync();
 
-            if (employee == null) continue;
+            if (employee == null)
+            {
+                continue;
+            }
 
             // Get department name
             var department = await _context.Departments
@@ -772,7 +775,7 @@ public class MaintenanceDataSeeder
         // Asset Type Task Templates for Equipment
         var equipmentTypeId = Guid.Parse("dddd1111-1111-1111-1111-111111111111");
         var vehicleTypeId = Guid.Parse("dddd2222-1111-1111-1111-111111111111");
-        
+
         var equipmentTaskId = Guid.Parse("eeee1111-1111-1111-1111-111111111111");
         var vehicleTaskId = Guid.Parse("eeee2222-1111-1111-1111-111111111111");
 

@@ -1,8 +1,8 @@
-using Microsoft.Extensions.Logging;
-using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
-using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services;
 
@@ -53,8 +53,8 @@ public class AuditLogService : IAuditLogService
         try
         {
             return await _unitOfWork.Repository<AuditLog>().GetPagedAsync(
-                pageNumber, 
-                pageSize, 
+                pageNumber,
+                pageSize,
                 a => a.Timestamp,
                 descending: true);
         }
@@ -139,7 +139,7 @@ public class AuditLogService : IAuditLogService
             auditLog.Id = Guid.NewGuid();
             auditLog.CreatedAt = DateTime.UtcNow;
             auditLog.Timestamp = DateTime.UtcNow;
-            
+
             // Ensure TenantId is set - this is required for proper multi-tenant audit trail
             if (auditLog.TenantId == Guid.Empty)
             {
@@ -149,9 +149,9 @@ public class AuditLogService : IAuditLogService
 
             var createdAuditLog = await _unitOfWork.Repository<AuditLog>().AddAsync(auditLog);
             await _unitOfWork.SaveChangesAsync();
-            _logger.LogDebug("Created audit log for user {Username} action {Action} on {Resource}", 
+            _logger.LogDebug("Created audit log for user {Username} action {Action} on {Resource}",
                 auditLog.Username, auditLog.Action, auditLog.Resource);
-            
+
             return createdAuditLog;
         }
         catch (Exception ex)
@@ -161,15 +161,15 @@ public class AuditLogService : IAuditLogService
         }
     }
 
-    public async Task LogUserActionAsync(Guid userId, string username, string action, string resource, 
-        string? resourceId = null, object? oldValues = null, object? newValues = null, 
+    public async Task LogUserActionAsync(Guid userId, string username, string action, string resource,
+        string? resourceId = null, object? oldValues = null, object? newValues = null,
         string? ipAddress = null, string? userAgent = null)
     {
         try
         {
             // Get tenant context from current user or try to get from user entity
             var tenantId = _currentUserService.TenantId;
-            
+
             // If no tenant context from current user (e.g., system operations), we need to get it another way
             if (!tenantId.HasValue)
             {
@@ -213,7 +213,7 @@ public class AuditLogService : IAuditLogService
                 await _unitOfWork.Repository<AuditLog>().DeleteAsync(log.Id);
             }
             await _unitOfWork.SaveChangesAsync();
-            
+
             _logger.LogInformation("Deleted {Count} audit logs older than {Date}", oldLogs.Count(), beforeDate);
         }
         catch (Exception ex)
@@ -245,8 +245,8 @@ public class SecurityLogService : ISecurityLogService
         try
         {
             return await _unitOfWork.Repository<SecurityLog>().GetPagedAsync(
-                pageNumber, 
-                pageSize, 
+                pageNumber,
+                pageSize,
                 s => s.Timestamp,
                 descending: true);
         }
@@ -331,7 +331,7 @@ public class SecurityLogService : ISecurityLogService
             securityLog.Id = Guid.NewGuid();
             securityLog.CreatedAt = DateTime.UtcNow;
             securityLog.Timestamp = DateTime.UtcNow;
-            
+
             // For security logs, TenantId should always be provided for proper multi-tenant security tracking
             if (securityLog.TenantId == Guid.Empty)
             {
@@ -341,9 +341,9 @@ public class SecurityLogService : ISecurityLogService
 
             var createdSecurityLog = await _unitOfWork.Repository<SecurityLog>().AddAsync(securityLog);
             await _unitOfWork.SaveChangesAsync();
-            _logger.LogDebug("Created security log for action {Action} from IP {IpAddress}", 
+            _logger.LogDebug("Created security log for action {Action} from IP {IpAddress}",
                 securityLog.Action, securityLog.IpAddress);
-            
+
             return createdSecurityLog;
         }
         catch (Exception ex)
@@ -353,15 +353,15 @@ public class SecurityLogService : ISecurityLogService
         }
     }
 
-    public async Task LogSecurityEventAsync(SecurityAction action, bool success, string ipAddress, 
-        string? username = null, Guid? userId = null, string? details = null, 
+    public async Task LogSecurityEventAsync(SecurityAction action, bool success, string ipAddress,
+        string? username = null, Guid? userId = null, string? details = null,
         string? failureReason = null, string? userAgent = null)
     {
         try
         {
             // Get tenant context from current user
             var tenantId = _currentUserService.TenantId;
-            
+
             // If no tenant context, we need to handle this appropriately
             if (!tenantId.HasValue)
             {
@@ -402,7 +402,7 @@ public class SecurityLogService : ISecurityLogService
                 await _unitOfWork.Repository<SecurityLog>().DeleteAsync(log.Id);
             }
             await _unitOfWork.SaveChangesAsync();
-            
+
             _logger.LogInformation("Deleted {Count} security logs older than {Date}", oldLogs.Count(), beforeDate);
         }
         catch (Exception ex)
@@ -416,9 +416,9 @@ public class SecurityLogService : ISecurityLogService
     {
         try
         {
-            return await _unitOfWork.Repository<SecurityLog>().FindAsync(s => 
-                s.IpAddress == ipAddress && 
-                s.Action == SecurityAction.LoginFailure.ToString() && 
+            return await _unitOfWork.Repository<SecurityLog>().FindAsync(s =>
+                s.IpAddress == ipAddress &&
+                s.Action == SecurityAction.LoginFailure.ToString() &&
                 s.Timestamp >= since);
         }
         catch (Exception ex)
@@ -432,11 +432,11 @@ public class SecurityLogService : ISecurityLogService
     {
         try
         {
-            var failedAttempts = await _unitOfWork.Repository<SecurityLog>().FindAsync(s => 
-                s.Username == username && 
-                s.Action == SecurityAction.LoginFailure.ToString() && 
+            var failedAttempts = await _unitOfWork.Repository<SecurityLog>().FindAsync(s =>
+                s.Username == username &&
+                s.Action == SecurityAction.LoginFailure.ToString() &&
                 s.Timestamp >= since);
-            
+
             return failedAttempts.Count();
         }
         catch (Exception ex)

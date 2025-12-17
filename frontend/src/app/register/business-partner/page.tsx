@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -71,8 +71,27 @@ const validateStep4 = (formData: RegistrationFormData): string[] => {
   return errors;
 };
 
+// Function to determine which step to show based on completed data
+const determineCurrentStep = (formData: RegistrationFormData): number => {
+  // Check if step 1 is complete
+  const step1Errors = validateStep1(formData);
+  if (step1Errors.length > 0) return 1;
+
+  // Check if step 2 is complete
+  const step2Errors = validateStep2(formData);
+  if (step2Errors.length > 0) return 2;
+
+  // Step 3 (documents) is optional, so check if step 4 has data
+  // If step 4 has no data, stay on step 3
+  if (!formData.licenses || formData.licenses.length === 0) return 3;
+
+  // If all steps have data, go to step 4 (or could be step 5 for review)
+  return 4;
+};
+
 export default function BusinessPartnerRegistrationPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -125,20 +144,77 @@ export default function BusinessPartnerRegistrationPage() {
 
   const loadDraftRegistration = async () => {
     try {
-      const registrations = await businessPartnerRegistrationService.getMyRegistrations();
-      const draft = registrations.find(r => r.status === 'Draft');
+      // Check if a specific registration ID is provided in the URL
+      const urlRegistrationId = searchParams.get('id');
 
-      if (draft) {
-        setRegistrationId(draft.id);
-        setHasStartedRegistration(true);
-        const detail = await businessPartnerRegistrationService.getById(draft.id);
-        const parsedData = businessPartnerRegistrationService.parseRegistrationData(detail.registrationData);
-        if (parsedData) {
-          setFormData(parsedData);
+      if (urlRegistrationId) {
+        // Load the specific registration from the URL
+        try {
+          const detail = await businessPartnerRegistrationService.getById(urlRegistrationId);
+
+          // Only allow editing if status is Draft or MoreInfoRequired
+          if (detail.status === 'Draft' || detail.status === 'MoreInfoRequired') {
+            setRegistrationId(urlRegistrationId);
+            setHasStartedRegistration(true);
+            const parsedData = businessPartnerRegistrationService.parseRegistrationData(detail.registrationData);
+            if (parsedData) {
+              setFormData(parsedData);
+              // Determine which step to show based on completed data
+              const stepToShow = determineCurrentStep(parsedData);
+              setCurrentStep(stepToShow);
+
+              // Show notification if this is a MoreInfoRequired registration
+              if (detail.status === 'MoreInfoRequired') {
+                toast.info('Please update the required information and resubmit your registration.');
+              }
+            }
+          } else {
+            toast.error('This registration cannot be edited.');
+            router.push('/external-portal/business-partner');
+          }
+        } catch (detailError: any) {
+          console.error('Error loading registration from URL:', detailError);
+          toast.error('Failed to load the registration. Please try again.');
+          router.push('/external-portal/business-partner');
+        }
+      } else {
+        // No ID in URL - load the first editable registration (old behavior)
+        const registrations = await businessPartnerRegistrationService.getMyRegistrations();
+        // Load either Draft or MoreInfoRequired registrations for editing
+        const editableRegistration = registrations.find(r => r.status === 'Draft' || r.status === 'MoreInfoRequired');
+
+        if (editableRegistration) {
+          try {
+            // Verify the registration still exists and is accessible
+            const detail = await businessPartnerRegistrationService.getById(editableRegistration.id);
+            setRegistrationId(editableRegistration.id);
+            setHasStartedRegistration(true);
+            const parsedData = businessPartnerRegistrationService.parseRegistrationData(detail.registrationData);
+            if (parsedData) {
+              setFormData(parsedData);
+              // Determine which step to show based on completed data
+              const stepToShow = determineCurrentStep(parsedData);
+              setCurrentStep(stepToShow);
+
+              // Show notification if this is a MoreInfoRequired registration
+              if (editableRegistration.status === 'MoreInfoRequired') {
+                toast.info('Please update the required information and resubmit your registration.');
+              }
+            }
+          } catch (detailError: any) {
+            // If loading the registration detail fails, clear the state
+            console.error('Error loading registration details:', detailError);
+            setRegistrationId(null);
+            setHasStartedRegistration(false);
+            // Don't show toast on initial load to avoid spam
+          }
         }
       }
     } catch (error) {
-      console.error('Error loading draft:', error);
+      console.error('Error loading registration:', error);
+      // Clear state if we can't load registrations
+      setRegistrationId(null);
+      setHasStartedRegistration(false);
     }
   };
 
@@ -148,15 +224,6 @@ export default function BusinessPartnerRegistrationPage() {
     switch (currentStep) {
       case 1:
         errors = validateStep1(formData);
-        break;
-      case 2:
-        errors = validateStep2(formData);
-        break;
-      case 3:
-        errors = validateStep3(formData);
-        break;
-      case 4:
-        errors = validateStep4(formData);
         break;
       default:
         errors = [];
@@ -172,26 +239,60 @@ export default function BusinessPartnerRegistrationPage() {
     return true;
   };
 
-  const handleSaveDraft = async () => {
+	  // Run full validation across all steps before final submission
+	  const validateForSubmit = (): boolean => {
+	    const errors: string[] = [];
+
+	    errors.push(...validateStep1(formData));
+	    errors.push(...validateStep2(formData));
+	    errors.push(...validateStep3(formData));
+	    errors.push(...validateStep4(formData));
+
+	    setValidationErrors(errors);
+
+	    if (errors.length > 0) {
+	      toast.error('Please fix the validation errors before submitting');
+	      return false;
+	    }
+
+	    return true;
+	  };
+
+  const handleSaveDraft = async (showToast: boolean = true) => {
     setSaving(true);
     try {
       setHasStartedRegistration(true);
       const completionPercentage = businessPartnerRegistrationService.calculateCompletionPercentage(formData);
 
-      if (registrationId) {
-        // Update existing draft
+      // Check if user already has an editable registration (Draft or MoreInfoRequired)
+      const registrations = await businessPartnerRegistrationService.getMyRegistrations();
+      const existingEditable = registrations.find(r => r.status === 'Draft' || r.status === 'MoreInfoRequired');
+
+      if (existingEditable) {
+        // Update existing registration
         const updateDto = businessPartnerRegistrationService.convertFormDataToUpdateDto(formData, completionPercentage);
-        await businessPartnerRegistrationService.update(registrationId, updateDto);
-        toast.success('Draft saved successfully');
+        await businessPartnerRegistrationService.update(existingEditable.id, updateDto);
+        setRegistrationId(existingEditable.id);
+        if (showToast) {
+          toast.success(existingEditable.status === 'MoreInfoRequired' ? 'Information updated successfully' : 'Draft updated successfully');
+        }
       } else {
         // Create new draft
         const createDto = businessPartnerRegistrationService.convertFormDataToCreateDto(formData);
         const result = await businessPartnerRegistrationService.create(createDto);
         setRegistrationId(result.id);
-        toast.success('Draft created successfully');
+        if (showToast) {
+          toast.success('Draft saved successfully');
+        }
       }
     } catch (error: any) {
-      toast.error(error.message || 'Failed to save draft');
+      console.error('Save draft error:', error);
+      // Clear state on error
+      setRegistrationId(null);
+      setHasStartedRegistration(false);
+      if (showToast) {
+        toast.error(error.message || 'Failed to save draft');
+      }
     } finally {
       setSaving(false);
     }
@@ -206,8 +307,8 @@ export default function BusinessPartnerRegistrationPage() {
       return;
     }
 
-    // Save draft before moving to next step
-    await handleSaveDraft();
+    // Save draft before moving to next step (without showing toast)
+    await handleSaveDraft(false);
 
     if (currentStep < STEPS.length) {
       setCurrentStep(currentStep + 1);
@@ -232,6 +333,11 @@ export default function BusinessPartnerRegistrationPage() {
       toast.error('Please save your registration first');
       return;
     }
+
+	    // For final submission, validate all steps, not just the current one
+	    if (!validateForSubmit()) {
+	      return;
+	    }
 
     setLoading(true);
     try {
@@ -269,124 +375,122 @@ export default function BusinessPartnerRegistrationPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-5xl mx-auto px-4">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Business Partner Registration</h1>
-          <p className="text-gray-600">Complete the registration process to become an approved business partner</p>
-          {hasStartedRegistration && (
-            <Alert className="mt-4">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                Your progress is being saved automatically. Please complete all required fields before proceeding to the next step.
-              </AlertDescription>
-            </Alert>
-          )}
-        </div>
+    <div className="space-y-6">
+      {/* Back Button */}
+      <div>
+        <Button
+          variant="outline"
+          onClick={() => router.push('/external-portal/business-partner')}
+          className="mb-4"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Back to Dashboard
+        </Button>
+      </div>
 
-        {/* Validation Errors */}
-        {validationErrors.length > 0 && (
-          <Alert variant="destructive" className="mb-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">Business Partner Registration</h1>
+        <p className="text-gray-600">Complete the registration process to become an approved business partner</p>
+        {hasStartedRegistration && (
+          <Alert className="mt-4">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
-              <div className="font-semibold mb-2">Please fix the following errors:</div>
-              <ul className="list-disc list-inside space-y-1">
-                {validationErrors.map((error, index) => (
-                  <li key={index}>{error}</li>
-                ))}
-              </ul>
+	              Your progress is being saved automatically. Please make sure all required fields are completed before submitting your registration.
             </AlertDescription>
           </Alert>
         )}
+      </div>
 
-        {/* Connected Progress Bar */}
-        <Card className="mb-6">
+      {/* Validation Errors */}
+      {validationErrors.length > 0 && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            <div className="font-semibold mb-2">Please fix the following errors:</div>
+            <ul className="list-disc list-inside space-y-1">
+              {validationErrors.map((error, index) => (
+                <li key={index}>{error}</li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Connected Progress Bar */}
+      <Card>
           <CardContent className="pt-8 pb-6">
             {/* Step Indicators with Connected Lines */}
             <div className="relative">
-              {/* Connection Lines */}
-              <div className="absolute top-6 left-0 right-0 flex items-center px-8">
-                <div className="flex-1 flex items-center">
-                  {STEPS.map((step, index) => {
-                    if (index === STEPS.length - 1) return null;
-                    const isCompleted = currentStep > step.id;
-                    return (
-                      <div
-                        key={`line-${step.id}`}
-                        className={`flex-1 h-1 mx-2 transition-all duration-300 ${
-                          isCompleted ? 'bg-blue-500' : 'bg-gray-300'
-                        }`}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-
               {/* Step Circles and Labels */}
-              <div className="relative flex justify-between items-start">
+              <div className="flex items-start justify-between">
                 {STEPS.map((step, index) => {
                   const StepIcon = step.icon;
                   const isActive = currentStep === step.id;
                   const isCompleted = currentStep > step.id;
 
                   return (
-                    <div key={step.id} className="flex flex-col items-center" style={{ flex: '1' }}>
-                      {/* Circle with Number/Icon */}
-                      <div
-                        className={`relative z-10 w-12 h-12 rounded-full flex items-center justify-center font-semibold text-lg transition-all duration-300 ${
-                          isActive
-                            ? 'bg-blue-500 text-white shadow-lg scale-110'
-                            : isCompleted
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-white text-gray-400 border-2 border-gray-300'
-                        }`}
-                      >
-                        {isCompleted ? (
-                          <CheckCircle2 className="w-6 h-6" />
-                        ) : (
-                          <span>{step.id}</span>
-                        )}
-                      </div>
-
-                      {/* Step Label */}
-                      <div className="mt-3 text-center max-w-[120px]">
+                    <div key={step.id} className="flex items-center flex-1">
+                      {/* Step Container */}
+                      <div className="flex flex-col items-center flex-shrink-0">
+                        {/* Circle with Number/Icon */}
                         <div
-                          className={`text-xs font-medium transition-colors duration-300 ${
+                          className={`w-12 h-12 rounded-full flex items-center justify-center font-semibold text-lg transition-all duration-300 ${
                             isActive
-                              ? 'text-blue-600'
+                              ? 'bg-blue-500 text-white shadow-lg scale-110'
                               : isCompleted
-                              ? 'text-blue-500'
-                              : 'text-gray-500'
+                              ? 'bg-blue-500 text-white'
+                              : 'bg-white text-gray-400 border-2 border-gray-300'
                           }`}
                         >
-                          {step.name}
+                          {isCompleted ? (
+                            <CheckCircle2 className="w-6 h-6" />
+                          ) : (
+                            <span>{step.id}</span>
+                          )}
                         </div>
-                        {isActive && (
-                          <div className="text-[10px] text-gray-500 mt-1">
-                            Please fill the {step.name.toLowerCase()}
+
+                        {/* Step Label */}
+                        <div className="mt-3 text-center max-w-[100px]">
+                          <div
+                            className={`text-xs font-medium transition-colors duration-300 ${
+                              isActive
+                                ? 'text-blue-600'
+                                : isCompleted
+                                ? 'text-blue-500'
+                                : 'text-gray-500'
+                            }`}
+                          >
+                            {step.name}
                           </div>
-                        )}
+                          {isActive && (
+                            <div className="text-[10px] text-gray-500 mt-1">
+                              Current step
+                            </div>
+                          )}
+                        </div>
                       </div>
+
+                      {/* Connection Line */}
+                      {index < STEPS.length - 1 && (
+                        <div className="flex-1 h-0.5 mx-4 mb-16">
+                          <div
+                            className={`h-full transition-all duration-300 ${
+                              currentStep > step.id ? 'bg-blue-500' : 'bg-gray-300'
+                            }`}
+                          />
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
             </div>
-
-            {/* Progress Percentage */}
-            <div className="mt-6 pt-4 border-t border-gray-200">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-600">Overall Progress</span>
-                <span className="text-sm font-semibold text-blue-600">{completionPercentage}% Complete</span>
-              </div>
-              <Progress value={completionPercentage} className="h-2 mt-2" />
-            </div>
           </CardContent>
         </Card>
 
-        {/* Step Content */}
-        <Card className="mb-6">
+      {/* Step Content */}
+      <Card>
           <CardHeader>
             <CardTitle>{STEPS[currentStep - 1].name}</CardTitle>
             <CardDescription>
@@ -396,8 +500,8 @@ export default function BusinessPartnerRegistrationPage() {
           <CardContent>{renderStepComponent()}</CardContent>
         </Card>
 
-        {/* Navigation Buttons */}
-        <div className="flex justify-between items-center">
+      {/* Navigation Buttons */}
+      <div className="flex justify-between items-center">
           <Button
             variant="outline"
             onClick={handlePrevious}
@@ -430,15 +534,14 @@ export default function BusinessPartnerRegistrationPage() {
           </div>
         </div>
 
-        {/* Registration ID Badge */}
-        {registrationId && (
-          <div className="mt-4 text-center">
-            <Badge variant="outline">
-              Registration ID: {registrationId.substring(0, 8)}...
-            </Badge>
-          </div>
-        )}
-      </div>
+      {/* Registration ID Badge */}
+      {registrationId && (
+        <div className="mt-4 text-center">
+          <Badge variant="outline">
+            Registration ID: {registrationId.substring(0, 8)}...
+          </Badge>
+        </div>
+      )}
     </div>
   );
 }

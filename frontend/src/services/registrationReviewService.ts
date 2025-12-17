@@ -21,11 +21,12 @@ export interface RegistrationReviewDto {
   email: string;
   phone: string;
   status: string;
-  submittedAt?: string;
-  reviewedAt?: string;
+  submittedDate?: string;  // Changed from submittedAt to match backend
+  reviewedDate?: string;   // Changed from reviewedAt to match backend
   reviewedBy?: string;
   reviewNotes?: string;
   completionPercentage: number;
+  createdAt?: string;      // Added to match backend
 }
 
 export interface RegistrationDetailDto extends RegistrationReviewDto {
@@ -37,7 +38,9 @@ export interface RegistrationDetailDto extends RegistrationReviewDto {
   city?: string;
   country?: string;
   postalCode?: string;
+  alternatePhone?: string;
   contactPersonName?: string;
+  contactPersonTitle?: string;
   contactPersonEmail?: string;
   contactPersonPhone?: string;
   industryType?: string;
@@ -46,6 +49,7 @@ export interface RegistrationDetailDto extends RegistrationReviewDto {
   annualRevenue?: number;
   bankName?: string;
   bankAccountNumber?: string;
+  bankBranchCode?: string;
   categoryIds?: string[];
   specializationIds?: string[];
   documents?: Array<{
@@ -55,6 +59,9 @@ export interface RegistrationDetailDto extends RegistrationReviewDto {
     filePath: string;
     uploadedAt: string;
     isVerified: boolean;
+    isRejected: boolean;
+    rejectionReason?: string;
+    rejectedDate?: string;
   }>;
   licenses?: Array<{
     licenseTypeId: string;
@@ -157,7 +164,7 @@ export const registrationReviewService = {
       {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ approvedById: 'current-user-id', notes }),
+        body: JSON.stringify({ notes }),
       }
     );
 
@@ -176,7 +183,7 @@ export const registrationReviewService = {
       {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ rejectedById: 'current-user-id', reason }),
+        body: JSON.stringify({ reason }),
       }
     );
 
@@ -195,7 +202,7 @@ export const registrationReviewService = {
       {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ requestedById: 'current-user-id', notes }),
+        body: JSON.stringify({ notes }),
       }
     );
 
@@ -214,7 +221,7 @@ export const registrationReviewService = {
       {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ verifiedById: 'current-user-id' }),
+        body: JSON.stringify({}),
       }
     );
 
@@ -222,6 +229,104 @@ export const registrationReviewService = {
       const error = await response.text();
       throw new Error(error || `HTTP error! status: ${response.status}`);
     }
+  },
+
+  /**
+   * Reject a document
+   */
+  async rejectDocument(registrationId: string, documentId: string, reason: string): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partner-registrations/${registrationId}/documents/${documentId}/reject`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ reason }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || `HTTP error! status: ${response.status}`);
+    }
+  },
+
+  async revertDocumentRejection(registrationId: string, documentId: string): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partner-registrations/${registrationId}/documents/${documentId}/revert-rejection`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || `HTTP error! status: ${response.status}`);
+    }
+  },
+
+  /**
+   * View a document (opens in new tab)
+   */
+  async viewDocument(registrationId: string, documentId: string, documentName: string): Promise<void> {
+    const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+
+    // Open the document download endpoint in a new tab
+    const url = `${API_BASE_URL}/procurement/business-partner-registrations/${registrationId}/documents/${documentId}/download`;
+
+    // Create a temporary link and click it
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+
+    // Add authorization header by using fetch and creating blob URL
+    const response = await fetch(url, {
+      headers: {
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to load document');
+    }
+
+    const blob = await response.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    window.open(blobUrl, '_blank');
+
+    // Clean up after a delay
+    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 100);
+  },
+
+  /**
+   * Download a document
+   */
+  async downloadDocument(registrationId: string, documentId: string, documentName: string): Promise<void> {
+    const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partner-registrations/${registrationId}/documents/${documentId}/download`,
+      {
+        headers: {
+          ...(token && { Authorization: `Bearer ${token}` }),
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('Failed to download document');
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = documentName;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
   },
 };
 

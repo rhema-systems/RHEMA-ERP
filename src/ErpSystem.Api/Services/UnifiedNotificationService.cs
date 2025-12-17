@@ -1,24 +1,24 @@
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using Microsoft.Extensions.Logging;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using NotificationDto = ErpSystem.Core.DTOs.Notifications.NotificationDto;
+using CreateEmailCampaignDto = ErpSystem.Core.DTOs.Notifications.CreateEmailCampaignDto;
 using CreateNotificationDto = ErpSystem.Core.DTOs.Notifications.CreateNotificationDto;
-using SendPushNotificationDto = ErpSystem.Core.DTOs.Notifications.SendPushNotificationDto;
+using CreateNotificationTemplateDto = ErpSystem.Core.DTOs.Notifications.CreateNotificationTemplateDto;
+using DashboardNotificationDto = ErpSystem.Core.DTOs.Dashboard.NotificationDto;
+using EmailCampaignDto = ErpSystem.Core.DTOs.Notifications.EmailCampaignDto;
+using NotificationDto = ErpSystem.Core.DTOs.Notifications.NotificationDto;
+using NotificationPagedResult = ErpSystem.Core.DTOs.Notifications.PagedResult<ErpSystem.Core.DTOs.Notifications.NotificationDto>;
 using NotificationPreferencesDto = ErpSystem.Core.DTOs.Notifications.NotificationPreferencesDto;
-using UpdateNotificationPreferencesDto = ErpSystem.Core.DTOs.Notifications.UpdateNotificationPreferencesDto;
-using PushSubscriptionDto = ErpSystem.Core.DTOs.Notifications.PushSubscriptionDto;
 using NotificationStatisticsDto = ErpSystem.Core.DTOs.Notifications.NotificationStatisticsDto;
 using NotificationTemplateDto = ErpSystem.Core.DTOs.Notifications.NotificationTemplateDto;
-using CreateNotificationTemplateDto = ErpSystem.Core.DTOs.Notifications.CreateNotificationTemplateDto;
-using EmailCampaignDto = ErpSystem.Core.DTOs.Notifications.EmailCampaignDto;
-using CreateEmailCampaignDto = ErpSystem.Core.DTOs.Notifications.CreateEmailCampaignDto;
-using NotificationPagedResult = ErpSystem.Core.DTOs.Notifications.PagedResult<ErpSystem.Core.DTOs.Notifications.NotificationDto>;
-using DashboardNotificationDto = ErpSystem.Core.DTOs.Dashboard.NotificationDto;
+using PushSubscriptionDto = ErpSystem.Core.DTOs.Notifications.PushSubscriptionDto;
+using SendPushNotificationDto = ErpSystem.Core.DTOs.Notifications.SendPushNotificationDto;
+using UpdateNotificationPreferencesDto = ErpSystem.Core.DTOs.Notifications.UpdateNotificationPreferencesDto;
 
 namespace ErpSystem.Api.Services;
 
@@ -56,7 +56,7 @@ public class UnifiedNotificationService : INotificationService
         try
         {
             _logger.LogInformation("Sending email to {EmailAddress} with subject: {Subject}", to, subject);
-            
+
             await _emailService.SendEmailAsync(new EmailDto
             {
                 To = to,
@@ -64,7 +64,7 @@ public class UnifiedNotificationService : INotificationService
                 Body = body,
                 IsHtml = isHtml
             });
-            
+
             _logger.LogInformation("Email sent successfully to {EmailAddress}", to);
         }
         catch (Exception ex)
@@ -81,7 +81,7 @@ public class UnifiedNotificationService : INotificationService
             _logger.LogInformation(
                 "[SMS] Send requested to {Phone} - Message length: {Length} chars",
                 MaskPhoneNumber(phoneNumber), message?.Length ?? 0);
-            
+
             // TODO: Implement real SMS provider integration (Twilio, AWS SNS, etc.)
             // For now, log as audit trail
             await Task.CompletedTask;
@@ -100,7 +100,7 @@ public class UnifiedNotificationService : INotificationService
             _logger.LogInformation(
                 "[PUSH] Send requested to {UserId}: {Title}",
                 userId, title);
-            
+
             // Send via in-app notification as primary channel
             var inAppData = new Dictionary<string, object>
             {
@@ -108,7 +108,7 @@ public class UnifiedNotificationService : INotificationService
                 { "Title", title },
                 { "Message", message }
             };
-            
+
             if (data != null)
             {
                 foreach (var kvp in data)
@@ -116,9 +116,9 @@ public class UnifiedNotificationService : INotificationService
                     inAppData[$"Custom_{kvp.Key}"] = kvp.Value;
                 }
             }
-            
+
             await CreateInAppNotificationAsync(userId, title, message, "PushNotification", inAppData);
-            
+
             // TODO: Integrate with push notification providers (Firebase, Apple Push, etc.)
             await Task.CompletedTask;
         }
@@ -134,7 +134,7 @@ public class UnifiedNotificationService : INotificationService
         _logger.LogInformation(
             "[PUSH] DTO Send requested by {SentBy} for tenant {TenantId}: {Title}",
             sentBy, tenantId, pushNotificationDto.Title);
-        
+
         await Task.CompletedTask;
     }
 
@@ -153,18 +153,18 @@ public class UnifiedNotificationService : INotificationService
             {
                 tenantId = _currentUserService.TenantId ?? Guid.Empty;
             }
-            
+
             // Extract EntityType and EntityId from data dictionary if present
             string? entityType = null;
             Guid? entityId = null;
-            
+
             if (data != null)
             {
                 if (data.TryGetValue("EntityType", out var et) && et != null)
                 {
                     entityType = et.ToString();
                 }
-                
+
                 if (data.TryGetValue("EntityId", out var ei) && ei != null)
                 {
                     if (ei is string eidStr && Guid.TryParse(eidStr, out var eidGuid))
@@ -177,7 +177,7 @@ public class UnifiedNotificationService : INotificationService
                     }
                 }
             }
-            
+
             var notification = new Notification
             {
                 Id = Guid.NewGuid(),
@@ -197,14 +197,14 @@ public class UnifiedNotificationService : INotificationService
                 Priority = "Normal",
                 AttemptCount = 1
             };
-            
+
             await _unitOfWork.Repository<Notification>().AddAsync(notification);
             await _unitOfWork.SaveChangesAsync();
-            
+
             // Broadcast via SignalR if user is connected
             var dashboardNotification = MapToDashboardDto(notification);
             await _hubNotificationService.BroadcastNotificationAsync(userId.ToString(), dashboardNotification);
-            
+
             _logger.LogInformation("In-app notification created: {NotificationId} for user {UserId} in tenant {TenantId}", notification.Id, userId, tenantId);
         }
         catch (Exception ex)
@@ -214,12 +214,14 @@ public class UnifiedNotificationService : INotificationService
         }
     }
 
-    private string MaskPhoneNumber(string phoneNumber)
+    private static string MaskPhoneNumber(string phoneNumber)
     {
         if (string.IsNullOrEmpty(phoneNumber) || phoneNumber.Length < 4)
+        {
             return "***";
-        
-        return "***" + phoneNumber.Substring(phoneNumber.Length - 4);
+        }
+
+        return string.Concat("***", phoneNumber.AsSpan(phoneNumber.Length - 4));
     }
 
     #endregion
@@ -233,7 +235,7 @@ public class UnifiedNotificationService : INotificationService
         try
         {
             var allNotifications = await _unitOfWork.Repository<Notification>()
-                .FindAsync(n => 
+                .FindAsync(n =>
                     n.RecipientId == userId && n.TenantId == tenantId &&
                     (unreadOnly == null || !n.IsRead == unreadOnly) &&
                     (string.IsNullOrEmpty(type) || n.NotificationType == type) &&
@@ -270,9 +272,9 @@ public class UnifiedNotificationService : INotificationService
         try
         {
             var notification = await _unitOfWork.Repository<Notification>()
-                .FirstOrDefaultAsync(n => 
-                    n.Id == notificationId && 
-                    n.RecipientId == userId && 
+                .FirstOrDefaultAsync(n =>
+                    n.Id == notificationId &&
+                    n.RecipientId == userId &&
                     n.TenantId == tenantId);
 
             return notification != null ? MapToDto(notification) : null;
@@ -303,20 +305,22 @@ public class UnifiedNotificationService : INotificationService
         try
         {
             var notification = await _unitOfWork.Repository<Notification>()
-                .FirstOrDefaultAsync(n => 
-                    n.Id == notificationId && 
-                    n.RecipientId == userId && 
+                .FirstOrDefaultAsync(n =>
+                    n.Id == notificationId &&
+                    n.RecipientId == userId &&
                     n.TenantId == tenantId);
 
             if (notification == null)
+            {
                 return false;
+            }
 
             notification.IsRead = true;
             notification.ReadAt = DateTime.UtcNow;
-            
+
             await _unitOfWork.Repository<Notification>().UpdateAsync(notification);
             await _unitOfWork.SaveChangesAsync();
-            
+
             _logger.LogInformation("Notification {NotificationId} marked as read", notificationId);
             return true;
         }
@@ -335,7 +339,7 @@ public class UnifiedNotificationService : INotificationService
                 .FindAsync(n => n.RecipientId == userId && n.TenantId == tenantId && !n.IsRead);
 
             var notificationsToUpdate = unreadNotifications.ToList();
-            
+
             foreach (var notification in notificationsToUpdate)
             {
                 notification.IsRead = true;
@@ -344,7 +348,7 @@ public class UnifiedNotificationService : INotificationService
 
             await _unitOfWork.Repository<Notification>().UpdateRangeAsync(notificationsToUpdate);
             await _unitOfWork.SaveChangesAsync();
-            
+
             _logger.LogInformation("Marked {Count} notifications as read for user {UserId}", notificationsToUpdate.Count, userId);
             return notificationsToUpdate.Count;
         }
@@ -360,17 +364,19 @@ public class UnifiedNotificationService : INotificationService
         try
         {
             var notification = await _unitOfWork.Repository<Notification>()
-                .FirstOrDefaultAsync(n => 
-                    n.Id == notificationId && 
-                    n.RecipientId == userId && 
+                .FirstOrDefaultAsync(n =>
+                    n.Id == notificationId &&
+                    n.RecipientId == userId &&
                     n.TenantId == tenantId);
 
             if (notification == null)
+            {
                 return false;
+            }
 
             await _unitOfWork.Repository<Notification>().DeleteAsync(notification);
             await _unitOfWork.SaveChangesAsync();
-            
+
             _logger.LogInformation("Notification {NotificationId} deleted", notificationId);
             return true;
         }
@@ -401,16 +407,16 @@ public class UnifiedNotificationService : INotificationService
                 ActionUrl = createNotificationDto.ActionUrl,
                 EntityType = createNotificationDto.EntityType,     // REQUIRED from DTO
                 EntityId = createNotificationDto.EntityId,         // REQUIRED from DTO
-                AdditionalData = createNotificationDto.Metadata != null 
-                    ? System.Text.Json.JsonSerializer.Serialize(createNotificationDto.Metadata) 
+                AdditionalData = createNotificationDto.Metadata != null
+                    ? System.Text.Json.JsonSerializer.Serialize(createNotificationDto.Metadata)
                     : null,
                 DeliveryMethods = "InApp"
             };
 
             await _unitOfWork.Repository<Notification>().AddAsync(notification);
             await _unitOfWork.SaveChangesAsync();
-            
-            _logger.LogInformation("Notification {NotificationId} created for entity {EntityType}:{EntityId}", 
+
+            _logger.LogInformation("Notification {NotificationId} created for entity {EntityType}:{EntityId}",
                 notification.Id, notification.EntityType, notification.EntityId);
             return MapToDto(notification);
         }
@@ -464,7 +470,7 @@ public class UnifiedNotificationService : INotificationService
         try
         {
             var cutoffDate = GetCutoffDate(period);
-            
+
             var allNotifications = await _unitOfWork.Repository<Notification>()
                 .FindAsync(n => n.TenantId == tenantId && n.CreatedAt >= cutoffDate);
 
@@ -546,7 +552,7 @@ public class UnifiedNotificationService : INotificationService
         _logger.LogInformation(
             "[REAL-TIME] Sending notification '{Title}' to {UserCount} users",
             notification.Title, userIds.Count);
-        
+
         foreach (var userId in userIds)
         {
             var dashboardNotification = new DashboardNotificationDto
@@ -570,7 +576,7 @@ public class UnifiedNotificationService : INotificationService
         _logger.LogInformation(
             "[BROADCAST] Broadcasting notification '{Title}' to tenant {TenantId} with roles: {Roles}",
             notification.Title, tenantId, roles?.Count > 0 ? string.Join(", ", roles) : "All");
-        
+
         // TODO: Implement role-based broadcast
         await Task.CompletedTask;
     }
@@ -584,12 +590,12 @@ public class UnifiedNotificationService : INotificationService
         try
         {
             _logger.LogInformation("Processing pending notifications");
-            
+
             var pendingNotifications = await _unitOfWork.Repository<Notification>()
                 .FindAsync(n => n.Status == "Pending" && n.ScheduledFor <= DateTime.UtcNow);
 
             var notificationsList = pendingNotifications.ToList();
-            
+
             foreach (var notification in notificationsList)
             {
                 try
@@ -598,7 +604,7 @@ public class UnifiedNotificationService : INotificationService
                     notification.Status = "Sent";
                     notification.SentAt = DateTime.UtcNow;
                     notification.AttemptCount++;
-                    
+
                     await _unitOfWork.Repository<Notification>().UpdateAsync(notification);
                 }
                 catch (Exception ex)
@@ -607,11 +613,11 @@ public class UnifiedNotificationService : INotificationService
                     notification.Status = "Failed";
                     notification.LastError = ex.Message;
                     notification.AttemptCount++;
-                    
+
                     await _unitOfWork.Repository<Notification>().UpdateAsync(notification);
                 }
             }
-            
+
             await _unitOfWork.SaveChangesAsync();
             _logger.LogInformation("Processed {Count} pending notifications", notificationsList.Count);
         }
@@ -627,19 +633,19 @@ public class UnifiedNotificationService : INotificationService
         {
             const int olderThanDays = 90;
             _logger.LogInformation("Cleaning up expired notifications older than {Days} days", olderThanDays);
-            
+
             var cutoffDate = DateTime.UtcNow.AddDays(-olderThanDays);
             var expiredNotifications = await _unitOfWork.Repository<Notification>()
                 .FindAsync(n => n.CreatedAt < cutoffDate && (n.IsRead || n.Status == "Dismissed" || n.Status == "Archived"));
 
             var notificationsToDelete = expiredNotifications.ToList();
-            
+
             if (notificationsToDelete.Count > 0)
             {
                 await _unitOfWork.Repository<Notification>().DeleteRangeAsync(notificationsToDelete);
                 await _unitOfWork.SaveChangesAsync();
             }
-            
+
             _logger.LogInformation("Deleted {Count} expired notifications", notificationsToDelete.Count);
         }
         catch (Exception ex)
@@ -673,7 +679,7 @@ public class UnifiedNotificationService : INotificationService
         };
     }
 
-    private DateTime GetCutoffDate(string period)
+    private static DateTime GetCutoffDate(string period)
     {
         return period switch
         {
@@ -685,20 +691,22 @@ public class UnifiedNotificationService : INotificationService
         };
     }
 
-    private double CalculateAverageDeliveryTime(List<Notification> notifications)
+    private static double CalculateAverageDeliveryTime(List<Notification> notifications)
     {
         var deliveredNotifications = notifications
             .Where(n => n.SentAt.HasValue && n.CreatedAt != DateTime.MinValue)
             .ToList();
 
         if (deliveredNotifications.Count == 0)
+        {
             return 0;
+        }
 
         return deliveredNotifications
             .Average(n => (n.SentAt!.Value - n.CreatedAt).TotalSeconds);
     }
 
-    private DashboardNotificationDto MapToDashboardDto(Notification notification)
+    private static DashboardNotificationDto MapToDashboardDto(Notification notification)
     {
         return new DashboardNotificationDto
         {

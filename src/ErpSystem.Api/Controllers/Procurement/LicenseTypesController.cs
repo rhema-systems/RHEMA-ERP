@@ -73,7 +73,9 @@ public class LicenseTypesController : ControllerBase
         {
             var licenseType = await _licenseTypeService.GetByIdAsync(id);
             if (licenseType == null)
+            {
                 return NotFound();
+            }
 
             return Ok(licenseType);
         }
@@ -90,7 +92,9 @@ public class LicenseTypesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var licenseType = await _licenseTypeService.CreateAsync(createDto);
             return CreatedAtAction(nameof(GetLicenseType), new { id = licenseType.Id }, licenseType);
@@ -112,7 +116,9 @@ public class LicenseTypesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var licenseType = await _licenseTypeService.UpdateAsync(id, updateDto);
             return Ok(licenseType);

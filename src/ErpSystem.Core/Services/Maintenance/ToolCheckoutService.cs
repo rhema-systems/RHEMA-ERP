@@ -1,8 +1,8 @@
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
-using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Maintenance;
@@ -44,30 +44,29 @@ public class ToolCheckoutService : IToolCheckoutService
             _logger.LogInformation("Starting tool checkout for tool {ToolId} to employee {EmployeeId}", toolId, employeeId);
 
             // Legacy MaintenanceTool record (deprecated, used only for status/metadata)
-            var tool = await _toolRepository.GetByIdAsync(toolId);
-            if (tool == null)
-                throw new ArgumentException($"Tool {toolId} not found");
-
+            var tool = await _toolRepository.GetByIdAsync(toolId) ?? throw new ArgumentException($"Tool {toolId} not found");
             if (!tool.IsActive)
+            {
                 throw new InvalidOperationException($"Tool {tool.ToolCode} is not active");
+            }
 
             if (tool.Status != "Available")
+            {
                 throw new InvalidOperationException($"Tool {tool.ToolCode} is not available (current status: {tool.Status})");
+            }
 
             // Resolve the underlying InventoryItem that represents this tool (ItemType = 4) by ToolCode/ItemCode
-            var inventoryItem = await _inventoryItemRepository.GetByItemCodeAsync(tool.ToolCode);
-            if (inventoryItem == null)
-            {
-                throw new InvalidOperationException(
+            var inventoryItem = await _inventoryItemRepository.GetByItemCodeAsync(tool.ToolCode) ?? throw new InvalidOperationException(
                     $"No inventory item found for tool code {tool.ToolCode}. " +
                     "Tools must exist as InventoryItems (ItemType = 4)."
                 );
-            }
 
             // Check if there's already an active checkout for this tool (by InventoryItem Id)
             var activeCheckout = await _checkoutRepository.GetActiveCheckoutByToolIdAsync(inventoryItem.Id);
             if (activeCheckout != null)
+            {
                 throw new InvalidOperationException($"Tool {tool.ToolCode} is already checked out");
+            }
 
             // Create checkout record
             var checkout = new ToolCheckout
@@ -127,12 +126,11 @@ public class ToolCheckoutService : IToolCheckoutService
         {
             _logger.LogInformation("Starting tool return for checkout {CheckoutId}", checkoutId);
 
-            var checkout = await _checkoutRepository.GetByIdAsync(checkoutId);
-            if (checkout == null)
-                throw new ArgumentException($"Checkout {checkoutId} not found");
-
+            var checkout = await _checkoutRepository.GetByIdAsync(checkoutId) ?? throw new ArgumentException($"Checkout {checkoutId} not found");
             if (checkout.Status == "Returned")
+            {
                 throw new InvalidOperationException("Tool has already been returned");
+            }
 
             var returnDate = DateTime.UtcNow;
             var daysCheckedOut = (int)(returnDate - checkout.CheckoutDate).TotalDays;
@@ -174,7 +172,7 @@ public class ToolCheckoutService : IToolCheckoutService
 
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Tool checkout {CheckoutId} returned successfully. Days out: {Days}, Overdue: {Overdue}", 
+            _logger.LogInformation("Tool checkout {CheckoutId} returned successfully. Days out: {Days}, Overdue: {Overdue}",
                 checkoutId, daysCheckedOut, isOverdue);
 
             return new ToolReturnResult
@@ -239,10 +237,7 @@ public class ToolCheckoutService : IToolCheckoutService
     {
         try
         {
-            var tool = await _toolRepository.GetByIdAsync(toolId);
-            if (tool == null)
-                throw new ArgumentException($"Tool {toolId} not found");
-
+            var tool = await _toolRepository.GetByIdAsync(toolId) ?? throw new ArgumentException($"Tool {toolId} not found");
             var isAvailable = tool.Status == "Available";
             var activeCheckout = await _checkoutRepository.GetActiveCheckoutByToolIdAsync(toolId);
 
@@ -280,10 +275,7 @@ public class ToolCheckoutService : IToolCheckoutService
     {
         try
         {
-            var tool = await _toolRepository.GetByIdAsync(toolId);
-            if (tool == null)
-                throw new ArgumentException($"Tool {toolId} not found");
-
+            var tool = await _toolRepository.GetByIdAsync(toolId) ?? throw new ArgumentException($"Tool {toolId} not found");
             var checkouts = await _checkoutRepository.GetToolCheckoutHistoryAsync(toolId, limit);
             var totalCheckouts = await _checkoutRepository.GetTotalCheckoutCountAsync(toolId);
             var totalUsageDays = await _checkoutRepository.GetTotalUsageDaysAsync(toolId);
@@ -389,10 +381,7 @@ public class ToolCheckoutService : IToolCheckoutService
         {
             _logger.LogInformation("Reporting damage for checkout {CheckoutId}", checkoutId);
 
-            var checkout = await _checkoutRepository.GetByIdAsync(checkoutId);
-            if (checkout == null)
-                throw new ArgumentException($"Checkout {checkoutId} not found");
-
+            var checkout = await _checkoutRepository.GetByIdAsync(checkoutId) ?? throw new ArgumentException($"Checkout {checkoutId} not found");
             checkout.DamageReported = true;
             checkout.DamageDescription = dto.DamageDescription;
             checkout.DamageCost = dto.EstimatedCost;
@@ -426,7 +415,7 @@ public class ToolCheckoutService : IToolCheckoutService
 
     #region Mapping Helpers
 
-    private List<ToolCheckoutDto> MapToCheckoutDtos(List<ToolCheckout> checkouts)
+    private static List<ToolCheckoutDto> MapToCheckoutDtos(List<ToolCheckout> checkouts)
     {
         return checkouts.Select(c =>
         {

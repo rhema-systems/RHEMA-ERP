@@ -1,12 +1,12 @@
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Http;
 using System.Net.Http;
-using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Shared;
+using Microsoft.Extensions.Http;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services;
 
@@ -93,7 +93,7 @@ public class DeviceSessionService : IDeviceSessionService
     private readonly IUserSessionService _userSessionService;
     private readonly ILogger<DeviceSessionService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
-    
+
     public DeviceSessionService(
         IUserSessionService userSessionService,
         ILogger<DeviceSessionService> logger,
@@ -110,20 +110,20 @@ public class DeviceSessionService : IDeviceSessionService
         {
             // Generate device fingerprint
             var fingerprint = await GenerateDeviceFingerprintAsync(request);
-            
+
             // Get geolocation
             var location = await GetGeolocationAsync(request.IpAddress);
-            
+
             // Assess security
             var security = await AssessSecurityRiskAsync(userId, request, location, fingerprint);
-            
+
             // Create session using existing UserSessionService
             var session = await _userSessionService.CreateSessionAsync(
-                userId, 
-                tenantId, 
-                request.IpAddress, 
-                request.UserAgent, 
-                fingerprint.Hash, 
+                userId,
+                tenantId,
+                request.IpAddress,
+                request.UserAgent,
+                fingerprint.Hash,
                 "Disabled", // Assume no concurrent login prevention for now
                 request.JwtTokenId);
 
@@ -177,7 +177,10 @@ public class DeviceSessionService : IDeviceSessionService
         try
         {
             var session = await _userSessionService.GetSessionAsync(sessionId);
-            if (session == null) return null;
+            if (session == null)
+            {
+                return null;
+            }
 
             return await MapToDeviceSessionDtoAsync(session);
         }
@@ -231,7 +234,7 @@ public class DeviceSessionService : IDeviceSessionService
         try
         {
             var sessions = await _userSessionService.GetUserSessionHistoryAsync(userId, days);
-            
+
             var stats = new DeviceSessionStats
             {
                 TotalSessions = sessions.Count,
@@ -258,7 +261,7 @@ public class DeviceSessionService : IDeviceSessionService
         {
             var sessions = await _userSessionService.GetUserSessionHistoryAsync(userId, 30);
             var recentSessions = sessions.OrderByDescending(s => s.LoginTime).Take(count).ToList();
-            
+
             var deviceSessions = new List<DeviceSessionDto>();
             foreach (var session in recentSessions)
             {
@@ -281,16 +284,22 @@ public class DeviceSessionService : IDeviceSessionService
         {
             var recentSessions = await _userSessionService.GetUserSessionHistoryAsync(userId, 7);
             var location = await GetGeolocationAsync(ipAddress);
-            
-            if (location == null) return true; // Unknown location is suspicious
-            
+
+            if (location == null)
+            {
+                return true; // Unknown location is suspicious
+            }
+
             // Check if user has logged in from this country before
-            var hasLoggedFromCountry = recentSessions.Any(s => 
+            var hasLoggedFromCountry = recentSessions.Any(s =>
                 s.Location.Contains(location.Country, StringComparison.OrdinalIgnoreCase));
-            
+
             // Consider VPN/Tor usage as suspicious
-            if (location.IsVPN || location.IsTor) return true;
-            
+            if (location.IsVPN || location.IsTor)
+            {
+                return true;
+            }
+
             // New country login is suspicious
             return !hasLoggedFromCountry;
         }
@@ -306,39 +315,45 @@ public class DeviceSessionService : IDeviceSessionService
         try
         {
             var fingerprint = new DeviceFingerprint();
-            
+
             // Parse User Agent
             var deviceInfo = ParseUserAgent(request.UserAgent);
             fingerprint.DeviceType = deviceInfo.DeviceType;
             fingerprint.Browser = deviceInfo.Browser;
             fingerprint.OperatingSystem = deviceInfo.OperatingSystem;
-            
+
             // Use provided device info if available
             if (request.DeviceInfo != null)
             {
                 if (request.DeviceInfo.TryGetValue("screenResolution", out var screenRes))
+                {
                     fingerprint.ScreenResolution = screenRes;
-                    
+                }
+
                 if (request.DeviceInfo.TryGetValue("timeZone", out var timeZone))
+                {
                     fingerprint.TimeZone = timeZone;
-                    
+                }
+
                 if (request.DeviceInfo.TryGetValue("language", out var language))
+                {
                     fingerprint.Language = language;
-                
+                }
+
                 if (request.DeviceInfo.TryGetValue("cookiesEnabled", out var cookiesEnabled))
                 {
                     fingerprint.CookiesEnabled = bool.TryParse(cookiesEnabled, out var cookiesResult) && cookiesResult;
                 }
-                
-                if (request.DeviceInfo.ContainsKey("plugins"))
+
+                if (request.DeviceInfo.TryGetValue("plugins", out string? value))
                 {
-                    fingerprint.Plugins = request.DeviceInfo["plugins"].Split(',').ToList();
+                    fingerprint.Plugins = value.Split(',').ToList();
                 }
             }
-            
+
             // Generate hash from all fingerprint data
             fingerprint.Hash = GenerateFingerprintHash(fingerprint, request.UserAgent, request.IpAddress);
-            
+
             return fingerprint;
         }
         catch (Exception ex)
@@ -374,14 +389,14 @@ public class DeviceSessionService : IDeviceSessionService
             // Use a free IP geolocation service (ip-api.com)
             // In production, you might want to use a paid service with API keys
             var httpClient = _httpClientFactory.CreateClient("geolocation");
-            
+
             var response = await httpClient.GetAsync($"http://ip-api.com/json/{ipAddress}?fields=status,message,country,countryCode,region,city,lat,lon,isp,org,proxy");
-            
+
             if (response.IsSuccessStatusCode)
             {
                 var json = await response.Content.ReadAsStringAsync();
                 var data = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
-                
+
                 if (data != null && data.TryGetValue("status", out var status) && status.ToString() == "success")
                 {
                     return new GeolocationInfo
@@ -404,14 +419,14 @@ public class DeviceSessionService : IDeviceSessionService
         {
             _logger.LogWarning(ex, "Failed to get geolocation for IP {IpAddress}", ipAddress);
         }
-        
+
         return null;
     }
 
     private async Task<DeviceSessionDto> MapToDeviceSessionDtoAsync(UserSession session)
     {
         var location = await GetGeolocationAsync(session.IpAddress);
-        
+
         return new DeviceSessionDto
         {
             Id = session.SessionId,
@@ -430,7 +445,7 @@ public class DeviceSessionService : IDeviceSessionService
                 City = location?.City ?? session.Location.Split(',').FirstOrDefault()?.Trim() ?? "",
                 Country = location?.Country ?? session.Location.Split(',').LastOrDefault()?.Trim() ?? "",
                 Ip = session.IpAddress,
-                Coordinates = location?.Latitude != null && location.Longitude != null ? 
+                Coordinates = location?.Latitude != null && location.Longitude != null ?
                     new CoordinatesDto { Latitude = location.Latitude.Value, Longitude = location.Longitude.Value } : null
             },
             Session = new SessionInfoDto
@@ -465,13 +480,13 @@ public class DeviceSessionService : IDeviceSessionService
                 riskFactors.Add("New location");
                 riskScore += 30;
             }
-            
+
             if (location.IsVPN)
             {
                 riskFactors.Add("VPN detected");
                 riskScore += 25;
             }
-            
+
             if (location.IsTor)
             {
                 riskFactors.Add("Tor network detected");
@@ -505,8 +520,10 @@ public class DeviceSessionService : IDeviceSessionService
         var browser = "Unknown";
         var os = "Unknown";
 
-        if (string.IsNullOrEmpty(userAgent)) 
+        if (string.IsNullOrEmpty(userAgent))
+        {
             return (deviceType, browser, os);
+        }
 
         userAgent = userAgent.ToLowerInvariant();
 
@@ -521,18 +538,48 @@ public class DeviceSessionService : IDeviceSessionService
         }
 
         // Browser detection
-        if (userAgent.Contains("chrome")) browser = "Chrome";
-        else if (userAgent.Contains("firefox")) browser = "Firefox";
-        else if (userAgent.Contains("safari")) browser = "Safari";
-        else if (userAgent.Contains("edge")) browser = "Edge";
-        else if (userAgent.Contains("opera")) browser = "Opera";
+        if (userAgent.Contains("chrome"))
+        {
+            browser = "Chrome";
+        }
+        else if (userAgent.Contains("firefox"))
+        {
+            browser = "Firefox";
+        }
+        else if (userAgent.Contains("safari"))
+        {
+            browser = "Safari";
+        }
+        else if (userAgent.Contains("edge"))
+        {
+            browser = "Edge";
+        }
+        else if (userAgent.Contains("opera"))
+        {
+            browser = "Opera";
+        }
 
         // OS detection
-        if (userAgent.Contains("windows")) os = "Windows";
-        else if (userAgent.Contains("macintosh") || userAgent.Contains("mac os")) os = "macOS";
-        else if (userAgent.Contains("linux")) os = "Linux";
-        else if (userAgent.Contains("android")) os = "Android";
-        else if (userAgent.Contains("ios") || userAgent.Contains("iphone") || userAgent.Contains("ipad")) os = "iOS";
+        if (userAgent.Contains("windows"))
+        {
+            os = "Windows";
+        }
+        else if (userAgent.Contains("macintosh") || userAgent.Contains("mac os"))
+        {
+            os = "macOS";
+        }
+        else if (userAgent.Contains("linux"))
+        {
+            os = "Linux";
+        }
+        else if (userAgent.Contains("android"))
+        {
+            os = "Android";
+        }
+        else if (userAgent.Contains("ios") || userAgent.Contains("iphone") || userAgent.Contains("ipad"))
+        {
+            os = "iOS";
+        }
 
         return (deviceType, browser, os);
     }
@@ -552,8 +599,12 @@ public class DeviceSessionService : IDeviceSessionService
 
     private static bool IsPrivateOrLocalhost(string ipAddress)
     {
-        if (string.IsNullOrEmpty(ipAddress)) return true;
-        return ipAddress == "::1" || ipAddress.StartsWith("127.") || ipAddress.StartsWith("192.168.") || 
+        if (string.IsNullOrEmpty(ipAddress))
+        {
+            return true;
+        }
+
+        return ipAddress == "::1" || ipAddress.StartsWith("127.") || ipAddress.StartsWith("192.168.") ||
                ipAddress.StartsWith("10.") || ipAddress.StartsWith("172.16.") || ipAddress == "localhost";
     }
 
@@ -565,7 +616,10 @@ public class DeviceSessionService : IDeviceSessionService
     private static double? GetDoubleValue(Dictionary<string, object> data, string key)
     {
         if (data.TryGetValue(key, out var value) && double.TryParse(value?.ToString(), out var doubleValue))
+        {
             return doubleValue;
+        }
+
         return null;
     }
 

@@ -6,6 +6,7 @@ import { TenantProvider } from "../contexts/TenantContext";
 import { SessionBlacklistProvider } from "../contexts/SessionBlacklistContext";
 import { ThemeProvider } from "../contexts/ThemeContext";
 import { Toaster } from "../components/ui/toaster";
+import { Toaster as SonnerToaster } from "sonner";
 import { PWAInit } from "../components/PWAInit";
 import { NotificationProvider } from "../contexts/NotificationContext";
 import { NotificationToast } from "../components/notifications/NotificationToast";
@@ -49,6 +50,7 @@ export default function RootLayout({
                 <NotificationProvider>
                   {children}
                   <Toaster />
+                  <SonnerToaster position="top-right" richColors />
                   <NotificationToast position="top-right" />
                   <PWAInit />
                 </NotificationProvider>

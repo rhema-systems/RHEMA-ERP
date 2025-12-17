@@ -12,7 +12,7 @@ public class SecurityMetricsDto
     public int PasswordCompliance { get; set; }
     public int AuditEventsToday { get; set; }
     public string LastUpdated { get; set; } = string.Empty;
-    
+
     public SecurityTrendsDto Trends { get; set; } = new();
 }
 
@@ -49,26 +49,26 @@ public class CreateSecurityAlertRequest
     [Required]
     [StringLength(50)]
     public string Type { get; set; } = string.Empty;
-    
+
     [Required]
     [StringLength(200)]
     public string Title { get; set; } = string.Empty;
-    
+
     [Required]
     [StringLength(1000)]
     public string Message { get; set; } = string.Empty;
-    
+
     [Range(1, 10)]
     public int Severity { get; set; } = 1;
-    
+
     [Required]
     [StringLength(50)]
     public string Category { get; set; } = string.Empty;
-    
+
     [Required]
     [StringLength(100)]
     public string Source { get; set; } = string.Empty;
-    
+
     public string? AffectedUser { get; set; }
     public string? IpAddress { get; set; }
     public string? Location { get; set; }
@@ -130,7 +130,7 @@ public class DeviceSessionDto
     public string UserId { get; set; } = string.Empty;
     public string UserName { get; set; } = string.Empty;
     public string UserEmail { get; set; } = string.Empty;
-    
+
     public DeviceInfoDto DeviceInfo { get; set; } = new();
     public LocationInfoDto Location { get; set; } = new();
     public SessionInfoDto Session { get; set; } = new();
@@ -232,7 +232,7 @@ public class UpdateThreatStatusRequest
     [Required]
     [StringLength(50)]
     public string Status { get; set; } = string.Empty;
-    
+
     [StringLength(1000)]
     public string? Resolution { get; set; }
 }
@@ -261,7 +261,7 @@ public class EnableTwoFactorRequest
     // VerificationCode is optional for initial setup, required for enabling
     [StringLength(6, MinimumLength = 0)]
     public string? VerificationCode { get; set; }
-    
+
     [Required]
     [StringLength(100)]
     public string Password { get; set; } = string.Empty;
@@ -272,7 +272,7 @@ public class DisableTwoFactorRequest
     [Required]
     [StringLength(100)]
     public string Password { get; set; } = string.Empty;
-    
+
     [StringLength(200)]
     public string? Reason { get; set; }
 }
@@ -295,16 +295,16 @@ public class CreateSecurityPolicyRequest
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string Description { get; set; } = string.Empty;
-    
+
     [Required]
     [StringLength(50)]
     public string PolicyType { get; set; } = string.Empty;
-    
+
     public bool IsEnabled { get; set; } = true;
-    
+
     public Dictionary<string, object>? Configuration { get; set; }
 }
 
@@ -313,11 +313,11 @@ public class UpdateSecurityPolicyRequest
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string Description { get; set; } = string.Empty;
-    
+
     public bool IsEnabled { get; set; }
-    
+
     public Dictionary<string, object>? Configuration { get; set; }
 }

@@ -1,5 +1,5 @@
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.Entities.Workflow;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Interfaces.Data;
 
@@ -15,7 +15,7 @@ public interface IWorkflowDataContext
     DbSet<WorkflowStepInstance> WorkflowStepInstances { get; }
     DbSet<WorkflowActivityLog> WorkflowActivityLogs { get; }
     DbSet<WorkflowApproval> WorkflowApprovals { get; }
-    
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
     DbSet<TEntity> Set<TEntity>() where TEntity : class;
 }

@@ -136,7 +136,7 @@ public class MaintenanceSchedule : TenantEntity
     /// Schedule start date
     /// </summary>
     public DateTime StartDate { get; set; }
-    
+
     /// <summary>
     /// Next scheduled maintenance date
     /// </summary>
@@ -412,7 +412,7 @@ public class ScheduledWorkOrder : BaseEntity
     /// Whether the work order was completed on time
     /// </summary>
     [NotMapped]
-    public bool IsOnTime => ActualCompletionDate.HasValue && 
+    public bool IsOnTime => ActualCompletionDate.HasValue &&
                            ActualCompletionDate <= ScheduledCompletionDate;
 
     /// <summary>

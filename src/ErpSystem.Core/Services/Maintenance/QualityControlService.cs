@@ -1,7 +1,7 @@
 using ErpSystem.Core.DTOs.Maintenance;
-using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Maintenance;
@@ -77,10 +77,7 @@ public class QualityControlService : IQualityControlService
         {
             _logger.LogInformation("Validating work order {WorkOrderId} for completion", workOrderId);
 
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {workOrderId} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
             var result = new QualityValidationResult
             {
                 WorkOrderId = workOrderId,
@@ -211,9 +208,9 @@ public class QualityControlService : IQualityControlService
 
             // TODO: Phase 2 - Get all active inspection templates from actual service
             // var templates = await _templateService.GetActiveTemplatesAsync();
-            
+
             // For Phase 1.4, create stub inspection requirements based on work order type
-            
+
             // Safety inspections are always required for safety-related work
             if (workOrderType.Contains("Safety") || workOrderType.Contains("Emergency"))
             {
@@ -271,17 +268,19 @@ public class QualityControlService : IQualityControlService
         {
             var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
             if (workOrder == null || workOrder.AssetId == Guid.Empty)
+            {
                 return true; // No asset means no inspection requirements
+            }
 
             var requiredInspections = await GetRequiredInspectionsAsync(workOrder.AssetId, workOrder.MaintenanceType?.Name ?? "General");
-            
+
             // TODO: Phase 2 - Check actual inspection status using inspection service
             // For Phase 1.4, we assume all required inspections pass for basic validation
             foreach (var requiredInspection in requiredInspections)
             {
                 // Stub implementation - in Phase 2 this will use actual inspection service
                 // var latestInspection = await _inspectionService.GetLatestInspectionByAssetAsync(workOrder.AssetId.Value);
-                
+
                 // For now, assume inspections pass (Phase 1.4 foundation)
                 _logger.LogInformation("Quality control framework - inspection '{InspectionType}' validation will be implemented in Phase 2", requiredInspection.InspectionType);
             }
@@ -307,7 +306,9 @@ public class QualityControlService : IQualityControlService
 
             var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
             if (workOrder == null)
+            {
                 return checklist;
+            }
 
             // Standard quality checklist items
             checklist.Add(new QualityChecklistItemDto
@@ -379,17 +380,13 @@ public class QualityControlService : IQualityControlService
     {
         try
         {
-            _logger.LogInformation("Recording quality validation for work order {WorkOrderId} by validator {ValidatedById}", 
+            _logger.LogInformation("Recording quality validation for work order {WorkOrderId} by validator {ValidatedById}",
                 workOrderId, validatedById);
 
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {workOrderId} not found");
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
 
             // Validate that the validator is qualified
-            var validator = await _employeeRepository.GetByIdAsync(validatedById);
-            if (validator == null)
-                throw new ArgumentException($"Validator {validatedById} not found");
+            var validator = await _employeeRepository.GetByIdAsync(validatedById) ?? throw new ArgumentException($"Validator {validatedById} not found");
 
             // TODO: In a real implementation, check if the validator has inspection officer role
             // For now, we'll assume any employee can validate
@@ -420,7 +417,7 @@ public class QualityControlService : IQualityControlService
             if (result.CanComplete)
             {
                 result.ValidationMessages.Add("Quality validation passed - work order approved for completion");
-                
+
                 // Update work order status to indicate quality approval
                 workOrder.Status = "QualityApproved";
                 workOrder.UpdatedAt = DateTime.UtcNow;
@@ -429,14 +426,14 @@ public class QualityControlService : IQualityControlService
             else
             {
                 result.ValidationFailures.Add("Quality validation failed - work order cannot be completed");
-                
+
                 // Update work order status to indicate quality failure
                 workOrder.Status = "QualityRejected";
                 workOrder.UpdatedAt = DateTime.UtcNow;
                 await _workOrderRepository.UpdateAsync(workOrder);
             }
 
-            _logger.LogInformation("Quality validation recorded for work order {WorkOrderId}. Result: {Result}", 
+            _logger.LogInformation("Quality validation recorded for work order {WorkOrderId}. Result: {Result}",
                 workOrderId, result.OverallResult);
 
             return result;

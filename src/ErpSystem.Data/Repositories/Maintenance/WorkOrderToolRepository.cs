@@ -35,8 +35,8 @@ public class WorkOrderToolRepository : GenericRepository<WorkOrderTool>, IWorkOr
             .Include(wt => wt.Tool)
             .Include(wt => wt.Checkout)
                 .ThenInclude(c => c!.CheckedOutBy)
-            .Where(wt => wt.WorkOrderId == workOrderId 
-                && wt.CheckoutId.HasValue 
+            .Where(wt => wt.WorkOrderId == workOrderId
+                && wt.CheckoutId.HasValue
                 && wt.Checkout!.ActualReturnDate == null
                 && !wt.IsDeleted)
             .ToListAsync();
@@ -49,8 +49,8 @@ public class WorkOrderToolRepository : GenericRepository<WorkOrderTool>, IWorkOr
             .Include(wt => wt.Tool)
             .Include(wt => wt.Checkout)
                 .ThenInclude(c => c!.CheckedOutBy)
-            .Where(wt => wt.WorkOrderId == workOrderId 
-                && wt.CheckoutId.HasValue 
+            .Where(wt => wt.WorkOrderId == workOrderId
+                && wt.CheckoutId.HasValue
                 && wt.Checkout!.ActualReturnDate == null
                 && wt.Checkout!.ExpectedReturnDate.HasValue
                 && wt.Checkout!.ExpectedReturnDate.Value < now

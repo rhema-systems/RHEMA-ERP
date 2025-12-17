@@ -18,7 +18,7 @@ namespace ErpSystem.Web.Services
         private readonly ILogger<GracefulShutdownService> _logger;
         private readonly IHostApplicationLifetime _applicationLifetime;
         private readonly TaskCompletionSource<bool> _shutdownComplete;
-        
+
         private bool _shutdownRequested = false;
         private bool _shutdownCompleted = false;
         private readonly object _shutdownLock = new object();
@@ -44,13 +44,13 @@ namespace ErpSystem.Web.Services
         public async Task StopAsync(CancellationToken cancellationToken)
         {
             _logger.LogInformation("Graceful shutdown service stopping...");
-            
+
             try
             {
                 // These methods have their own synchronization to prevent duplicate execution
                 await BeginShutdownAsync(cancellationToken);
                 await CompleteShutdownAsync(cancellationToken);
-                
+
                 _logger.LogInformation("Graceful shutdown service stopped successfully");
             }
             catch (Exception ex)
@@ -136,7 +136,7 @@ namespace ErpSystem.Web.Services
 
                 stopwatch.Stop();
                 _logger.LogInformation("Graceful shutdown completed successfully in {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
-                
+
                 // Only set result if not already completed
                 if (!_shutdownComplete.Task.IsCompleted)
                 {
@@ -147,7 +147,7 @@ namespace ErpSystem.Web.Services
             {
                 stopwatch.Stop();
                 _logger.LogError(ex, "Error during graceful shutdown completion after {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
-                
+
                 // Only set exception if not already completed
                 if (!_shutdownComplete.Task.IsCompleted)
                 {
@@ -173,7 +173,7 @@ namespace ErpSystem.Web.Services
         private void OnApplicationStopping()
         {
             _logger.LogInformation("Application stopping event received, initiating graceful shutdown");
-            
+
             // Check if shutdown is already in progress to avoid duplicate work
             lock (_shutdownLock)
             {
@@ -183,13 +183,13 @@ namespace ErpSystem.Web.Services
                     return;
                 }
             }
-            
+
             // Use fire-and-forget pattern for graceful shutdown with timeout
             _ = Task.Run(async () =>
             {
                 var shutdownTimeout = TimeSpan.FromSeconds(60); // Give it a reasonable timeout
                 using var cts = new CancellationTokenSource(shutdownTimeout);
-                
+
                 try
                 {
                     await BeginShutdownAsync(cts.Token);
@@ -211,15 +211,15 @@ namespace ErpSystem.Web.Services
         {
             const int maxWaitSeconds = 30;
             var timeout = TimeSpan.FromSeconds(maxWaitSeconds);
-            
+
             try
             {
                 _logger.LogDebug("Waiting up to {MaxWaitSeconds} seconds for active requests to complete", maxWaitSeconds);
-                
+
                 // Wait for a reasonable time for requests to complete
                 // In a real scenario, you might track active requests
                 await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
-                
+
                 _logger.LogDebug("Active request wait period completed");
             }
             catch (OperationCanceledException)
@@ -237,11 +237,11 @@ namespace ErpSystem.Web.Services
             try
             {
                 _logger.LogDebug("Beginning resource cleanup...");
-                
+
                 // Signal all background services to begin cleanup
                 // This is a placeholder - in practice you'd have a registry of cleanup tasks
                 await Task.Delay(100, cancellationToken);
-                
+
                 _logger.LogDebug("Resource cleanup signaling completed");
             }
             catch (Exception ex)
@@ -255,10 +255,10 @@ namespace ErpSystem.Web.Services
             try
             {
                 _logger.LogDebug("Cleaning up database connections...");
-                
+
                 using var scope = _serviceProvider.CreateScope();
                 var dbContext = scope.ServiceProvider.GetService<ApplicationDbContext>();
-                
+
                 if (dbContext != null)
                 {
                     // Ensure all pending changes are saved
@@ -267,7 +267,7 @@ namespace ErpSystem.Web.Services
                         _logger.LogWarning("Saving pending database changes during shutdown");
                         await dbContext.SaveChangesAsync(cancellationToken);
                     }
-                    
+
                     // Dispose the context properly
                     await dbContext.DisposeAsync();
                     _logger.LogDebug("Database connections cleaned up");
@@ -284,9 +284,9 @@ namespace ErpSystem.Web.Services
             try
             {
                 _logger.LogDebug("Cleaning up cache resources...");
-                
+
                 using var scope = _serviceProvider.CreateScope();
-                
+
                 // Clean up memory cache
                 var memoryCache = scope.ServiceProvider.GetService<IMemoryCache>();
                 if (memoryCache is MemoryCache mc)
@@ -294,7 +294,7 @@ namespace ErpSystem.Web.Services
                     mc.Dispose();
                     _logger.LogDebug("Memory cache disposed");
                 }
-                
+
                 // Clean up distributed cache connections
                 var distributedCache = scope.ServiceProvider.GetService<IDistributedCache>();
                 if (distributedCache != null)
@@ -303,7 +303,7 @@ namespace ErpSystem.Web.Services
                     // This depends on the specific cache implementation
                     _logger.LogDebug("Distributed cache cleanup completed");
                 }
-                
+
                 await Task.CompletedTask;
             }
             catch (Exception ex)
@@ -317,17 +317,17 @@ namespace ErpSystem.Web.Services
             try
             {
                 _logger.LogDebug("Cleaning up background services...");
-                
+
                 // In practice, you would have a registry of background services to clean up
                 // For now, we'll just ensure any warmup services are properly disposed
                 using var scope = _serviceProvider.CreateScope();
                 var warmupService = scope.ServiceProvider.GetService<IApplicationWarmupService>();
-                
+
                 if (warmupService != null)
                 {
                     _logger.LogDebug("Background services cleanup completed");
                 }
-                
+
                 await Task.CompletedTask;
             }
             catch (Exception ex)
@@ -341,11 +341,11 @@ namespace ErpSystem.Web.Services
             try
             {
                 _logger.LogDebug("Cleaning up file resources...");
-                
+
                 // Clean up temporary files, logs, etc.
                 var tempPath = Path.GetTempPath();
                 var appTempFiles = Directory.GetFiles(tempPath, "ErpSystem_*", SearchOption.TopDirectoryOnly);
-                
+
                 foreach (var file in appTempFiles)
                 {
                     try
@@ -358,7 +358,7 @@ namespace ErpSystem.Web.Services
                         _logger.LogWarning(ex, "Failed to delete temporary file: {FileName}", Path.GetFileName(file));
                     }
                 }
-                
+
                 _logger.LogDebug("File resources cleanup completed");
                 await Task.CompletedTask;
             }
@@ -373,7 +373,7 @@ namespace ErpSystem.Web.Services
             try
             {
                 _logger.LogDebug("Saving final application state...");
-                
+
                 // Save any final state information
                 var shutdownInfo = new
                 {
@@ -381,7 +381,7 @@ namespace ErpSystem.Web.Services
                     Version = typeof(Program).Assembly.GetName().Version?.ToString(),
                     Environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
                 };
-                
+
                 _logger.LogInformation("Application shutdown completed: {@ShutdownInfo}", shutdownInfo);
                 await Task.CompletedTask;
             }

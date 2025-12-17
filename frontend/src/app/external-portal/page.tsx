@@ -12,6 +12,8 @@ import {
   AlertCircle,
   ArrowRight,
   TrendingUp,
+  Briefcase,
+  ClipboardList,
 } from 'lucide-react';
 import Link from 'next/link';
 import { authService } from '@/services/auth';
@@ -26,6 +28,22 @@ export default function ExternalPortalDashboard() {
       icon: Building2,
       href: '/external-portal/business-partner',
       color: 'bg-blue-500',
+      available: true,
+    },
+    {
+      title: 'Browse Tenders',
+      description: 'View available tenders and submit bids',
+      icon: Briefcase,
+      href: '/external-portal/tenders',
+      color: 'bg-indigo-500',
+      available: true,
+    },
+    {
+      title: 'My Bids',
+      description: 'View and manage your submitted bids',
+      icon: ClipboardList,
+      href: '/external-portal/my-bids',
+      color: 'bg-teal-500',
       available: true,
     },
     {
@@ -100,9 +118,6 @@ export default function ExternalPortalDashboard() {
     <div className="space-y-6">
       {/* Welcome Section */}
       <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-lg p-6 text-white">
-        <h1 className="text-3xl font-bold mb-2">
-          Welcome back, {user?.firstName}!
-        </h1>
         <p className="text-blue-100">
           Manage your applications, registrations, and submissions all in one place.
         </p>

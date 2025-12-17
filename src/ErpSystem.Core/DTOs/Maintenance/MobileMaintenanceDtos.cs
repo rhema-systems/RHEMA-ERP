@@ -59,45 +59,45 @@ public class MobileWorkOrderDetailDto
     public string Priority { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public string WorkOrderType { get; set; } = string.Empty;
-    
+
     // Asset Information
     public Guid AssetId { get; set; }
     public string AssetName { get; set; } = string.Empty;
     public string AssetCode { get; set; } = string.Empty;
     public string AssetLocation { get; set; } = string.Empty;
     public string AssetDescription { get; set; } = string.Empty;
-    
+
     // Scheduling
     public DateTime? ScheduledDate { get; set; }
     public DateTime? DueDate { get; set; }
     public double EstimatedHours { get; set; }
     public double EstimatedDuration { get; set; }
-    
+
     // Assignment
     public Guid? AssignedToId { get; set; }
     public string AssignedToName { get; set; } = string.Empty;
     public Guid? AssignedTeamId { get; set; }
     public string AssignedTeamName { get; set; } = string.Empty;
-    
+
     // Parts and Materials
     public List<MobileWorkOrderPartDto> RequiredParts { get; set; } = new();
-    
+
     // Tasks/Checklist
     public List<MobileWorkOrderTaskDto> Tasks { get; set; } = new();
-    
+
     // Attachments
     public List<MobileAttachmentDto> Attachments { get; set; } = new();
-    
+
     // Work Logs
     public List<MobileWorkLogDto> WorkLogs { get; set; } = new();
-    
+
     // Timestamps
     public DateTime CreatedAt { get; set; }
     public string CreatedByName { get; set; } = string.Empty;
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public DateTime LastModified { get; set; }
-    
+
     // Additional Properties
     public string Location { get; set; } = string.Empty;
     public bool IsOverdue { get; set; }

@@ -1,9 +1,9 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
-using ErpSystem.Core.Interfaces.Maintenance;
+using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces;
-using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -56,7 +56,7 @@ public class MaintenanceMobileController : ControllerBase
         {
             var result = await _mobileService.GetTechnicianWorkOrdersAsync(
                 CurrentUserId, page, pageSize, status, lastSync);
-            
+
             return Ok(result);
         }
         catch (Exception ex)
@@ -76,7 +76,9 @@ public class MaintenanceMobileController : ControllerBase
         {
             var workOrder = await _mobileService.GetMobileWorkOrderDetailAsync(id);
             if (workOrder == null)
+            {
                 return NotFound();
+            }
 
             return Ok(workOrder);
         }
@@ -92,7 +94,7 @@ public class MaintenanceMobileController : ControllerBase
     /// </summary>
     [HttpPut("work-orders/{id}/status")]
     public async Task<ActionResult<MobileWorkOrderUpdateResultDto>> UpdateWorkOrderStatus(
-        Guid id, 
+        Guid id,
         [FromBody] MobileWorkOrderStatusUpdateDto updateDto)
     {
         try
@@ -119,7 +121,7 @@ public class MaintenanceMobileController : ControllerBase
     /// </summary>
     [HttpPost("work-orders/{id}/logs")]
     public async Task<ActionResult<MobileWorkLogResultDto>> AddWorkLog(
-        Guid id, 
+        Guid id,
         [FromBody] MobileWorkLogCreateDto logDto)
     {
         try
@@ -153,7 +155,9 @@ public class MaintenanceMobileController : ControllerBase
         try
         {
             if (photos == null || !photos.Any())
+            {
                 return BadRequest("No photos provided");
+            }
 
             // Photo upload functionality not yet implemented
             return BadRequest("Photo upload functionality is currently under development");
@@ -179,7 +183,9 @@ public class MaintenanceMobileController : ControllerBase
         {
             var asset = await _mobileService.GetMobileAssetDetailAsync(id);
             if (asset == null)
+            {
                 return NotFound();
+            }
 
             return Ok(asset);
         }

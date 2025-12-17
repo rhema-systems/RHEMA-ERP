@@ -38,7 +38,9 @@ public class BusinessPartnersController : ControllerBase
         try
         {
             if (pageSize > 100)
+            {
                 pageSize = 100;
+            }
 
             var categoryIds = categoryId.HasValue ? new List<Guid> { categoryId.Value } : null;
             var result = await _partnerService.GetPartnersAsync(
@@ -62,7 +64,9 @@ public class BusinessPartnersController : ControllerBase
         {
             var partner = await _partnerService.GetByIdAsync(id);
             if (partner == null)
+            {
                 return NotFound();
+            }
 
             return Ok(partner);
         }
@@ -83,13 +87,38 @@ public class BusinessPartnersController : ControllerBase
         {
             var partner = await _partnerService.GetByCodeAsync(partnerCode);
             if (partner == null)
+            {
                 return NotFound();
+            }
 
             return Ok(partner);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving business partner by code {PartnerCode}", partnerCode);
+            return StatusCode(500, "An error occurred while retrieving the business partner");
+        }
+    }
+
+    /// <summary>
+    /// Gets a business partner by user ID
+    /// </summary>
+    [HttpGet("user/{userId:guid}")]
+    public async Task<ActionResult<BusinessPartnerDetailDto>> GetPartnerByUserId(Guid userId)
+    {
+        try
+        {
+            var partner = await _partnerService.GetByUserIdAsync(userId);
+            if (partner == null)
+            {
+                return NotFound($"Business partner for user ID {userId} not found");
+            }
+
+            return Ok(partner);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving business partner by user ID {UserId}", userId);
             return StatusCode(500, "An error occurred while retrieving the business partner");
         }
     }
@@ -157,7 +186,9 @@ public class BusinessPartnersController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var partner = await _partnerService.CreateAsync(createDto);
             return CreatedAtAction(nameof(GetPartner), new { id = partner.Id }, partner);
@@ -182,7 +213,9 @@ public class BusinessPartnersController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var partner = await _partnerService.UpdateAsync(id, updateDto);
             return Ok(partner);
@@ -305,6 +338,40 @@ public class BusinessPartnersController : ControllerBase
         {
             _logger.LogError(ex, "Error activating business partner {PartnerId}", id);
             return StatusCode(500, "An error occurred while activating the business partner");
+        }
+    }
+
+    /// <summary>
+    /// Downloads a business partner document
+    /// </summary>
+    [HttpGet("{id:guid}/documents/{documentId:guid}/download")]
+    public async Task<IActionResult> DownloadDocument(Guid id, Guid documentId)
+    {
+        try
+        {
+            var documents = await _partnerService.GetDocumentsAsync(id);
+            var document = documents.FirstOrDefault(d => d.Id == documentId);
+
+            if (document == null)
+            {
+                return NotFound("Document not found");
+            }
+
+            if (string.IsNullOrEmpty(document.FilePath) || !System.IO.File.Exists(document.FilePath))
+            {
+                _logger.LogError("Document file not found at path: {FilePath}", document.FilePath);
+                return NotFound("Document file not found on server");
+            }
+
+            var fileBytes = await System.IO.File.ReadAllBytesAsync(document.FilePath);
+            var contentType = document.MimeType ?? "application/octet-stream";
+
+            return File(fileBytes, contentType, document.DocumentName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error downloading document {DocumentId} for business partner {PartnerId}", documentId, id);
+            return StatusCode(500, "An error occurred while downloading the document");
         }
     }
 }

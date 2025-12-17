@@ -18,10 +18,10 @@ public class CreateRoleRequest
     [Required]
     [StringLength(256)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(1000)]
     public string? Description { get; set; }
-    
+
     public string[] Permissions { get; set; } = Array.Empty<string>();
 }
 
@@ -30,9 +30,9 @@ public class UpdateRoleRequest
     [Required]
     [StringLength(256)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(1000)]
     public string? Description { get; set; }
-    
+
     public string[] Permissions { get; set; } = Array.Empty<string>();
 }

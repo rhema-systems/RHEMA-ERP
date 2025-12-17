@@ -52,11 +52,11 @@ namespace ErpSystem.Core.Entities
         // Navigation properties
         public virtual ApplicationUser CreatedByUser { get; set; } = null!;
         public virtual List<DataSourceUsageLog> UsageLogs { get; set; } = new();
-        
+
         // Computed property for DataSourceType enum
         [NotMapped]
-        public DataSourceType DataSourceType 
-        { 
+        public DataSourceType DataSourceType
+        {
             get => (DataSourceType)Type;
             set => Type = (int)value;
         }

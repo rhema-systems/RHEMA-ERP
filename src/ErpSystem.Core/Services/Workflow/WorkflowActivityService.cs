@@ -1,9 +1,9 @@
-using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using ErpSystem.Core.Entities.Workflow;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Services;
-using ErpSystem.Core.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Workflow;
 
@@ -27,13 +27,13 @@ public class WorkflowActivityService : IWorkflowActivityService
     }
 
     public async Task LogActivityAsync(
-        Guid workflowInstanceId, 
-        WorkflowActivityType activityType, 
-        string title, 
-        string? description = null, 
-        Guid? performedById = null, 
-        Guid? stepInstanceId = null, 
-        object? data = null, 
+        Guid workflowInstanceId,
+        WorkflowActivityType activityType,
+        string title,
+        string? description = null,
+        Guid? performedById = null,
+        Guid? stepInstanceId = null,
+        object? data = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogDebug("Logging workflow activity: {ActivityType} for instance {WorkflowInstanceId}", activityType, workflowInstanceId);

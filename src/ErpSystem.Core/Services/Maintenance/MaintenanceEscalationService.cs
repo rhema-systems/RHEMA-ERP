@@ -18,7 +18,7 @@ public interface IMaintenanceEscalationService
     Task<MaintenanceEscalationRuleDto> UpdateEscalationRuleAsync(Guid id, MaintenanceEscalationRuleDto dto);
     Task DeleteEscalationRuleAsync(Guid id);
     Task<List<MaintenanceEscalationRuleDto>> GetAllRulesAsync();
-    
+
     // Escalation evaluation
     Task EvaluateAndExecuteEscalationsAsync();
     Task<int> EscalateOverdueNotificationsAsync(string entityType, int overdueHours);
@@ -105,10 +105,7 @@ public class MaintenanceEscalationService : IMaintenanceEscalationService
     {
         try
         {
-            var entity = await _unitOfWork.Repository<MaintenanceEscalationRule>().GetByIdAsync(id);
-            if (entity == null)
-                throw new ArgumentException($"Escalation rule with ID {id} not found");
-
+            var entity = await _unitOfWork.Repository<MaintenanceEscalationRule>().GetByIdAsync(id) ?? throw new ArgumentException($"Escalation rule with ID {id} not found");
             entity.Name = dto.Name;
             entity.EntityType = dto.EntityType;
             entity.TriggerCondition = dto.TriggerCondition;
@@ -133,10 +130,7 @@ public class MaintenanceEscalationService : IMaintenanceEscalationService
     {
         try
         {
-            var entity = await _unitOfWork.Repository<MaintenanceEscalationRule>().GetByIdAsync(id);
-            if (entity == null)
-                throw new ArgumentException($"Escalation rule with ID {id} not found");
-
+            var entity = await _unitOfWork.Repository<MaintenanceEscalationRule>().GetByIdAsync(id) ?? throw new ArgumentException($"Escalation rule with ID {id} not found");
             await _unitOfWork.Repository<MaintenanceEscalationRule>().DeleteAsync(id);
             await _unitOfWork.SaveChangesAsync();
 
@@ -259,7 +253,7 @@ public class MaintenanceEscalationService : IMaintenanceEscalationService
         }
     }
 
-    private string GetEscalatedPriority(string currentPriority)
+    private static string GetEscalatedPriority(string currentPriority)
     {
         return currentPriority.ToLower() switch
         {

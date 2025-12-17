@@ -1,11 +1,11 @@
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
-using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.HR;
-using Microsoft.Extensions.Logging;
+using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Shared;
-using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -54,7 +54,7 @@ public class JobCardService : IJobCardService
         try
         {
             _logger.LogDebug("Getting paged job cards with filter: {@Filter}", filter);
-            
+
             var jobCards = await _jobCardRepository.GetPagedAsync(filter);
             return jobCards;
         }
@@ -100,13 +100,12 @@ public class JobCardService : IJobCardService
             _logger.LogInformation("Creating new job card for asset {AssetId}", createDto.AssetId);
 
             // Validate asset exists
-            var asset = await _assetRepository.GetByIdAsync(createDto.AssetId);
-            if (asset == null)
-                throw new ArgumentException($"Asset with ID {createDto.AssetId} not found");
-
+            var asset = await _assetRepository.GetByIdAsync(createDto.AssetId) ?? throw new ArgumentException($"Asset with ID {createDto.AssetId} not found");
             var currentUserIdString = _currentUserService.UserId;
             if (string.IsNullOrEmpty(currentUserIdString))
+            {
                 throw new UnauthorizedAccessException("User not authenticated");
+            }
 
             var currentUserId = Guid.Parse(currentUserIdString);
             var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Tenant not found");
@@ -114,12 +113,12 @@ public class JobCardService : IJobCardService
             // Get the Employee ID from the current user's claims
             var currentEmployeeId = _currentUserService.EmployeeId;
             if (!currentEmployeeId.HasValue)
+            {
                 throw new InvalidOperationException("Current user does not have an associated employee record. Please link your user account to an employee record.");
+            }
 
             // Validate that the current employee exists in the Employees table
-            var currentEmployee = await _employeeRepository.GetByIdAsync(currentEmployeeId.Value);
-            if (currentEmployee == null)
-                throw new InvalidOperationException($"Employee with ID {currentEmployeeId.Value} is not found in the Employees table. Please ensure the employee record exists.");
+            var currentEmployee = await _employeeRepository.GetByIdAsync(currentEmployeeId.Value) ?? throw new InvalidOperationException($"Employee with ID {currentEmployeeId.Value} is not found in the Employees table. Please ensure the employee record exists.");
 
             // Generate job card number
             var jobCardNumber = await GenerateJobCardNumberAsync();
@@ -150,7 +149,7 @@ public class JobCardService : IJobCardService
                 SafetyRequirements = createDto.SafetyRequirements,
                 JobCardStatus = "Draft",
                 ApprovalStatus = "NotStarted",
-                CustomFieldValues = createDto.CustomFieldValues != null ? 
+                CustomFieldValues = createDto.CustomFieldValues != null ?
                     JsonSerializer.Serialize(createDto.CustomFieldValues) : null,
                 TenantId = tenantId,
                 CreatedAt = DateTime.UtcNow,
@@ -160,10 +159,10 @@ public class JobCardService : IJobCardService
             await _jobCardRepository.AddAsync(jobCard);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Created job card {JobCardNumber} with ID {JobCardId}", 
+            _logger.LogInformation("Created job card {JobCardNumber} with ID {JobCardId}",
                 jobCardNumber, jobCard.Id);
 
-            return await GetJobCardByIdAsync(jobCard.Id) ?? 
+            return await GetJobCardByIdAsync(jobCard.Id) ??
                 throw new InvalidOperationException("Failed to retrieve created job card");
         }
         catch (Exception ex)
@@ -177,28 +176,32 @@ public class JobCardService : IJobCardService
     {
         try
         {
-            var existingJobCard = await _jobCardRepository.GetByIdAsync(id);
-            if (existingJobCard == null)
-                throw new ArgumentException($"Job card with ID {id} not found");
+            var existingJobCard = await _jobCardRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Job card with ID {id} not found");
 
             // Only allow updates if job card is in draft status
             if (existingJobCard.JobCardStatus != "Draft")
+            {
                 throw new InvalidOperationException($"Cannot update job card in {existingJobCard.JobCardStatus} status");
+            }
 
             // Check permissions
             var currentEmployeeId = _currentUserService.EmployeeId;
             if (!currentEmployeeId.HasValue)
+            {
                 throw new UnauthorizedAccessException("Current user does not have an associated employee record");
-            
+            }
+
             if (existingJobCard.RequestedById != currentEmployeeId.Value)
+            {
                 throw new UnauthorizedAccessException("User does not have permission to update this job card");
+            }
 
             // Log before update
-            _logger.LogInformation("Updating JobCard {JobCardId} - Before: ProblemDescription='{OldValue}'", 
+            _logger.LogInformation("Updating JobCard {JobCardId} - Before: ProblemDescription='{OldValue}'",
                 id, existingJobCard.ProblemDescription);
-            _logger.LogInformation("Updating JobCard {JobCardId} - New: ProblemDescription='{NewValue}'", 
+            _logger.LogInformation("Updating JobCard {JobCardId} - New: ProblemDescription='{NewValue}'",
                 id, updateDto.ProblemDescription);
-            
+
             // Update properties
             existingJobCard.Title = updateDto.Title;
             existingJobCard.Description = updateDto.Description;
@@ -224,11 +227,11 @@ public class JobCardService : IJobCardService
             existingJobCard.UpdatedBy = currentUserIdString ?? "Unknown";
 
             await _jobCardRepository.UpdateAsync(existingJobCard);
-            
+
             // Log after setting properties
-            _logger.LogInformation("JobCard {JobCardId} - After property update: ProblemDescription='{Value}'", 
+            _logger.LogInformation("JobCard {JobCardId} - After property update: ProblemDescription='{Value}'",
                 id, existingJobCard.ProblemDescription);
-            
+
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Updated job card {JobCardId} and saved to database", id);
@@ -247,21 +250,25 @@ public class JobCardService : IJobCardService
     {
         try
         {
-            var jobCard = await _jobCardRepository.GetByIdAsync(id);
-            if (jobCard == null)
-                throw new ArgumentException($"Job card with ID {id} not found");
+            var jobCard = await _jobCardRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Job card with ID {id} not found");
 
             // Only allow deletion if not submitted for approval
             if (jobCard.JobCardStatus != "Draft")
+            {
                 throw new InvalidOperationException($"Cannot delete job card in {jobCard.JobCardStatus} status");
+            }
 
             // Check permissions
             var currentEmployeeId = _currentUserService.EmployeeId;
             if (!currentEmployeeId.HasValue)
+            {
                 throw new UnauthorizedAccessException("Current user does not have an associated employee record");
-            
+            }
+
             if (jobCard.RequestedById != currentEmployeeId.Value)
+            {
                 throw new UnauthorizedAccessException("User does not have permission to delete this job card");
+            }
 
             await _jobCardRepository.DeleteAsync(id);
             await _unitOfWork.SaveChangesAsync();
@@ -279,20 +286,23 @@ public class JobCardService : IJobCardService
     {
         try
         {
-            var jobCard = await _jobCardRepository.GetByIdAsync(id);
-            if (jobCard == null)
-                throw new ArgumentException($"Job card with ID {id} not found");
-
+            var jobCard = await _jobCardRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Job card with ID {id} not found");
             if (jobCard.JobCardStatus != "Draft")
+            {
                 throw new InvalidOperationException($"Job card is already submitted or processed");
+            }
 
             // Check permissions
             var currentEmployeeId = _currentUserService.EmployeeId;
             if (!currentEmployeeId.HasValue)
+            {
                 throw new UnauthorizedAccessException("Current user does not have an associated employee record");
-            
+            }
+
             if (jobCard.RequestedById != currentEmployeeId.Value)
+            {
                 throw new UnauthorizedAccessException("User does not have permission to submit this job card");
+            }
 
             var currentUserIdString = _currentUserService.UserId;
 
@@ -340,20 +350,23 @@ public class JobCardService : IJobCardService
     {
         try
         {
-            var jobCard = await _jobCardRepository.GetByIdAsync(id);
-            if (jobCard == null)
-                throw new ArgumentException($"Job card with ID {id} not found");
-
+            var jobCard = await _jobCardRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Job card with ID {id} not found");
             if (jobCard.JobCardStatus != "Submitted" && jobCard.ApprovalStatus != "Pending")
+            {
                 throw new InvalidOperationException("Job card is not awaiting approval");
+            }
 
             var currentUserIdString = _currentUserService.UserId;
             if (string.IsNullOrEmpty(currentUserIdString))
+            {
                 throw new UnauthorizedAccessException("User not authenticated");
-            
+            }
+
             var currentEmployeeId = _currentUserService.EmployeeId;
             if (!currentEmployeeId.HasValue)
+            {
                 throw new UnauthorizedAccessException("Current user does not have an associated employee record");
+            }
 
             // For now, skip workflow validation - in production, implement proper approval workflow
             // var canApprove = await _workflowService.CanUserApproveAsync("JobCard", id, currentEmployeeId.Value);
@@ -395,22 +408,38 @@ public class JobCardService : IJobCardService
         jobCard.ApprovalStatus = "Approved";
         jobCard.ApprovedDate = DateTime.UtcNow;
         jobCard.ApprovedById = approverId;
-        
+
         // Update planning details if provided
         if (approvalDto.PlannedStartDate.HasValue)
+        {
             jobCard.PlannedStartDate = approvalDto.PlannedStartDate;
+        }
+
         if (approvalDto.PlannedEndDate.HasValue)
+        {
             jobCard.PlannedEndDate = approvalDto.PlannedEndDate;
+        }
+
         if (approvalDto.AssignedTechnicianId.HasValue)
+        {
             jobCard.AssignedTechnicianId = approvalDto.AssignedTechnicianId;
+        }
+
         if (approvalDto.AssignedTeamId.HasValue)
+        {
             jobCard.AssignedTeamId = approvalDto.AssignedTeamId;
-        
+        }
+
         // Update revised estimates if provided
         if (approvalDto.RevisedEstimatedHours.HasValue)
+        {
             jobCard.EstimatedHours = approvalDto.RevisedEstimatedHours.Value;
+        }
+
         if (approvalDto.RevisedEstimatedCost.HasValue)
+        {
             jobCard.EstimatedCost = approvalDto.RevisedEstimatedCost.Value;
+        }
 
         jobCard.ApprovedDate = DateTime.UtcNow;
         jobCard.UpdatedAt = DateTime.UtcNow;
@@ -485,15 +514,16 @@ public class JobCardService : IJobCardService
     {
         try
         {
-            var jobCard = await _jobCardRepository.GetByIdAsync(jobCardId);
-            if (jobCard == null)
-                throw new ArgumentException($"Job card with ID {jobCardId} not found");
-
+            var jobCard = await _jobCardRepository.GetByIdAsync(jobCardId) ?? throw new ArgumentException($"Job card with ID {jobCardId} not found");
             if (jobCard.ApprovalStatus != "Approved")
+            {
                 throw new InvalidOperationException("Only approved job cards can be converted to work orders");
+            }
 
             if (jobCard.GeneratedWorkOrderId.HasValue)
+            {
                 throw new InvalidOperationException("Work order has already been generated from this job card");
+            }
 
             // Get default work order type based on maintenance type or use a standard one
             _logger.LogDebug("Getting default work order type for maintenance type {MaintenanceTypeId}", jobCard.MaintenanceTypeId);
@@ -523,15 +553,12 @@ public class JobCardService : IJobCardService
             };
 
             _logger.LogDebug("Calling WorkOrderService.CreateWorkOrderAsync with DTO: {@CreateWorkOrderDto}", createWorkOrderDto);
-            
+
             try
             {
-                var workOrder = await _workOrderService.CreateWorkOrderAsync(createWorkOrderDto);
-                if (workOrder == null)
-                    throw new InvalidOperationException("Failed to create work order from job card - service returned null");
-                
+                var workOrder = await _workOrderService.CreateWorkOrderAsync(createWorkOrderDto) ?? throw new InvalidOperationException("Failed to create work order from job card - service returned null");
                 _logger.LogInformation("Successfully created work order {WorkOrderId} from job card {JobCardId}", workOrder.Id, jobCardId);
-                
+
                 // Update job card with generated work order reference
                 jobCard.GeneratedWorkOrderId = workOrder.Id;
                 jobCard.WorkOrderGeneratedAt = DateTime.UtcNow;
@@ -555,7 +582,7 @@ public class JobCardService : IJobCardService
             }
             catch (Exception workOrderException)
             {
-                _logger.LogError(workOrderException, "Failed to create work order from job card {JobCardId}. CreateWorkOrderDto: {@CreateWorkOrderDto}", 
+                _logger.LogError(workOrderException, "Failed to create work order from job card {JobCardId}. CreateWorkOrderDto: {@CreateWorkOrderDto}",
                     jobCardId, createWorkOrderDto);
                 throw new InvalidOperationException($"Failed to create work order from job card: {workOrderException.Message}", workOrderException);
             }
@@ -574,12 +601,16 @@ public class JobCardService : IJobCardService
         {
             var currentUserIdString = _currentUserService.UserId;
             if (string.IsNullOrEmpty(currentUserIdString))
+            {
                 throw new UnauthorizedAccessException("User not authenticated");
-            
+            }
+
             var currentEmployeeId = _currentUserService.EmployeeId;
             if (!currentEmployeeId.HasValue)
+            {
                 throw new UnauthorizedAccessException("Current user does not have an associated employee record");
-            
+            }
+
             var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Tenant not found");
 
             var comment = new JobCardComment
@@ -633,8 +664,10 @@ public class JobCardService : IJobCardService
     {
         var currentEmployeeId = _currentUserService.EmployeeId;
         if (!currentEmployeeId.HasValue)
+        {
             throw new UnauthorizedAccessException("Current user does not have an associated employee record");
-            
+        }
+
         return await _jobCardRepository.GetPendingApprovalsAsync(filter, currentEmployeeId.Value);
     }
 
@@ -665,10 +698,7 @@ public class JobCardService : IJobCardService
 
     public async Task<JobCardDto> CancelJobCardAsync(Guid id, string reason)
     {
-        var jobCard = await _jobCardRepository.GetByIdAsync(id);
-        if (jobCard == null)
-            throw new ArgumentException($"Job card with ID {id} not found");
-
+        var jobCard = await _jobCardRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Job card with ID {id} not found");
         jobCard.JobCardStatus = "Cancelled";
         jobCard.UpdatedAt = DateTime.UtcNow;
         jobCard.UpdatedBy = _currentUserService.UserId ?? "System";
@@ -689,15 +719,19 @@ public class JobCardService : IJobCardService
     public async Task<JobCardDocumentDto> UploadDocumentAsync(Guid jobCardId, Stream fileStream, string fileName, string documentType)
     {
         var uploadResult = await _fileUploadService.UploadFileAsync(fileStream, fileName, "jobcards", jobCardId.ToString());
-        
+
         var currentUserIdString = _currentUserService.UserId;
         if (string.IsNullOrEmpty(currentUserIdString))
+        {
             throw new UnauthorizedAccessException("User not authenticated");
-        
+        }
+
         var currentEmployeeId = _currentUserService.EmployeeId;
         if (!currentEmployeeId.HasValue)
+        {
             throw new UnauthorizedAccessException("Current user does not have an associated employee record");
-            
+        }
+
         var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Tenant not found");
 
         var document = new JobCardDocument
@@ -747,20 +781,23 @@ public class JobCardService : IJobCardService
     {
         try
         {
-            var jobCard = await _jobCardRepository.GetByIdAsync(id);
-            if (jobCard == null)
-                throw new ArgumentException($"Job card with ID {id} not found");
-
+            var jobCard = await _jobCardRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Job card with ID {id} not found");
             if (jobCard.JobCardStatus == "Completed" || jobCard.JobCardStatus == "Closed")
+            {
                 throw new InvalidOperationException($"Job card is already {jobCard.JobCardStatus}");
+            }
 
             var currentUserIdString = _currentUserService.UserId;
             if (string.IsNullOrEmpty(currentUserIdString))
+            {
                 throw new UnauthorizedAccessException("User not authenticated");
+            }
 
             var currentEmployeeId = _currentUserService.EmployeeId;
             if (!currentEmployeeId.HasValue)
+            {
                 throw new UnauthorizedAccessException("Current user does not have an associated employee record");
+            }
 
             jobCard.CompletedDate = DateTime.UtcNow;
             jobCard.CompletionNotes = completeDto.CompletionNotes;
@@ -805,20 +842,23 @@ public class JobCardService : IJobCardService
     {
         try
         {
-            var jobCard = await _jobCardRepository.GetByIdAsync(id);
-            if (jobCard == null)
-                throw new ArgumentException($"Job card with ID {id} not found");
-
+            var jobCard = await _jobCardRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Job card with ID {id} not found");
             if (jobCard.JobCardStatus != "Completed")
+            {
                 throw new InvalidOperationException("Job card must be completed before quality check");
+            }
 
             var currentUserIdString = _currentUserService.UserId;
             if (string.IsNullOrEmpty(currentUserIdString))
+            {
                 throw new UnauthorizedAccessException("User not authenticated");
+            }
 
             var currentEmployeeId = _currentUserService.EmployeeId;
             if (!currentEmployeeId.HasValue)
+            {
                 throw new UnauthorizedAccessException("Current user does not have an associated employee record");
+            }
 
             jobCard.QualityCheckDate = DateTime.UtcNow;
             jobCard.QualityCheckedById = currentEmployeeId.Value;
@@ -839,7 +879,7 @@ public class JobCardService : IJobCardService
                 IsInternal = false
             });
 
-            _logger.LogInformation("Quality check performed on job card {JobCardId} by employee {EmployeeId}. Result: {Result}", 
+            _logger.LogInformation("Quality check performed on job card {JobCardId} by employee {EmployeeId}. Result: {Result}",
                 id, currentEmployeeId, checkResult);
 
             return await GetJobCardByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve job card after quality check");
@@ -855,23 +895,28 @@ public class JobCardService : IJobCardService
     {
         try
         {
-            var jobCard = await _jobCardRepository.GetByIdAsync(id);
-            if (jobCard == null)
-                throw new ArgumentException($"Job card with ID {id} not found");
-
+            var jobCard = await _jobCardRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Job card with ID {id} not found");
             if (jobCard.JobCardStatus != "Quality Checked")
+            {
                 throw new InvalidOperationException("Job card must pass quality check before acceptance");
+            }
 
             if (!acceptanceDto.Accepted)
+            {
                 throw new InvalidOperationException("Cannot record non-acceptance. Use rejection workflow instead.");
+            }
 
             var currentUserIdString = _currentUserService.UserId;
             if (string.IsNullOrEmpty(currentUserIdString))
+            {
                 throw new UnauthorizedAccessException("User not authenticated");
+            }
 
             var currentEmployeeId = _currentUserService.EmployeeId;
             if (!currentEmployeeId.HasValue)
+            {
                 throw new UnauthorizedAccessException("Current user does not have an associated employee record");
+            }
 
             jobCard.AcceptedDate = DateTime.UtcNow;
             jobCard.AcceptedById = currentEmployeeId.Value;
@@ -906,20 +951,23 @@ public class JobCardService : IJobCardService
     {
         try
         {
-            var jobCard = await _jobCardRepository.GetByIdAsync(jobCardId);
-            if (jobCard == null)
-                throw new ArgumentException($"Job card with ID {jobCardId} not found");
-
+            var jobCard = await _jobCardRepository.GetByIdAsync(jobCardId) ?? throw new ArgumentException($"Job card with ID {jobCardId} not found");
             if (jobCard.JobCardStatus != "Accepted")
+            {
                 throw new InvalidOperationException("Job card must be accepted before generating certificate");
+            }
 
             var currentUserIdString = _currentUserService.UserId;
             if (string.IsNullOrEmpty(currentUserIdString))
+            {
                 throw new UnauthorizedAccessException("User not authenticated");
+            }
 
             var currentEmployeeId = _currentUserService.EmployeeId;
             if (!currentEmployeeId.HasValue)
+            {
                 throw new UnauthorizedAccessException("Current user does not have an associated employee record");
+            }
 
             var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Tenant not found");
 
@@ -942,12 +990,12 @@ public class JobCardService : IJobCardService
             };
 
             await _jobCardRepository.AddCertificateAsync(certificate);
-            
+
             jobCard.JobCardStatus = "Closed";
             jobCard.UpdatedAt = DateTime.UtcNow;
             jobCard.UpdatedBy = currentUserIdString;
             await _jobCardRepository.UpdateAsync(jobCard);
-            
+
             await _unitOfWork.SaveChangesAsync();
 
             await AddCommentAsync(jobCardId, new AddJobCardCommentDto
@@ -957,7 +1005,7 @@ public class JobCardService : IJobCardService
                 IsInternal = false
             });
 
-            _logger.LogInformation("Certificate {CertificateNumber} generated for job card {JobCardId} by employee {EmployeeId}", 
+            _logger.LogInformation("Certificate {CertificateNumber} generated for job card {JobCardId} by employee {EmployeeId}",
                 certificateNumber, jobCardId, currentEmployeeId);
 
             var employee = await _employeeRepository.GetByIdAsync(currentEmployeeId.Value);
@@ -1034,27 +1082,27 @@ public class JobCardService : IJobCardService
         {
             _logger.LogDebug("Getting work order types from repository");
             var workOrderTypes = await _jobCardRepository.GetWorkOrderTypesAsync();
-            
+
             _logger.LogDebug("Found {Count} work order types", workOrderTypes.Count);
-            
+
             if (!workOrderTypes.Any())
             {
                 throw new InvalidOperationException("No work order types found. Please configure at least one work order type in the database.");
             }
-            
+
             // Try to find a suitable type based on naming conventions
-            var defaultType = workOrderTypes.FirstOrDefault(wot => 
-                wot.Name.ToLower().Contains("maintenance") || 
-                wot.Name.ToLower().Contains("standard") ||
+            var defaultType = workOrderTypes.FirstOrDefault(wot =>
+                wot.Name.Contains("maintenance", StringComparison.CurrentCultureIgnoreCase) ||
+                wot.Name.Contains("standard", StringComparison.CurrentCultureIgnoreCase) ||
                 wot.Code.ToLower() == "main" ||
                 wot.Code.ToLower() == "std");
-                
+
             if (defaultType != null)
             {
                 _logger.LogDebug("Using work order type '{Name}' (ID: {Id}) as default", defaultType.Name, defaultType.Id);
                 return defaultType.Id;
             }
-                
+
             // If no suitable type found, return the first active one
             var firstActiveType = workOrderTypes.FirstOrDefault(wot => wot.IsActive);
             if (firstActiveType != null)
@@ -1062,7 +1110,7 @@ public class JobCardService : IJobCardService
                 _logger.LogDebug("Using first active work order type '{Name}' (ID: {Id}) as fallback", firstActiveType.Name, firstActiveType.Id);
                 return firstActiveType.Id;
             }
-            
+
             // If no active types, use the first one available
             var firstType = workOrderTypes.First();
             _logger.LogWarning("No active work order types found, using first available type '{Name}' (ID: {Id})", firstType.Name, firstType.Id);

@@ -66,7 +66,7 @@ public class MaintenanceToolRepository : IMaintenanceToolRepository
     public Task UpdateAsync(MaintenanceTool tool)
     {
         var entry = _context.Entry(tool);
-        
+
         if (entry.State == EntityState.Detached)
         {
             _context.MaintenanceTools.Attach(tool);
@@ -76,7 +76,7 @@ public class MaintenanceToolRepository : IMaintenanceToolRepository
         {
             _context.MaintenanceTools.Update(tool);
         }
-        
+
         return Task.CompletedTask;
     }
 
@@ -93,12 +93,12 @@ public class MaintenanceToolRepository : IMaintenanceToolRepository
     public async Task<bool> ToolCodeExistsAsync(string toolCode, Guid? excludeId = null)
     {
         var query = _context.MaintenanceTools.Where(t => t.ToolCode == toolCode);
-        
+
         if (excludeId.HasValue)
         {
             query = query.Where(t => t.Id != excludeId.Value);
         }
-        
+
         return await query.AnyAsync();
     }
 }

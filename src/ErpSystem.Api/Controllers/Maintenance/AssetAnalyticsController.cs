@@ -1,10 +1,10 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
-using ErpSystem.Core.DTOs.Maintenance;
-using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Interfaces;
-using ErpSystem.Api.Services;
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Api.Services;
+using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
@@ -1078,7 +1078,7 @@ public class AssetAnalyticsController : ControllerBase
             var startDate = DateTime.UtcNow.AddDays(-30);
             var endDate = DateTime.UtcNow;
 
-            try 
+            try
             {
                 // Try to get real data from services
                 var fleetOeeAnalysis = await _analyticsService.CalculateFleetOeeAsync(startDate, endDate);
@@ -1087,10 +1087,10 @@ public class AssetAnalyticsController : ControllerBase
 
                 // Get dashboard data for additional metrics
                 var dashboardData = await _analyticsService.GetAssetPerformanceDashboardAsync(tenantId ?? Guid.Empty, startDate, endDate);
-                
+
                 // Get cost analysis data
                 var costAnalysis = await _maintenanceAnalyticsService.GetCostAnalysisAsync(startDate, endDate);
-                
+
                 // Get all assets to enrich the OEE data with real asset information
                 var allAssets = await _assetService.GetAllAssetsAsync();
                 var assetLookup = allAssets.ToDictionary(a => a.Id, a => a);
@@ -1098,10 +1098,10 @@ public class AssetAnalyticsController : ControllerBase
                 // Build comprehensive analytics response from real data
                 var analyticsData = new
                 {
-                    assets = fleetOeeAnalysis.Select(oee => 
+                    assets = fleetOeeAnalysis.Select(oee =>
                     {
-                        var asset = assetLookup.ContainsKey(oee.AssetId) ? assetLookup[oee.AssetId] : null;
-                        return new 
+                        var asset = assetLookup.TryGetValue(oee.AssetId, out MaintenanceAssetDto? value) ? value : null;
+                        return new
                         {
                             id = oee.AssetId.ToString(),
                             name = oee.AssetName,
@@ -1110,7 +1110,7 @@ public class AssetAnalyticsController : ControllerBase
                             department = DetermineDepartmentFromAsset(asset)
                         };
                     }).ToArray(),
-                    performanceData = performanceTrends.Take(5).SelectMany(trend => 
+                    performanceData = performanceTrends.Take(5).SelectMany(trend =>
                         trend.TrendData.Select(data => new
                         {
                             date = data.Date,
@@ -1138,7 +1138,7 @@ public class AssetAnalyticsController : ControllerBase
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to retrieve real analytics data, falling back to mock data");
-                
+
                 // Fallback to mock data if services fail
                 var mockAnalyticsData = new
                 {
@@ -1178,7 +1178,7 @@ public class AssetAnalyticsController : ControllerBase
                         new { date = "2024-10-17", consumption = 1205, efficiency = 88.9, cost = 301.25 }
                     }
                 };
-                
+
                 return Ok(mockAnalyticsData);
             }
         }
@@ -1188,45 +1188,73 @@ public class AssetAnalyticsController : ControllerBase
             return StatusCode(500, "An error occurred while retrieving analytics data");
         }
     }
-    
+
     #region Helper Methods
-    
+
     /// <summary>
     /// Determines the department based on asset information
     /// </summary>
-    private string DetermineDepartmentFromAsset(MaintenanceAssetDto? asset)
+    private static string DetermineDepartmentFromAsset(MaintenanceAssetDto? asset)
     {
-        if (asset == null) return "Maintenance";
-        
+        if (asset == null)
+        {
+            return "Maintenance";
+        }
+
         // Logic to determine department based on asset type, location, or category
-        if (asset.AssetCategory?.Name?.ToLower().Contains("hvac") == true)
+        if (asset.AssetCategory?.Name?.ToLower().Contains("hvac", StringComparison.CurrentCultureIgnoreCase) == true)
+        {
             return "Facilities";
-        if (asset.AssetCategory?.Name?.ToLower().Contains("elevator") == true)
+        }
+
+        if (asset.AssetCategory?.Name?.ToLower().Contains("elevator", StringComparison.CurrentCultureIgnoreCase) == true)
+        {
             return "Operations";
-        if (asset.AssetCategory?.Name?.ToLower().Contains("generator") == true)
+        }
+
+        if (asset.AssetCategory?.Name?.ToLower().Contains("generator", StringComparison.CurrentCultureIgnoreCase) == true)
+        {
             return "Emergency Services";
-        if (asset.AssetCategory?.Name?.ToLower().Contains("production") == true)
+        }
+
+        if (asset.AssetCategory?.Name?.ToLower().Contains("production", StringComparison.CurrentCultureIgnoreCase) == true)
+        {
             return "Production";
-        if (asset.AssetCategory?.Name?.ToLower().Contains("it") == true)
+        }
+
+        if (asset.AssetCategory?.Name?.ToLower().Contains("it", StringComparison.CurrentCultureIgnoreCase) == true)
+        {
             return "Information Technology";
-        if (asset.AssetCategory?.Name?.ToLower().Contains("security") == true)
+        }
+
+        if (asset.AssetCategory?.Name?.ToLower().Contains("security", StringComparison.CurrentCultureIgnoreCase) == true)
+        {
             return "Security";
-        
+        }
+
         // Fallback based on location
-        if (asset.Location?.ToLower().Contains("office") == true)
+        if (asset.Location?.ToLower().Contains("office", StringComparison.CurrentCultureIgnoreCase) == true)
+        {
             return "Administration";
-        if (asset.Location?.ToLower().Contains("warehouse") == true)
+        }
+
+        if (asset.Location?.ToLower().Contains("warehouse", StringComparison.CurrentCultureIgnoreCase) == true)
+        {
             return "Logistics";
-        if (asset.Location?.ToLower().Contains("factory") == true || asset.Location?.ToLower().Contains("plant") == true)
+        }
+
+        if (asset.Location?.ToLower().Contains("factory", StringComparison.CurrentCultureIgnoreCase) == true || asset.Location?.ToLower().Contains("plant", StringComparison.CurrentCultureIgnoreCase) == true)
+        {
             return "Production";
-        
+        }
+
         return "Maintenance";
     }
-    
+
     /// <summary>
     /// Builds cost data from cost analysis service results
     /// </summary>
-    private object[] BuildCostDataFromAnalysis(MaintenanceCostAnalysisDto costAnalysis)
+    private static object[] BuildCostDataFromAnalysis(MaintenanceCostAnalysisDto costAnalysis)
     {
         if (costAnalysis?.CostByCategory == null || !costAnalysis.CostByCategory.Any())
         {
@@ -1239,7 +1267,7 @@ public class AssetAnalyticsController : ControllerBase
                 new { category = "Equipment", cost = 0, percentage = 0 }
             };
         }
-        
+
         var totalCost = costAnalysis.TotalCost;
         return costAnalysis.CostByCategory.Select(cb => new
         {
@@ -1248,7 +1276,7 @@ public class AssetAnalyticsController : ControllerBase
             percentage = totalCost > 0 ? Math.Round((cb.Cost / totalCost) * 100, 1) : 0
         }).ToArray();
     }
-    
+
     /// <summary>
     /// Builds energy data by analyzing assets for energy consumption
     /// </summary>
@@ -1260,7 +1288,7 @@ public class AssetAnalyticsController : ControllerBase
             var dateRange = Enumerable.Range(0, 5)
                 .Select(i => endDate.AddDays(-4 + i).Date)
                 .ToList();
-            
+
             foreach (var date in dateRange)
             {
                 // Try to get energy performance data for assets on this date
@@ -1268,14 +1296,14 @@ public class AssetAnalyticsController : ControllerBase
                 var avgEfficiency = 0.0;
                 var totalCost = 0.0;
                 var assetCount = 0;
-                
+
                 foreach (var asset in assets)
                 {
                     try
                     {
                         var energyPerformance = await _analyticsService.AnalyzeEnergyPerformanceAsync(
                             asset.Id, date, date.AddDays(1));
-                        
+
                         if (energyPerformance != null)
                         {
                             totalConsumption += energyPerformance.EnergyConsumption;
@@ -1290,7 +1318,7 @@ public class AssetAnalyticsController : ControllerBase
                         continue;
                     }
                 }
-                
+
                 energyDataList.Add(new
                 {
                     date = date.ToString("yyyy-MM-dd"),
@@ -1299,13 +1327,13 @@ public class AssetAnalyticsController : ControllerBase
                     cost = Math.Round(totalCost, 2)
                 });
             }
-            
+
             return energyDataList.ToArray();
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to retrieve energy data, using estimated values");
-            
+
             // Fallback to estimated energy data
             return Enumerable.Range(0, 5).Select(i => new
             {
@@ -1316,6 +1344,6 @@ public class AssetAnalyticsController : ControllerBase
             }).ToArray();
         }
     }
-    
+
     #endregion
 }

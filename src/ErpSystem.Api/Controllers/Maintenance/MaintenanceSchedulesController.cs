@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -43,7 +43,9 @@ public class MaintenanceSchedulesController : ControllerBase
         try
         {
             if (pageSize > 100)
+            {
                 pageSize = 100;
+            }
 
             var filter = new MaintenanceScheduleFilterDto
             {
@@ -136,7 +138,9 @@ public class MaintenanceSchedulesController : ControllerBase
         {
             var schedule = await _scheduleService.GetScheduleByIdAsync(id);
             if (schedule == null)
+            {
                 return NotFound($"Maintenance schedule with ID {id} not found");
+            }
 
             return Ok(schedule);
         }
@@ -178,7 +182,9 @@ public class MaintenanceSchedulesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var schedule = await _scheduleService.CreateScheduleAsync(createDto);
             return CreatedAtAction(nameof(GetSchedule), new { id = schedule.Id }, schedule);
@@ -203,7 +209,9 @@ public class MaintenanceSchedulesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var schedule = await _scheduleService.UpdateScheduleAsync(id, updateDto);
             return Ok(schedule);
@@ -334,7 +342,7 @@ public class MaintenanceSchedulesController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error generating schedule compliance report");
-            
+
             return StatusCode(500, "An error occurred while generating the schedule compliance report");
         }
     }

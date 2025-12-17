@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Plus, Search, Edit, Trash2, Wrench, Settings } from 'lucide-react';
-import { contractorSpecializationService, ContractorSpecializationDto, CreateContractorSpecializationDto } from '@/services/partnerConfigService';
+import { contractorSpecializationService, ContractorSpecializationDto, CreateContractorSpecializationDto, UpdateContractorSpecializationDto } from '@/services/partnerConfigService';
 import { useToast } from '@/components/ui/use-toast';
 
 export default function ContractorSpecializationsPage() {
@@ -26,12 +26,20 @@ export default function ContractorSpecializationsPage() {
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   
-  // Form state
+  // Form state for create
   const [formData, setFormData] = useState<CreateContractorSpecializationDto>({
-    name: '',
-    code: '',
+    specializationName: '',
+    specializationCode: '',
     description: '',
-    isActive: true
+    displayOrder: 0
+  });
+
+  // Form state for edit
+  const [editFormData, setEditFormData] = useState<UpdateContractorSpecializationDto>({
+    specializationName: '',
+    description: '',
+    isActive: true,
+    displayOrder: 0
   });
 
   // Fetch specializations
@@ -64,14 +72,14 @@ export default function ContractorSpecializationsPage() {
 
     if (searchTerm) {
       filtered = filtered.filter(item =>
-        item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.specializationName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.specializationCode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.description?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(item => 
+      filtered = filtered.filter(item =>
         statusFilter === 'active' ? item.isActive : !item.isActive
       );
     }
@@ -100,11 +108,11 @@ export default function ContractorSpecializationsPage() {
 
   const handleEdit = (specialization: ContractorSpecializationDto) => {
     setSelectedSpecialization(specialization);
-    setFormData({
-      name: specialization.name,
-      code: specialization.code,
+    setEditFormData({
+      specializationName: specialization.specializationName,
       description: specialization.description || '',
-      isActive: specialization.isActive
+      isActive: specialization.isActive,
+      displayOrder: specialization.displayOrder || 0
     });
     setIsEditDialogOpen(true);
   };
@@ -113,7 +121,7 @@ export default function ContractorSpecializationsPage() {
     if (!selectedSpecialization?.id) return;
 
     try {
-      await contractorSpecializationService.update(selectedSpecialization.id, formData);
+      await contractorSpecializationService.update(selectedSpecialization.id, editFormData);
       toast({
         title: 'Success',
         description: 'Contractor specialization updated successfully'
@@ -153,10 +161,16 @@ export default function ContractorSpecializationsPage() {
 
   const resetForm = () => {
     setFormData({
-      name: '',
-      code: '',
+      specializationName: '',
+      specializationCode: '',
       description: '',
-      isActive: true
+      displayOrder: 0
+    });
+    setEditFormData({
+      specializationName: '',
+      description: '',
+      isActive: true,
+      displayOrder: 0
     });
     setSelectedSpecialization(null);
   };
@@ -191,8 +205,8 @@ export default function ContractorSpecializationsPage() {
                   <Label htmlFor="name">Specialization Name</Label>
                   <Input
                     id="name"
-                    value={formData.name}
-                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    value={formData.specializationName}
+                    onChange={(e) => setFormData({...formData, specializationName: e.target.value})}
                     placeholder="e.g., Electrical, Plumbing"
                   />
                 </div>
@@ -200,8 +214,8 @@ export default function ContractorSpecializationsPage() {
                   <Label htmlFor="code">Code</Label>
                   <Input
                     id="code"
-                    value={formData.code}
-                    onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
+                    value={formData.specializationCode}
+                    onChange={(e) => setFormData({...formData, specializationCode: e.target.value.toUpperCase()})}
                     placeholder="e.g., ELEC, PLUMB"
                   />
                 </div>
@@ -216,17 +230,6 @@ export default function ContractorSpecializationsPage() {
                   placeholder="Describe this specialization..."
                   rows={3}
                 />
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="isActive"
-                  checked={formData.isActive}
-                  onChange={(e) => setFormData({...formData, isActive: e.target.checked})}
-                  className="rounded border-gray-300"
-                />
-                <Label htmlFor="isActive" className="text-sm font-medium">Active</Label>
               </div>
             </div>
             <DialogFooter>
@@ -365,8 +368,8 @@ export default function ContractorSpecializationsPage() {
                     <div className="flex items-start justify-between">
                       <div className="space-y-2 flex-1">
                         <div className="flex items-center space-x-3">
-                          <h3 className="font-semibold">{specialization.name}</h3>
-                          <Badge variant="outline">{specialization.code}</Badge>
+                          <h3 className="font-semibold">{specialization.specializationName}</h3>
+                          <Badge variant="outline">{specialization.specializationCode}</Badge>
                           <Badge className={specialization.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
                             {specialization.isActive ? 'Active' : 'Inactive'}
                           </Badge>
@@ -420,33 +423,22 @@ export default function ContractorSpecializationsPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-name">Specialization Name</Label>
-                <Input
-                  id="edit-name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
-                  placeholder="e.g., Electrical, Plumbing"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-code">Code</Label>
-                <Input
-                  id="edit-code"
-                  value={formData.code}
-                  onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
-                  placeholder="e.g., ELEC, PLUMB"
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Specialization Name</Label>
+              <Input
+                id="edit-name"
+                value={editFormData.specializationName}
+                onChange={(e) => setEditFormData({...editFormData, specializationName: e.target.value})}
+                placeholder="e.g., Electrical, Plumbing"
+              />
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="edit-description">Description</Label>
               <Textarea
                 id="edit-description"
-                value={formData.description}
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                value={editFormData.description}
+                onChange={(e) => setEditFormData({...editFormData, description: e.target.value})}
                 placeholder="Describe this specialization..."
                 rows={3}
               />
@@ -456,8 +448,8 @@ export default function ContractorSpecializationsPage() {
               <input
                 type="checkbox"
                 id="edit-isActive"
-                checked={formData.isActive}
-                onChange={(e) => setFormData({...formData, isActive: e.target.checked})}
+                checked={editFormData.isActive}
+                onChange={(e) => setEditFormData({...editFormData, isActive: e.target.checked})}
                 className="rounded border-gray-300"
               />
               <Label htmlFor="edit-isActive" className="text-sm font-medium">Active</Label>

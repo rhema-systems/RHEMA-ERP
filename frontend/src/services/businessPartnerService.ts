@@ -22,53 +22,87 @@ export interface BusinessPartnerDto {
   id: string;
   partnerCode: string;
   partnerType: string; // Supplier, Contractor, Both
-  companyName: string;
+  partnerName: string;
+  companyName?: string; // Alias for partnerName
   tradingName?: string;
   registrationNumber?: string;
   taxNumber?: string;
+  vatNumber?: string;
   email?: string;
   phone?: string;
+  alternatePhone?: string;
   website?: string;
+  physicalAddress?: string;
+  city?: string;
+  country?: string;
   status: string; // Active, Inactive, Suspended, Pending
-  approvalStatus: string; // Pending, Approved, Rejected
+  approvalStatus?: string; // Pending, Approved, Rejected
   isPreferred: boolean;
   isBlacklisted: boolean;
   performanceRating?: number;
   createdAt: string;
-  updatedAt: string;
+  updatedAt?: string;
 }
 
 export interface BusinessPartnerDetailDto extends BusinessPartnerDto {
-  physicalAddress?: string;
+  legalName?: string;
   postalAddress?: string;
-  city?: string;
-  country?: string;
-  vatNumber?: string;
+  physicalState?: string;
+  physicalPostalCode?: string;
+  mailingAddress?: string;
+  mailingCity?: string;
+  mailingState?: string;
+  mailingCountry?: string;
+  mailingPostalCode?: string;
+  // Banking Information
   bankName?: string;
-  bankAccountNumber?: string;
-  bankBranchCode?: string;
+  bankBranch?: string;
+  accountNumber?: string;
+  accountName?: string;
+  swiftCode?: string;
+  iban?: string;
+  // Contact Person
+  contactPerson?: string;
+  contactTitle?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  // Classification
+  industryType?: string;
+  companySize?: string;
+  annualRevenue?: number;
+  geographicCoverage?: string;
+  // Other
   paymentTerms?: string;
   creditLimit?: number;
+  insuranceCoverageAmount?: number;
+  registrationDate?: string;
+  approvedDate?: string;
+  blacklistReason?: string;
+  blacklistDate?: string;
+  blacklistExpiryDate?: string;
   notes?: string;
+  // Related Data
   contacts?: BusinessPartnerContactDto[];
   licenses?: BusinessPartnerLicenseDto[];
   documents?: BusinessPartnerDocumentDto[];
+  financialRecords?: BusinessPartnerFinancialDto[];
+  financialInfo?: BusinessPartnerFinancialDto[]; // Alias for financialRecords
   categories?: PartnerCategoryDto[];
   specializations?: ContractorSpecializationDto[];
-  financialInfo?: {
-    bankName?: string;
-    bankAccountNumber?: string;
-    annualRevenue?: number;
-  };
 }
 
 export interface BusinessPartnerContactDto {
   id: string;
-  partnerId: string;
-  name?: string;
+  businessPartnerId?: string;
+  partnerId?: string; // Alias
+  contactName?: string;
+  name?: string; // Alias for contactName
   firstName?: string;
   lastName?: string;
-  position?: string;
+  contactTitle?: string;
+  title?: string; // Alias for contactTitle
+  position?: string; // Alias for contactTitle
+  department?: string;
   email?: string;
   phone?: string;
   mobile?: string;
@@ -77,25 +111,63 @@ export interface BusinessPartnerContactDto {
 
 export interface BusinessPartnerDocumentDto {
   id: string;
-  partnerId: string;
+  businessPartnerId?: string;
+  partnerId?: string; // Alias
   documentType: string;
   documentName: string;
   filePath?: string;
+  documentPath?: string; // Alias
+  fileSize?: number;
+  mimeType?: string;
+  issueDate?: string;
+  expiryDate?: string;
   uploadedAt?: string;
   isVerified: boolean;
+  verifiedBy?: string;
+  verifiedDate?: string;
+  verificationNotes?: string;
 }
 
 export interface BusinessPartnerLicenseDto {
   id: string;
-  partnerId: string;
+  businessPartnerId?: string;
+  partnerId?: string; // Alias
   licenseTypeId: string;
   licenseTypeName?: string;
   licenseNumber: string;
-  issueDate: string;
-  expiryDate: string;
+  issueDate?: string;
+  expiryDate?: string;
   issuingAuthority?: string;
-  status: string; // Valid, Expired, Suspended
-  documentPath?: string;
+  status: string; // Valid, Expired, Suspended, Active
+  filePath?: string;
+  documentPath?: string; // Alias
+  verificationNotes?: string;
+  isExpired?: boolean;
+  daysUntilExpiry?: number;
+}
+
+export interface BusinessPartnerFinancialDto {
+  id: string;
+  businessPartnerId?: string;
+  partnerId?: string; // Alias
+  fiscalYear?: number;
+  financialYear?: number; // Alias
+  annualRevenue?: number;
+  revenue?: number; // Alias
+  netProfit?: number;
+  profit?: number; // Alias
+  totalAssets?: number;
+  assets?: number; // Alias
+  totalLiabilities?: number;
+  liabilities?: number; // Alias
+  creditRating?: string;
+  financialStatementPath?: string;
+  isAudited?: boolean;
+  auditorName?: string;
+  auditDate?: string;
+  // Banking info (for compatibility)
+  bankName?: string;
+  bankAccountNumber?: string;
 }
 
 export interface PartnerCategoryDto {
@@ -135,7 +207,9 @@ export interface CreateBusinessPartnerDto {
   phone?: string;
   website?: string;
   physicalAddress?: string;
-  postalAddress?: string;
+  city?: string;
+  country?: string;
+  postalCode?: string;
   bankName?: string;
   bankAccountNumber?: string;
   bankBranchCode?: string;
@@ -146,9 +220,23 @@ export interface CreateBusinessPartnerDto {
   specializationIds?: string[];
 }
 
-export interface UpdateBusinessPartnerDto extends CreateBusinessPartnerDto {
+export interface UpdateBusinessPartnerDto {
+  partnerName: string;
+  tradingName?: string;
+  registrationNumber?: string;
+  taxNumber?: string;
+  email?: string;
+  phone?: string;
+  physicalAddress?: string;
+  city?: string;
+  country?: string;
+  postalCode?: string;
+  website?: string;
   status?: string;
   isPreferred?: boolean;
+  notes?: string;
+  categoryIds?: string[];
+  specializationIds?: string[];
 }
 
 export interface PagedResult<T> {
@@ -204,6 +292,16 @@ export const businessPartnerService = {
   // Alias for getPartnerById
   async getById(id: string): Promise<BusinessPartnerDetailDto> {
     return this.getPartnerById(id);
+  },
+
+  // Get partner by user ID
+  async getPartnerByUserId(userId: string): Promise<BusinessPartnerDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/user/${userId}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch business partner by user ID');
+    return response.json();
   },
 
   // Get active partners
@@ -304,6 +402,30 @@ export const businessPartnerService = {
     if (!response.ok) throw new Error('Failed to activate business partner');
   },
 
+  // Blacklist partner
+  async blacklistPartner(id: string, reason: string, blacklistUntil?: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/partner-blacklist/partners/${id}/blacklist`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        reason,
+        blacklistUntil: blacklistUntil || null
+      })
+    });
+
+    if (!response.ok) throw new Error('Failed to blacklist business partner');
+  },
+
+  // Remove from blacklist
+  async removeFromBlacklist(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/partner-blacklist/partners/${id}/remove-from-blacklist`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to remove business partner from blacklist');
+  },
+
   // Get partner contacts
   async getPartnerContacts(partnerId: string): Promise<BusinessPartnerContactDto[]> {
     const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts`, {
@@ -324,4 +446,9 @@ export const businessPartnerService = {
     return response.json();
   }
 };
+
+// Export individual methods for easier import
+export const getPartnerByUserId = businessPartnerService.getPartnerByUserId.bind(businessPartnerService);
+export const getPartnerById = businessPartnerService.getPartnerById.bind(businessPartnerService);
+export const getPartners = businessPartnerService.getPartners.bind(businessPartnerService);
 

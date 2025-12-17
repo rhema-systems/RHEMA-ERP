@@ -28,22 +28,35 @@ public class MaintenanceTriggerEvaluationBackgroundService : BackgroundService
     {
         _logger.LogInformation("Maintenance Trigger Evaluation Background Service is starting");
 
-        // Wait a bit before starting the first evaluation
-        await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
-
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
-            {
-                await EvaluateTriggersAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error occurred during trigger evaluation");
-            }
+            // Wait a bit before starting the first evaluation
+            await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
 
-            // Wait for the next evaluation cycle
-            await Task.Delay(_evaluationInterval, stoppingToken);
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await EvaluateTriggersAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error occurred during trigger evaluation");
+                }
+
+                // Wait for the next evaluation cycle
+                await Task.Delay(_evaluationInterval, stoppingToken);
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            // This is expected when the application is shutting down
+            _logger.LogInformation("Maintenance Trigger Evaluation Background Service is being cancelled");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error in Maintenance Trigger Evaluation Background Service");
+            throw;
         }
 
         _logger.LogInformation("Maintenance Trigger Evaluation Background Service is stopping");

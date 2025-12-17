@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
@@ -93,7 +93,7 @@ public class QualityControlController : ControllerBase
     {
         try
         {
-            _logger.LogInformation("Getting required inspections for asset {AssetId} and type {WorkOrderType}", 
+            _logger.LogInformation("Getting required inspections for asset {AssetId} and type {WorkOrderType}",
                 assetId, workOrderType);
 
             // Get checklists that match this work order type
@@ -150,9 +150,9 @@ public class QualityControlController : ControllerBase
 
             // Check if already submitted for inspection (Pending or InProgress)
             var existingInspection = await _context.WorkOrderQualityChecks
-                .FirstOrDefaultAsync(qc => qc.WorkOrderId == woId && 
+                .FirstOrDefaultAsync(qc => qc.WorkOrderId == woId &&
                     (qc.OverallResult == "Pending" || qc.OverallResult == "InProgress"));
-            
+
             if (existingInspection != null)
             {
                 return BadRequest("Work order already submitted for inspection");
@@ -171,19 +171,13 @@ public class QualityControlController : ControllerBase
                     c.WorkOrderType == workOrderTypeName &&
                     c.MaintenanceType == maintenanceTypeName)
                 .OrderByDescending(c => c.IsMandatory)
-                .FirstOrDefaultAsync();
-
-            // 2. Partial match: AssetCategory + WorkOrderType (no specific MaintenanceType)
-            if (checklist == null)
-            {
-                checklist = await _context.QualityControlChecklists
+                .FirstOrDefaultAsync() ?? await _context.QualityControlChecklists
                     .Where(c => c.IsActive &&
                         c.AssetCategory == assetCategory &&
                         c.WorkOrderType == workOrderTypeName &&
                         string.IsNullOrEmpty(c.MaintenanceType))
                     .OrderByDescending(c => c.IsMandatory)
                     .FirstOrDefaultAsync();
-            }
 
             // 3. Generic match: WorkOrderType + MaintenanceType (no specific AssetCategory)
             if (checklist == null)
@@ -271,7 +265,7 @@ public class QualityControlController : ControllerBase
         try
         {
             var tenantId = _currentUserService.TenantId.GetValueOrDefault(Guid.Empty);
-            
+
             // Note: WorkOrderQualityCheck entity does not have navigation property for WorkOrder
             // We need to join manually or load work orders separately
             var pendingInspections = await _context.WorkOrderQualityChecks
@@ -287,7 +281,7 @@ public class QualityControlController : ControllerBase
                 .Where(wo => workOrderIds.Contains(wo.Id))
                 .ToDictionaryAsync(wo => wo.Id);
 
-            var dtos = pendingInspections.Select(qc => 
+            var dtos = pendingInspections.Select(qc =>
             {
                 workOrders.TryGetValue(qc.WorkOrderId, out var workOrder);
                 return new WorkOrderQualityCheckDto
@@ -430,7 +424,7 @@ public class QualityControlController : ControllerBase
         }
         catch (Exception ex)
         {
-        _logger.LogError(ex, "Error retrieving inspection for work order {WorkOrderId}", workOrderId);
+            _logger.LogError(ex, "Error retrieving inspection for work order {WorkOrderId}", workOrderId);
             return StatusCode(500, "An error occurred while retrieving the inspection");
         }
     }
@@ -444,7 +438,7 @@ public class QualityControlController : ControllerBase
         try
         {
             var tenantId = _currentUserService.TenantId.GetValueOrDefault(Guid.Empty);
-            
+
             if (!Guid.TryParse(request.QualityCheckId, out var qcId))
             {
                 return BadRequest("Invalid quality check ID format");
@@ -506,7 +500,7 @@ public class QualityControlController : ControllerBase
         try
         {
             var tenantId = _currentUserService.TenantId.GetValueOrDefault(Guid.Empty);
-            
+
             if (!Guid.TryParse(request.QualityCheckId, out var qcId))
             {
                 return BadRequest("Invalid quality check ID format");
@@ -545,7 +539,8 @@ public class QualityControlController : ControllerBase
 
             await _context.SaveChangesAsync();
 
-            return Ok(new {
+            return Ok(new
+            {
                 overallResult,
                 score,
                 message = "Inspection completed successfully. Use the standard work order completion flow to complete the work order."
@@ -568,7 +563,7 @@ public class QualityControlController : ControllerBase
         {
             var tenantId = _currentUserService.TenantId.GetValueOrDefault(Guid.Empty);
             var inspectorId = _currentUserService.EmployeeId.GetValueOrDefault(Guid.Empty);
-            
+
             if (!Guid.TryParse(request.QualityCheckId, out var qcId))
             {
                 return BadRequest("Invalid quality check ID format");
@@ -615,7 +610,8 @@ public class QualityControlController : ControllerBase
 
             await _context.SaveChangesAsync();
 
-            return Ok(new { 
+            return Ok(new
+            {
                 reworkId = rework.Id,
                 message = "Work order rejected for rework"
             });
@@ -641,7 +637,7 @@ public class QualityControlController : ControllerBase
             }
 
             var pdfBytes = await _certificateService.GenerateCertificateAsync(qcId);
-            
+
             return File(pdfBytes, "application/pdf", $"QC-Certificate-{qualityCheckId}.pdf");
         }
         catch (Exception ex)
@@ -660,10 +656,10 @@ public class QualityControlController : ControllerBase
         try
         {
             var tenantId = _currentUserService.TenantId.GetValueOrDefault(Guid.Empty);
-            
+
             var qualityChecks = await _context.WorkOrderQualityChecks
                 .Include(qc => qc.Checklist)
-                .Where(qc => qc.TenantId == tenantId && 
+                .Where(qc => qc.TenantId == tenantId &&
                     (qc.OverallResult == "Pass" || qc.OverallResult == "Fail"))
                 .OrderByDescending(qc => qc.InspectionDate)
                 .Take(50) // Limit to last 50 inspections
@@ -734,7 +730,7 @@ public class QualityControlController : ControllerBase
             // Change status to InProgress and assign inspector
             qualityCheck.OverallResult = "InProgress";
             qualityCheck.InspectionDate = DateTime.UtcNow; // Update to actual start time
-            
+
             // Assign current user as inspector if they have an EmployeeId
             var currentEmployeeId = _currentUserService?.EmployeeId;
             if (currentEmployeeId.HasValue && currentEmployeeId.Value != Guid.Empty)

@@ -1,9 +1,9 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using ErpSystem.Shared;
-using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -158,18 +158,19 @@ namespace ErpSystem.Api.Controllers
                 // Get current session ID - this is a simplified approach
                 // In a real implementation, you might want to pass the current session ID from the frontend
                 var currentSessionId = HttpContext.TraceIdentifier;
-                
+
                 var reason = request?.Reason ?? "All other sessions terminated by user";
                 var terminatedCount = await _deviceSessionService.TerminateAllSessionsExceptCurrentAsync(
-                    currentUserId.Value, 
-                    currentSessionId, 
+                    currentUserId.Value,
+                    currentSessionId,
                     reason);
 
                 _logger.LogInformation("User {UserId} terminated {Count} other sessions", currentUserId.Value, terminatedCount);
-                
-                return Ok(new { 
+
+                return Ok(new
+                {
                     message = $"Successfully terminated {terminatedCount} other sessions",
-                    terminatedCount 
+                    terminatedCount
                 });
             }
             catch (Exception ex)
@@ -195,7 +196,7 @@ namespace ErpSystem.Api.Controllers
 
                 // This is a simplified implementation
                 // In a real system, you'd have a device trust store/database
-                _logger.LogInformation("User {UserId} updated trust for device {DeviceId} to {IsTrusted}", 
+                _logger.LogInformation("User {UserId} updated trust for device {DeviceId} to {IsTrusted}",
                     currentUserId.Value, request.DeviceId, request.IsTrusted);
 
                 return Ok(new { message = "Device trust updated successfully" });
@@ -277,7 +278,7 @@ namespace ErpSystem.Api.Controllers
     {
         [Required]
         public string DeviceId { get; set; } = string.Empty;
-        
+
         [Required]
         public bool IsTrusted { get; set; }
     }

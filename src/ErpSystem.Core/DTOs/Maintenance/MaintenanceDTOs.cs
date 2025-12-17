@@ -1,5 +1,4 @@
 using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.DTOs.HR;
 
 namespace ErpSystem.Core.DTOs.Maintenance;
@@ -2540,19 +2539,29 @@ public class UpdateWorkOrderDto : IValidatableObject
     {
         // Ensure empty GUIDs (Guid.Empty) are treated as null
         if (WorkOrderTypeId.HasValue && WorkOrderTypeId.Value == Guid.Empty)
+        {
             WorkOrderTypeId = null;
+        }
 
         if (MaintenanceTypeId.HasValue && MaintenanceTypeId.Value == Guid.Empty)
+        {
             MaintenanceTypeId = null;
+        }
 
         if (PriorityLevelId.HasValue && PriorityLevelId.Value == Guid.Empty)
+        {
             PriorityLevelId = null;
+        }
 
         if (AssignedTechnicianId.HasValue && AssignedTechnicianId.Value == Guid.Empty)
+        {
             AssignedTechnicianId = null;
+        }
 
         if (AssignedTeamId.HasValue && AssignedTeamId.Value == Guid.Empty)
+        {
             AssignedTeamId = null;
+        }
 
         return Enumerable.Empty<ValidationResult>();
     }

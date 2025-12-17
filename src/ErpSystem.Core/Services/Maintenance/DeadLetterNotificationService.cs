@@ -108,7 +108,9 @@ public class DeadLetterNotificationService : IDeadLetterNotificationService
         {
             var notification = await _unitOfWork.Repository<MaintenanceNotification>().GetByIdAsync(id);
             if (notification == null || notification.Status != "DeadLetter")
+            {
                 return null;
+            }
 
             return MapToDto(notification);
         }
@@ -124,13 +126,11 @@ public class DeadLetterNotificationService : IDeadLetterNotificationService
         try
         {
             var repo = _unitOfWork.Repository<MaintenanceNotification>();
-            var notification = await repo.GetByIdAsync(notificationId);
-
-            if (notification == null)
-                throw new ArgumentException($"Notification with ID {notificationId} not found");
-
+            var notification = await repo.GetByIdAsync(notificationId) ?? throw new ArgumentException($"Notification with ID {notificationId} not found");
             if (notification.Status != "DeadLetter")
+            {
                 throw new InvalidOperationException($"Notification is not in DeadLetter status, current status: {notification.Status}");
+            }
 
             // Reset for retry
             notification.Status = "Pending";
@@ -197,13 +197,11 @@ public class DeadLetterNotificationService : IDeadLetterNotificationService
         try
         {
             var repo = _unitOfWork.Repository<MaintenanceNotification>();
-            var notification = await repo.GetByIdAsync(id);
-
-            if (notification == null)
-                throw new ArgumentException($"Notification with ID {id} not found");
-
+            var notification = await repo.GetByIdAsync(id) ?? throw new ArgumentException($"Notification with ID {id} not found");
             if (notification.Status != "DeadLetter")
+            {
                 throw new InvalidOperationException($"Only DeadLetter notifications can be permanently deleted");
+            }
 
             await repo.HardDeleteAsync(notification);
             await _unitOfWork.SaveChangesAsync();

@@ -1,6 +1,6 @@
+using ErpSystem.Core.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using ErpSystem.Core.Entities;
 
 namespace ErpSystem.Data.Services;
 

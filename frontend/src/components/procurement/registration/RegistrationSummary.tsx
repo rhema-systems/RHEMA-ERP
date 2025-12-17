@@ -5,18 +5,34 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { useState } from 'react';
-import { 
-  Building2, 
-  Mail, 
-  Phone, 
-  MapPin, 
-  FileText, 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { useState, useEffect } from 'react';
+import { format } from 'date-fns';
+import {
+  Building2,
+  Mail,
+  Phone,
+  MapPin,
+  FileText,
   Award,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  ExternalLink,
+  Send,
+  CheckCircle
 } from 'lucide-react';
 import { type RegistrationFormData } from '@/services/businessPartnerRegistrationService';
+import { licenseTypeService, type LicenseTypeDto } from '@/services/partnerConfigService';
+import { settingsService } from '@/services/settings';
 
 interface RegistrationSummaryProps {
   formData: RegistrationFormData;
@@ -27,8 +43,51 @@ interface RegistrationSummaryProps {
 export default function RegistrationSummary({ formData, onSubmit, loading }: RegistrationSummaryProps) {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [agreedToAccuracy, setAgreedToAccuracy] = useState(false);
+  const [licenseTypes, setLicenseTypes] = useState<LicenseTypeDto[]>([]);
+  const [termsOfServiceUrl, setTermsOfServiceUrl] = useState<string | null>(null);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   const canSubmit = agreedToTerms && agreedToAccuracy && !loading;
+
+  const handleSubmitClick = () => {
+    if (!canSubmit) return;
+    setShowConfirmDialog(true);
+  };
+
+  const handleConfirmSubmit = () => {
+    setShowConfirmDialog(false);
+    onSubmit();
+  };
+
+  useEffect(() => {
+    // Load license types
+    const loadLicenseTypes = async () => {
+      try {
+        const data = await licenseTypeService.getActive();
+        setLicenseTypes(data);
+      } catch (error) {
+        console.error('Error loading license types:', error);
+      }
+    };
+
+    // Load security settings for Terms of Service URL
+    const loadSecuritySettings = async () => {
+      try {
+        const settings = await settingsService.getPublicSecuritySettings();
+        setTermsOfServiceUrl(settings.termsOfServiceUrl || null);
+      } catch (error) {
+        console.error('Error loading security settings:', error);
+      }
+    };
+
+    loadLicenseTypes();
+    loadSecuritySettings();
+  }, []);
+
+  const getLicenseTypeName = (licenseTypeId: string): string => {
+    const licenseType = licenseTypes.find((lt) => lt.id === licenseTypeId);
+    return licenseType?.licenseName || 'Unknown License Type';
+  };
 
   return (
     <div className="space-y-6">
@@ -184,14 +243,35 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2">
+            <div className="space-y-3">
               {formData.licenses.map((license, index) => (
-                <div key={index} className="flex items-center gap-2 text-sm">
-                  <CheckCircle2 className="w-4 h-4 text-green-600" />
-                  <span className="font-medium">License #{license.licenseNumber}</span>
-                  <span className="text-gray-500">
-                    - Issued: {new Date(license.issueDate).toLocaleDateString()}
-                  </span>
+                <div key={index} className="border-l-4 border-green-500 pl-4 py-2">
+                  <div className="flex items-start gap-2">
+                    <Award className="w-5 h-5 text-green-600 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="font-semibold text-sm">{getLicenseTypeName(license.licenseTypeId)}</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2 text-sm text-gray-600">
+                        <div>
+                          <span className="font-medium">License #:</span>{' '}
+                          {license.licenseNumber}
+                        </div>
+                        <div>
+                          <span className="font-medium">Issued:</span>{' '}
+                          {format(new Date(license.issueDate), 'MMM dd, yyyy')}
+                        </div>
+                        {license.expiryDate && (
+                          <div>
+                            <span className="font-medium">Expires:</span>{' '}
+                            {format(new Date(license.expiryDate), 'MMM dd, yyyy')}
+                          </div>
+                        )}
+                        <div className={license.expiryDate ? '' : 'md:col-span-2'}>
+                          <span className="font-medium">Issuing Authority:</span>{' '}
+                          {license.issuingAuthority}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -208,9 +288,23 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
               checked={agreedToTerms}
               onCheckedChange={(checked) => setAgreedToTerms(checked as boolean)}
             />
-            <Label htmlFor="terms" className="text-sm cursor-pointer">
-              I agree to the terms and conditions of the business partner registration process.
-              I understand that my application will be reviewed and I will be notified of the outcome.
+            <Label htmlFor="terms" className="text-sm cursor-pointer leading-relaxed">
+              I agree to the{' '}
+              {termsOfServiceUrl ? (
+                <a
+                  href={termsOfServiceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline inline-flex items-center gap-1"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  terms and conditions
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              ) : (
+                <span className="font-medium">terms and conditions</span>
+              )}{' '}
+              of the business partner registration process. I understand that my application will be reviewed and I will be notified of the outcome.
             </Label>
           </div>
 
@@ -220,7 +314,7 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
               checked={agreedToAccuracy}
               onCheckedChange={(checked) => setAgreedToAccuracy(checked as boolean)}
             />
-            <Label htmlFor="accuracy" className="text-sm cursor-pointer">
+            <Label htmlFor="accuracy" className="text-sm cursor-pointer leading-relaxed">
               I certify that all information provided in this registration is accurate and complete
               to the best of my knowledge. I understand that providing false information may result
               in rejection or termination of business partnership.
@@ -245,14 +339,78 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
       {/* Submit Button */}
       <div className="flex justify-center pt-4">
         <Button
-          onClick={onSubmit}
+          onClick={handleSubmitClick}
           disabled={!canSubmit}
           size="lg"
           className="min-w-[200px]"
         >
-          {loading ? 'Submitting...' : 'Submit Registration'}
+          <Send className="w-4 h-4 mr-2" />
+          Submit Registration
         </Button>
       </div>
+
+      {/* Confirmation Dialog */}
+      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+        <AlertDialogContent className="sm:max-w-[700px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-xl">
+              <CheckCircle className="w-6 h-6 text-blue-600" />
+              Submit Business Partner Registration
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-4 text-left pt-2">
+                <p className="text-base text-gray-700">
+                  You are about to submit your business partner registration for review.
+                  Please confirm that:
+                </p>
+                <ul className="space-y-2 text-sm text-gray-600">
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                    <span>All information provided is accurate and complete</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                    <span>All required documents have been uploaded</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                    <span>You have reviewed and accepted the terms and conditions</span>
+                  </li>
+                </ul>
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-4">
+                  <p className="text-sm text-blue-900">
+                    <strong>What happens next?</strong>
+                  </p>
+                  <p className="text-sm text-blue-800 mt-1">
+                    Once submitted, your application will be reviewed by our team.
+                    You will be notified of the outcome via email and in-app notifications.
+                  </p>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={loading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmSubmit}
+              disabled={loading}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {loading ? (
+                <>
+                  <span className="animate-spin mr-2">⏳</span>
+                  Submitting...
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4 mr-2" />
+                  Yes, Submit Registration
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

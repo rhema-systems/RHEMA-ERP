@@ -1,8 +1,8 @@
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using ErpSystem.Data;
-using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -35,7 +35,7 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("No tenant ID found in token");
@@ -86,9 +86,10 @@ namespace ErpSystem.Api.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting tenant diagnostics");
-                return StatusCode(500, new { 
-                    error = ex.Message, 
-                    innerError = ex.InnerException?.Message 
+                return StatusCode(500, new
+                {
+                    error = ex.Message,
+                    innerError = ex.InnerException?.Message
                 });
             }
         }
@@ -103,10 +104,11 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var tenants = await _context.Tenants
-                    .Select(t => new { 
-                        t.Id, 
-                        t.Name, 
-                        t.Code, 
+                    .Select(t => new
+                    {
+                        t.Id,
+                        t.Name,
+                        t.Code,
                         t.Status,
                         UserCount = _context.Users.Count(u => u.TenantId == t.Id)
                     })
@@ -117,9 +119,10 @@ namespace ErpSystem.Api.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting all tenants");
-                return StatusCode(500, new { 
-                    error = ex.Message, 
-                    innerError = ex.InnerException?.Message 
+                return StatusCode(500, new
+                {
+                    error = ex.Message,
+                    innerError = ex.InnerException?.Message
                 });
             }
         }
@@ -133,7 +136,7 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var tenantId = _currentUserService.TenantId;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("No tenant ID found in token");
@@ -142,9 +145,10 @@ namespace ErpSystem.Api.Controllers
                 // Get active sessions with minimal data (avoid complex joins)
                 var activeSessions = await _context.UserSessions
                     .Where(s => s.TenantId == tenantId.Value && s.IsActive)
-                    .Select(s => new { 
-                        s.UserId, 
-                        s.LastActivityTime, 
+                    .Select(s => new
+                    {
+                        s.UserId,
+                        s.LastActivityTime,
                         s.Location,
                         UserName = s.User.UserName,
                         Email = s.User.Email
@@ -163,7 +167,8 @@ namespace ErpSystem.Api.Controllers
                     Location = session.Location
                 }).ToList();
 
-                return Ok(new { 
+                return Ok(new
+                {
                     count = onlineUsers.Count,
                     users = onlineUsers,
                     tenantId = tenantId.Value.ToString()
@@ -172,8 +177,9 @@ namespace ErpSystem.Api.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting simple online users");
-                return StatusCode(500, new { 
-                    error = ex.Message, 
+                return StatusCode(500, new
+                {
+                    error = ex.Message,
                     innerError = ex.InnerException?.Message,
                     stackTrace = ex.StackTrace
                 });
@@ -191,13 +197,13 @@ namespace ErpSystem.Api.Controllers
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
                 var userName = _currentUserService.UserName;
-                
+
                 // Check JWT token claims
                 var claims = User.Claims.Select(c => new { c.Type, c.Value }).ToList();
-                
+
                 // Check if we can access the hub context (this tests if SignalR services are working)
                 var hubContextTest = "SignalR services appear to be registered";
-                
+
                 var result = new
                 {
                     UserId = userId?.ToString(),
@@ -215,8 +221,9 @@ namespace ErpSystem.Api.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error in SignalR test endpoint");
-                return StatusCode(500, new { 
-                    error = ex.Message, 
+                return StatusCode(500, new
+                {
+                    error = ex.Message,
                     innerError = ex.InnerException?.Message,
                     stackTrace = ex.StackTrace
                 });

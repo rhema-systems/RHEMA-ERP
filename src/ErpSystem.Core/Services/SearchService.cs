@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using ErpSystem.Core.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services
 {
@@ -19,7 +19,7 @@ namespace ErpSystem.Core.Services
         {
             // Basic implementation - to be replaced with Elasticsearch or Azure Search
             _logger.LogWarning("Using basic search implementation. Consider implementing Elasticsearch for production.");
-            
+
             return Task.FromResult(new SearchResult<T>
             {
                 Documents = new List<T>(),

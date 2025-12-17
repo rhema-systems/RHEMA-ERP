@@ -1,8 +1,8 @@
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
-using System.Text.Json;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -25,10 +25,7 @@ public class AssetUsageTrackingService : IAssetUsageTrackingService
     public async Task<AssetUsageTrackingDto> CreateUsageRecordAsync(CreateAssetUsageTrackingDto createDto)
     {
         // Validate asset exists
-        var asset = await _assetService.GetAssetByIdAsync(createDto.AssetId);
-        if (asset == null)
-            throw new KeyNotFoundException($"Asset with ID {createDto.AssetId} not found");
-
+        var asset = await _assetService.GetAssetByIdAsync(createDto.AssetId) ?? throw new KeyNotFoundException($"Asset with ID {createDto.AssetId} not found");
         var usageRecord = new AssetUsageTracking
         {
             Id = Guid.NewGuid(),
@@ -64,7 +61,7 @@ public class AssetUsageTrackingService : IAssetUsageTrackingService
         {
             recordDto.DataSource = bulkDto.DataSource;
             recordDto.IsValidated = bulkDto.ValidateAll;
-            
+
             var result = await CreateUsageRecordAsync(recordDto);
             results.Add(result);
         }
@@ -81,20 +78,20 @@ public class AssetUsageTrackingService : IAssetUsageTrackingService
     }
 
     public async Task<IEnumerable<AssetUsageTrackingDto>> GetUsageRecordsAsync(
-        Guid assetId, 
-        DateTime? startDate = null, 
+        Guid assetId,
+        DateTime? startDate = null,
         DateTime? endDate = null)
     {
         var query = await _unitOfWork.Repository<AssetUsageTracking>()
-            .FindAsync(u => 
-                u.AssetId == assetId && 
+            .FindAsync(u =>
+                u.AssetId == assetId &&
                 u.TenantId == _currentUserService.TenantId &&
                 (!startDate.HasValue || u.RecordedAt >= startDate.Value) &&
                 (!endDate.HasValue || u.RecordedAt <= endDate.Value));
 
         var orderedRecords = query.OrderByDescending(u => u.RecordedAt).ToList();
         var dtos = new List<AssetUsageTrackingDto>();
-        
+
         foreach (var record in orderedRecords)
         {
             dtos.Add(await MapToDto(record));
@@ -104,15 +101,15 @@ public class AssetUsageTrackingService : IAssetUsageTrackingService
     }
 
     public async Task<PagedResult<AssetUsageTrackingDto>> GetUsageRecordsPagedAsync(
-        Guid assetId, 
-        int page, 
-        int pageSize, 
-        DateTime? startDate = null, 
+        Guid assetId,
+        int page,
+        int pageSize,
+        DateTime? startDate = null,
         DateTime? endDate = null)
     {
         var query = await _unitOfWork.Repository<AssetUsageTracking>()
-            .FindAsync(u => 
-                u.AssetId == assetId && 
+            .FindAsync(u =>
+                u.AssetId == assetId &&
                 u.TenantId == _currentUserService.TenantId &&
                 (!startDate.HasValue || u.RecordedAt >= startDate.Value) &&
                 (!endDate.HasValue || u.RecordedAt <= endDate.Value));
@@ -142,11 +139,7 @@ public class AssetUsageTrackingService : IAssetUsageTrackingService
     public async Task DeleteUsageRecordAsync(Guid id)
     {
         var record = await _unitOfWork.Repository<AssetUsageTracking>()
-            .FirstOrDefaultAsync(u => u.Id == id && u.TenantId == _currentUserService.TenantId);
-
-        if (record == null)
-            throw new KeyNotFoundException($"Usage record with ID {id} not found");
-
+            .FirstOrDefaultAsync(u => u.Id == id && u.TenantId == _currentUserService.TenantId) ?? throw new KeyNotFoundException($"Usage record with ID {id} not found");
         await _unitOfWork.Repository<AssetUsageTracking>().DeleteAsync(record);
         await _unitOfWork.SaveChangesAsync();
     }
@@ -158,13 +151,11 @@ public class AssetUsageTrackingService : IAssetUsageTrackingService
 
     public async Task<AssetUsageSummaryDto> GetAssetUsageSummaryAsync(Guid assetId, Guid? tenantId)
     {
-        var asset = await _assetService.GetAssetByIdAsync(assetId);
-        if (asset == null)
-            throw new KeyNotFoundException($"Asset with ID {assetId} not found");
+        var asset = await _assetService.GetAssetByIdAsync(assetId) ?? throw new KeyNotFoundException($"Asset with ID {assetId} not found");
 
         // If no tenant provided, use current user's tenant; for background service (null tenant), query all
         var effectiveTenantId = tenantId ?? _currentUserService.TenantId;
-        
+
         var records = await _unitOfWork.Repository<AssetUsageTracking>()
             .FindAsync(u => u.AssetId == assetId && (effectiveTenantId == null || u.TenantId == effectiveTenantId));
 
@@ -249,14 +240,17 @@ public class AssetUsageTrackingService : IAssetUsageTrackingService
     {
         var startDate = DateTime.UtcNow.AddDays(-days);
         var records = await _unitOfWork.Repository<AssetUsageTracking>()
-            .FindAsync(u => 
-                u.AssetId == assetId && 
+            .FindAsync(u =>
+                u.AssetId == assetId &&
                 u.TenantId == _currentUserService.TenantId &&
                 u.RecordedAt >= startDate &&
                 u.Mileage.HasValue);
 
         var recordsList = records.OrderBy(u => u.RecordedAt).ToList();
-        if (recordsList.Count < 2) return null;
+        if (recordsList.Count < 2)
+        {
+            return null;
+        }
 
         var firstRecord = recordsList.First();
         var lastRecord = recordsList.Last();
@@ -270,14 +264,17 @@ public class AssetUsageTrackingService : IAssetUsageTrackingService
     {
         var startDate = DateTime.UtcNow.AddDays(-days);
         var records = await _unitOfWork.Repository<AssetUsageTracking>()
-            .FindAsync(u => 
-                u.AssetId == assetId && 
+            .FindAsync(u =>
+                u.AssetId == assetId &&
                 u.TenantId == _currentUserService.TenantId &&
                 u.RecordedAt >= startDate &&
                 u.OperatingHours.HasValue);
 
         var recordsList = records.OrderBy(u => u.RecordedAt).ToList();
-        if (recordsList.Count < 2) return null;
+        if (recordsList.Count < 2)
+        {
+            return null;
+        }
 
         var firstRecord = recordsList.First();
         var lastRecord = recordsList.Last();
@@ -294,7 +291,10 @@ public class AssetUsageTrackingService : IAssetUsageTrackingService
             // This would be extended based on the data source type
             // For now, assume JSON format
             var records = JsonSerializer.Deserialize<List<CreateAssetUsageTrackingDto>>(externalData);
-            if (records == null) return false;
+            if (records == null)
+            {
+                return false;
+            }
 
             await BulkCreateUsageRecordsAsync(new BulkUsageImportDto
             {
@@ -328,11 +328,7 @@ public class AssetUsageTrackingService : IAssetUsageTrackingService
     public async Task ValidateUsageRecordAsync(Guid id)
     {
         var record = await _unitOfWork.Repository<AssetUsageTracking>()
-            .FirstOrDefaultAsync(u => u.Id == id && u.TenantId == _currentUserService.TenantId);
-
-        if (record == null)
-            throw new KeyNotFoundException($"Usage record with ID {id} not found");
-
+            .FirstOrDefaultAsync(u => u.Id == id && u.TenantId == _currentUserService.TenantId) ?? throw new KeyNotFoundException($"Usage record with ID {id} not found");
         record.IsValidated = true;
         await _unitOfWork.Repository<AssetUsageTracking>().UpdateAsync(record);
         await _unitOfWork.SaveChangesAsync();

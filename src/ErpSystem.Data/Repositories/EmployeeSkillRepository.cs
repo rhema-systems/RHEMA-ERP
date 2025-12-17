@@ -1,7 +1,7 @@
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.Entities.HR;
-using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.HR;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories;
 
@@ -57,7 +57,7 @@ public class EmployeeSkillRepository : GenericRepository<EmployeeSkill>, IEmploy
     public async Task<IEnumerable<EmployeeSkill>> GetExpiringCertificationsAsync(DateTime withinDate)
     {
         return await _context.EmployeeSkills
-            .Where(es => es.CertificationExpiryDate.HasValue && 
+            .Where(es => es.CertificationExpiryDate.HasValue &&
                         es.CertificationExpiryDate.Value <= DateOnly.FromDateTime(withinDate))
             .Include(es => es.Employee)
             .Include(es => es.Skill)

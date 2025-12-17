@@ -1,7 +1,7 @@
-using Microsoft.EntityFrameworkCore;
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces.Procurement;
-using ErpSystem.Core.DTOs.Common;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.Procurement;
 
@@ -34,7 +34,7 @@ public class LicenseTypeRepository : GenericRepository<LicenseType>, ILicenseTyp
 
     public async Task<LicenseType> UpdateAsync(LicenseType licenseType)
     {
-        await UpdateAsync(licenseType);
+        await base.UpdateAsync(licenseType);
         return licenseType;
     }
 
@@ -115,7 +115,7 @@ public class BusinessPartnerLicenseRepository : GenericRepository<BusinessPartne
 
     public async Task<BusinessPartnerLicense> UpdateAsync(BusinessPartnerLicense license)
     {
-        await UpdateAsync(license);
+        await base.UpdateAsync(license);
         return license;
     }
 
@@ -230,7 +230,7 @@ public class BusinessPartnerContactRepository : GenericRepository<BusinessPartne
 
     public async Task<BusinessPartnerContact> UpdateAsync(BusinessPartnerContact contact)
     {
-        await UpdateAsync(contact);
+        await base.UpdateAsync(contact);
         return contact;
     }
 

@@ -65,7 +65,7 @@ namespace ErpSystem.Web.Configuration
                 {
                     foreach (var validationResult in validationResults)
                     {
-                        var memberNames = validationResult.MemberNames.Any() 
+                        var memberNames = validationResult.MemberNames.Any()
                             ? string.Join(", ", validationResult.MemberNames)
                             : "Unknown";
                         errors.Add($"{sectionName}.{memberNames}: {validationResult.ErrorMessage}");
@@ -120,7 +120,7 @@ namespace ErpSystem.Web.Configuration
                 // Try to get database context to validate connection
                 using var scope = _serviceProvider.CreateScope();
                 var dbContext = scope.ServiceProvider.GetService<ErpSystem.Data.ApplicationDbContext>();
-                
+
                 if (dbContext != null)
                 {
                     await dbContext.Database.CanConnectAsync();

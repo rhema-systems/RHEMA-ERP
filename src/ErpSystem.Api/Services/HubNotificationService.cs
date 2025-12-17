@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.SignalR;
+using ErpSystem.Api.Hubs;
 using ErpSystem.Core.DTOs.Dashboard;
 using ErpSystem.Core.Interfaces;
-using ErpSystem.Api.Hubs;
+using Microsoft.AspNetCore.SignalR;
 
 namespace ErpSystem.Api.Services
 {
@@ -91,7 +91,7 @@ namespace ErpSystem.Api.Services
                     Timestamp = DateTime.UtcNow,
                     IsRead = false
                 };
-                
+
                 await _hubContext.Clients.Group($"User_{userId}").SendAsync("MaintenanceNotification", notification);
                 _logger.LogInformation("Broadcasted maintenance notification to user {UserId}: {Title}", userId, title);
             }
@@ -114,7 +114,7 @@ namespace ErpSystem.Api.Services
                     Data = data ?? new Dictionary<string, object>(),
                     Timestamp = DateTime.UtcNow
                 };
-                
+
                 await _hubContext.Clients.Group($"Tenant_{tenantId}").SendAsync("MaintenanceAlert", alert);
                 _logger.LogInformation("Broadcasted maintenance alert to tenant {TenantId}: {AlertType}", tenantId, alertType);
             }
@@ -139,7 +139,7 @@ namespace ErpSystem.Api.Services
                     Type = "CriticalMaintenanceAlert",
                     Timestamp = DateTime.UtcNow
                 };
-                
+
                 await _hubContext.Clients.All.SendAsync("CriticalMaintenanceAlert", alert);
                 _logger.LogWarning("Broadcasted critical maintenance alert to all users: {Message}", message);
             }

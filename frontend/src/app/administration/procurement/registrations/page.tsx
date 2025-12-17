@@ -8,17 +8,20 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { 
-  Search, 
-  Eye, 
-  CheckCircle, 
-  XCircle, 
+import {
+  Search,
+  Eye,
+  CheckCircle,
+  XCircle,
   Clock,
   Filter,
-  RefreshCw
+  RefreshCw,
+  Download
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { registrationReviewService, type RegistrationReviewDto } from '@/services/registrationReviewService';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 
 export default function RegistrationReviewPage() {
   const router = useRouter();
@@ -29,6 +32,21 @@ export default function RegistrationReviewPage() {
   const [partnerTypeFilter, setPartnerTypeFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+
+  // Format date as "MMM dd, yyyy HH:mm AM/PM"
+  const formatDateTime = (dateString: string | undefined) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: '2-digit',
+      year: 'numeric'
+    }) + ' ' + date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  };
 
   useEffect(() => {
     loadRegistrations();
@@ -63,18 +81,66 @@ export default function RegistrationReviewPage() {
     router.push(`/administration/procurement/registrations/${id}`);
   };
 
+  const handleExportToExcel = () => {
+    try {
+      if (registrations.length === 0) {
+        toast.error('No data to export');
+        return;
+      }
+
+      // Prepare data for export
+      const exportData = registrations.map(registration => ({
+        'Application Number': registration.applicationNumber,
+        'Company Name': registration.companyName,
+        'Email': registration.email || '',
+        'Phone': registration.phone || '',
+        'Partner Type': registration.partnerType,
+        'Status': registration.status,
+        'Completion %': registration.completionPercentage ? `${registration.completionPercentage}%` : '0%',
+        'Submitted Date': formatDateTime(registration.submittedDate),
+        'Reviewed Date': formatDateTime(registration.reviewedDate),
+        'Reviewed By': registration.reviewedBy || '',
+        'Created Date': formatDateTime(registration.createdAt),
+      }));
+
+      // Create worksheet
+      const ws = XLSX.utils.json_to_sheet(exportData);
+
+      // Auto-adjust column widths
+      const colWidths = Object.keys(exportData[0] || {}).map(key => ({
+        wch: Math.max(key.length, 15)
+      }));
+      ws['!cols'] = colWidths;
+
+      // Create workbook
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Registrations');
+
+      // Generate filename with current date
+      const filename = `business_partner_registrations_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+      // Save file
+      XLSX.writeFile(wb, filename);
+
+      toast.success(`Exported ${registrations.length} registration(s) to Excel`);
+    } catch (error) {
+      console.error('Error exporting to Excel:', error);
+      toast.error('Failed to export to Excel');
+    }
+  };
+
   const getStatusBadge = (status: string) => {
-    const statusConfig: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
+    const statusConfig: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
       Draft: { label: 'Draft', variant: 'secondary' },
       Submitted: { label: 'Submitted', variant: 'default' },
       UnderReview: { label: 'Under Review', variant: 'outline' },
-      Approved: { label: 'Approved', variant: 'default' },
+      Approved: { label: 'Approved', variant: 'default', className: 'bg-green-100 text-green-800 hover:bg-green-100' },
       Rejected: { label: 'Rejected', variant: 'destructive' },
       MoreInfoRequired: { label: 'More Info Required', variant: 'outline' },
     };
 
     const config = statusConfig[status] || { label: status, variant: 'secondary' };
-    return <Badge variant={config.variant}>{config.label}</Badge>;
+    return <Badge variant={config.variant} className={config.className}>{config.label}</Badge>;
   };
 
   return (
@@ -135,7 +201,11 @@ export default function RegistrationReviewPage() {
             </Select>
           </div>
 
-          <div className="flex justify-end mt-4">
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={handleExportToExcel} disabled={registrations.length === 0}>
+              <Download className="w-4 h-4 mr-2" />
+              Export to Excel
+            </Button>
             <Button variant="outline" onClick={loadRegistrations}>
               <RefreshCw className="w-4 h-4 mr-2" />
               Refresh
@@ -188,8 +258,8 @@ export default function RegistrationReviewPage() {
                       </TableCell>
                       <TableCell>{getStatusBadge(registration.status)}</TableCell>
                       <TableCell>
-                        {registration.submittedAt
-                          ? new Date(registration.submittedAt).toLocaleDateString()
+                        {registration.submittedDate
+                          ? formatDateTime(registration.submittedDate)
                           : '-'}
                       </TableCell>
                       <TableCell>

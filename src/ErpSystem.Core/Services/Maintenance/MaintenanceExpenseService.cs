@@ -76,50 +76,106 @@ public class MaintenanceExpenseService : IMaintenanceExpenseService
     {
         try
         {
-            var expense = await _expenseRepository.GetByIdAsync(id);
-            if (expense == null)
-                throw new ArgumentException($"Expense {id} not found");
-
+            var expense = await _expenseRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Expense {id} not found");
             if (!string.IsNullOrEmpty(updateDto.ExpenseType))
+            {
                 expense.ExpenseType = updateDto.ExpenseType;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.Description))
+            {
                 expense.Description = updateDto.Description;
+            }
+
             if (updateDto.Amount.HasValue)
+            {
                 expense.Amount = updateDto.Amount.Value;
+            }
+
             if (updateDto.ExpenseDate.HasValue)
+            {
                 expense.ExpenseDate = updateDto.ExpenseDate.Value;
+            }
+
             if (updateDto.MileageDriven.HasValue)
+            {
                 expense.MileageDriven = updateDto.MileageDriven;
+            }
+
             if (updateDto.MileageRate.HasValue)
+            {
                 expense.MileageRate = updateDto.MileageRate;
+            }
+
             if (updateDto.FuelQuantity.HasValue)
+            {
                 expense.FuelQuantity = updateDto.FuelQuantity;
+            }
+
             if (updateDto.FuelPricePerUnit.HasValue)
+            {
                 expense.FuelPricePerUnit = updateDto.FuelPricePerUnit;
+            }
+
             if (updateDto.VehicleId.HasValue)
+            {
                 expense.VehicleId = updateDto.VehicleId;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.ReceiptPath))
+            {
                 expense.ReceiptPath = updateDto.ReceiptPath;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.VendorName))
+            {
                 expense.VendorName = updateDto.VendorName;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.ReferenceNumber))
+            {
                 expense.ReferenceNumber = updateDto.ReferenceNumber;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.Status))
+            {
                 expense.Status = updateDto.Status;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.ApprovalNotes))
+            {
                 expense.ApprovalNotes = updateDto.ApprovalNotes;
+            }
+
             if (updateDto.IsReimbursable.HasValue)
+            {
                 expense.IsReimbursable = updateDto.IsReimbursable.Value;
+            }
+
             if (updateDto.IsReimbursed.HasValue)
+            {
                 expense.IsReimbursed = updateDto.IsReimbursed.Value;
+            }
+
             if (updateDto.ReimbursedDate.HasValue)
+            {
                 expense.ReimbursedDate = updateDto.ReimbursedDate;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.Location))
+            {
                 expense.Location = updateDto.Location;
+            }
+
             if (updateDto.Latitude.HasValue)
+            {
                 expense.Latitude = updateDto.Latitude;
+            }
+
             if (updateDto.Longitude.HasValue)
+            {
                 expense.Longitude = updateDto.Longitude;
+            }
 
             expense.UpdatedAt = DateTime.UtcNow;
 
@@ -209,12 +265,9 @@ public class MaintenanceExpenseService : IMaintenanceExpenseService
     {
         try
         {
-            var expense = await _expenseRepository.GetByIdAsync(id);
-            if (expense == null)
-                throw new ArgumentException($"Expense {id} not found");
-
+            var expense = await _expenseRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Expense {id} not found");
             expense.Status = approveDto.Status;
-            expense.ApprovedById = _currentUserService.EmployeeId ?? 
+            expense.ApprovedById = _currentUserService.EmployeeId ??
                 (Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : Guid.Empty);
             expense.ApprovedDate = DateTime.UtcNow;
             expense.ApprovalNotes = approveDto.ApprovalNotes;
@@ -258,7 +311,9 @@ public class MaintenanceExpenseService : IMaintenanceExpenseService
             {
                 var approver = await _employeeRepository.GetByIdAsync(expense.ApprovedById.Value);
                 if (approver != null)
+                {
                     approvedByName = $"{approver.FirstName} {approver.LastName}";
+                }
             }
             catch { }
         }

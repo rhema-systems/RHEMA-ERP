@@ -37,10 +37,7 @@ public class AssetDowntimeService : IAssetDowntimeService
         try
         {
             // Validate asset exists
-            var asset = await _assetService.GetAssetByIdAsync(createDto.AssetId);
-            if (asset == null)
-                throw new KeyNotFoundException($"Asset with ID {createDto.AssetId} not found");
-
+            var asset = await _assetService.GetAssetByIdAsync(createDto.AssetId) ?? throw new KeyNotFoundException($"Asset with ID {createDto.AssetId} not found");
             var downtime = new AssetDowntime
             {
                 Id = Guid.NewGuid(),
@@ -73,11 +70,7 @@ public class AssetDowntimeService : IAssetDowntimeService
         try
         {
             var repo = _unitOfWork.Repository<AssetDowntime>();
-            var downtime = await repo.FirstOrDefaultAsync(d => d.Id == id && d.TenantId == _currentUserService.TenantId);
-
-            if (downtime == null)
-                throw new KeyNotFoundException($"Asset downtime with ID {id} not found");
-
+            var downtime = await repo.FirstOrDefaultAsync(d => d.Id == id && d.TenantId == _currentUserService.TenantId) ?? throw new KeyNotFoundException($"Asset downtime with ID {id} not found");
             downtime.EndTime = endTime;
             if (endTime < downtime.StartTime)
             {
@@ -111,11 +104,7 @@ public class AssetDowntimeService : IAssetDowntimeService
         try
         {
             var repo = _unitOfWork.Repository<AssetDowntime>();
-            var downtime = await repo.FirstOrDefaultAsync(d => d.Id == id && d.TenantId == _currentUserService.TenantId);
-
-            if (downtime == null)
-                throw new KeyNotFoundException($"Asset downtime with ID {id} not found");
-
+            var downtime = await repo.FirstOrDefaultAsync(d => d.Id == id && d.TenantId == _currentUserService.TenantId) ?? throw new KeyNotFoundException($"Asset downtime with ID {id} not found");
             downtime.StartTime = updateDto.StartTime;
             downtime.EndTime = updateDto.EndTime;
             if (downtime.EndTime.HasValue && downtime.EndTime.Value >= downtime.StartTime)
@@ -149,7 +138,9 @@ public class AssetDowntimeService : IAssetDowntimeService
             var downtime = await repo.FirstOrDefaultAsync(d => d.Id == id && d.TenantId == _currentUserService.TenantId);
 
             if (downtime == null)
+            {
                 return;
+            }
 
             await repo.DeleteAsync(downtime);
             await _unitOfWork.SaveChangesAsync();
@@ -167,7 +158,9 @@ public class AssetDowntimeService : IAssetDowntimeService
         var downtime = await repo.FirstOrDefaultAsync(d => d.Id == id && d.TenantId == _currentUserService.TenantId);
 
         if (downtime == null)
+        {
             return null;
+        }
 
         var asset = await _assetService.GetAssetByIdAsync(downtime.AssetId);
         return await MapToDtoAsync(downtime, asset?.Name, asset?.AssetNumber);
@@ -228,7 +221,9 @@ public class AssetDowntimeService : IAssetDowntimeService
         };
 
         if (list.Count == 0)
+        {
             return analytics;
+        }
 
         foreach (var record in list)
         {
@@ -239,7 +234,9 @@ public class AssetDowntimeService : IAssetDowntimeService
             }
 
             if (!hours.HasValue)
+            {
                 continue;
+            }
 
             analytics.TotalDowntimeHours += hours.Value;
             analytics.TotalCostImpact += record.EstimatedCostImpact;
@@ -284,7 +281,9 @@ public class AssetDowntimeService : IAssetDowntimeService
             .FirstOrDefault();
 
         if (record == null)
+        {
             return null;
+        }
 
         var asset = await _assetService.GetAssetByIdAsync(assetId);
         return await MapToDtoAsync(record, asset?.Name, asset?.AssetNumber);
@@ -328,7 +327,9 @@ public class AssetDowntimeService : IAssetDowntimeService
                 }
 
                 if (!hours.HasValue)
+                {
                     continue;
+                }
 
                 totalHours += hours.Value;
                 totalCost += record.EstimatedCostImpact;
@@ -336,7 +337,9 @@ public class AssetDowntimeService : IAssetDowntimeService
             }
 
             if (incidentCount == 0)
+            {
                 continue;
+            }
 
             var avgDuration = incidentCount > 0 ? totalHours / incidentCount : 0;
 
@@ -366,7 +369,7 @@ public class AssetDowntimeService : IAssetDowntimeService
 
     #region Helper Methods
 
-    private async Task<AssetDowntimeDto> MapToDtoAsync(AssetDowntime record, string? assetName, string? assetNumber)
+    private static async Task<AssetDowntimeDto> MapToDtoAsync(AssetDowntime record, string? assetName, string? assetNumber)
     {
         // Compute downtime hours on the fly if not stored but we have EndTime
         double? hours = record.DowntimeHours;

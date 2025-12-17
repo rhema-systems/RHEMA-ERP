@@ -77,7 +77,10 @@ public class MaintenanceExpenseController : ControllerBase
         {
             var result = await _expenseService.GetExpenseByIdAsync(id);
             if (result == null)
+            {
                 return NotFound();
+            }
+
             return Ok(result);
         }
         catch (Exception ex)

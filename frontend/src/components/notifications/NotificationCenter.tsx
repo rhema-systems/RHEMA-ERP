@@ -102,6 +102,14 @@ const NotificationCenter: React.FC = () => {
     return notificationService.formatNotificationTime(dateString)
   }
 
+  // Helper function to strip HTML tags from notification message
+  const stripHtml = (html: string) => {
+    if (!html) return '';
+    const tmp = document.createElement('DIV');
+    tmp.innerHTML = html;
+    return tmp.textContent || tmp.innerText || '';
+  }
+
   const handleNotificationClick = async (notification: NotificationModel) => {
     if (!notification.isRead) {
       await markAsRead(notification.id)
@@ -263,7 +271,7 @@ const NotificationCenter: React.FC = () => {
                         </div>
                         
                         <p className="text-sm text-muted-foreground mb-2">
-                          {notification.message}
+                          {stripHtml(notification.message)}
                         </p>
                         
                         <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">

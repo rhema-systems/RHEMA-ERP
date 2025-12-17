@@ -1,11 +1,11 @@
 using AutoMapper;
-using Microsoft.Extensions.Logging;
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.DTOs.Maintenance;
-using ErpSystem.Core.Entities.Maintenance;
-using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Api.Services.Maintenance;
 
@@ -41,7 +41,7 @@ public class PriorityLevelService : IPriorityLevelService
             var existingByName = await _priorityLevelRepository.GetQueryable()
                 .Where(p => p.Name == createDto.Name && !p.IsDeleted)
                 .FirstOrDefaultAsync();
-            
+
             if (existingByName != null)
             {
                 throw new ArgumentException($"Priority level with name '{createDto.Name}' already exists");
@@ -58,10 +58,10 @@ public class PriorityLevelService : IPriorityLevelService
             // TODO: Restore proper tenant assignment when authentication is fixed
             priorityLevel.TenantId = _currentUserService.TenantId ?? Guid.NewGuid();
             priorityLevel.ResponseTimeHours = createDto.ResponseTime / 60; // Convert minutes to hours
-            
+
             var createdPriorityLevel = await _priorityLevelRepository.AddAsync(priorityLevel);
             await _unitOfWork.SaveChangesAsync();
-            
+
             _logger.LogInformation("Successfully created priority level with ID: {Id}", createdPriorityLevel.Id);
 
             return _mapper.Map<PriorityLevelDto>(createdPriorityLevel);
@@ -79,17 +79,13 @@ public class PriorityLevelService : IPriorityLevelService
         {
             _logger.LogInformation("Updating priority level: {Id}", id);
 
-            var existingPriorityLevel = await _priorityLevelRepository.GetByIdAsync(id);
-            if (existingPriorityLevel == null)
-            {
-                throw new ArgumentException($"Priority level with ID {id} not found");
-            }
+            var existingPriorityLevel = await _priorityLevelRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Priority level with ID {id} not found");
 
             // Validate name uniqueness (exclude current record)
             var existingByName = await _priorityLevelRepository.GetQueryable()
                 .Where(p => p.Name == updateDto.Name && p.Id != id && !p.IsDeleted)
                 .FirstOrDefaultAsync();
-            
+
             if (existingByName != null)
             {
                 throw new ArgumentException($"Priority level with name '{updateDto.Name}' already exists");
@@ -103,7 +99,7 @@ public class PriorityLevelService : IPriorityLevelService
 
             _mapper.Map(updateDto, existingPriorityLevel);
             existingPriorityLevel.ResponseTimeHours = updateDto.ResponseTime / 60; // Convert minutes to hours
-            
+
             await _priorityLevelRepository.UpdateAsync(existingPriorityLevel);
             await _unitOfWork.SaveChangesAsync();
 
@@ -124,11 +120,7 @@ public class PriorityLevelService : IPriorityLevelService
         {
             _logger.LogInformation("Deleting priority level: {Id}", id);
 
-            var priorityLevel = await _priorityLevelRepository.GetByIdAsync(id);
-            if (priorityLevel == null)
-            {
-                throw new ArgumentException($"Priority level with ID {id} not found");
-            }
+            var priorityLevel = await _priorityLevelRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Priority level with ID {id} not found");
 
             // Check if priority level is being used by work orders
             var workOrderCount = await _priorityLevelRepository.GetWorkOrderCountByPriorityAsync(id);
@@ -199,7 +191,7 @@ public class PriorityLevelService : IPriorityLevelService
 
             if (!string.IsNullOrEmpty(filter.SearchTerm))
             {
-                query = query.Where(p => 
+                query = query.Where(p =>
                     p.Name.Contains(filter.SearchTerm) ||
                     (p.Description != null && p.Description.Contains(filter.SearchTerm)));
             }
@@ -242,12 +234,7 @@ public class PriorityLevelService : IPriorityLevelService
         {
             _logger.LogInformation("Toggling priority level status: {Id}", id);
 
-            var priorityLevel = await _priorityLevelRepository.GetByIdAsync(id);
-            if (priorityLevel == null)
-            {
-                throw new ArgumentException($"Priority level with ID {id} not found");
-            }
-
+            var priorityLevel = await _priorityLevelRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Priority level with ID {id} not found");
             priorityLevel.IsActive = !priorityLevel.IsActive;
             await _priorityLevelRepository.UpdateAsync(priorityLevel);
 
@@ -268,11 +255,11 @@ public class PriorityLevelService : IPriorityLevelService
         {
             // Since PriorityLevel doesn't have Code property, we'll check by generated code pattern
             // Code is generated as P{Level:D2}, so we extract the level from the code
-            if (code.StartsWith("P") && code.Length >= 2 && int.TryParse(code.Substring(1), out int level))
+            if (code.StartsWith("P") && code.Length >= 2 && int.TryParse(code.AsSpan(1), out int level))
             {
                 var query = _priorityLevelRepository.GetQueryable()
                     .Where(p => p.Level == level && !p.IsDeleted);
-                
+
                 if (excludeId.HasValue)
                 {
                     query = query.Where(p => p.Id != excludeId.Value);
@@ -280,7 +267,7 @@ public class PriorityLevelService : IPriorityLevelService
 
                 return !await query.AnyAsync();
             }
-            
+
             return true; // If code format is invalid, consider it unique
         }
         catch (Exception ex)

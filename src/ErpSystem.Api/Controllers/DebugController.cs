@@ -1,10 +1,10 @@
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using ErpSystem.Core.Interfaces;
-using ErpSystem.Shared;
-using ErpSystem.Data;
-using ErpSystem.Core.Entities;
 
 namespace ErpSystem.Api.Controllers;
 
@@ -14,11 +14,16 @@ namespace ErpSystem.Api.Controllers;
 public class DebugController : ControllerBase
 {
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<DebugController> _logger;
 
-    public DebugController(ICurrentUserService currentUserService, ILogger<DebugController> logger)
+    public DebugController(
+        ICurrentUserService currentUserService,
+        ICurrentUserProvider currentUserProvider,
+        ILogger<DebugController> logger)
     {
         _currentUserService = currentUserService;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
 
@@ -34,7 +39,7 @@ public class DebugController : ControllerBase
             var tenantId = _currentUserService.TenantId;
             var username = _currentUserService.UserName;
             var isAuthenticated = _currentUserService.IsAuthenticated;
-            
+
             // Get all claims for debugging
             var claims = User.Claims.Select(c => new { c.Type, c.Value }).ToArray();
 
@@ -44,11 +49,13 @@ public class DebugController : ControllerBase
                 UserId = userId,
                 TenantId = tenantId,
                 Username = username,
+                IsExternalUser = _currentUserProvider.IsExternalUser,
+                AuthenticationProvider = _currentUserProvider.AuthenticationProvider,
                 Claims = claims
             };
 
             _logger.LogInformation("Debug user info: {@UserInfo}", result);
-            
+
             return Ok(result);
         }
         catch (Exception ex)
@@ -68,7 +75,8 @@ public class DebugController : ControllerBase
         try
         {
             var reports = await context.Reports
-                .Select(r => new {
+                .Select(r => new
+                {
                     r.Id,
                     r.Name,
                     r.TenantId,
@@ -79,7 +87,8 @@ public class DebugController : ControllerBase
                 .ToListAsync();
 
             var tenants = await context.Tenants
-                .Select(t => new {
+                .Select(t => new
+                {
                     t.Id,
                     t.Code,
                     t.Name,
@@ -88,14 +97,16 @@ public class DebugController : ControllerBase
                 .ToListAsync();
 
             var roles = await context.Roles
-                .Select(r => new {
+                .Select(r => new
+                {
                     r.Id,
                     r.Name
                 })
                 .ToListAsync();
 
             var reportRoleAssignments = await context.ReportRoleAssignments
-                .Select(rra => new {
+                .Select(rra => new
+                {
                     rra.Id,
                     rra.ReportId,
                     rra.RoleId,
@@ -106,7 +117,8 @@ public class DebugController : ControllerBase
                 .Take(10)
                 .ToListAsync();
 
-            return Ok(new {
+            return Ok(new
+            {
                 DatabaseConnected = true,
                 ReportsCount = reports.Count,
                 Reports = reports,
@@ -120,9 +132,10 @@ public class DebugController : ControllerBase
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { 
+            return StatusCode(500, new
+            {
                 error = ex.Message,
-                stackTrace = ex.StackTrace 
+                stackTrace = ex.StackTrace
             });
         }
     }
@@ -156,8 +169,8 @@ public class DebugController : ControllerBase
             {
                 // Check if assignment already exists
                 var existingAssignment = await context.ReportRoleAssignments
-                    .FirstOrDefaultAsync(rra => rra.ReportId == report.Id && 
-                                               rra.RoleId == superAdminRole.Id && 
+                    .FirstOrDefaultAsync(rra => rra.ReportId == report.Id &&
+                                               rra.RoleId == superAdminRole.Id &&
                                                rra.TenantId == techstartTenantId);
 
                 if (existingAssignment == null)
@@ -181,7 +194,8 @@ public class DebugController : ControllerBase
                     };
 
                     context.ReportRoleAssignments.Add(newAssignment);
-                    addedAssignments.Add(new {
+                    addedAssignments.Add(new
+                    {
                         ReportName = report.Name,
                         ReportId = report.Id,
                         RoleId = superAdminRole.Id,
@@ -193,7 +207,8 @@ public class DebugController : ControllerBase
 
             await context.SaveChangesAsync();
 
-            return Ok(new {
+            return Ok(new
+            {
                 Message = "Report role assignments fixed for SuperAdmin",
                 SuperAdminRoleId = superAdminRole.Id,
                 TechstartTenantId = techstartTenantId,
@@ -204,9 +219,10 @@ public class DebugController : ControllerBase
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { 
+            return StatusCode(500, new
+            {
                 error = ex.Message,
-                stackTrace = ex.StackTrace 
+                stackTrace = ex.StackTrace
             });
         }
     }
@@ -222,7 +238,8 @@ public class DebugController : ControllerBase
         {
             var reportsWithDetails = await context.Reports
                 .Where(r => !r.IsDeleted)
-                .Select(r => new {
+                .Select(r => new
+                {
                     r.Id,
                     r.Name,
                     r.TenantId,
@@ -236,16 +253,18 @@ public class DebugController : ControllerBase
                 })
                 .ToListAsync();
 
-            return Ok(new {
+            return Ok(new
+            {
                 ReportsCount = reportsWithDetails.Count,
                 Reports = reportsWithDetails
             });
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { 
+            return StatusCode(500, new
+            {
                 error = ex.Message,
-                stackTrace = ex.StackTrace 
+                stackTrace = ex.StackTrace
             });
         }
     }

@@ -1,7 +1,9 @@
-using Microsoft.EntityFrameworkCore;
-using ErpSystem.Core.Entities.Procurement;
-using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Procurement;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Data.Repositories.Procurement;
 
@@ -11,22 +13,48 @@ namespace ErpSystem.Data.Repositories.Procurement;
 
 public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBusinessPartnerRepository
 {
-    public BusinessPartnerRepository(ApplicationDbContext context) : base(context) { }
+    private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ILogger<BusinessPartnerRepository> _logger;
+
+    public BusinessPartnerRepository(
+        ApplicationDbContext context,
+        ICurrentUserProvider currentUserProvider,
+        ILogger<BusinessPartnerRepository> logger) : base(context)
+    {
+        _currentUserProvider = currentUserProvider;
+        _logger = logger;
+    }
 
     public async Task<BusinessPartner?> GetByIdAsync(Guid id)
     {
         if (id == Guid.Empty)
+        {
             return null;
+        }
 
-        return await _dbSet
-            .Where(bp => bp.Id == id && !bp.IsDeleted)
-            .FirstOrDefaultAsync();
+        var query = _dbSet.Where(bp => bp.Id == id && !bp.IsDeleted);
+
+        // External users can only see their own business partner
+        if (_currentUserProvider.IsExternalUser)
+        {
+            query = query.Where(bp => bp.UserId == _currentUserProvider.UserId);
+        }
+
+        return await query.FirstOrDefaultAsync();
     }
 
     public async Task<BusinessPartner?> GetByCodeAsync(string partnerCode)
     {
         return await _dbSet
             .Where(bp => bp.PartnerCode == partnerCode && !bp.IsDeleted)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<BusinessPartner?> GetByUserIdAsync(Guid userId)
+    {
+        return await _dbSet
+            .Include(bp => bp.User)
+            .Where(bp => bp.UserId == userId && !bp.IsDeleted)
             .FirstOrDefaultAsync();
     }
 
@@ -37,7 +65,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
 
     public async Task<BusinessPartner> UpdateAsync(BusinessPartner partner)
     {
-        await UpdateAsync(partner);
+        await base.UpdateAsync(partner);
         return partner;
     }
 
@@ -46,7 +74,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         var partner = await GetByIdAsync(id);
         if (partner != null)
         {
-            await DeleteAsync(partner);
+            await base.DeleteAsync(partner);
         }
     }
 
@@ -64,36 +92,64 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
     {
         var query = _dbSet.Where(bp => !bp.IsDeleted);
 
+        // External users can only see their own business partner
+        var isExternalUser = _currentUserProvider.IsExternalUser;
+        var currentUserId = _currentUserProvider.UserId;
+        var authProvider = _currentUserProvider.AuthenticationProvider;
+
+        _logger.LogInformation("GetPartnersAsync - IsExternalUser: {IsExternalUser}, UserId: {UserId}, AuthProvider: {AuthProvider}",
+            isExternalUser, currentUserId, authProvider);
+
+        if (isExternalUser)
+        {
+            _logger.LogInformation("Filtering business partners for external user {UserId}", currentUserId);
+            query = query.Where(bp => bp.UserId == currentUserId);
+        }
+
         if (!string.IsNullOrWhiteSpace(search))
         {
             var searchLower = search.ToLower();
             query = query.Where(bp =>
-                bp.PartnerName.ToLower().Contains(searchLower) ||
-                bp.PartnerCode.ToLower().Contains(searchLower) ||
-                (bp.PrimaryEmail != null && bp.PrimaryEmail.ToLower().Contains(searchLower)) ||
-                (bp.BusinessRegistrationNumber != null && bp.BusinessRegistrationNumber.ToLower().Contains(searchLower)));
+                bp.PartnerName.Contains(searchLower, StringComparison.CurrentCultureIgnoreCase) ||
+                bp.PartnerCode.Contains(searchLower, StringComparison.CurrentCultureIgnoreCase) ||
+                (bp.PrimaryEmail != null && bp.PrimaryEmail.Contains(searchLower, StringComparison.CurrentCultureIgnoreCase)) ||
+                (bp.BusinessRegistrationNumber != null && bp.BusinessRegistrationNumber.Contains(searchLower, StringComparison.CurrentCultureIgnoreCase)));
         }
 
         if (!string.IsNullOrWhiteSpace(partnerType))
+        {
             query = query.Where(bp => bp.PartnerType == partnerType);
+        }
 
         if (!string.IsNullOrWhiteSpace(status))
+        {
             query = query.Where(bp => bp.RegistrationStatus == status);
+        }
 
         if (!string.IsNullOrWhiteSpace(approvalStatus))
+        {
             query = query.Where(bp => bp.ApprovalStatus == approvalStatus);
+        }
 
         if (isPreferred.HasValue)
+        {
             query = query.Where(bp => bp.IsPreferred == isPreferred.Value);
+        }
 
         if (isBlacklisted.HasValue)
+        {
             query = query.Where(bp => bp.IsBlacklisted == isBlacklisted.Value);
+        }
 
         if (categoryIds != null && categoryIds.Any())
+        {
             query = query.Where(bp => bp.Categories.Any(c => categoryIds.Contains(c.CategoryId)));
+        }
 
         if (specializationIds != null && specializationIds.Any())
+        {
             query = query.Where(bp => bp.Specializations.Any(s => specializationIds.Contains(s.SpecializationId)));
+        }
 
         var totalCount = await query.CountAsync();
 
@@ -116,7 +172,10 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
     {
         var query = _dbSet.Where(bp => bp.IsActive && !bp.IsDeleted);
         if (!string.IsNullOrWhiteSpace(partnerType))
+        {
             query = query.Where(bp => bp.PartnerType == partnerType);
+        }
+
         return await query.OrderBy(bp => bp.PartnerName).ToListAsync();
     }
 
@@ -124,7 +183,10 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
     {
         var query = _dbSet.Where(bp => bp.IsPreferred && bp.IsActive && !bp.IsDeleted);
         if (!string.IsNullOrWhiteSpace(partnerType))
+        {
             query = query.Where(bp => bp.PartnerType == partnerType);
+        }
+
         return await query.OrderBy(bp => bp.PartnerName).ToListAsync();
     }
 
@@ -183,7 +245,10 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
     {
         var query = _dbSet.Where(bp => bp.PartnerCode == partnerCode && !bp.IsDeleted);
         if (excludeId.HasValue)
+        {
             query = query.Where(bp => bp.Id != excludeId.Value);
+        }
+
         return !await query.AnyAsync();
     }
 
@@ -287,8 +352,15 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
 
     public async Task<BusinessPartner?> GetWithCategoriesAsync(Guid id)
     {
-        return await _dbSet
-            .Where(bp => bp.Id == id && !bp.IsDeleted)
+        var query = _dbSet.Where(bp => bp.Id == id && !bp.IsDeleted);
+
+        // External users can only see their own business partner
+        if (_currentUserProvider.IsExternalUser)
+        {
+            query = query.Where(bp => bp.UserId == _currentUserProvider.UserId);
+        }
+
+        return await query
             .Include(bp => bp.Categories)
                 .ThenInclude(c => c.Category)
             .FirstOrDefaultAsync();
@@ -296,8 +368,15 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
 
     public async Task<BusinessPartner?> GetWithSpecializationsAsync(Guid id)
     {
-        return await _dbSet
-            .Where(bp => bp.Id == id && !bp.IsDeleted)
+        var query = _dbSet.Where(bp => bp.Id == id && !bp.IsDeleted);
+
+        // External users can only see their own business partner
+        if (_currentUserProvider.IsExternalUser)
+        {
+            query = query.Where(bp => bp.UserId == _currentUserProvider.UserId);
+        }
+
+        return await query
             .Include(bp => bp.Specializations)
                 .ThenInclude(s => s.Specialization)
             .FirstOrDefaultAsync();
@@ -305,8 +384,15 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
 
     public async Task<BusinessPartner?> GetWithLicensesAsync(Guid id)
     {
-        return await _dbSet
-            .Where(bp => bp.Id == id && !bp.IsDeleted)
+        var query = _dbSet.Where(bp => bp.Id == id && !bp.IsDeleted);
+
+        // External users can only see their own business partner
+        if (_currentUserProvider.IsExternalUser)
+        {
+            query = query.Where(bp => bp.UserId == _currentUserProvider.UserId);
+        }
+
+        return await query
             .Include(bp => bp.Licenses)
                 .ThenInclude(l => l.LicenseType)
             .FirstOrDefaultAsync();
@@ -314,32 +400,60 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
 
     public async Task<BusinessPartner?> GetWithContactsAsync(Guid id)
     {
-        return await _dbSet
-            .Where(bp => bp.Id == id && !bp.IsDeleted)
+        var query = _dbSet.Where(bp => bp.Id == id && !bp.IsDeleted);
+
+        // External users can only see their own business partner
+        if (_currentUserProvider.IsExternalUser)
+        {
+            query = query.Where(bp => bp.UserId == _currentUserProvider.UserId);
+        }
+
+        return await query
             .Include(bp => bp.Contacts)
             .FirstOrDefaultAsync();
     }
 
     public async Task<BusinessPartner?> GetWithDocumentsAsync(Guid id)
     {
-        return await _dbSet
-            .Where(bp => bp.Id == id && !bp.IsDeleted)
+        var query = _dbSet.Where(bp => bp.Id == id && !bp.IsDeleted);
+
+        // External users can only see their own business partner
+        if (_currentUserProvider.IsExternalUser)
+        {
+            query = query.Where(bp => bp.UserId == _currentUserProvider.UserId);
+        }
+
+        return await query
             .Include(bp => bp.Documents)
             .FirstOrDefaultAsync();
     }
 
     public async Task<BusinessPartner?> GetWithFinancialsAsync(Guid id)
     {
-        return await _dbSet
-            .Where(bp => bp.Id == id && !bp.IsDeleted)
+        var query = _dbSet.Where(bp => bp.Id == id && !bp.IsDeleted);
+
+        // External users can only see their own business partner
+        if (_currentUserProvider.IsExternalUser)
+        {
+            query = query.Where(bp => bp.UserId == _currentUserProvider.UserId);
+        }
+
+        return await query
             .Include(bp => bp.Financials)
             .FirstOrDefaultAsync();
     }
 
     public async Task<BusinessPartner?> GetWithAllRelatedDataAsync(Guid id)
     {
-        return await _dbSet
-            .Where(bp => bp.Id == id && !bp.IsDeleted)
+        var query = _dbSet.Where(bp => bp.Id == id && !bp.IsDeleted);
+
+        // External users can only see their own business partner
+        if (_currentUserProvider.IsExternalUser)
+        {
+            query = query.Where(bp => bp.UserId == _currentUserProvider.UserId);
+        }
+
+        return await query
             .Include(bp => bp.Categories)
                 .ThenInclude(c => c.Category)
             .Include(bp => bp.Specializations)
@@ -383,7 +497,7 @@ public class PartnerCategoryRepository : GenericRepository<PartnerCategory>, IPa
 
     public async Task<PartnerCategory> UpdateAsync(PartnerCategory category)
     {
-        await UpdateAsync(category);
+        await base.UpdateAsync(category);
         return category;
     }
 
@@ -507,7 +621,7 @@ public class ContractorSpecializationRepository : GenericRepository<ContractorSp
 
     public async Task<ContractorSpecialization> UpdateAsync(ContractorSpecialization specialization)
     {
-        await UpdateAsync(specialization);
+        await base.UpdateAsync(specialization);
         return specialization;
     }
 

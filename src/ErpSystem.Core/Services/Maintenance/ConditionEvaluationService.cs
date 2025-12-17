@@ -57,14 +57,14 @@ public class ConditionEvaluationService : IConditionEvaluationService
                 var conditionMet = EvaluateCondition(currentValue, condition.Operator, condition.Value);
                 results.Add(conditionMet);
 
-                _logger.LogDebug("Condition evaluation: {Parameter} {Operator} {Value} = {Result}", 
+                _logger.LogDebug("Condition evaluation: {Parameter} {Operator} {Value} = {Result}",
                     condition.Parameter, condition.Operator, condition.Value, conditionMet);
             }
 
             // All conditions must be met (AND logic within the criteria)
             var finalResult = results.All(r => r);
-            
-            _logger.LogInformation("Condition evaluation complete. {Met}/{Total} conditions met. Result: {Result}", 
+
+            _logger.LogInformation("Condition evaluation complete. {Met}/{Total} conditions met. Result: {Result}",
                 results.Count(r => r), results.Count, finalResult);
 
             return finalResult;
@@ -105,7 +105,7 @@ public class ConditionEvaluationService : IConditionEvaluationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error evaluating condition: {CurrentValue} {Operator} {ExpectedValue}", 
+            _logger.LogError(ex, "Error evaluating condition: {CurrentValue} {Operator} {ExpectedValue}",
                 currentValue, operatorStr, expectedValue);
             return false;
         }
@@ -136,7 +136,7 @@ public class ConditionEvaluationService : IConditionEvaluationService
             // 1. Connect to sensors/APIs based on source type
             // 2. Fetch actual data
             // 3. Map to parameter names
-            
+
             _logger.LogInformation("Fetching data from {Count} data sources", dataSources.Count);
 
             foreach (var source in dataSources)

@@ -8,7 +8,7 @@ namespace ErpSystem.Core.Interfaces
         Task BroadcastNotificationAsync(string userId, NotificationDto notification);
         Task BroadcastUserSessionUpdateAsync(string tenantId, UserSessionUpdateDto update);
         Task SendNotificationToAllAsync(string message, string? type = null);
-        
+
         // Enhanced maintenance notification support
         Task BroadcastMaintenanceNotificationAsync(string userId, string title, string message, string priority, string? actionUrl = null);
         Task BroadcastMaintenanceAlertToTenantAsync(string tenantId, string alertType, string message, Dictionary<string, object>? data = null);

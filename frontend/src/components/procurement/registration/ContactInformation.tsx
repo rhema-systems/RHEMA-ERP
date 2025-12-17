@@ -6,6 +6,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { type RegistrationFormData } from '@/services/businessPartnerRegistrationService';
 import { COUNTRIES } from '@/lib/countries';
+import PhoneInput from '@/components/ui/phone-input';
+import { useEffect } from 'react';
 
 interface ContactInformationProps {
   formData: RegistrationFormData;
@@ -13,6 +15,13 @@ interface ContactInformationProps {
 }
 
 export default function ContactInformation({ formData, updateFormData }: ContactInformationProps) {
+  // Set default country to Ghana on mount if not already set
+  useEffect(() => {
+    if (!formData.country) {
+      updateFormData({ country: 'Ghana' });
+    }
+  }, []);
+
   return (
     <div className="space-y-6">
       {/* Required Fields Notice */}
@@ -46,25 +55,20 @@ export default function ContactInformation({ formData, updateFormData }: Contact
             <Label htmlFor="phone">
               Phone Number <span className="text-red-500">*</span>
             </Label>
-            <Input
-              id="phone"
-              type="tel"
+            <PhoneInput
               value={formData.phone}
-              onChange={(e) => updateFormData({ phone: e.target.value })}
-              placeholder="+1 (555) 123-4567"
-              required
+              onChange={(value) => updateFormData({ phone: value })}
+              placeholder="Enter phone number"
             />
           </div>
 
           {/* Alternate Phone */}
           <div className="space-y-2">
             <Label htmlFor="alternatePhone">Alternate Phone</Label>
-            <Input
-              id="alternatePhone"
-              type="tel"
+            <PhoneInput
               value={formData.alternatePhone || ''}
-              onChange={(e) => updateFormData({ alternatePhone: e.target.value })}
-              placeholder="+1 (555) 987-6543"
+              onChange={(value) => updateFormData({ alternatePhone: value })}
+              placeholder="Enter alternate phone"
             />
           </div>
         </div>
@@ -185,12 +189,10 @@ export default function ContactInformation({ formData, updateFormData }: Contact
 
           <div className="space-y-2">
             <Label htmlFor="contactPersonPhone">Phone</Label>
-            <Input
-              id="contactPersonPhone"
-              type="tel"
+            <PhoneInput
               value={formData.contactPersonPhone || ''}
-              onChange={(e) => updateFormData({ contactPersonPhone: e.target.value })}
-              placeholder="+1 (555) 123-4567"
+              onChange={(value) => updateFormData({ contactPersonPhone: value })}
+              placeholder="Enter contact phone"
             />
           </div>
         </div>

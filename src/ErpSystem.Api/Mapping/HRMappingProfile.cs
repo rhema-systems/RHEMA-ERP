@@ -1,6 +1,6 @@
 using AutoMapper;
-using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 
 namespace ErpSystem.Api.Mapping
 {
@@ -48,7 +48,7 @@ namespace ErpSystem.Api.Mapping
             // EmployeePosition mappings
             CreateMap<EmployeePosition, EmployeePositionDto>()
                 .ForMember(dest => dest.DepartmentName, opt => opt.MapFrom(src => src.Department.Name));
-            
+
             CreateMap<CreateEmployeePositionDto, EmployeePosition>()
                 .ForMember(dest => dest.Id, opt => opt.Ignore())
                 .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())

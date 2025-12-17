@@ -1,7 +1,7 @@
+using ErpSystem.Core.Interfaces;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Core.Services;
 
@@ -165,7 +165,7 @@ public class DatabaseMetadataService : IDatabaseMetadataService
                 .FindAsync(tm => tm.TenantId == tenantId.Value && tm.Status == Shared.ModuleStatus.Enabled);
 
             var moduleNames = tenantModules.Select(tm => tm.ModuleName).OrderBy(x => x).ToList();
-            
+
             _logger.LogInformation("Retrieved {Count} enabled modules for tenant {TenantId}", moduleNames.Count, tenantId);
             return moduleNames;
         }

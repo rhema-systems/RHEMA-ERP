@@ -1,10 +1,10 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using ErpSystem.Data.Services;
-using ErpSystem.Core.Entities;
 using ErpSystem.Shared;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using IPermissionService = ErpSystem.Data.Services.IPermissionService;
 using IRolePermissionService = ErpSystem.Data.Services.IRolePermissionService;
 namespace ErpSystem.Api.Controllers;
@@ -118,7 +118,7 @@ public class RoleController : ControllerBase
             };
 
             var createdRole = await _roleService.CreateRoleAsync(role);
-            
+
             // Handle permissions
             if (request.Permissions != null && request.Permissions.Length > 0)
             {
@@ -127,12 +127,12 @@ public class RoleController : ControllerBase
                     .Where(p => request.Permissions.Contains(p.Name))
                     .Select(p => p.Id)
                     .ToList();
-                    
+
                 if (permissionIds.Any())
                 {
                     await _permissionService.UpdateRolePermissionsAsync(
-                        createdRole.Id, 
-                        permissionIds, 
+                        createdRole.Id,
+                        permissionIds,
                         _currentUserService.UserName);
                 }
             }
@@ -147,8 +147,9 @@ public class RoleController : ControllerBase
                     "Role",
                     createdRole.Id.ToString(),
                     null,
-                    new { 
-                        Name = request.Name, 
+                    new
+                    {
+                        Name = request.Name,
                         Description = request.Description,
                         Permissions = request.Permissions
                     },
@@ -162,7 +163,7 @@ public class RoleController : ControllerBase
 
             // Get the created role with permissions
             var roleWithPermissions = await _rolePermissionService.GetRoleWithPermissionsByIdAsync(createdRole.Id);
-            
+
             var roleDto = new RoleDto
             {
                 Id = createdRole.Id.ToString(),
@@ -205,7 +206,7 @@ public class RoleController : ControllerBase
             }
 
             // Capture old values for audit logging
-            var oldValues = new 
+            var oldValues = new
             {
                 Name = role.Name,
                 Description = role.Description,
@@ -216,7 +217,7 @@ public class RoleController : ControllerBase
             role.Description = request.Description;
 
             var updatedRole = await _roleService.UpdateRoleAsync(role);
-            
+
             // Handle permissions update
             if (request.Permissions != null)
             {
@@ -225,17 +226,17 @@ public class RoleController : ControllerBase
                     .Where(p => request.Permissions.Contains(p.Name))
                     .Select(p => p.Id)
                     .ToList();
-                    
+
                 await _permissionService.UpdateRolePermissionsAsync(
-                    updatedRole.Id, 
-                    permissionIds, 
+                    updatedRole.Id,
+                    permissionIds,
                     _currentUserService.UserName);
             }
 
             // Log audit trail for role update
             try
             {
-                var newValues = new 
+                var newValues = new
                 {
                     Name = request.Name,
                     Description = request.Description,
@@ -260,7 +261,7 @@ public class RoleController : ControllerBase
 
             // Get the updated role with permissions
             var roleWithPermissions = await _rolePermissionService.GetRoleWithPermissionsByIdAsync(updatedRole.Id);
-            
+
             var roleDto = new RoleDto
             {
                 Id = updatedRole.Id.ToString(),

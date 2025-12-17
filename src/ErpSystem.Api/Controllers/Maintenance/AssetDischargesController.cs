@@ -28,7 +28,11 @@ public class AssetDischargesController : ControllerBase
     public async Task<ActionResult<AssetDischargeDto>> GetDischargeById(Guid id)
     {
         var result = await _dischargeService.GetDischargeByIdAsync(id);
-        if (result == null) return NotFound();
+        if (result == null)
+        {
+            return NotFound();
+        }
+
         return Ok(result);
     }
 

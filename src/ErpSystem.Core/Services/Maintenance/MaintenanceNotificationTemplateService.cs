@@ -1,9 +1,9 @@
+using System.Text.RegularExpressions;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.Extensions.Logging;
-using System.Text.RegularExpressions;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -20,14 +20,14 @@ public interface IMaintenanceNotificationTemplateService
     Task<MaintenanceNotificationTemplateDto> UpdateTemplateAsync(Guid id, MaintenanceNotificationTemplateDto dto);
     Task DeleteTemplateAsync(Guid id);
     Task<List<MaintenanceNotificationTemplateDto>> GetAllTemplatesAsync();
-    
+
     // Template processing
     Task<string> ProcessTemplateTitleAsync(Guid templateId, Dictionary<string, object> variables);
     Task<string> ProcessTemplateMessageAsync(Guid templateId, Dictionary<string, object> variables);
     Task<List<string>> ExtractTemplateVariablesAsync(Guid templateId);
 }
 
-public class MaintenanceNotificationTemplateService : IMaintenanceNotificationTemplateService
+public partial class MaintenanceNotificationTemplateService : IMaintenanceNotificationTemplateService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
@@ -48,7 +48,10 @@ public class MaintenanceNotificationTemplateService : IMaintenanceNotificationTe
         try
         {
             var template = await _unitOfWork.Repository<MaintenanceNotificationTemplate>().GetByIdAsync(id);
-            if (template == null) return null;
+            if (template == null)
+            {
+                return null;
+            }
 
             return MapToDto(template);
         }
@@ -65,7 +68,7 @@ public class MaintenanceNotificationTemplateService : IMaintenanceNotificationTe
         {
             var templates = await _unitOfWork.Repository<MaintenanceNotificationTemplate>()
                 .FindAsync(t => t.Name == name && t.IsActive);
-            
+
             var template = templates.FirstOrDefault();
             return template == null ? null : MapToDto(template);
         }
@@ -132,10 +135,7 @@ public class MaintenanceNotificationTemplateService : IMaintenanceNotificationTe
     {
         try
         {
-            var entity = await _unitOfWork.Repository<MaintenanceNotificationTemplate>().GetByIdAsync(id);
-            if (entity == null)
-                throw new ArgumentException($"Template with ID {id} not found");
-
+            var entity = await _unitOfWork.Repository<MaintenanceNotificationTemplate>().GetByIdAsync(id) ?? throw new ArgumentException($"Template with ID {id} not found");
             entity.Name = dto.Name;
             entity.NotificationType = dto.NotificationType;
             entity.Description = dto.Description;
@@ -165,10 +165,7 @@ public class MaintenanceNotificationTemplateService : IMaintenanceNotificationTe
     {
         try
         {
-            var entity = await _unitOfWork.Repository<MaintenanceNotificationTemplate>().GetByIdAsync(id);
-            if (entity == null)
-                throw new ArgumentException($"Template with ID {id} not found");
-
+            var entity = await _unitOfWork.Repository<MaintenanceNotificationTemplate>().GetByIdAsync(id) ?? throw new ArgumentException($"Template with ID {id} not found");
             entity.IsActive = false;
             entity.UpdatedAt = DateTime.UtcNow;
 
@@ -204,10 +201,7 @@ public class MaintenanceNotificationTemplateService : IMaintenanceNotificationTe
     {
         try
         {
-            var template = await GetTemplateByIdAsync(templateId);
-            if (template == null)
-                throw new ArgumentException($"Template with ID {templateId} not found");
-
+            var template = await GetTemplateByIdAsync(templateId) ?? throw new ArgumentException($"Template with ID {templateId} not found");
             return SubstituteVariables(template.TitleTemplate, variables);
         }
         catch (Exception ex)
@@ -221,10 +215,7 @@ public class MaintenanceNotificationTemplateService : IMaintenanceNotificationTe
     {
         try
         {
-            var template = await GetTemplateByIdAsync(templateId);
-            if (template == null)
-                throw new ArgumentException($"Template with ID {templateId} not found");
-
+            var template = await GetTemplateByIdAsync(templateId) ?? throw new ArgumentException($"Template with ID {templateId} not found");
             return SubstituteVariables(template.MessageTemplate, variables);
         }
         catch (Exception ex)
@@ -238,10 +229,7 @@ public class MaintenanceNotificationTemplateService : IMaintenanceNotificationTe
     {
         try
         {
-            var template = await GetTemplateByIdAsync(templateId);
-            if (template == null)
-                throw new ArgumentException($"Template with ID {templateId} not found");
-
+            var template = await GetTemplateByIdAsync(templateId) ?? throw new ArgumentException($"Template with ID {templateId} not found");
             var titleVars = ExtractVariablesFromTemplate(template.TitleTemplate);
             var messageVars = ExtractVariablesFromTemplate(template.MessageTemplate);
 
@@ -254,7 +242,7 @@ public class MaintenanceNotificationTemplateService : IMaintenanceNotificationTe
         }
     }
 
-    private string SubstituteVariables(string template, Dictionary<string, object> variables)
+    private static string SubstituteVariables(string template, Dictionary<string, object> variables)
     {
         var result = template;
 
@@ -267,9 +255,9 @@ public class MaintenanceNotificationTemplateService : IMaintenanceNotificationTe
         return result;
     }
 
-    private List<string> ExtractVariablesFromTemplate(string template)
+    private static List<string> ExtractVariablesFromTemplate(string template)
     {
-        var regex = new Regex(@"\{\{(\w+(?:\.\w+)*)\}\}");
+        var regex = MyRegex();
         var matches = regex.Matches(template);
 
         return matches.Cast<Match>()
@@ -299,4 +287,7 @@ public class MaintenanceNotificationTemplateService : IMaintenanceNotificationTe
             LastModifiedByName = entity.LastModifiedById?.ToString()
         };
     }
+
+    [GeneratedRegex(@"\{\{(\w+(?:\.\w+)*)\}\}")]
+    private static partial Regex MyRegex();
 }

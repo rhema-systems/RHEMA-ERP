@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Plus, Search, Edit, Trash2, FileCheck, Shield } from 'lucide-react';
-import { licenseTypeService, LicenseTypeDto, CreateLicenseTypeDto } from '@/services/partnerConfigService';
+import { licenseTypeService, LicenseTypeDto, CreateLicenseTypeDto, UpdateLicenseTypeDto } from '@/services/partnerConfigService';
 import { useToast } from '@/components/ui/use-toast';
 
 export default function LicenseTypesPage() {
@@ -27,14 +27,24 @@ export default function LicenseTypesPage() {
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   
-  // Form state
+  // Form state for create
   const [formData, setFormData] = useState<CreateLicenseTypeDto>({
-    name: '',
-    code: '',
+    licenseName: '',
+    licenseCode: '',
     description: '',
     applicableTo: 'Both',
     isMandatory: false,
+    validityPeriodMonths: undefined
+  });
+
+  // Form state for edit
+  const [editFormData, setEditFormData] = useState<UpdateLicenseTypeDto>({
+    licenseName: '',
+    description: '',
+    isMandatory: false,
     validityPeriodMonths: undefined,
+    requiresRenewal: false,
+    renewalReminderDays: 30,
     isActive: true
   });
 
@@ -68,20 +78,20 @@ export default function LicenseTypesPage() {
 
     if (searchTerm) {
       filtered = filtered.filter(item =>
-        item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.licenseName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.licenseCode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.description?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(item => 
+      filtered = filtered.filter(item =>
         statusFilter === 'active' ? item.isActive : !item.isActive
       );
     }
 
     if (applicableToFilter !== 'all') {
-      filtered = filtered.filter(item => 
+      filtered = filtered.filter(item =>
         item.applicableTo === applicableToFilter || item.applicableTo === 'Both'
       );
     }
@@ -110,13 +120,13 @@ export default function LicenseTypesPage() {
 
   const handleEdit = (licenseType: LicenseTypeDto) => {
     setSelectedLicenseType(licenseType);
-    setFormData({
-      name: licenseType.name,
-      code: licenseType.code,
+    setEditFormData({
+      licenseName: licenseType.licenseName,
       description: licenseType.description || '',
-      applicableTo: licenseType.applicableTo,
       isMandatory: licenseType.isMandatory,
       validityPeriodMonths: licenseType.validityPeriodMonths,
+      requiresRenewal: licenseType.requiresRenewal || false,
+      renewalReminderDays: licenseType.renewalReminderDays || 30,
       isActive: licenseType.isActive
     });
     setIsEditDialogOpen(true);
@@ -126,7 +136,7 @@ export default function LicenseTypesPage() {
     if (!selectedLicenseType?.id) return;
 
     try {
-      await licenseTypeService.update(selectedLicenseType.id, formData);
+      await licenseTypeService.update(selectedLicenseType.id, editFormData);
       toast({
         title: 'Success',
         description: 'License type updated successfully'
@@ -166,12 +176,20 @@ export default function LicenseTypesPage() {
 
   const resetForm = () => {
     setFormData({
-      name: '',
-      code: '',
+      licenseName: '',
+      licenseCode: '',
       description: '',
       applicableTo: 'Both',
       isMandatory: false,
+      validityPeriodMonths: undefined
+    });
+    setEditFormData({
+      licenseName: '',
+      description: '',
+      isMandatory: false,
       validityPeriodMonths: undefined,
+      requiresRenewal: false,
+      renewalReminderDays: 30,
       isActive: true
     });
     setSelectedLicenseType(null);
@@ -207,8 +225,8 @@ export default function LicenseTypesPage() {
                   <Label htmlFor="name">License Name</Label>
                   <Input
                     id="name"
-                    value={formData.name}
-                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    value={formData.licenseName}
+                    onChange={(e) => setFormData({...formData, licenseName: e.target.value})}
                     placeholder="e.g., Trade License"
                   />
                 </div>
@@ -216,8 +234,8 @@ export default function LicenseTypesPage() {
                   <Label htmlFor="code">Code</Label>
                   <Input
                     id="code"
-                    value={formData.code}
-                    onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
+                    value={formData.licenseCode}
+                    onChange={(e) => setFormData({...formData, licenseCode: e.target.value.toUpperCase()})}
                     placeholder="e.g., TL, VAT"
                   />
                 </div>
@@ -447,8 +465,8 @@ export default function LicenseTypesPage() {
                     <div className="flex items-start justify-between">
                       <div className="space-y-2 flex-1">
                         <div className="flex items-center space-x-3">
-                          <h3 className="font-semibold">{licenseType.name}</h3>
-                          <Badge variant="outline">{licenseType.code}</Badge>
+                          <h3 className="font-semibold">{licenseType.licenseName}</h3>
+                          <Badge variant="outline">{licenseType.licenseCode}</Badge>
                           <Badge className={licenseType.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
                             {licenseType.isActive ? 'Active' : 'Inactive'}
                           </Badge>
@@ -509,63 +527,36 @@ export default function LicenseTypesPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-name">License Name</Label>
-                <Input
-                  id="edit-name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
-                  placeholder="e.g., Trade License"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-code">Code</Label>
-                <Input
-                  id="edit-code"
-                  value={formData.code}
-                  onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
-                  placeholder="e.g., TL, VAT"
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">License Name</Label>
+              <Input
+                id="edit-name"
+                value={editFormData.licenseName}
+                onChange={(e) => setEditFormData({...editFormData, licenseName: e.target.value})}
+                placeholder="e.g., Trade License"
+              />
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="edit-description">Description</Label>
               <Textarea
                 id="edit-description"
-                value={formData.description}
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                value={editFormData.description}
+                onChange={(e) => setEditFormData({...editFormData, description: e.target.value})}
                 placeholder="Describe this license type..."
                 rows={3}
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-applicableTo">Applicable To</Label>
-                <Select value={formData.applicableTo} onValueChange={(value) => setFormData({...formData, applicableTo: value})}>
-                  <SelectTrigger id="edit-applicableTo">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Supplier">Supplier</SelectItem>
-                    <SelectItem value="Contractor">Contractor</SelectItem>
-                    <SelectItem value="Both">Both</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-validityPeriod">Validity Period (Months)</Label>
-                <Input
-                  id="edit-validityPeriod"
-                  type="number"
-                  value={formData.validityPeriodMonths || ''}
-                  onChange={(e) => setFormData({...formData, validityPeriodMonths: e.target.value ? parseInt(e.target.value) : undefined})}
-                  placeholder="e.g., 12, 24"
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-validityPeriod">Validity Period (Months)</Label>
+              <Input
+                id="edit-validityPeriod"
+                type="number"
+                value={editFormData.validityPeriodMonths || ''}
+                onChange={(e) => setEditFormData({...editFormData, validityPeriodMonths: e.target.value ? parseInt(e.target.value) : undefined})}
+                placeholder="e.g., 12, 24"
+              />
             </div>
 
             <div className="flex items-center space-x-4">
@@ -573,8 +564,8 @@ export default function LicenseTypesPage() {
                 <input
                   type="checkbox"
                   id="edit-isMandatory"
-                  checked={formData.isMandatory}
-                  onChange={(e) => setFormData({...formData, isMandatory: e.target.checked})}
+                  checked={editFormData.isMandatory}
+                  onChange={(e) => setEditFormData({...editFormData, isMandatory: e.target.checked})}
                   className="rounded border-gray-300"
                 />
                 <Label htmlFor="edit-isMandatory" className="text-sm font-medium">Mandatory</Label>
@@ -584,8 +575,8 @@ export default function LicenseTypesPage() {
                 <input
                   type="checkbox"
                   id="edit-isActive"
-                  checked={formData.isActive}
-                  onChange={(e) => setFormData({...formData, isActive: e.target.checked})}
+                  checked={editFormData.isActive}
+                  onChange={(e) => setEditFormData({...editFormData, isActive: e.target.checked})}
                   className="rounded border-gray-300"
                 />
                 <Label htmlFor="edit-isActive" className="text-sm font-medium">Active</Label>

@@ -1,4 +1,4 @@
-﻿using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -60,6 +60,7 @@ public class ContractorSpecializationService : IContractorSpecializationService
         };
 
         var created = await _repository.CreateAsync(specialization);
+        await _repository.SaveChangesAsync();
         _logger.LogInformation("Created contractor specialization {SpecializationCode} - {SpecializationName}",
             created.SpecializationCode, created.SpecializationName);
 
@@ -68,18 +69,14 @@ public class ContractorSpecializationService : IContractorSpecializationService
 
     public async Task<ContractorSpecializationDto> UpdateAsync(Guid id, UpdateContractorSpecializationDto dto)
     {
-        var specialization = await _repository.GetByIdAsync(id);
-        if (specialization == null)
-        {
-            throw new InvalidOperationException($"Contractor specialization with ID {id} not found.");
-        }
-
+        var specialization = await _repository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Contractor specialization with ID {id} not found.");
         specialization.SpecializationName = dto.SpecializationName;
         specialization.Description = dto.Description;
         specialization.IsActive = dto.IsActive;
         specialization.UpdatedAt = DateTime.UtcNow;
 
         var updated = await _repository.UpdateAsync(specialization);
+        await _repository.SaveChangesAsync();
         _logger.LogInformation("Updated contractor specialization {SpecializationCode} - {SpecializationName}",
             updated.SpecializationCode, updated.SpecializationName);
 
@@ -89,6 +86,7 @@ public class ContractorSpecializationService : IContractorSpecializationService
     public async Task DeleteAsync(Guid id)
     {
         await _repository.DeleteAsync(id);
+        await _repository.SaveChangesAsync();
         _logger.LogInformation("Deleted contractor specialization with ID {SpecializationId}", id);
     }
 

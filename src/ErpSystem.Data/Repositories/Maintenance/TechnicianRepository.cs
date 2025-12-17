@@ -1,7 +1,7 @@
-using Microsoft.EntityFrameworkCore;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Entities.HR;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.Maintenance;
 
@@ -17,17 +17,17 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
     public async Task<IEnumerable<Employee>> GetTechniciansAsync()
     {
         return await _context.Employees
-            .Where(e => e.Department != null && e.Department.Name.Contains("Maintenance") && 
+            .Where(e => e.Department != null && e.Department.Name.Contains("Maintenance") &&
                        e.IsActive && !e.IsDeleted)
             .OrderBy(e => e.FirstName)
             .ThenBy(e => e.LastName)
             .ToListAsync();
     }
-    
+
     public async Task<IEnumerable<Employee>> GetActiveTechniciansAsync()
     {
         return await _context.Employees
-            .Where(e => e.Department != null && e.Department.Name.Contains("Maintenance") && 
+            .Where(e => e.Department != null && e.Department.Name.Contains("Maintenance") &&
                        e.IsActive && !e.IsDeleted)
             .OrderBy(e => e.FirstName)
             .ThenBy(e => e.LastName)
@@ -42,8 +42,8 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
     public async Task<IEnumerable<Employee>> GetByDepartmentAsync(string department)
     {
         return await _context.Employees
-            .Where(e => e.Department != null && e.Department.Name == department && 
-                       e.Department.Name.Contains("Maintenance") && 
+            .Where(e => e.Department != null && e.Department.Name == department &&
+                       e.Department.Name.Contains("Maintenance") &&
                        !e.IsDeleted)
             .OrderBy(e => e.FirstName)
             .ThenBy(e => e.LastName)
@@ -53,29 +53,29 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
     public async Task<IEnumerable<Employee>> GetBySpecializationAsync(string specialization)
     {
         return await _context.Employees
-            .Where(e => e.Specialization == specialization && 
-                       e.Department != null && e.Department.Name.Contains("Maintenance") && 
+            .Where(e => e.Specialization == specialization &&
+                       e.Department != null && e.Department.Name.Contains("Maintenance") &&
                        !e.IsDeleted)
             .OrderBy(e => e.FirstName)
             .ThenBy(e => e.LastName)
             .ToListAsync();
     }
-    
+
     public async Task<IEnumerable<Employee>> GetAvailableAsync(DateTime startTime, DateTime endTime)
     {
         // Basic implementation - in a real system this would check scheduling/availability
         return await _context.Employees
-            .Where(e => e.Department != null && e.Department.Name.Contains("Maintenance") && 
+            .Where(e => e.Department != null && e.Department.Name.Contains("Maintenance") &&
                        e.IsActive && !e.IsDeleted)
             .OrderBy(e => e.FirstName)
             .ToListAsync();
     }
-    
+
     public async Task<IEnumerable<Employee>> GetAvailableTechniciansAsync(DateTime startTime, DateTime endTime)
     {
         return await GetAvailableAsync(startTime, endTime);
     }
-    
+
     public async Task<IEnumerable<Employee>> GetTechniciansBySkillAsync(Guid skillId)
     {
         return await _context.TechnicianSkillAssignments
@@ -85,22 +85,22 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
             .Cast<Employee>()
             .ToListAsync();
     }
-    
+
     public async Task<Employee?> GetTechnicianWithSkillsAsync(Guid technicianId)
     {
         return await _context.Employees
-            .Where(e => e.Id == technicianId && e.Department != null && 
+            .Where(e => e.Id == technicianId && e.Department != null &&
                        e.Department.Name.Contains("Maintenance") && !e.IsDeleted)
             .FirstOrDefaultAsync();
     }
-    
+
     public async Task<bool> IsTechnicianAvailableAsync(Guid technicianId, DateTime startTime, DateTime endTime)
     {
         // Basic implementation - in a real system this would check work orders, schedules, etc.
         var technician = await GetByIdAsync(technicianId);
         return technician != null && technician.IsActive;
     }
-    
+
     public async Task<IEnumerable<Employee>> GetTechniciansByTeamAsync(Guid teamId)
     {
         // TechnicianId now references ApplicationUser (Users table) instead of Employee
@@ -108,7 +108,7 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
         await Task.CompletedTask;
         return new List<Employee>();
     }
-    
+
     public async Task<double> GetTechnicianWorkloadAsync(Guid technicianId, DateTime startDate, DateTime endDate)
     {
         // Basic implementation - count work orders in date range
@@ -119,25 +119,25 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
             .CountAsync();
         return workOrderCount;
     }
-    
+
     public async Task<IEnumerable<Employee>> GetTechniciansByLocationAsync(Guid locationId)
     {
         // Basic implementation - filter by department containing location info
         return await _context.Employees
-            .Where(e => e.Department != null && e.Department.Name.Contains("Maintenance") && 
+            .Where(e => e.Department != null && e.Department.Name.Contains("Maintenance") &&
                        e.IsActive && !e.IsDeleted)
             .OrderBy(e => e.FirstName)
             .ToListAsync();
     }
-    
+
     public async Task<Employee?> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _context.Employees
-            .Where(e => e.Id == employeeId && e.Department != null && 
+            .Where(e => e.Id == employeeId && e.Department != null &&
                        e.Department.Name.Contains("Maintenance") && !e.IsDeleted)
             .FirstOrDefaultAsync();
     }
-    
+
     public async Task<IEnumerable<Employee>> GetFromHRModuleAsync()
     {
         // TODO: Implement actual HR module integration
@@ -145,7 +145,7 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
         await Task.CompletedTask;
         return new List<Employee>();
     }
-    
+
     public async Task<IEnumerable<Employee>> SyncFromHRAsync()
     {
         var hrEmployees = await GetFromHRModuleAsync();
@@ -164,7 +164,7 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
                 existingEmployee.PositionId = hrEmployee.PositionId;
                 existingEmployee.IsActive = hrEmployee.IsActive;
                 existingEmployee.UpdatedAt = DateTime.UtcNow;
-                
+
                 await UpdateAsync(existingEmployee);
                 syncedEmployees.Add(existingEmployee);
             }

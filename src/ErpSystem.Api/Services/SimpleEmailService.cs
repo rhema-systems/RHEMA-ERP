@@ -27,12 +27,12 @@ public class SimpleEmailService : IEmailService
                 _logger.LogInformation("Reset Token: {ResetToken}", resetToken);
                 _logger.LogInformation("Token expires in 1 hour");
                 _logger.LogInformation("============================");
-                
+
                 // Simulate email sending delay
                 await Task.Delay(500);
                 return true;
             }
-            
+
             // In production, implement actual email sending logic here
             // Examples: SendGrid, SMTP, Amazon SES, etc.
             _logger.LogWarning("Email service not configured for production environment");
@@ -57,11 +57,11 @@ public class SimpleEmailService : IEmailService
                 _logger.LogInformation("Temporary Password: {TempPassword}", temporaryPassword);
                 _logger.LogInformation("Please change your password after first login");
                 _logger.LogInformation("=====================");
-                
+
                 await Task.Delay(300);
                 return true;
             }
-            
+
             _logger.LogWarning("Email service not configured for production environment");
             return false;
         }
@@ -84,11 +84,11 @@ public class SimpleEmailService : IEmailService
                 _logger.LogInformation("Your account has been temporarily locked due to multiple failed login attempts");
                 _logger.LogInformation("Contact your administrator to unlock your account");
                 _logger.LogInformation("============================");
-                
+
                 await Task.Delay(300);
                 return true;
             }
-            
+
             _logger.LogWarning("Email service not configured for production environment");
             return false;
         }
@@ -98,7 +98,7 @@ public class SimpleEmailService : IEmailService
             return false;
         }
     }
-    
+
     public async Task<bool> SendEmailAsync(string to, string subject, string body, bool isHtml = false)
     {
         try
@@ -111,17 +111,154 @@ public class SimpleEmailService : IEmailService
                 _logger.LogInformation("Is HTML: {IsHtml}", isHtml);
                 _logger.LogInformation("Body: {Body}", body);
                 _logger.LogInformation("=====================");
-                
+
                 await Task.Delay(300);
                 return true;
             }
-            
+
             _logger.LogWarning("Email service not configured for production environment");
             return false;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send email to {Email}", to);
+            return false;
+        }
+    }
+
+    public async Task<bool> SendRegistrationSubmittedEmailAsync(string to, string companyName, string registrationId)
+    {
+        try
+        {
+            if (_environment.IsDevelopment())
+            {
+                _logger.LogInformation("=== REGISTRATION SUBMITTED EMAIL ===");
+                _logger.LogInformation("To: {Email}", to);
+                _logger.LogInformation("Company: {CompanyName}", companyName);
+                _logger.LogInformation("Registration ID: {RegistrationId}", registrationId);
+                _logger.LogInformation("Subject: Registration Submitted - ERP System");
+                _logger.LogInformation("=====================================");
+
+                await Task.Delay(300);
+                return true;
+            }
+
+            _logger.LogWarning("Email service not configured for production environment");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send registration submitted email to {Email}", to);
+            return false;
+        }
+    }
+
+    public async Task<bool> SendRegistrationApprovedEmailAsync(string to, string companyName, string registrationId)
+    {
+        try
+        {
+            if (_environment.IsDevelopment())
+            {
+                _logger.LogInformation("=== REGISTRATION APPROVED EMAIL ===");
+                _logger.LogInformation("To: {Email}", to);
+                _logger.LogInformation("Company: {CompanyName}", companyName);
+                _logger.LogInformation("Registration ID: {RegistrationId}", registrationId);
+                _logger.LogInformation("Subject: Registration Approved - ERP System");
+                _logger.LogInformation("===================================");
+
+                await Task.Delay(300);
+                return true;
+            }
+
+            _logger.LogWarning("Email service not configured for production environment");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send registration approved email to {Email}", to);
+            return false;
+        }
+    }
+
+    public async Task<bool> SendRegistrationRejectedEmailAsync(string to, string companyName, string registrationId)
+    {
+        try
+        {
+            if (_environment.IsDevelopment())
+            {
+                _logger.LogInformation("=== REGISTRATION REJECTED EMAIL ===");
+                _logger.LogInformation("To: {Email}", to);
+                _logger.LogInformation("Company: {CompanyName}", companyName);
+                _logger.LogInformation("Registration ID: {RegistrationId}", registrationId);
+                _logger.LogInformation("Subject: Registration Rejected - ERP System");
+                _logger.LogInformation("====================================");
+
+                await Task.Delay(300);
+                return true;
+            }
+
+            _logger.LogWarning("Email service not configured for production environment");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send registration rejected email to {Email}", to);
+            return false;
+        }
+    }
+
+    public async Task<bool> SendDocumentVerificationRequestEmailAsync(string to, string companyName, string documentType)
+    {
+        try
+        {
+            if (_environment.IsDevelopment())
+            {
+                _logger.LogInformation("=== DOCUMENT VERIFICATION REQUEST EMAIL ===");
+                _logger.LogInformation("To: {Email}", to);
+                _logger.LogInformation("Company: {CompanyName}", companyName);
+                _logger.LogInformation("Document Type: {DocumentType}", documentType);
+                _logger.LogInformation("Subject: Document Verification Required - ERP System");
+                _logger.LogInformation("================================================");
+
+                await Task.Delay(300);
+                return true;
+            }
+
+            _logger.LogWarning("Email service not configured for production environment");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send document verification request email to {Email}", to);
+            return false;
+        }
+    }
+
+    public async Task<bool> SendLicenseExpiryReminderEmailAsync(string to, string companyName, string licenseType, DateTime expiryDate, int daysUntilExpiry)
+    {
+        try
+        {
+            if (_environment.IsDevelopment())
+            {
+                _logger.LogInformation("=== LICENSE EXPIRY REMINDER EMAIL ===");
+                _logger.LogInformation("To: {Email}", to);
+                _logger.LogInformation("Company: {CompanyName}", companyName);
+                _logger.LogInformation("License Type: {LicenseType}", licenseType);
+                _logger.LogInformation("Expiry Date: {ExpiryDate}", expiryDate);
+                _logger.LogInformation("Days Until Expiry: {DaysUntilExpiry}", daysUntilExpiry);
+                _logger.LogInformation("Subject: License Expiry Reminder - ERP System");
+                _logger.LogInformation("==========================================");
+
+                await Task.Delay(300);
+                return true;
+            }
+
+            _logger.LogWarning("Email service not configured for production environment");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send license expiry reminder email to {Email}", to);
             return false;
         }
     }

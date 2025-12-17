@@ -18,6 +18,9 @@ public class BusinessPartnerDto
     public string? TradingName { get; set; }
     public string? RegistrationNumber { get; set; }
     public string? TaxNumber { get; set; }
+    public string? VatNumber { get; set; }
+    public string? CompanyName { get; set; }
+    public string? AlternatePhone { get; set; }
     public string? Email { get; set; }
     public string? Phone { get; set; }
     public string? Website { get; set; }
@@ -40,12 +43,17 @@ public class BusinessPartnerDto
 /// </summary>
 public class BusinessPartnerDetailDto : BusinessPartnerDto
 {
+    // User Account Link
+    public Guid? UserId { get; set; }
+    public string? UserEmail { get; set; }
+    public string? UserFullName { get; set; }
+
     // Legal & Registration Information
     public string? LegalEntityType { get; set; }
     public DateTime? RegistrationDate { get; set; }
     public string? RegistrationCountry { get; set; }
     public string? VatNumber { get; set; }
-    
+
     // Contact Information
     public string? ContactPerson { get; set; }
     public string? ContactTitle { get; set; }
@@ -54,7 +62,7 @@ public class BusinessPartnerDetailDto : BusinessPartnerDto
     public string? ContactMobile { get; set; }
     public string? AlternatePhone { get; set; }
     public string? Fax { get; set; }
-    
+
     // Address Information
     public string? MailingAddress { get; set; }
     public string? MailingCity { get; set; }
@@ -63,7 +71,7 @@ public class BusinessPartnerDetailDto : BusinessPartnerDto
     public string? MailingCountry { get; set; }
     public string? PhysicalState { get; set; }
     public string? PhysicalPostalCode { get; set; }
-    
+
     // Banking Information
     public string? BankName { get; set; }
     public string? BankBranch { get; set; }
@@ -72,7 +80,7 @@ public class BusinessPartnerDetailDto : BusinessPartnerDto
     public string? SwiftCode { get; set; }
     public string? Iban { get; set; }
     public string? Currency { get; set; }
-    
+
     // Classification
     public string? IndustryType { get; set; }
     public string? CompanySize { get; set; }
@@ -80,7 +88,7 @@ public class BusinessPartnerDetailDto : BusinessPartnerDto
     public decimal? AnnualRevenue { get; set; }
     public int? YearsInBusiness { get; set; }
     public string? GeographicCoverage { get; set; }
-    
+
     // Performance & Status
     public int? QualityScore { get; set; }
     public int? DeliveryScore { get; set; }
@@ -90,7 +98,7 @@ public class BusinessPartnerDetailDto : BusinessPartnerDto
     public string? BlacklistReason { get; set; }
     public DateTime? BlacklistDate { get; set; }
     public DateTime? BlacklistExpiryDate { get; set; }
-    
+
     // Contractor-Specific Fields
     public string? ContractorLicenseNumber { get; set; }
     public DateTime? ContractorLicenseExpiry { get; set; }
@@ -104,15 +112,15 @@ public class BusinessPartnerDetailDto : BusinessPartnerDto
     public string? InsuranceProvider { get; set; }
     public decimal? InsuranceCoverageAmount { get; set; }
     public DateTime? InsuranceExpiryDate { get; set; }
-    
+
     // Approval Information
     public string? ApprovedBy { get; set; }
     public DateTime? ApprovedDate { get; set; }
-    
+
     // Additional Information
     public string? Notes { get; set; }
     public string? Tags { get; set; }
-    
+
     // Related Data
     public List<BusinessPartnerContactDto> Contacts { get; set; } = new();
     public List<BusinessPartnerLicenseDto> Licenses { get; set; } = new();
@@ -589,6 +597,35 @@ public class BusinessPartnerRegistrationDetailDto : BusinessPartnerRegistrationD
     public string? RegistrationData { get; set; } // JSON data
     public string? ReviewNotes { get; set; }
     public string? RejectionReason { get; set; }
+
+    // Parsed fields from RegistrationData JSON
+    public string? TradingName { get; set; }
+    public string? TaxNumber { get; set; }
+    public string? VatNumber { get; set; }
+    public string? Website { get; set; }
+    public string? IndustryType { get; set; }
+    public int? YearsInBusiness { get; set; }
+    public int? NumberOfEmployees { get; set; }
+    public decimal? AnnualRevenue { get; set; }
+
+    // Contact Information
+    public string? AlternatePhone { get; set; }
+    public string? PhysicalAddress { get; set; }
+    public string? City { get; set; }
+    public string? Country { get; set; }
+    public string? PostalCode { get; set; }
+
+    // Primary Contact Person
+    public string? ContactPersonName { get; set; }
+    public string? ContactPersonTitle { get; set; }
+    public string? ContactPersonEmail { get; set; }
+    public string? ContactPersonPhone { get; set; }
+
+    // Banking Information
+    public string? BankName { get; set; }
+    public string? BankAccountNumber { get; set; }
+    public string? BankBranchCode { get; set; }
+
     public List<BusinessPartnerRegistrationDocumentDto> Documents { get; set; } = new();
     public List<BusinessPartnerRegistrationStatusHistoryDto> StatusHistory { get; set; } = new();
 }
@@ -612,11 +649,11 @@ public class CreateBusinessPartnerRegistrationDto
     [MaxLength(100)]
     public string? VatNumber { get; set; }
 
-    [EmailAddress]
+    // Email validation only if provided (not null or empty) - removed validation for draft saves
     [MaxLength(200)]
     public string? Email { get; set; }
 
-    [Phone]
+    // Phone validation only if provided (not null or empty) - removed validation for draft saves
     [MaxLength(50)]
     public string? Phone { get; set; }
 
@@ -639,6 +676,31 @@ public class CreateBusinessPartnerRegistrationDto
     public string? ContactPersonName { get; set; }
 
     public string? RegistrationData { get; set; } // JSON data
+
+    // License Information (for contractors)
+    public List<BusinessPartnerRegistrationLicenseDto>? Licenses { get; set; }
+}
+
+/// <summary>
+/// License information for business partner registration
+/// </summary>
+public class BusinessPartnerRegistrationLicenseDto
+{
+    [Required]
+    public string LicenseTypeId { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(100)]
+    public string LicenseNumber { get; set; } = string.Empty;
+
+    [Required]
+    public string IssueDate { get; set; } = string.Empty;
+
+    public string? ExpiryDate { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string IssuingAuthority { get; set; } = string.Empty;
 }
 
 public class UpdateBusinessPartnerRegistrationDto
@@ -650,11 +712,11 @@ public class UpdateBusinessPartnerRegistrationDto
     [MaxLength(100)]
     public string? RegistrationNumber { get; set; }
 
-    [EmailAddress]
+    // Email validation only if provided (not null or empty) - removed validation for draft saves
     [MaxLength(200)]
     public string? Email { get; set; }
 
-    [Phone]
+    // Phone validation only if provided (not null or empty) - removed validation for draft saves
     [MaxLength(50)]
     public string? Phone { get; set; }
 
@@ -696,7 +758,11 @@ public class BusinessPartnerRegistrationDocumentDto
     public string FilePath { get; set; } = string.Empty;
     public string? DocumentPath { get; set; } // Alias for FilePath
     public long FileSize { get; set; }
+    public string? MimeType { get; set; }
     public bool IsVerified { get; set; }
+    public bool IsRejected { get; set; }
+    public string? RejectionReason { get; set; }
+    public DateTime? RejectedDate { get; set; }
     public DateTime UploadedAt { get; set; }
 }
 

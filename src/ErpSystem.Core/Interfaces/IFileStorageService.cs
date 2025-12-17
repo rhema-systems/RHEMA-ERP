@@ -11,12 +11,12 @@ public interface IFileStorageService
     /// Upload a single file to storage
     /// </summary>
     Task<FileStorageResult> UploadFileAsync(FileUploadRequest request);
-    
+
     /// <summary>
     /// Upload a file with stream, filename, and folder path
     /// </summary>
     Task<string> UploadFileAsync(Stream fileStream, string fileName, string folderPath);
-    
+
     /// <summary>
     /// Download a file from storage
     /// </summary>

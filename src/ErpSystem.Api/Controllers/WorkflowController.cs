@@ -1,10 +1,10 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using ErpSystem.Core.DTOs.Workflow;
-using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Interfaces;
-using System.Security.Claims;
+using ErpSystem.Core.Interfaces.Workflow;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers;
 
@@ -62,12 +62,14 @@ public class WorkflowController : ControllerBase
         {
             var currentUserId = GetCurrentUserId();
             if (currentUserId == null)
+            {
                 return Unauthorized();
+            }
 
             _logger.LogInformation("User {UserId} is retrieving workflow definitions", currentUserId);
 
             var definitions = await _workflowDefinitionService.GetWorkflowDefinitionsAsync(filter.EntityType ?? string.Empty);
-            
+
             // Convert to admin DTOs with additional administrative properties
             var adminDtos = definitions.Select(def => new WorkflowDefinitionAdminDto
             {
@@ -144,13 +146,17 @@ public class WorkflowController : ControllerBase
         {
             var currentUserId = GetCurrentUserId();
             if (currentUserId == null)
+            {
                 return Unauthorized();
+            }
 
             _logger.LogInformation("User {UserId} is retrieving workflow definition {WorkflowId}", currentUserId, id);
 
             var definition = await _workflowDefinitionService.GetWorkflowDefinitionAsync(id);
             if (definition == null)
+            {
                 return NotFound("Workflow definition not found");
+            }
 
             var dto = MapToWorkflowDefinitionDto(definition);
             return Ok(dto);
@@ -174,7 +180,9 @@ public class WorkflowController : ControllerBase
         {
             var currentUserId = GetCurrentUserId();
             if (currentUserId == null)
+            {
                 return Unauthorized();
+            }
 
             _logger.LogInformation("User {UserId} is creating workflow definition {WorkflowName}", currentUserId, createDto.Name);
 
@@ -222,7 +230,9 @@ public class WorkflowController : ControllerBase
         {
             var currentUserId = GetCurrentUserId();
             if (currentUserId == null)
+            {
                 return Unauthorized();
+            }
 
             _logger.LogInformation("User {UserId} is updating workflow definition {WorkflowId}", currentUserId, id);
 
@@ -235,7 +245,7 @@ public class WorkflowController : ControllerBase
             };
 
             var definition = await _workflowDefinitionService.UpdateWorkflowDefinitionAsync(id, workflowDto);
-            
+
             await _workflowDefinitionService.SetWorkflowDefinitionActiveAsync(id, updateDto.IsActive, currentUserId.Value);
 
             var responseDto = MapToWorkflowDefinitionDto(definition);
@@ -259,7 +269,9 @@ public class WorkflowController : ControllerBase
         {
             var currentUserId = GetCurrentUserId();
             if (currentUserId == null)
+            {
                 return Unauthorized();
+            }
 
             _logger.LogInformation("User {UserId} is deleting workflow definition {WorkflowId}", currentUserId, id);
 
@@ -284,7 +296,9 @@ public class WorkflowController : ControllerBase
         {
             var currentUserId = GetCurrentUserId();
             if (currentUserId == null)
+            {
                 return Unauthorized();
+            }
 
             _logger.LogInformation("User {UserId} is validating workflow definition {WorkflowId}", currentUserId, id);
 
@@ -313,7 +327,9 @@ public class WorkflowController : ControllerBase
         {
             var currentUserId = GetCurrentUserId();
             if (currentUserId == null)
+            {
                 return Unauthorized();
+            }
 
             _logger.LogInformation("User {UserId} is retrieving workflow summary", currentUserId);
 
@@ -351,7 +367,9 @@ public class WorkflowController : ControllerBase
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
         if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+        {
             return null;
+        }
 
         return userId;
     }
@@ -396,7 +414,7 @@ public class WorkflowController : ControllerBase
             IsRequired = step.IsRequired,
             RequiredRole = step.RequiredRole,
             EstimatedHours = step.EstimatedHours,
-            Configuration = step.Configuration != null ? 
+            Configuration = step.Configuration != null ?
                 System.Text.Json.JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(step.Configuration) : null
         };
     }
@@ -415,7 +433,7 @@ public class WorkflowController : ControllerBase
             Description = transition.Description,
             IsDefault = transition.IsDefault,
             Priority = transition.Priority,
-            Condition = transition.Condition != null ? 
+            Condition = transition.Condition != null ?
                 System.Text.Json.JsonSerializer.Deserialize<WorkflowConditionDto>(transition.Condition) : null
         };
     }

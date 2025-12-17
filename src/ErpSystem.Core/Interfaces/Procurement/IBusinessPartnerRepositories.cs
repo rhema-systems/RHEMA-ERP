@@ -1,6 +1,6 @@
-using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.Procurement;
 
 namespace ErpSystem.Core.Interfaces.Procurement;
 
@@ -16,15 +16,16 @@ public interface IBusinessPartnerRepository : IGenericRepository<BusinessPartner
     // Basic CRUD
     Task<BusinessPartner?> GetByIdAsync(Guid id);
     Task<BusinessPartner?> GetByCodeAsync(string partnerCode);
+    Task<BusinessPartner?> GetByUserIdAsync(Guid userId);
     Task<BusinessPartner> CreateAsync(BusinessPartner partner);
     Task<BusinessPartner> UpdateAsync(BusinessPartner partner);
     Task DeleteAsync(Guid id);
-    
+
     // Queries
     Task<PagedResult<BusinessPartner>> GetPartnersAsync(
-        int page, 
-        int pageSize, 
-        string? search = null, 
+        int page,
+        int pageSize,
+        string? search = null,
         string? partnerType = null,
         string? status = null,
         string? approvalStatus = null,
@@ -32,7 +33,7 @@ public interface IBusinessPartnerRepository : IGenericRepository<BusinessPartner
         bool? isBlacklisted = null,
         List<Guid>? categoryIds = null,
         List<Guid>? specializationIds = null);
-    
+
     Task<IEnumerable<BusinessPartner>> GetActivePartnersAsync(string? partnerType = null);
     Task<IEnumerable<BusinessPartner>> GetPreferredPartnersAsync(string? partnerType = null);
     Task<IEnumerable<BusinessPartner>> GetBlacklistedPartnersAsync();
@@ -41,7 +42,7 @@ public interface IBusinessPartnerRepository : IGenericRepository<BusinessPartner
     Task<IEnumerable<BusinessPartner>> GetPartnersRequiringApprovalAsync();
     Task<IEnumerable<BusinessPartner>> GetPartnersWithExpiringLicensesAsync(int daysAhead = 30);
     Task<IEnumerable<BusinessPartner>> GetPartnersWithExpiringBlacklistAsync(int daysAhead = 30);
-    
+
     // Business Logic
     Task<bool> IsPartnerCodeUniqueAsync(string partnerCode, Guid? excludeId = null);
     Task<bool> HasActiveContractsAsync(Guid partnerId);
@@ -52,7 +53,7 @@ public interface IBusinessPartnerRepository : IGenericRepository<BusinessPartner
     Task AddToBlacklistAsync(Guid partnerId, string reason, DateTime? expiryDate = null);
     Task RemoveFromBlacklistAsync(Guid partnerId);
     Task<string> GeneratePartnerCodeAsync(string partnerType);
-    
+
     // Related Data
     Task<BusinessPartner?> GetWithCategoriesAsync(Guid id);
     Task<BusinessPartner?> GetWithSpecializationsAsync(Guid id);
@@ -77,7 +78,7 @@ public interface IPartnerCategoryRepository : IGenericRepository<PartnerCategory
     Task<PartnerCategory> CreateAsync(PartnerCategory category);
     Task<PartnerCategory> UpdateAsync(PartnerCategory category);
     Task DeleteAsync(Guid id);
-    
+
     Task<IEnumerable<PartnerCategory>> GetAllCategoriesAsync(string? categoryType = null);
     Task<IEnumerable<PartnerCategory>> GetActiveCategoriesAsync(string? categoryType = null);
     Task<IEnumerable<PartnerCategory>> GetRootCategoriesAsync(string? categoryType = null);
@@ -102,7 +103,7 @@ public interface IContractorSpecializationRepository : IGenericRepository<Contra
     Task<ContractorSpecialization> CreateAsync(ContractorSpecialization specialization);
     Task<ContractorSpecialization> UpdateAsync(ContractorSpecialization specialization);
     Task DeleteAsync(Guid id);
-    
+
     Task<IEnumerable<ContractorSpecialization>> GetAllSpecializationsAsync();
     Task<IEnumerable<ContractorSpecialization>> GetActiveSpecializationsAsync();
     Task<bool> IsSpecializationCodeUniqueAsync(string specializationCode, Guid? excludeId = null);
@@ -123,7 +124,7 @@ public interface ILicenseTypeRepository : IGenericRepository<LicenseType>
     Task<LicenseType> CreateAsync(LicenseType licenseType);
     Task<LicenseType> UpdateAsync(LicenseType licenseType);
     Task DeleteAsync(Guid id);
-    
+
     Task<IEnumerable<LicenseType>> GetAllLicenseTypesAsync();
     Task<IEnumerable<LicenseType>> GetActiveLicenseTypesAsync();
     Task<IEnumerable<LicenseType>> GetMandatoryLicenseTypesAsync(string applicableTo);
@@ -270,6 +271,7 @@ public interface IBusinessPartnerRegistrationDocumentRepository : IGenericReposi
     Task DeleteAsync(Guid id);
 
     Task<IEnumerable<BusinessPartnerRegistrationDocument>> GetDocumentsByRegistrationAsync(Guid registrationId);
+    Task<IEnumerable<BusinessPartnerRegistrationDocument>> GetByRegistrationIdAsync(Guid registrationId);
     Task<IEnumerable<BusinessPartnerRegistrationDocument>> GetDocumentsByTypeAsync(Guid registrationId, string documentType);
     Task<IEnumerable<BusinessPartnerRegistrationDocument>> GetUnverifiedDocumentsAsync(Guid registrationId);
     Task VerifyDocumentAsync(Guid documentId, Guid verifiedById);

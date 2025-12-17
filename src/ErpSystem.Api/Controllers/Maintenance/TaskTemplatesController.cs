@@ -1,6 +1,6 @@
+using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using ErpSystem.Core.Interfaces.Maintenance;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -86,7 +86,9 @@ public class TaskTemplatesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var template = await _taskTemplateService.CreateAssetTaskTemplateAsync(createDto);
             return CreatedAtAction(nameof(GetAssetTaskTemplates), new { assetId = template.AssetId }, template);
@@ -107,7 +109,9 @@ public class TaskTemplatesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var template = await _taskTemplateService.UpdateAssetTaskTemplateAsync(id, updateDto);
             return Ok(template);
@@ -195,7 +199,9 @@ public class TaskTemplatesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var template = await _taskTemplateService.CreateAssetTypeTaskTemplateAsync(createDto);
             return CreatedAtAction(nameof(GetAssetTypeTaskTemplates), new { assetTypeId = template.AssetTypeId }, template);
@@ -216,7 +222,9 @@ public class TaskTemplatesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var template = await _taskTemplateService.UpdateAssetTypeTaskTemplateAsync(id, updateDto);
             return Ok(template);
@@ -312,7 +320,9 @@ public class TaskTemplatesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var template = await _taskTemplateService.CreateMaintenanceTaskTemplateAsync(createDto);
             return CreatedAtAction(nameof(GetMaintenanceTaskTemplates), new { maintenanceTypeId = template.MaintenanceTypeId }, template);
@@ -333,7 +343,9 @@ public class TaskTemplatesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var template = await _taskTemplateService.UpdateMaintenanceTaskTemplateAsync(id, updateDto);
             return Ok(template);

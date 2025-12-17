@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -36,7 +36,9 @@ public class WorkOrderTypesController : ControllerBase
         try
         {
             if (pageSize > 100)
+            {
                 pageSize = 100;
+            }
 
             var filter = new WorkOrderTypeFilterDto
             {
@@ -47,7 +49,7 @@ public class WorkOrderTypesController : ControllerBase
                 Priority = priority,
                 IsActive = isActive
             };
-            
+
             var result = await _workOrderTypeService.GetWorkOrderTypesPagedAsync(filter);
             return Ok(result);
         }
@@ -86,7 +88,9 @@ public class WorkOrderTypesController : ControllerBase
         {
             var workOrderType = await _workOrderTypeService.GetWorkOrderTypeByIdAsync(id);
             if (workOrderType == null)
+            {
                 return NotFound($"Work order type with ID {id} not found");
+            }
 
             return Ok(workOrderType);
         }
@@ -106,7 +110,9 @@ public class WorkOrderTypesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var workOrderType = await _workOrderTypeService.CreateWorkOrderTypeAsync(createDto);
             return CreatedAtAction(nameof(GetWorkOrderType), new { id = workOrderType.Id }, workOrderType);
@@ -131,7 +137,9 @@ public class WorkOrderTypesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var workOrderType = await _workOrderTypeService.UpdateWorkOrderTypeAsync(id, updateDto);
             return Ok(workOrderType);

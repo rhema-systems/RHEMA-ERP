@@ -163,7 +163,15 @@ public class BusinessPartner : TenantEntity
     // Metadata
     public string? Notes { get; set; }
 
+    // User Account Link (for external portal access)
+    /// <summary>
+    /// Links this business partner to the user account that manages it in the external portal
+    /// This is the user ID from the registration process (CreatedById from BusinessPartnerRegistration)
+    /// </summary>
+    public Guid? UserId { get; set; }
+
     // Navigation Properties
+    public virtual ApplicationUser? User { get; set; }
     public virtual ApplicationUser? ApprovedBy { get; set; }
     public virtual ICollection<BusinessPartnerCategory> Categories { get; set; } = new List<BusinessPartnerCategory>();
     public virtual ICollection<BusinessPartnerSpecialization> Specializations { get; set; } = new List<BusinessPartnerSpecialization>();
@@ -450,9 +458,8 @@ public class BusinessPartnerRegistration : TenantEntity
     [MaxLength(200)]
     public string ApplicantName { get; set; } = string.Empty;
 
-    [Required]
     [MaxLength(100)]
-    public string ApplicantEmail { get; set; } = string.Empty;
+    public string? ApplicantEmail { get; set; }
 
     [MaxLength(50)]
     public string? ApplicantPhone { get; set; }
@@ -525,6 +532,13 @@ public class BusinessPartnerRegistrationDocument : TenantEntity
     [MaxLength(1000)]
     public string? VerificationNotes { get; set; }
 
+    public bool IsRejected { get; set; } = false;
+    public Guid? RejectedById { get; set; }
+    public DateTime? RejectedDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? RejectionReason { get; set; }
+
     // Navigation Properties
     public virtual BusinessPartnerRegistration Registration { get; set; } = null!;
     public virtual ApplicationUser? VerifiedBy { get; set; }
@@ -553,6 +567,81 @@ public class BusinessPartnerRegistrationStatusHistory : BaseEntity
     // Navigation Properties
     public virtual BusinessPartnerRegistration Registration { get; set; } = null!;
     public virtual ApplicationUser? ChangedBy { get; set; }
+}
+
+#endregion
+
+#region Business Partner User Management
+
+/// <summary>
+/// Links multiple users to a business partner for multi-user management
+/// Allows business partners to have admin users who can create and manage sub-users
+/// </summary>
+public class BusinessPartnerUser : TenantEntity
+{
+    [Required]
+    public Guid BusinessPartnerId { get; set; }
+
+    [Required]
+    public Guid UserId { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string Role { get; set; } = "User"; // Admin, User, Viewer
+
+    public bool IsActive { get; set; } = true;
+
+    public DateTime GrantedAt { get; set; } = DateTime.UtcNow;
+
+    public Guid? GrantedById { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+
+    // Navigation Properties
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
+    public virtual ApplicationUser User { get; set; } = null!;
+    public virtual ApplicationUser? GrantedBy { get; set; }
+}
+
+#endregion
+
+#region Tender Assignment Management
+
+/// <summary>
+/// Manages tender assignments to business partner users
+/// Allows admins to control which users can work on which tenders
+/// </summary>
+public class TenderAssignment : TenantEntity
+{
+    [Required]
+    public Guid TenderId { get; set; }
+
+    [Required]
+    public Guid BusinessPartnerId { get; set; }
+
+    /// <summary>
+    /// Specific user assigned to this tender (null if assignment type is AllUsers)
+    /// </summary>
+    public Guid? AssignedToUserId { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string AssignmentType { get; set; } = "Self"; // AllUsers, Self, SelectedUsers
+
+    public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
+
+    [Required]
+    public Guid AssignedById { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+
+    // Navigation Properties
+    public virtual Tender Tender { get; set; } = null!;
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
+    public virtual ApplicationUser? AssignedToUser { get; set; }
+    public virtual ApplicationUser AssignedBy { get; set; } = null!;
 }
 
 #endregion

@@ -22,7 +22,7 @@ public class AdvancedMaintenanceReportingService : IAdvancedMaintenanceReporting
     public async Task<ExecutiveMaintenanceDashboardDto> GenerateExecutiveDashboardAsync(Guid tenantId, DateTime startDate, DateTime endDate)
     {
         _logger.LogInformation("Generating executive maintenance dashboard for tenant {TenantId} - STUB", tenantId);
-        
+
         return new ExecutiveMaintenanceDashboardDto
         {
             ReportDate = DateTime.UtcNow,
@@ -39,7 +39,7 @@ public class AdvancedMaintenanceReportingService : IAdvancedMaintenanceReporting
     public async Task<MaintenanceTrendAnalysisDto> GenerateTrendAnalysisReportAsync(Guid tenantId, DateTime startDate, DateTime endDate, string analysisPeriod = "Monthly")
     {
         _logger.LogInformation("Generating maintenance trend analysis for tenant {TenantId} - STUB", tenantId);
-        
+
         return new MaintenanceTrendAnalysisDto
         {
             AnalysisPeriod = analysisPeriod,
@@ -77,7 +77,7 @@ public class AdvancedMaintenanceReportingService : IAdvancedMaintenanceReporting
     public async Task<RegulatoryComplianceReportDto> GenerateComplianceReportAsync(Guid tenantId, string regulatoryFramework, DateTime startDate, DateTime endDate)
     {
         _logger.LogInformation("Generating compliance report for tenant {TenantId} - STUB", tenantId);
-        
+
         return new RegulatoryComplianceReportDto
         {
             RegulatoryFramework = regulatoryFramework,
@@ -117,7 +117,7 @@ public class AdvancedMaintenanceReportingService : IAdvancedMaintenanceReporting
     public async Task<ReportDefinitionDto> CreateMaintenanceReportTemplateAsync(Guid tenantId, Guid userId, string reportType, CreateMaintenanceReportTemplateDto template)
     {
         _logger.LogInformation("Creating maintenance report template - STUB");
-        
+
         return new ReportDefinitionDto
         {
             Id = Guid.NewGuid(),
@@ -130,7 +130,7 @@ public class AdvancedMaintenanceReportingService : IAdvancedMaintenanceReporting
     public async Task<ReportExportResultDto> ExecuteAndExportMaintenanceReportAsync(Guid reportId, Guid tenantId, Guid userId, ExecuteMaintenanceReportDto executeDto)
     {
         _logger.LogInformation("Executing and exporting maintenance report - STUB");
-        
+
         return new ReportExportResultDto
         {
             ReportId = reportId,

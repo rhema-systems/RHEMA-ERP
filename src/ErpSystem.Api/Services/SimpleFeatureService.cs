@@ -37,8 +37,10 @@ namespace ErpSystem.Web.Services
                 try
                 {
                     if (value is T directValue)
+                    {
                         return directValue;
-                    
+                    }
+
                     return (T)Convert.ChangeType(value, typeof(T));
                 }
                 catch (Exception ex)
@@ -149,7 +151,7 @@ namespace ErpSystem.Web.Services
             try
             {
                 var process = System.Diagnostics.Process.GetCurrentProcess();
-                
+
                 return new
                 {
                     Status = "Healthy",

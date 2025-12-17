@@ -1,11 +1,10 @@
 using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Interfaces.Common;
-using ErpSystem.Core.Enums;
-using ErpSystem.Core.Entities.Maintenance;
-using ErpSystem.Core.Entities.HR;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Maintenance;
@@ -61,7 +60,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
 
             // Get schedules due in the next 7 days
             var upcomingSchedules = await _scheduleService.GetSchedulesDueInDaysAsync(7);
-            
+
             foreach (var schedule in upcomingSchedules)
             {
                 await SendScheduleReminderAsync(schedule);
@@ -69,13 +68,13 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
 
             // Get overdue schedules
             var overdueSchedules = await _scheduleService.GetOverdueSchedulesAsync();
-            
+
             foreach (var schedule in overdueSchedules)
             {
                 await SendOverdueMaintenanceAlertAsync(schedule);
             }
 
-            _logger.LogInformation("Processed {UpcomingCount} upcoming and {OverdueCount} overdue maintenance notifications", 
+            _logger.LogInformation("Processed {UpcomingCount} upcoming and {OverdueCount} overdue maintenance notifications",
                 upcomingSchedules.Count(), overdueSchedules.Count());
         }
         catch (Exception ex)
@@ -110,7 +109,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
                 Priority = MapPriorityToString(schedule.Priority),
                 ScheduledFor = DateTime.UtcNow
             };
-            
+
             await CreateNotificationAsync(createDto);
 
             _logger.LogInformation("Schedule reminder sent for schedule {ScheduleId}", schedule.Id);
@@ -168,7 +167,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
     {
         try
         {
-            _logger.LogInformation("Sending work order assignment notification for WO {WorkOrderId} to technician {TechnicianId}", 
+            _logger.LogInformation("Sending work order assignment notification for WO {WorkOrderId} to technician {TechnicianId}",
                 workOrderId, technicianId);
 
             var createDto = new CreateMaintenanceNotificationDto
@@ -472,9 +471,9 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         {
             // Get assets with warranties expiring in the next 60 days
             var assets = await _assetService.GetAllAssetsAsync();
-            var assetsWithExpiringWarranty = assets.Where(a => 
-                a.WarrantyEndDate.HasValue && 
-                a.WarrantyEndDate.Value >= DateTime.Now && 
+            var assetsWithExpiringWarranty = assets.Where(a =>
+                a.WarrantyEndDate.HasValue &&
+                a.WarrantyEndDate.Value >= DateTime.Now &&
                 a.WarrantyEndDate.Value <= DateTime.Now.AddDays(60)).ToList();
 
             foreach (var asset in assetsWithExpiringWarranty)
@@ -536,7 +535,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
                 }
             }
 
-            _logger.LogInformation("Notification processed via unified service: {Title} to {RecipientCount} recipients", 
+            _logger.LogInformation("Notification processed via unified service: {Title} to {RecipientCount} recipients",
                 notification.Title, notification.Recipients.Count);
         }
         catch (Exception ex)
@@ -548,7 +547,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
 
     // Helper methods removed - would be implemented with proper recipient management in production
 
-    private string MapPriorityToString(string priority)
+    private static string MapPriorityToString(string priority)
     {
         return priority?.ToLower() switch
         {
@@ -560,7 +559,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         };
     }
 
-    private string GetStatusChangeNotificationPriority(string status)
+    private static string GetStatusChangeNotificationPriority(string status)
     {
         return status?.ToLower() switch
         {
@@ -584,10 +583,10 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Getting notifications with filter");
-            
+
             // Mock implementation - would retrieve from database
             var notifications = new List<MaintenanceNotificationDto>();
-            
+
             return new PagedResult<MaintenanceNotificationDto>
             {
                 Items = notifications,
@@ -611,7 +610,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Getting notification {NotificationId}", id);
-            
+
             // Mock implementation - would retrieve from database
             return null;
         }
@@ -659,7 +658,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
             // Create in-app notification via unified service
             // Use provided tenantId from DTO (for background service), or current user's tenant
             var effectiveTenantId = createDto.TenantId ?? tenantId;
-            
+
             if (effectiveTenantId != Guid.Empty)
             {
                 // Use explicit tenant overload for background service context
@@ -721,10 +720,10 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Creating bulk notifications for {EntityCount} entities", bulkDto.EntityIds.Count);
-            
+
             var results = new List<MaintenanceNotificationDto>();
             var recipientIds = bulkDto.RecipientIds ?? new List<Guid>();
-            
+
             // Create notification for each entity-recipient combination
             foreach (var entityId in bulkDto.EntityIds)
             {
@@ -744,7 +743,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
                             Priority = bulkDto.Priority,
                             ScheduledFor = bulkDto.ScheduledFor
                         };
-                        
+
                         var notification = await CreateNotificationAsync(createDto);
                         results.Add(notification);
                     }
@@ -764,12 +763,12 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
                         Priority = bulkDto.Priority,
                         ScheduledFor = bulkDto.ScheduledFor
                     };
-                    
+
                     var notification = await CreateNotificationAsync(createDto);
                     results.Add(notification);
                 }
             }
-            
+
             _logger.LogInformation("Created {Count} bulk notifications", results.Count);
             return results;
         }
@@ -788,7 +787,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Updating notification status {NotificationId} to {Status}", id, updateDto.Status);
-            
+
             // Mock implementation - would update in database
             var notification = new MaintenanceNotificationDto
             {
@@ -796,7 +795,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
                 Status = updateDto.Status,
                 CreatedDate = DateTime.UtcNow
             };
-            
+
             if (updateDto.Status.Equals("Read", StringComparison.OrdinalIgnoreCase))
             {
                 notification.ReadAt = DateTime.UtcNow;
@@ -806,7 +805,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
             {
                 notification.DismissedAt = DateTime.UtcNow;
             }
-            
+
             return notification;
         }
         catch (Exception ex)
@@ -824,7 +823,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Marking notification {NotificationId} as read for user {UserId}", id, userId);
-            
+
             var updateDto = new UpdateNotificationStatusDto { Status = "Read" };
             return await UpdateNotificationStatusAsync(id, updateDto);
         }
@@ -843,7 +842,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Dismissing notification {NotificationId} for user {UserId}", id, userId);
-            
+
             var updateDto = new UpdateNotificationStatusDto { Status = "Dismissed" };
             return await UpdateNotificationStatusAsync(id, updateDto);
         }
@@ -862,7 +861,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Getting unread notifications for user {UserId}", userId);
-            
+
             // Mock implementation - would retrieve from database
             return new List<MaintenanceNotificationDto>();
         }
@@ -881,7 +880,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Getting notifications for user {UserId} by type {Type}", userId, notificationType);
-            
+
             // Mock implementation - would retrieve from database
             return new List<MaintenanceNotificationDto>();
         }
@@ -966,7 +965,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Getting notification summary for user {UserId}", userId);
-            
+
             // Mock implementation - would calculate from database
             return new NotificationSummaryDto
             {
@@ -991,10 +990,10 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Deleting notifications older than {Days} days", olderThanDays);
-            
+
             // Mock implementation - would delete from database
             var deletedCount = 0;
-            
+
             _logger.LogInformation("Deleted {Count} old notifications", deletedCount);
             return deletedCount;
         }
@@ -1054,7 +1053,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         }).ToList();
     }
 
-    private string FormatNotificationEmailBody(MaintenanceNotificationDto notification, NotificationRecipientDto recipient = null)
+    private static string FormatNotificationEmailBody(MaintenanceNotificationDto notification, NotificationRecipientDto recipient = null)
     {
         var recipientSection = recipient != null ? $"<p>Dear {recipient.Name},</p>" : "";
         return $"{recipientSection}<h2>{notification.Title}</h2><p>{notification.Message}</p><p>Priority: {notification.Priority}</p>";
@@ -1094,7 +1093,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Sending job card submitted notification for job card {JobCardId}", jobCardId);
-            
+
             var dto = new CreateMaintenanceNotificationDto
             {
                 NotificationType = "JobCardSubmitted",
@@ -1123,7 +1122,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Sending job card approved notification for job card {JobCardId}", jobCardId);
-            
+
             var dto = new CreateMaintenanceNotificationDto
             {
                 NotificationType = "JobCardApproved",
@@ -1150,7 +1149,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Sending job card rejected notification for job card {JobCardId}", jobCardId);
-            
+
             var dto = new CreateMaintenanceNotificationDto
             {
                 NotificationType = "JobCardRejected",
@@ -1177,7 +1176,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Sending job card changes requested notification for job card {JobCardId}", jobCardId);
-            
+
             var dto = new CreateMaintenanceNotificationDto
             {
                 NotificationType = "JobCardChangesRequested",

@@ -1,10 +1,10 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Entities.Base;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Inventory;
-using ErpSystem.Core.Entities.Base;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Core.Entities.Maintenance;
 
@@ -27,7 +27,7 @@ public class MaintenanceAsset : TenantEntity
 
     [MaxLength(100)]
     public string? Manufacturer { get; set; }
-    
+
     [MaxLength(100)]
     public string? Model { get; set; }
 
@@ -46,14 +46,14 @@ public class MaintenanceAsset : TenantEntity
 
     [MaxLength(500)]
     public string? Location { get; set; }
-    
+
     // Building-specific location details
     [MaxLength(100)]
     public string? Building { get; set; }
-    
+
     [MaxLength(100)]
     public string? Floor { get; set; }
-    
+
     [MaxLength(100)]
     public string? Room { get; set; }
 
@@ -82,34 +82,34 @@ public class MaintenanceAsset : TenantEntity
     // Operating metrics
     public double? OperatingHours { get; set; }
     public DateTime? LastOperatingHoursUpdate { get; set; }
-    
+
     // Vehicle-specific metrics
     public double? Mileage { get; set; }
     public DateTime? LastMileageUpdate { get; set; }
-    
+
     [MaxLength(50)]
     public string? LicensePlate { get; set; }
-    
+
     [MaxLength(50)]
     public string? VIN { get; set; } // Vehicle Identification Number
-    
+
     public DateTime? LastServiceDate { get; set; }
     public DateTime? NextServiceDue { get; set; }
-    
+
     // Building-specific metrics
     public double? FloorArea { get; set; } // Square feet/meters
-    
+
     [MaxLength(50)]
     public string? EnergyRating { get; set; }
-    
+
     // Equipment-specific metrics
     public double? Capacity { get; set; }
-    
+
     [MaxLength(50)]
     public string? CapacityUnit { get; set; }
-    
+
     public double? PowerRating { get; set; } // kW, HP, etc.
-    
+
     [MaxLength(20)]
     public string? PowerUnit { get; set; }
 
@@ -166,24 +166,24 @@ public class MaintenanceAssetCategory : TenantEntity
     // Primary Maintenance Criteria
     [MaxLength(20)]
     public string MaintenanceType { get; set; } = "Time"; // 'Time', 'Distance', 'Usage', 'Cycles'
-    
+
     [MaxLength(50)]
     public string? MaintenanceFrequency { get; set; } // For time-based: 'Monthly', 'Quarterly', etc.
-    
+
     public double? MaintenanceValue { get; set; } // For non-time-based: 5000, 250, etc.
-    
+
     [MaxLength(20)]
     public string? MaintenanceUnit { get; set; } // 'km', 'miles', 'hours', 'cycles', etc.
 
     // Secondary Maintenance Criteria (for multi-criteria schedules)
     [MaxLength(20)]
     public string? SecondaryMaintenanceType { get; set; } // 'Time', 'Distance', 'Usage', 'Cycles'
-    
+
     [MaxLength(50)]
     public string? SecondaryMaintenanceFrequency { get; set; } // For time-based secondary criteria
-    
+
     public double? SecondaryMaintenanceValue { get; set; } // For non-time-based secondary criteria
-    
+
     [MaxLength(20)]
     public string? SecondaryMaintenanceUnit { get; set; } // Unit for secondary criteria
 
@@ -222,28 +222,28 @@ public class AssetType : TenantEntity
     public bool RequiresInspections { get; set; } = false;
     public bool SupportsHierarchy { get; set; } = false; // Can have child assets
     public bool RequiresSpecializedFields { get; set; } = false;
-    
+
     // Maintenance Configuration
     public int DefaultMaintenanceIntervalDays { get; set; } = 90;
     public bool RequiresPreventiveMaintenance { get; set; } = true;
     public bool RequiresConditionMonitoring { get; set; } = false;
-    
+
     // Safety and Compliance
     public bool RequiresSafetyChecks { get; set; } = false;
     public bool RequiresLockoutTagout { get; set; } = false;
     public bool RequiresPermits { get; set; } = false;
-    
+
     // Workflow Configuration
     public int DefaultWorkOrderPriority { get; set; } = 3; // 1=Critical, 5=Low
     public double DefaultEstimatedHours { get; set; } = 2.0;
-    
+
     [MaxLength(2000)]
     public string? DefaultWorkInstructions { get; set; }
-    
+
     // Custom Fields Configuration (JSON)
     [Column(TypeName = "nvarchar(max)")]
     public string? CustomFieldsConfig { get; set; }
-    
+
     // Navigation properties
     public virtual ICollection<AssetTypeField> CustomFields { get; set; } = new List<AssetTypeField>();
 }
@@ -413,7 +413,7 @@ public class AssetDischarge : TenantEntity
     public bool QualityCheckPassed { get; set; } = false;
     public Guid? QualityCheckedById { get; set; }
     public DateTime? QualityCheckDate { get; set; }
-    
+
     [MaxLength(1000)]
     public string? QualityCheckNotes { get; set; }
 
@@ -431,7 +431,7 @@ public class AssetDischarge : TenantEntity
     // Completion certificate
     public bool CertificateGenerated { get; set; } = false;
     public DateTime? CertificateGeneratedDate { get; set; }
-    
+
     [MaxLength(500)]
     public string? CertificatePath { get; set; }
 
@@ -439,21 +439,21 @@ public class AssetDischarge : TenantEntity
     public bool CustomerAcceptance { get; set; } = false;
     public Guid? AcceptedById { get; set; }
     public DateTime? AcceptedDate { get; set; }
-    
+
     [MaxLength(1000)]
     public string? AcceptanceNotes { get; set; }
 
     // Follow-up requirements
     public bool RequiresFollowUp { get; set; } = false;
     public DateTime? FollowUpDate { get; set; }
-    
+
     [MaxLength(1000)]
     public string? FollowUpInstructions { get; set; }
 
     // Warranty information
     public int WarrantyDays { get; set; } = 0;
     public DateTime? WarrantyExpiration { get; set; }
-    
+
     [MaxLength(1000)]
     public string? WarrantyTerms { get; set; }
 
@@ -614,7 +614,7 @@ public class WorkOrder : TenantEntity
 
     public DateTime? RequestedStartDate { get; set; }
     public DateTime? RequestedCompletionDate { get; set; }
-    
+
     public DateTime? ActualStartDate { get; set; }
     public DateTime? ActualCompletionDate { get; set; }
 
@@ -630,7 +630,7 @@ public class WorkOrder : TenantEntity
     public Guid? RequestedById { get; set; }
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedAt { get; set; }
-    
+
     public Guid? SupervisorId { get; set; }
     public Guid? CompletedById { get; set; }
     public Guid? QualityCheckedById { get; set; }
@@ -665,7 +665,7 @@ public class WorkOrder : TenantEntity
 
     [Column(TypeName = "nvarchar(max)")]
     public string? CustomFields { get; set; } // JSON string for additional fields
-    
+
     // Dynamic custom field values based on AssetType configuration
     [Column(TypeName = "nvarchar(max)")]
     public string? CustomFieldValues { get; set; } // JSON object with field values
@@ -795,7 +795,7 @@ public class MaintenanceType : TenantEntity
 
     // Priority and criticality
     public int DefaultPriority { get; set; } = 3; // 1=Critical, 2=High, 3=Medium, 4=Low, 5=Deferred
-    
+
     [MaxLength(20)]
     public string Criticality { get; set; } = "Medium"; // Critical, High, Medium, Low
 
@@ -936,39 +936,39 @@ public class JobCard : TenantEntity
     // Approval workflow tracking
     [MaxLength(20)]
     public string JobCardStatus { get; set; } = "Draft"; // Draft, Submitted, UnderReview, Approved, Rejected, Cancelled
-    
+
     /// <summary>
     /// Current approval status
     /// </summary>
     [MaxLength(50)]
     public string ApprovalStatus { get; set; } = "Draft";
-    
+
     /// <summary>
     /// User who submitted for approval
     /// </summary>
     public Guid? SubmittedById { get; set; }
-    
+
     /// <summary>
     /// Date submitted for approval
     /// </summary>
     public DateTime? SubmittedDate { get; set; }
-    
+
     /// <summary>
     /// User who approved
     /// </summary>
     public Guid? ApprovedById { get; set; }
-    
+
     /// <summary>
     /// Date approved
     /// </summary>
     public DateTime? ApprovedDate { get; set; }
-    
+
     /// <summary>
     /// Approval comments
     /// </summary>
     [MaxLength(1000)]
     public string? ApprovalComments { get; set; }
-    
+
     /// <summary>
     /// Workflow instance ID if using workflow engine
     /// </summary>
@@ -990,33 +990,33 @@ public class JobCard : TenantEntity
     // Asset Admission (replaces AssetAdmission table)
     [MaxLength(20)]
     public string? AssetConditionOnAdmission { get; set; } // Excellent, Good, Fair, Poor, Critical
-    
+
     public decimal? MileageReadingOnAdmission { get; set; }
     public decimal? HoursReadingOnAdmission { get; set; }
     public decimal? FuelLevelOnAdmission { get; set; }
-    
+
     [MaxLength(2000)]
     public string? AdmissionNotes { get; set; }
-    
+
     [MaxLength(100)]
     public string? BayOrStation { get; set; }
 
     // Job Card Completion (replaces AssetDischarge table)
     public DateTime? CompletedDate { get; set; }
-    
+
     [MaxLength(2000)]
     public string? CompletionNotes { get; set; }
-    
+
     [MaxLength(20)]
     public string? AssetConditionOnCompletion { get; set; } // Excellent, Good, Fair, Poor, Critical
-    
+
     public decimal? MileageReadingOnCompletion { get; set; }
     public decimal? HoursReadingOnCompletion { get; set; }
     public decimal? FuelLevelOnCompletion { get; set; }
-    
+
     [MaxLength(2000)]
     public string? WorkCompletedSummary { get; set; }
-    
+
     [MaxLength(2000)]
     public string? RemainingIssues { get; set; }
 
@@ -1024,7 +1024,7 @@ public class JobCard : TenantEntity
     public bool QualityCheckPassed { get; set; } = false;
     public Guid? QualityCheckedById { get; set; }
     public DateTime? QualityCheckDate { get; set; }
-    
+
     [MaxLength(2000)]
     public string? QualityCheckNotes { get; set; }
 
@@ -1036,21 +1036,21 @@ public class JobCard : TenantEntity
     public bool CustomerAcceptance { get; set; } = false;
     public Guid? AcceptedById { get; set; }
     public DateTime? AcceptedDate { get; set; }
-    
+
     [MaxLength(1000)]
     public string? AcceptanceNotes { get; set; }
 
     // Follow-up
     public bool RequiresFollowUp { get; set; } = false;
     public DateTime? FollowUpDate { get; set; }
-    
+
     [MaxLength(1000)]
     public string? FollowUpInstructions { get; set; }
 
     // Warranty
     public int WarrantyDays { get; set; } = 0;
     public DateTime? WarrantyExpiration { get; set; }
-    
+
     [MaxLength(1000)]
     public string? WarrantyTerms { get; set; }
 
@@ -1248,7 +1248,7 @@ public class WorkOrderTask : TenantEntity
     /// ID of the user (ApplicationUser) assigned as technician for this task
     /// </summary>
     public Guid? AssignedTechnicianId { get; set; }
-    
+
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
 
@@ -1298,10 +1298,10 @@ public class WorkOrderPart : TenantEntity
 
     // Location and tracking
     public Guid? WarehouseLocationId { get; set; } // Where the part should be picked from
-    
+
     [MaxLength(100)]
     public string? SerialNumber { get; set; }
-    
+
     [MaxLength(100)]
     public string? LotNumber { get; set; }
 
@@ -1311,7 +1311,7 @@ public class WorkOrderPart : TenantEntity
 
     // Allocation tracking
     public Guid? AllocationId { get; set; } // Link to InventoryAllocation
-    
+
     public DateTime? AllocatedAt { get; set; }
     public DateTime? PickedAt { get; set; }
     public DateTime? UsedAt { get; set; }
@@ -1321,16 +1321,16 @@ public class WorkOrderPart : TenantEntity
 
     // Navigation properties
     public virtual WorkOrder WorkOrder { get; set; } = null!;
-    
+
     // References to Inventory Module
     // Note: Navigation properties are defined here but DbContext configuration
     // will handle the relationships to avoid circular dependencies
     [ForeignKey("InventoryItemId")]
     public virtual InventoryItem? InventoryItem { get; set; }
-    
+
     [ForeignKey("WarehouseLocationId")]
     public virtual WarehouseLocation? WarehouseLocation { get; set; }
-    
+
     [ForeignKey("AllocationId")]
     public virtual InventoryAllocation? Allocation { get; set; }
 }
@@ -1430,43 +1430,43 @@ public class AssetTaskTemplate : TenantEntity
 {
     [Required]
     public Guid AssetId { get; set; }
-    
+
     [Required]
     public Guid MaintenanceTypeId { get; set; }
-    
+
     [Required]
     [MaxLength(200)]
     public string TaskName { get; set; } = string.Empty;
-    
+
     [MaxLength(1000)]
     public string? Description { get; set; }
-    
+
     [Required]
     public int Sequence { get; set; } = 1;
-    
+
     public double EstimatedHours { get; set; } = 0;
-    
+
     public bool IsRequired { get; set; } = true;
-    
+
     /// <summary>
     /// ID of the user (ApplicationUser) assigned as technician template default
     /// </summary>
     public Guid? AssignedTechnicianId { get; set; }
-    
+
     [MaxLength(1000)]
     public string? Instructions { get; set; }
-    
+
     [MaxLength(1000)]
     public string? SafetyRequirements { get; set; }
-    
+
     [MaxLength(1000)]
     public string? RequiredTools { get; set; }
-    
+
     [MaxLength(1000)]
     public string? RequiredParts { get; set; }
-    
+
     public bool IsActive { get; set; } = true;
-    
+
     // Navigation properties
     public virtual MaintenanceAsset Asset { get; set; } = null!;
     public virtual MaintenanceType MaintenanceType { get; set; } = null!;
@@ -1481,43 +1481,43 @@ public class AssetTypeTaskTemplate : TenantEntity
 {
     [Required]
     public Guid AssetTypeId { get; set; }
-    
+
     [Required]
     public Guid MaintenanceTypeId { get; set; }
-    
+
     [Required]
     [MaxLength(200)]
     public string TaskName { get; set; } = string.Empty;
-    
+
     [MaxLength(1000)]
     public string? Description { get; set; }
-    
+
     [Required]
     public int Sequence { get; set; } = 1;
-    
+
     public double EstimatedHours { get; set; } = 0;
-    
+
     public bool IsRequired { get; set; } = true;
-    
+
     /// <summary>
     /// ID of the user (ApplicationUser) assigned as technician template default
     /// </summary>
     public Guid? AssignedTechnicianId { get; set; }
-    
+
     [MaxLength(1000)]
     public string? Instructions { get; set; }
-    
+
     [MaxLength(1000)]
     public string? SafetyRequirements { get; set; }
-    
+
     [MaxLength(1000)]
     public string? RequiredTools { get; set; }
-    
+
     [MaxLength(1000)]
     public string? RequiredParts { get; set; }
-    
+
     public bool IsActive { get; set; } = true;
-    
+
     // Navigation properties
     public virtual AssetType AssetType { get; set; } = null!;
     public virtual MaintenanceType MaintenanceType { get; set; } = null!;
@@ -1531,34 +1531,34 @@ public class MaintenanceTaskTemplate : TenantEntity
 {
     [Required]
     public Guid MaintenanceTypeId { get; set; }
-    
+
     [Required]
     [MaxLength(200)]
     public string TaskName { get; set; } = string.Empty;
-    
+
     [MaxLength(1000)]
     public string? Description { get; set; }
-    
+
     [Required]
     public int Sequence { get; set; } = 1;
-    
+
     public double EstimatedHours { get; set; } = 0;
-    
+
     public bool IsRequired { get; set; } = true;
-    
+
     /// <summary>
     /// ID of the user (ApplicationUser) assigned as technician template default
     /// </summary>
     public Guid? AssignedTechnicianId { get; set; }
-    
+
     [MaxLength(1000)]
     public string? Instructions { get; set; }
-    
+
     [MaxLength(1000)]
     public string? SafetyRequirements { get; set; }
-    
+
     public bool IsActive { get; set; } = true;
-    
+
     // Navigation properties
     public virtual MaintenanceType MaintenanceType { get; set; } = null!;
     public virtual Employee? AssignedTechnician { get; set; }
@@ -1923,61 +1923,61 @@ public class SafetyComplianceRecord : TenantEntity
 {
     [Required]
     public Guid SafetyProtocolId { get; set; }
-    
+
     // Alias for compatibility with services
-    public Guid ProtocolId 
-    { 
-        get => SafetyProtocolId; 
-        set => SafetyProtocolId = value; 
+    public Guid ProtocolId
+    {
+        get => SafetyProtocolId;
+        set => SafetyProtocolId = value;
     }
-    
+
     [Required]
     public Guid TechnicianId { get; set; }
-    
+
     public Guid? WorkOrderId { get; set; }
-    
+
     [Required]
     public DateTime ComplianceDate { get; set; }
-    
+
     // Alias for compatibility with services
-    public DateTime CheckDate 
-    { 
-        get => ComplianceDate; 
-        set => ComplianceDate = value; 
+    public DateTime CheckDate
+    {
+        get => ComplianceDate;
+        set => ComplianceDate = value;
     }
-    
+
     [Required]
     [MaxLength(20)]
     public string ComplianceStatus { get; set; } = string.Empty; // Compliant, NonCompliant, PartialCompliance
-    
+
     [MaxLength(2000)]
     public string? Notes { get; set; }
-    
+
     public bool IsCompliant { get; set; }
-    
+
     [MaxLength(50)]
     public string? ViolationType { get; set; }
-    
+
     [MaxLength(2000)]
     public string? CorrectiveActions { get; set; }
-    
+
     public DateTime? CorrectiveActionDueDate { get; set; }
-    
+
     // Additional properties for service compatibility
     [Column(TypeName = "nvarchar(max)")]
     public string? ChecklistItems { get; set; } // JSON serialized list of checklist items
-    
+
     [Column(TypeName = "nvarchar(max)")]
     public string? Violations { get; set; } // JSON serialized list of violations
-    
+
     public Guid? InspectorId { get; set; }
-    
+
     [MaxLength(2000)]
     public string? InspectorNotes { get; set; }
-    
+
     public Guid? VerifiedById { get; set; }
     public DateTime? VerifiedDate { get; set; }
-    
+
     // Navigation properties
     public virtual SafetyProtocol SafetyProtocol { get; set; } = null!;
     public virtual Employee Technician { get; set; } = null!;

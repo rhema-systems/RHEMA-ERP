@@ -70,13 +70,13 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
                     ActiveProtocols = safetyMetrics?.ActiveProtocols ?? 0,
                     ComplianceRate = (decimal)(safetyMetrics?.OverallComplianceRate ?? 0)
                 },
-                
+
                 WorkOrdersByStatus = workOrderMetrics?.WorkOrdersByStatus ?? new Dictionary<string, int>(),
-                
+
                 WorkOrdersByPriority = workOrderMetrics?.WorkOrdersByPriority ?? new Dictionary<string, int>(),
-                
+
                 AssetsByStatus = assetMetrics?.AssetsByStatus ?? new Dictionary<string, int>(),
-                
+
                 MaintenanceKPIs = new MaintenanceKPIsDto
                 {
                     MTTR = workOrderMetrics?.MTTR ?? 0,
@@ -88,9 +88,9 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
                 },
 
                 UpcomingMaintenance = new List<MaintenanceScheduleDto>(), // TODO: Convert UpcomingMaintenanceDto to MaintenanceScheduleDto
-                
+
                 RecentAlerts = await GetRecentAlertsAsync(10),
-                
+
                 TopIssues = new List<string>() // TODO: Convert TopIssueDto to string list
             };
 
@@ -165,10 +165,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         {
             _logger.LogInformation("Generating asset performance report for asset {AssetId}", assetId);
 
-            var asset = await _assetService.GetAssetByIdAsync(assetId);
-            if (asset == null)
-                throw new ArgumentException($"Asset with ID {assetId} not found");
-
+            var asset = await _assetService.GetAssetByIdAsync(assetId) ?? throw new ArgumentException($"Asset with ID {assetId} not found");
             var workOrders = await _workOrderService.GetWorkOrdersByAssetAsync(assetId);
             var periodWorkOrders = workOrders.Where(wo => wo.ScheduledStartDate >= startDate && wo.ScheduledStartDate <= endDate).ToList();
 
@@ -178,23 +175,23 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
                 AssetName = asset.Name,
                 AssetNumber = asset.AssetNumber,
                 ReportPeriod = $"{startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd}",
-                
+
                 TotalWorkOrders = periodWorkOrders.Count,
                 CompletedWorkOrders = periodWorkOrders.Count(wo => wo.Status == "Completed"),
                 PlannedWorkOrders = periodWorkOrders.Count(wo => wo.WorkOrderSource == "Scheduled"),
                 UnplannedWorkOrders = periodWorkOrders.Count(wo => wo.WorkOrderSource != "Scheduled"),
-                
+
                 TotalDowntime = CalculateTotalDowntime(periodWorkOrders),
                 AverageRepairTime = CalculateAverageRepairTime(periodWorkOrders),
-                
+
                 MaintenanceCost = periodWorkOrders.Sum(wo => wo.ActualCost),
                 LaborHours = periodWorkOrders.Sum(wo => wo.ActualHours),
-                
+
                 Availability = CalculateAssetAvailability(asset, periodWorkOrders, startDate, endDate),
                 Reliability = CalculateAssetReliability(periodWorkOrders, startDate, endDate),
-                
+
                 MaintenanceHistory = new List<MaintenanceHistoryItemDto>(), // TODO: Convert WorkOrderListDto to MaintenanceHistoryItemDto
-                
+
                 Recommendations = GenerateAssetRecommendations(asset, periodWorkOrders)
             };
         }
@@ -228,26 +225,26 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
             return new MaintenanceCostAnalysisDto
             {
                 ReportPeriod = $"{startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd}",
-                
+
                 TotalMaintenanceCost = completedWorkOrders.Sum(wo => wo.ActualCost),
                 LaborCost = completedWorkOrders.Sum(wo => CalculateLaborCost(wo)),
                 PartsCost = completedWorkOrders.Sum(wo => CalculatePartsCost(wo)),
                 ContractorCost = completedWorkOrders.Sum(wo => CalculateContractorCost(wo)),
-                
+
                 PlannedMaintenanceCost = completedWorkOrders
                     .Where(wo => wo.WorkOrderSource == "Scheduled")
                     .Sum(wo => wo.ActualCost),
-                
+
                 UnplannedMaintenanceCost = completedWorkOrders
                     .Where(wo => wo.WorkOrderSource != "Scheduled")
                     .Sum(wo => wo.ActualCost),
-                
+
                 CostByCategory = new List<CostByCategoryDto>(), // TODO: Convert Dictionary to List
                 CostByAsset = new List<CostByAssetDto>(), // TODO: Convert Dictionary to List
                 CostTrend = new List<TrendDataPointDto>(), // TODO: Convert MonthlyCostDto to TrendDataPointDto
-                
+
                 BudgetVariance = (double)await CalculateBudgetVarianceAsync(startDate, endDate),
-                CostPerWorkOrder = completedWorkOrders.Any() ? 
+                CostPerWorkOrder = completedWorkOrders.Any() ?
                     (double)(completedWorkOrders.Sum(wo => wo.ActualCost) / completedWorkOrders.Count) : 0
             };
         }
@@ -341,9 +338,12 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         };
     }
 
-    private double CalculateMTTR(List<WorkOrderListDto> completedWorkOrders)
+    private static double CalculateMTTR(List<WorkOrderListDto> completedWorkOrders)
     {
-        if (!completedWorkOrders.Any()) return 0;
+        if (!completedWorkOrders.Any())
+        {
+            return 0;
+        }
 
         var totalRepairTime = completedWorkOrders
             .Where(wo => wo.ActualStartDate.HasValue && wo.ActualEndDate.HasValue)
@@ -352,50 +352,59 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         return totalRepairTime / completedWorkOrders.Count;
     }
 
-    private double CalculateFirstTimeFixRate(List<WorkOrderListDto> completedWorkOrders)
+    private static double CalculateFirstTimeFixRate(List<WorkOrderListDto> completedWorkOrders)
     {
-        if (!completedWorkOrders.Any()) return 0;
+        if (!completedWorkOrders.Any())
+        {
+            return 0;
+        }
 
         // Mock calculation - in reality would check for rework or repeat issues
         var firstTimeFixes = completedWorkOrders.Count(wo => !wo.Title.Contains("Rework"));
         return (double)firstTimeFixes / completedWorkOrders.Count * 100;
     }
 
-    private async Task<double> CalculateScheduleComplianceAsync(DateTime startDate, DateTime endDate)
+    private static async Task<double> CalculateScheduleComplianceAsync(DateTime startDate, DateTime endDate)
     {
         // Mock calculation - in reality would compare scheduled vs actual completion dates
         return 87.3;
     }
 
-    private double CalculatePlannedMaintenancePercentage(IEnumerable<WorkOrderListDto> workOrders)
+    private static double CalculatePlannedMaintenancePercentage(IEnumerable<WorkOrderListDto> workOrders)
     {
-        if (!workOrders.Any()) return 0;
+        if (!workOrders.Any())
+        {
+            return 0;
+        }
 
         var plannedWorkOrders = workOrders.Count(wo => wo.WorkOrderSource == "Scheduled");
         return (double)plannedWorkOrders / workOrders.Count() * 100;
     }
 
-    private async Task<double> CalculateMTBFAsync(DateTime startDate, DateTime endDate)
+    private static async Task<double> CalculateMTBFAsync(DateTime startDate, DateTime endDate)
     {
         // Mock calculation - Mean Time Between Failures
         return 720.5; // hours
     }
 
-    private async Task<double> CalculateOEEAsync(DateTime startDate, DateTime endDate)
+    private static async Task<double> CalculateOEEAsync(DateTime startDate, DateTime endDate)
     {
         // Mock calculation - Overall Equipment Effectiveness
         return 78.2; // percentage
     }
 
-    private async Task<decimal> CalculateMaintenanceCostPerAssetAsync(DateTime startDate, DateTime endDate)
+    private static async Task<decimal> CalculateMaintenanceCostPerAssetAsync(DateTime startDate, DateTime endDate)
     {
         // Mock calculation
         return 2350.75m;
     }
 
-    private double CalculateAverageWorkOrderDuration(List<WorkOrderListDto> completedWorkOrders)
+    private static double CalculateAverageWorkOrderDuration(List<WorkOrderListDto> completedWorkOrders)
     {
-        if (!completedWorkOrders.Any()) return 0;
+        if (!completedWorkOrders.Any())
+        {
+            return 0;
+        }
 
         var totalDuration = completedWorkOrders
             .Where(wo => wo.ActualStartDate.HasValue && wo.ActualEndDate.HasValue)
@@ -404,13 +413,13 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         return totalDuration / completedWorkOrders.Count;
     }
 
-    private async Task<double> CalculatePreventiveMaintenanceRatioAsync(DateTime startDate, DateTime endDate)
+    private static async Task<double> CalculatePreventiveMaintenanceRatioAsync(DateTime startDate, DateTime endDate)
     {
         // Mock calculation
         return 65.8; // percentage
     }
 
-    private async Task<List<UpcomingMaintenanceDto>> GetUpcomingMaintenanceAsync(int days)
+    private static async Task<List<UpcomingMaintenanceDto>> GetUpcomingMaintenanceAsync(int days)
     {
         // Mock data - would be retrieved from actual schedules
         return new List<UpcomingMaintenanceDto>
@@ -425,7 +434,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         };
     }
 
-    private async Task<List<MaintenanceAlertDto>> GetRecentAlertsAsync(int count)
+    private static async Task<List<MaintenanceAlertDto>> GetRecentAlertsAsync(int count)
     {
         // Mock data - would be retrieved from actual alerts system
         return new List<MaintenanceAlertDto>
@@ -440,7 +449,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         };
     }
 
-    private async Task<List<TopIssueDto>> GetTopIssuesAsync(int count)
+    private static async Task<List<TopIssueDto>> GetTopIssuesAsync(int count)
     {
         // Mock data - would be calculated from work order patterns
         return new List<TopIssueDto>
@@ -455,61 +464,65 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         };
     }
 
-    private double CalculateTotalDowntime(List<WorkOrderListDto> workOrders)
+    private static double CalculateTotalDowntime(List<WorkOrderListDto> workOrders)
     {
         // Mock calculation
         return workOrders.Sum(wo => wo.ActualHours);
     }
 
-    private double CalculateAverageRepairTime(List<WorkOrderListDto> workOrders)
+    private static double CalculateAverageRepairTime(List<WorkOrderListDto> workOrders)
     {
         return workOrders.Any() ? workOrders.Average(wo => wo.ActualHours) : 0;
     }
 
-    private double CalculateAssetAvailability(MaintenanceAssetDto asset, List<WorkOrderListDto> workOrders, DateTime startDate, DateTime endDate)
+    private static double CalculateAssetAvailability(MaintenanceAssetDto asset, List<WorkOrderListDto> workOrders, DateTime startDate, DateTime endDate)
     {
         // Mock calculation - Asset Availability
         return 92.5; // percentage
     }
 
-    private double CalculateAssetReliability(List<WorkOrderListDto> workOrders, DateTime startDate, DateTime endDate)
+    private static double CalculateAssetReliability(List<WorkOrderListDto> workOrders, DateTime startDate, DateTime endDate)
     {
         // Mock calculation - Asset Reliability
         return 88.7; // percentage
     }
 
-    private List<string> GenerateAssetRecommendations(MaintenanceAssetDto asset, List<WorkOrderListDto> workOrders)
+    private static List<string> GenerateAssetRecommendations(MaintenanceAssetDto asset, List<WorkOrderListDto> workOrders)
     {
         var recommendations = new List<string>();
 
         if (workOrders.Count(wo => wo.WorkOrderSource != "Scheduled") > workOrders.Count * 0.3)
+        {
             recommendations.Add("Consider increasing preventive maintenance frequency");
+        }
 
         if (workOrders.Any(wo => wo.ActualCost > 5000))
+        {
             recommendations.Add("Review high-cost maintenance patterns");
+        }
 
         return recommendations;
     }
 
-    private decimal CalculateLaborCost(WorkOrderListDto workOrder)
+    private static decimal CalculateLaborCost(WorkOrderListDto workOrder)
     {
         // Mock calculation - would calculate from labor records
         return (decimal)workOrder.ActualHours * 75m; // $75/hour average
     }
 
-    private decimal CalculatePartsCost(WorkOrderListDto workOrder)
+    private static decimal CalculatePartsCost(WorkOrderListDto workOrder)
     {
         // Mock calculation - would calculate from parts usage
         return workOrder.ActualCost * 0.6m; // Assume 60% is parts
     }
 
-    private decimal CalculateContractorCost(WorkOrderListDto workOrder)
+    private static decimal CalculateContractorCost(WorkOrderListDto workOrder)
     {
         // Mock calculation - would calculate from contractor records
         return workOrder.ActualCost * 0.15m; // Assume 15% is contractor cost
     }
 
-    private Dictionary<string, decimal> GroupCostByCategory(List<WorkOrderListDto> workOrders)
+    private static Dictionary<string, decimal> GroupCostByCategory(List<WorkOrderListDto> workOrders)
     {
         // Mock grouping
         return new Dictionary<string, decimal>
@@ -519,14 +532,14 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         };
     }
 
-    private Dictionary<string, decimal> GroupCostByAsset(List<WorkOrderListDto> workOrders)
+    private static Dictionary<string, decimal> GroupCostByAsset(List<WorkOrderListDto> workOrders)
     {
         return workOrders
             .GroupBy(wo => wo.AssetName ?? "Unknown")
             .ToDictionary(g => g.Key, g => g.Sum(wo => wo.ActualCost));
     }
 
-    private List<MonthlyCostDto> CalculateCostTrend(List<WorkOrderListDto> workOrders, DateTime startDate, DateTime endDate)
+    private static List<MonthlyCostDto> CalculateCostTrend(List<WorkOrderListDto> workOrders, DateTime startDate, DateTime endDate)
     {
         // Mock trend calculation
         return workOrders
@@ -540,7 +553,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
             .ToList();
     }
 
-    private async Task<decimal> CalculateBudgetVarianceAsync(DateTime startDate, DateTime endDate)
+    private static async Task<decimal> CalculateBudgetVarianceAsync(DateTime startDate, DateTime endDate)
     {
         // Mock calculation - would compare against budget
         return -15000m; // $15k under budget
@@ -696,7 +709,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
 
     #region Helper Methods for Mock Data
 
-    private List<TrendDataPointDto> GenerateMockTrendData(DateTime startDate, DateTime endDate, string metricType)
+    private static List<TrendDataPointDto> GenerateMockTrendData(DateTime startDate, DateTime endDate, string metricType)
     {
         var trendData = new List<TrendDataPointDto>();
         var currentDate = startDate;
@@ -726,7 +739,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         return trendData;
     }
 
-    private List<WorkOrderTypeMetricDto> GenerateMockTypeDistribution()
+    private static List<WorkOrderTypeMetricDto> GenerateMockTypeDistribution()
     {
         return new List<WorkOrderTypeMetricDto>
         {
@@ -737,7 +750,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         };
     }
 
-    private List<TechnicianUtilizationDto> GenerateMockTechnicianStats()
+    private static List<TechnicianUtilizationDto> GenerateMockTechnicianStats()
     {
         return new List<TechnicianUtilizationDto>
         {
@@ -747,7 +760,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         };
     }
 
-    private List<AssetReliabilityDto> GenerateMockAssetReliabilities()
+    private static List<AssetReliabilityDto> GenerateMockAssetReliabilities()
     {
         return new List<AssetReliabilityDto>
         {
@@ -757,7 +770,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         };
     }
 
-    private List<FailureModeAnalysisDto> GenerateMockFailureModes()
+    private static List<FailureModeAnalysisDto> GenerateMockFailureModes()
     {
         return new List<FailureModeAnalysisDto>
         {

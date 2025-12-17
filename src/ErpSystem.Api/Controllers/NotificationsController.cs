@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -39,12 +39,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -52,7 +52,7 @@ namespace ErpSystem.Api.Controllers
 
                 var notifications = await _notificationService.GetNotificationsAsync(
                     userId.Value, tenantId.Value, page, pageSize, unreadOnly, type, severity);
-                
+
                 return Ok(notifications);
             }
             catch (Exception ex)
@@ -73,12 +73,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -86,7 +86,7 @@ namespace ErpSystem.Api.Controllers
 
                 var notifications = await _notificationService.GetNotificationsAsync(
                     userId.Value, tenantId.Value, 1, limit, unreadOnly: true);
-                
+
                 return Ok(notifications.Items);
             }
             catch (Exception ex)
@@ -106,12 +106,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -137,12 +137,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -173,12 +173,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -204,12 +204,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -240,12 +240,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -253,7 +253,7 @@ namespace ErpSystem.Api.Controllers
 
                 var notification = await _notificationService.CreateNotificationAsync(
                     createNotificationDto, userId.Value, tenantId.Value);
-                
+
                 return CreatedAtAction(nameof(GetNotification), new { notificationId = notification.Id }, notification);
             }
             catch (Exception ex)
@@ -273,12 +273,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -310,12 +310,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -344,7 +344,7 @@ namespace ErpSystem.Api.Controllers
                 {
                     return BadRequest("UserId not found in token");
                 }
-                
+
                 var preferences = await _notificationService.GetPreferencesAsync(userId.Value);
                 return Ok(preferences);
             }
@@ -368,7 +368,7 @@ namespace ErpSystem.Api.Controllers
                 {
                     return BadRequest("UserId not found in token");
                 }
-                
+
                 var preferences = await _notificationService.UpdatePreferencesAsync(userId.Value, preferencesDto);
                 return Ok(preferences);
             }
@@ -392,7 +392,7 @@ namespace ErpSystem.Api.Controllers
                 {
                     return BadRequest("UserId not found in token");
                 }
-                
+
                 await _notificationService.SubscribeToPushNotificationsAsync(userId.Value, subscriptionDto);
                 return Ok(new { message = "Successfully subscribed to push notifications" });
             }
@@ -416,7 +416,7 @@ namespace ErpSystem.Api.Controllers
                 {
                     return BadRequest("UserId not found in token");
                 }
-                
+
                 await _notificationService.UnsubscribeFromPushNotificationsAsync(userId.Value, subscriptionDto);
                 return Ok(new { message = "Successfully unsubscribed from push notifications" });
             }
@@ -438,7 +438,7 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var tenantId = _currentUserService.TenantId;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -446,7 +446,7 @@ namespace ErpSystem.Api.Controllers
 
                 var isSuperAdmin = User.IsInRole("SuperAdmin");
                 var statistics = await _notificationService.GetStatisticsAsync(tenantId.Value, period, isSuperAdmin);
-                
+
                 return Ok(statistics);
             }
             catch (Exception ex)
@@ -467,12 +467,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -498,7 +498,7 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var tenantId = _currentUserService.TenantId;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -530,7 +530,7 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var tenantId = _currentUserService.TenantId;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -556,12 +556,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");

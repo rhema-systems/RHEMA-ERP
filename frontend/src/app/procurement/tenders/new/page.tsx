@@ -1,0 +1,758 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
+import { ArrowLeft, ArrowRight, Save, FileText, Package, Upload, DollarSign, Users, CheckCircle2, ClipboardList } from 'lucide-react';
+import { toast } from 'sonner';
+import { tenderService, type CreateTenderDto, type CreateTenderItemDto, type TenderDocumentDto } from '@/services/tenderService';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+
+// Import step components (we'll create these)
+import BasicInformation from '@/components/procurement/tenders/BasicInformation';
+import TenderItems from '@/components/procurement/tenders/TenderItems';
+import TenderDocuments from '@/components/procurement/tenders/TenderDocuments';
+import TenderFees from '@/components/procurement/tenders/TenderFees';
+import TenderInvitations from '@/components/procurement/tenders/TenderInvitations';
+import TenderReview from '@/components/procurement/tenders/TenderReview';
+import TenderProposals from '@/components/procurement/tenders/TenderProposals';
+
+const STEPS = [
+  { id: 1, name: 'Basic Information', icon: FileText, component: 'BasicInformation' },
+  { id: 2, name: 'Tender Lots', icon: Package, component: 'TenderItems' },
+  { id: 3, name: 'Proposal', icon: ClipboardList, component: 'TenderProposals' },
+  { id: 4, name: 'Documents', icon: Upload, component: 'TenderDocuments' },
+  { id: 5, name: 'Fees', icon: DollarSign, component: 'TenderFees' },
+  { id: 6, name: 'Invitations', icon: Users, component: 'TenderInvitations' },
+  { id: 7, name: 'Review & Submit', icon: CheckCircle2, component: 'TenderReview' },
+];
+
+export interface DocumentRequirement {
+  documentType: string;
+  documentName: string;
+  isRequired: boolean;
+  description: string;
+  maxFileSizeMB: number;
+  allowedFileTypes: string;
+}
+
+export interface TenderFormData {
+  // Basic Information
+  title: string;
+  description: string;
+  tenderType: string;
+  submissionDeadline: string;
+  openingDate: string;
+  estimatedValue: number | null;
+  currency: string;
+  minimumPerformanceRating: number | null;
+  requiresPrequalification: boolean;
+  allowPartialBids: boolean;
+  priceWeightage: number;
+  qualityWeightage: number;
+  deliveryWeightage: number;
+  experienceWeightage: number;
+  evaluationCriteriaJson: string;
+  notes: string;
+  termsAndConditions: string;
+
+  // Evaluation Template
+  evaluationTemplateId: string | null;
+  evaluationTemplateName: string;
+
+  // Tender Items
+  items: CreateTenderItemDto[];
+
+  // Document Requirements (for bidders to upload)
+  documentRequirements: DocumentRequirement[];
+
+  // Acceptance Declaration
+  requiresAcceptanceDeclaration: boolean;
+  acceptanceDeclarationFile: File | null;
+  acceptanceDeclarationDocumentName: string;
+
+  // Proposal Template (for bidders to download - single template for both technical & commercial proposals)
+  proposalTemplateFile: File | null;
+  proposalTemplateName: string;
+
+  // Documents (will be uploaded separately)
+  documents: Array<{
+    documentType: string;
+    documentName: string;
+    file: File;
+  }>;
+
+  // Fees
+  fees: Array<{
+    id?: string;
+    feeType: string;
+    amount: number;
+    currency: string;
+    paymentMethod: string;
+    isMandatory: boolean;
+    dueDate: string;
+    description: string;
+    bankAccountDetails?: string;
+  }>;
+
+  // Invitations
+  invitations: Array<{
+    id?: string;
+    businessPartnerId: string;
+    businessPartnerName: string;
+    invitedDate: string;
+    status: string;
+    viewedDate?: string;
+    responseDate?: string;
+    declineReason?: string;
+  }>;
+}
+
+// Validation functions for each step
+const validateStep1 = (formData: TenderFormData): string[] => {
+  const errors: string[] = [];
+  if (!formData.title?.trim()) errors.push('Title is required');
+  if (!formData.tenderType) errors.push('Tender Type is required');
+  if (!formData.submissionDeadline) errors.push('Submission Deadline is required');
+
+  // Validate evaluation template is selected
+  if (!formData.evaluationTemplateId) {
+    errors.push('Evaluation Template is required');
+  }
+
+  return errors;
+};
+
+const validateStep2 = (formData: TenderFormData): string[] => {
+  const errors: string[] = [];
+  if (!formData.items || formData.items.length === 0) {
+    errors.push('At least one tender item is required');
+  }
+  return errors;
+};
+
+const validateStep3 = (formData: TenderFormData): string[] => {
+  // Documents are optional
+  return [];
+};
+
+const validateStep4 = (formData: TenderFormData): string[] => {
+  // Proposals are optional
+  return [];
+};
+
+const validateStep5 = (formData: TenderFormData): string[] => {
+  // Fees are optional
+  return [];
+};
+
+const validateStep6 = (formData: TenderFormData): string[] => {
+  // Invitations are optional (can be sent later)
+  return [];
+};
+
+export default function NewTenderPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [currentStep, setCurrentStep] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [tenderId, setTenderId] = useState<string | null>(null);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [tenderDocuments, setTenderDocuments] = useState<TenderDocumentDto[]>([]);
+
+  // Load tenderId from URL query parameter if it exists
+  useEffect(() => {
+    const tenderIdFromUrl = searchParams.get('tenderId');
+    if (tenderIdFromUrl) {
+      console.log('Loading tenderId from URL:', tenderIdFromUrl);
+      setTenderId(tenderIdFromUrl);
+    }
+  }, [searchParams]);
+
+  // Fetch tender documents when entering review step
+  useEffect(() => {
+    const fetchTenderDocuments = async () => {
+      if (tenderId && currentStep === 7) {
+        try {
+          const tender = await tenderService.getTenderById(tenderId);
+          if (tender.documents) {
+            setTenderDocuments(tender.documents);
+          }
+        } catch (error) {
+          console.error('Error fetching tender documents:', error);
+        }
+      }
+    };
+    fetchTenderDocuments();
+  }, [tenderId, currentStep]);
+  
+  const [formData, setFormData] = useState<TenderFormData>({
+    title: '',
+    description: '',
+    tenderType: 'RFQ',
+    submissionDeadline: '',
+    openingDate: '',
+    estimatedValue: null,
+    currency: 'USD',
+    minimumPerformanceRating: null,
+    requiresPrequalification: false,
+    allowPartialBids: false,
+    priceWeightage: 40,
+    qualityWeightage: 30,
+    deliveryWeightage: 20,
+    experienceWeightage: 10,
+    evaluationCriteriaJson: '',
+    notes: '',
+    termsAndConditions: '',
+    evaluationTemplateId: null,
+    evaluationTemplateName: '',
+    items: [],
+    documentRequirements: [],
+    requiresAcceptanceDeclaration: false,
+    acceptanceDeclarationFile: null,
+    acceptanceDeclarationDocumentName: '',
+    proposalTemplateFile: null,
+    proposalTemplateName: '',
+    documents: [],
+    fees: [],
+    invitations: [],
+  });
+
+  const updateFormData = (data: Partial<TenderFormData>) => {
+    setFormData(prev => ({ ...prev, ...data }));
+  };
+
+  const handleNext = async () => {
+    // Validate current step
+    let errors: string[] = [];
+    switch (currentStep) {
+      case 1:
+        errors = validateStep1(formData);
+        break;
+      case 2:
+        errors = validateStep2(formData);
+        break;
+      case 3:
+        errors = validateStep3(formData);
+        break;
+      case 4:
+        errors = validateStep4(formData);
+        break;
+      case 5:
+        errors = validateStep5(formData);
+        break;
+      case 6:
+        errors = validateStep6(formData);
+        break;
+    }
+
+    if (errors.length > 0) {
+      errors.forEach(error => toast.error(error));
+      return;
+    }
+
+    // Auto-save when moving from step 1 to step 2 (create the tender if it doesn't exist)
+    if (currentStep === 1 && !tenderId) {
+      try {
+        setSavingDraft(true);
+        const createDto: CreateTenderDto = {
+          title: formData.title,
+          description: formData.description,
+          tenderType: formData.tenderType,
+          submissionDeadline: formData.submissionDeadline || undefined,
+          openingDate: formData.openingDate || undefined,
+          estimatedValue: formData.estimatedValue || undefined,
+          currency: formData.currency,
+          minimumPerformanceRating: formData.minimumPerformanceRating || undefined,
+          requiresPrequalification: formData.requiresPrequalification,
+          allowPartialBids: formData.allowPartialBids,
+          priceWeightage: formData.priceWeightage,
+          qualityWeightage: formData.qualityWeightage,
+          deliveryWeightage: formData.deliveryWeightage,
+          experienceWeightage: formData.experienceWeightage,
+          evaluationCriteriaJson: formData.evaluationCriteriaJson || undefined,
+          notes: formData.notes || undefined,
+          termsAndConditions: formData.termsAndConditions || undefined,
+          requiredDocuments: formData.documentRequirements.length > 0
+            ? JSON.stringify(formData.documentRequirements)
+            : undefined,
+          requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
+          items: formData.items,
+        };
+
+        const result = await tenderService.createTender(createDto);
+        setTenderId(result.id);
+        console.log('Tender created with ID:', result.id);
+
+        // Upload acceptance declaration file if provided
+        if (formData.acceptanceDeclarationFile && formData.requiresAcceptanceDeclaration) {
+          console.log('Uploading acceptance declaration document...');
+          try {
+            await tenderService.uploadTenderDocument(
+              result.id,
+              formData.acceptanceDeclarationFile,
+              'AcceptanceDeclaration',
+              formData.acceptanceDeclarationDocumentName || formData.acceptanceDeclarationFile.name,
+              true // isPublic
+            );
+            console.log('Acceptance declaration uploaded successfully');
+            // Clear the file from state after successful upload to prevent re-uploading
+            updateFormData({
+              acceptanceDeclarationFile: null,
+            });
+          } catch (error) {
+            console.error('Error uploading acceptance declaration:', error);
+            // Don't fail the whole operation if just the file upload fails
+          }
+        }
+
+        toast.success('Draft saved automatically');
+      } catch (error: any) {
+        console.error('Error auto-saving tender:', error);
+        toast.error('Failed to save tender. Please try again.');
+        return; // Don't proceed to next step if save failed
+      } finally {
+        setSavingDraft(false);
+      }
+    }
+
+    if (currentStep < STEPS.length) {
+      setCurrentStep(currentStep + 1);
+    }
+  };
+
+  const handlePrevious = () => {
+    if (currentStep > 1) {
+      setCurrentStep(currentStep - 1);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    try {
+      setSavingDraft(true);
+
+      if (tenderId) {
+        // Update existing tender - basic information
+        const updateDto = {
+          title: formData.title,
+          description: formData.description,
+          submissionDeadline: formData.submissionDeadline || undefined,
+          openingDate: formData.openingDate || undefined,
+          estimatedValue: formData.estimatedValue || undefined,
+          currency: formData.currency,
+          minimumPerformanceRating: formData.minimumPerformanceRating || undefined,
+          requiresPrequalification: formData.requiresPrequalification,
+          allowPartialBids: formData.allowPartialBids,
+          priceWeightage: formData.priceWeightage,
+          qualityWeightage: formData.qualityWeightage,
+          deliveryWeightage: formData.deliveryWeightage,
+          experienceWeightage: formData.experienceWeightage,
+          evaluationCriteriaJson: formData.evaluationCriteriaJson || undefined,
+          notes: formData.notes || undefined,
+          termsAndConditions: formData.termsAndConditions || undefined,
+          requiredDocuments: formData.documentRequirements.length > 0
+            ? JSON.stringify(formData.documentRequirements)
+            : undefined,
+          requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
+        };
+
+        console.log('Saving draft for tender:', tenderId);
+        console.log('Current items in form state:', formData.items);
+
+        await tenderService.updateTender(tenderId, updateDto);
+
+        // Upload acceptance declaration file if provided and not already uploaded
+        if (formData.acceptanceDeclarationFile && formData.requiresAcceptanceDeclaration) {
+          console.log('Uploading acceptance declaration document...');
+          try {
+            await tenderService.uploadTenderDocument(
+              tenderId,
+              formData.acceptanceDeclarationFile,
+              'AcceptanceDeclaration',
+              formData.acceptanceDeclarationDocumentName || formData.acceptanceDeclarationFile.name,
+              true // isPublic
+            );
+            console.log('Acceptance declaration uploaded successfully');
+            // Clear the file from state after successful upload to prevent re-uploading
+            updateFormData({
+              acceptanceDeclarationFile: null,
+            });
+          } catch (error) {
+            console.error('Error uploading acceptance declaration:', error);
+            toast.error('Draft saved but failed to upload acceptance declaration');
+          }
+        }
+
+        // Save any items that don't have an ID (not yet saved to backend)
+        const unsavedItems = formData.items.filter((item: any) => !item.id);
+        console.log('Unsaved items to be added:', unsavedItems);
+
+        for (const item of unsavedItems) {
+          console.log('Adding item to tender:', item);
+          const savedItem = await tenderService.addTenderItem(tenderId, item);
+          console.log('Item saved with ID:', savedItem.id);
+        }
+
+        // Save any fees that don't have an ID (not yet saved to backend)
+        const unsavedFees = formData.fees.filter((fee: any) => !fee.id);
+        for (const fee of unsavedFees) {
+          await tenderService.addTenderFee(tenderId, fee);
+        }
+
+        // Send invitations if there are any new ones
+        if (formData.invitedBusinessPartnerIds && formData.invitedBusinessPartnerIds.length > 0) {
+          await tenderService.inviteTenderers(tenderId, {
+            businessPartnerIds: formData.invitedBusinessPartnerIds,
+            sendNotifications: formData.sendNotifications,
+          });
+        }
+
+        toast.success('Draft updated successfully');
+      } else {
+        // Create new tender with items
+        const createDto: CreateTenderDto = {
+          title: formData.title,
+          description: formData.description,
+          tenderType: formData.tenderType,
+          submissionDeadline: formData.submissionDeadline || undefined,
+          openingDate: formData.openingDate || undefined,
+          estimatedValue: formData.estimatedValue || undefined,
+          currency: formData.currency,
+          minimumPerformanceRating: formData.minimumPerformanceRating || undefined,
+          requiresPrequalification: formData.requiresPrequalification,
+          allowPartialBids: formData.allowPartialBids,
+          priceWeightage: formData.priceWeightage,
+          qualityWeightage: formData.qualityWeightage,
+          deliveryWeightage: formData.deliveryWeightage,
+          experienceWeightage: formData.experienceWeightage,
+          evaluationCriteriaJson: formData.evaluationCriteriaJson || undefined,
+          notes: formData.notes || undefined,
+          termsAndConditions: formData.termsAndConditions || undefined,
+          requiredDocuments: formData.documentRequirements.length > 0
+            ? JSON.stringify(formData.documentRequirements)
+            : undefined,
+          requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
+          items: formData.items,
+        };
+
+        const result = await tenderService.createTender(createDto);
+        setTenderId(result.id);
+
+        // Upload acceptance declaration file if provided
+        if (formData.acceptanceDeclarationFile && formData.requiresAcceptanceDeclaration) {
+          console.log('Uploading acceptance declaration document...');
+          try {
+            await tenderService.uploadTenderDocument(
+              result.id,
+              formData.acceptanceDeclarationFile,
+              'AcceptanceDeclaration',
+              formData.acceptanceDeclarationDocumentName || formData.acceptanceDeclarationFile.name,
+              true // isPublic
+            );
+            console.log('Acceptance declaration uploaded successfully');
+            // Clear the file from state after successful upload to prevent re-uploading
+            updateFormData({
+              acceptanceDeclarationFile: null,
+            });
+          } catch (error) {
+            console.error('Error uploading acceptance declaration:', error);
+            toast.error('Draft saved but failed to upload acceptance declaration');
+          }
+        }
+
+        toast.success('Draft saved successfully. You can now add items, fees, and invitations.');
+      }
+    } catch (error: any) {
+      console.error('Error saving draft:', error);
+      const errorMessage = error?.message || 'Failed to save draft';
+      toast.error(`Error saving draft: ${errorMessage}`);
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const handleSubmit = () => {
+    console.log('🔵 handleSubmit called');
+    console.log('🔵 formData:', formData);
+    console.log('🔵 tenderId:', tenderId);
+
+    // Validate all steps
+    const allErrors = [
+      ...validateStep1(formData),
+      ...validateStep2(formData),
+    ];
+
+    console.log('🔵 Validation errors:', allErrors);
+
+    if (allErrors.length > 0) {
+      allErrors.forEach(error => toast.error(error));
+      return;
+    }
+
+    // Show confirmation dialog
+    setShowConfirmDialog(true);
+  };
+
+  const getTenderTypeLabel = (type: string) => {
+    const typeMap: Record<string, string> = {
+      'RFQ': 'Request for Quotation',
+      'RFP': 'Request for Proposal',
+      'ITB': 'Invitation to Bid',
+      'EOI': 'Expression of Interest',
+    };
+    return typeMap[type] || type;
+  };
+
+  const confirmSubmit = async () => {
+    console.log('🔵 User confirmed tender creation');
+
+    try {
+      setLoading(true);
+      console.log('🔵 Starting tender creation...');
+
+      let finalTenderId = tenderId;
+
+      // Create tender if not already created
+      if (!finalTenderId) {
+        console.log('🔵 No tender ID yet, creating new tender...');
+        const createDto: CreateTenderDto = {
+          title: formData.title,
+          description: formData.description,
+          tenderType: formData.tenderType,
+          submissionDeadline: formData.submissionDeadline || undefined,
+          openingDate: formData.openingDate || undefined,
+          estimatedValue: formData.estimatedValue || undefined,
+          currency: formData.currency,
+          minimumPerformanceRating: formData.minimumPerformanceRating || undefined,
+          requiresPrequalification: formData.requiresPrequalification,
+          allowPartialBids: formData.allowPartialBids,
+          priceWeightage: formData.priceWeightage,
+          qualityWeightage: formData.qualityWeightage,
+          deliveryWeightage: formData.deliveryWeightage,
+          experienceWeightage: formData.experienceWeightage,
+          evaluationCriteriaJson: formData.evaluationCriteriaJson || undefined,
+          notes: formData.notes || undefined,
+          termsAndConditions: formData.termsAndConditions || undefined,
+          requiredDocuments: formData.documentRequirements.length > 0
+            ? JSON.stringify(formData.documentRequirements)
+            : undefined,
+          requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
+          items: formData.items,
+        };
+
+        console.log('🔵 createDto:', createDto);
+        const result = await tenderService.createTender(createDto);
+        console.log('🔵 Tender created:', result);
+        finalTenderId = result.id;
+
+        // Upload acceptance declaration file if provided
+        if (formData.acceptanceDeclarationFile && formData.requiresAcceptanceDeclaration) {
+          console.log('🔵 Uploading acceptance declaration document...');
+          try {
+            await tenderService.uploadTenderDocument(
+              finalTenderId,
+              formData.acceptanceDeclarationFile,
+              'AcceptanceDeclaration',
+              formData.acceptanceDeclarationDocumentName || formData.acceptanceDeclarationFile.name,
+              true // isPublic
+            );
+            console.log('🔵 Acceptance declaration uploaded successfully');
+          } catch (error) {
+            console.error('❌ Error uploading acceptance declaration:', error);
+            toast.error('Tender created but failed to upload acceptance declaration');
+          }
+        }
+      } else {
+        console.log('🔵 Tender already exists with ID:', finalTenderId);
+      }
+
+      toast.success('✅ Tender created successfully! You can now add invitations and publish it.');
+      console.log('🔵 Redirecting to tender details page...');
+      router.push(`/procurement/tenders/${finalTenderId}`);
+    } catch (error) {
+      console.error('❌ Error creating tender:', error);
+      toast.error('Failed to create tender');
+    } finally {
+      setLoading(false);
+      console.log('🔵 handleSubmit completed');
+    }
+  };
+
+  const calculateProgress = () => {
+    return ((currentStep - 1) / (STEPS.length - 1)) * 100;
+  };
+
+  const renderStepContent = () => {
+    console.log('🔵 renderStepContent - currentStep:', currentStep);
+    console.log('🔵 renderStepContent - loading:', loading);
+    console.log('🔵 renderStepContent - handleSubmit type:', typeof handleSubmit);
+
+    switch (currentStep) {
+      case 1:
+        return <BasicInformation formData={formData} updateFormData={updateFormData} />;
+      case 2:
+        return <TenderItems formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
+      case 3:
+        return <TenderProposals formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
+      case 4:
+        return <TenderDocuments formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
+      case 5:
+        return <TenderFees formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
+      case 6:
+        return <TenderInvitations formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
+      case 7:
+        console.log('🔵 Rendering TenderReview with onSubmit:', handleSubmit, 'loading:', loading);
+        return <TenderReview formData={formData} onSubmit={handleSubmit} loading={loading} tenderDocuments={tenderDocuments} />;
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-6xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Create New Tender</h1>
+            <p className="text-muted-foreground">
+              Step {currentStep} of {STEPS.length}: {STEPS[currentStep - 1].name}
+            </p>
+          </div>
+        </div>
+        <Button onClick={handleSaveDraft} variant="outline" disabled={savingDraft || !formData.title}>
+          <Save className="h-4 w-4 mr-2" />
+          {savingDraft ? 'Saving...' : 'Save Draft'}
+        </Button>
+      </div>
+
+      {/* Progress Bar */}
+      <div className="space-y-2">
+        <Progress value={calculateProgress()} className="h-2" />
+        <div className="flex justify-between">
+          {STEPS.map((step) => {
+            const Icon = step.icon;
+            const isActive = step.id === currentStep;
+            const isCompleted = step.id < currentStep;
+
+            return (
+              <div
+                key={step.id}
+                className={`flex flex-col items-center gap-2 ${
+                  isActive ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-400'
+                }`}
+              >
+                <div
+                  className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                    isActive
+                      ? 'bg-blue-100 border-2 border-blue-600'
+                      : isCompleted
+                      ? 'bg-green-100 border-2 border-green-600'
+                      : 'bg-gray-100 border-2 border-gray-300'
+                  }`}
+                >
+                  <Icon className="h-5 w-5" />
+                </div>
+                <span className="text-xs font-medium hidden md:block">{step.name}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Step Content */}
+      <Card>
+        <CardHeader>
+          <CardTitle>{STEPS[currentStep - 1].name}</CardTitle>
+          <CardDescription>
+            {currentStep === 1 && 'Enter the basic information about the tender'}
+            {currentStep === 2 && 'Add items to the tender'}
+            {currentStep === 3 && 'Upload tender documents (optional)'}
+            {currentStep === 4 && 'Configure tender fees (optional)'}
+            {currentStep === 5 && 'Invite business partners (optional)'}
+            {currentStep === 6 && 'Review and submit the tender'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {renderStepContent()}
+        </CardContent>
+      </Card>
+
+      {/* Navigation Buttons */}
+      <div className="flex justify-between">
+        <Button
+          variant="outline"
+          onClick={handlePrevious}
+          disabled={currentStep === 1}
+        >
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Previous
+        </Button>
+
+        {currentStep < STEPS.length ? (
+          <Button onClick={handleNext}>
+            Next
+            <ArrowRight className="h-4 w-4 ml-2" />
+          </Button>
+        ) : (
+          <Button
+            onClick={() => {
+              console.log('🟢 Create Tender button clicked!');
+              console.log('🟢 currentStep:', currentStep);
+              console.log('🟢 STEPS.length:', STEPS.length);
+              console.log('🟢 loading:', loading);
+              handleSubmit();
+            }}
+            disabled={loading}
+          >
+            {loading ? 'Creating...' : 'Create Tender'}
+          </Button>
+        )}
+      </div>
+
+      {/* Confirmation Dialog */}
+      <ConfirmationDialog
+        open={showConfirmDialog}
+        onOpenChange={setShowConfirmDialog}
+        title="Create Tender"
+        description={
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Are you sure you want to create this tender? Please review the details below:
+            </p>
+            <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium">Title:</span>
+                <span className="text-sm text-muted-foreground">{formData.title}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium">Type:</span>
+                <span className="text-sm text-muted-foreground">{getTenderTypeLabel(formData.tenderType)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium">Estimated Value:</span>
+                <span className="text-sm text-muted-foreground">
+                  {formData.currency} {formData.estimatedValue?.toLocaleString() || 'N/A'}
+                </span>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              The tender will be created as a draft and you can publish it later.
+            </p>
+          </div>
+        }
+        confirmText="Create Tender"
+        cancelText="Cancel"
+        variant="default"
+        onConfirm={confirmSubmit}
+        isLoading={loading}
+      />
+    </div>
+  );
+}

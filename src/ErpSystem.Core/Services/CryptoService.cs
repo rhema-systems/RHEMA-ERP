@@ -17,10 +17,10 @@ public class CryptoService : ICryptoService
 {
     private readonly string _encryptionKey;
     private readonly ILogger<CryptoService> _logger;
-    
+
     public CryptoService(IConfiguration configuration, ILogger<CryptoService> logger)
     {
-        _encryptionKey = configuration["Security:EncryptionKey"] ?? 
+        _encryptionKey = configuration["Security:EncryptionKey"] ??
                         throw new InvalidOperationException("Security:EncryptionKey is not configured");
         _logger = logger;
     }
@@ -28,7 +28,9 @@ public class CryptoService : ICryptoService
     public string Encrypt(string plainText)
     {
         if (string.IsNullOrEmpty(plainText))
+        {
             return string.Empty;
+        }
 
         try
         {
@@ -39,10 +41,10 @@ public class CryptoService : ICryptoService
 
             using var encryptor = aes.CreateEncryptor(aes.Key, aes.IV);
             using var msEncrypt = new MemoryStream();
-            
+
             // Prepend IV to the encrypted data
             msEncrypt.Write(aes.IV, 0, aes.IV.Length);
-            
+
             using (var csEncrypt = new CryptoStream(msEncrypt, encryptor, CryptoStreamMode.Write))
             using (var swEncrypt = new StreamWriter(csEncrypt))
             {
@@ -61,7 +63,9 @@ public class CryptoService : ICryptoService
     public string Decrypt(string cipherText)
     {
         if (string.IsNullOrEmpty(cipherText))
+        {
             return string.Empty;
+        }
 
         // Check if the string is likely already plain text (not base64 encrypted)
         if (!IsLikelyEncrypted(cipherText))
@@ -73,11 +77,11 @@ public class CryptoService : ICryptoService
         try
         {
             var fullCipher = Convert.FromBase64String(cipherText);
-            
+
             using var aes = Aes.Create();
             var key = DeriveKey(_encryptionKey, aes.KeySize / 8);
             aes.Key = key;
-            
+
             // Extract IV from the beginning of the cipher text
             var iv = new byte[aes.BlockSize / 8];
             Array.Copy(fullCipher, 0, iv, 0, iv.Length);
@@ -91,7 +95,7 @@ public class CryptoService : ICryptoService
             using var msDecrypt = new MemoryStream(cipher);
             using var csDecrypt = new CryptoStream(msDecrypt, decryptor, CryptoStreamMode.Read);
             using var srDecrypt = new StreamReader(csDecrypt);
-            
+
             return srDecrypt.ReadToEnd();
         }
         catch (Exception ex)
@@ -104,7 +108,9 @@ public class CryptoService : ICryptoService
     public string HashPassword(string password)
     {
         if (string.IsNullOrEmpty(password))
+        {
             return string.Empty;
+        }
 
         try
         {
@@ -136,12 +142,14 @@ public class CryptoService : ICryptoService
     public bool VerifyPassword(string password, string hashedPassword)
     {
         if (string.IsNullOrEmpty(password) || string.IsNullOrEmpty(hashedPassword))
+        {
             return false;
+        }
 
         try
         {
             var hashBytes = Convert.FromBase64String(hashedPassword);
-            
+
             // Extract salt
             var salt = new byte[32];
             Array.Copy(hashBytes, 0, salt, 0, 32);

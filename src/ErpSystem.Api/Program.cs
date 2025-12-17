@@ -1,28 +1,28 @@
-using Serilog;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using ErpSystem.Api.Data;
 using ErpSystem.Api.Extensions;
-using ErpSystem.Web.Middleware;
 using ErpSystem.Api.Middleware;
 using ErpSystem.Data;
-using ErpSystem.Api.Data;
+using ErpSystem.Web.Middleware;
 using ErpSystem.Web.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using Serilog;
 
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
 {
     var tempBuilder = WebApplication.CreateBuilder(args);
-    
+
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemIdentity();
-    
+
     var tempApp = tempBuilder.Build();
-    
+
     // Run user seeding
     await ErpSystem.Api.UserSeeder.SeedTestUsersAsync(tempApp.Services);
     return;
@@ -32,23 +32,23 @@ if (args.Length > 0 && args[0] == "seed")
 if (args.Length > 0 && args[0] == "seed-maintenance")
 {
     var tempBuilder = WebApplication.CreateBuilder(args);
-    
+
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
-    
+
     var tempApp = tempBuilder.Build();
-    
+
     // Run maintenance workflow seeding using the new MaintenanceDataSeeder
     using (var scope = tempApp.Services.CreateScope())
     {
         var context = scope.ServiceProvider.GetRequiredService<ErpSystem.Data.ApplicationDbContext>();
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<ErpSystem.Data.Seeders.MaintenanceDataSeeder>>();
         var seeder = new ErpSystem.Data.Seeders.MaintenanceDataSeeder(context, logger);
-        
+
         await seeder.SeedAsync();
     }
-    
+
     Console.WriteLine("Maintenance workflow seeding completed!");
     return;
 }
@@ -57,7 +57,7 @@ if (args.Length > 0 && args[0] == "seed-maintenance")
 if (args.Length > 0 && args[0] == "seed-maintenance-e2e")
 {
     var tempBuilder = WebApplication.CreateBuilder(args);
-    
+
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
     tempBuilder.Services.AddHttpContextAccessor(); // Required for ICurrentUserProvider
@@ -65,16 +65,16 @@ if (args.Length > 0 && args[0] == "seed-maintenance-e2e")
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemIdentity();
     tempBuilder.Services.AddDatabaseSeeding();
-    
+
     var tempApp = tempBuilder.Build();
-    
+
     // Run E2E maintenance test data seeding
     using (var scope = tempApp.Services.CreateScope())
     {
         var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
         await seedingService.SeedMaintenanceE2ETestDataAsync();
     }
-    
+
     Console.WriteLine("✅ Maintenance E2E test data seeding completed!");
     return;
 }
@@ -118,10 +118,15 @@ builder.Services.AddScoped<ErpSystem.Api.Services.QualityCertificateService>();
 
 var app = builder.Build();
 
+Console.WriteLine("🔧 App built successfully - configuring middleware...");
+
 // Configure the HTTP request pipeline
 
 // Add global exception handling first
 app.UseMiddleware<GlobalExceptionHandlingMiddleware>();
+
+// Add HTTP request/response logging (after exception handling)
+app.UseMiddleware<HttpLoggingMiddleware>();
 
 // Add security headers
 app.UseMiddleware<SecurityHeadersMiddleware>();
@@ -147,10 +152,10 @@ app.UseSwaggerUI(c =>
     c.EnableDeepLinking();
     c.EnableFilter();
     c.ShowExtensions();
-    
+
     // Persist authorization
     c.EnablePersistAuthorization();
-    
+
     // Add custom CSS for better UX
     c.InjectStylesheet("/swagger-ui/custom.css");
 });
@@ -202,8 +207,20 @@ app.MapControllers();
 app.MapHub<ErpSystem.Api.Hubs.DashboardHub>("/api/hubs/dashboard");
 
 // Initialize database and seed data
-await InitializeDatabaseAsync(app);
-await SeedDatabaseAsync(app);
+Console.WriteLine("🔄 Starting database initialization...");
+try
+{
+    await InitializeDatabaseAsync(app);
+    Console.WriteLine("✅ Database initialization completed");
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"❌ Database initialization failed: {ex.Message}");
+    Console.WriteLine($"   Stack trace: {ex.StackTrace}");
+}
+
+// Skip seeding for now
+// await SeedDatabaseAsync(app);
 
 // Workflow automation trigger - comprehensive testing active
 // Version: 2.0.0 - Full CI/CD Pipeline Integration
@@ -213,15 +230,45 @@ async Task InitializeDatabaseAsync(WebApplication app)
 {
     using var scope = app.Services.CreateScope();
     var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
     try
     {
-        await context.Database.MigrateAsync();
+        Console.WriteLine("   → Testing database connection...");
+
+        // Test connection first with a short timeout
+        using var testCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var canConnect = await context.Database.CanConnectAsync(testCts.Token);
+
+        if (!canConnect)
+        {
+            Console.WriteLine("   ❌ Cannot connect to database");
+            logger.LogError("Cannot connect to database");
+            return;
+        }
+
+        Console.WriteLine("   ✅ Database connection successful");
+        Console.WriteLine("   → Running migrations...");
+
+        // Add timeout to prevent hanging
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await context.Database.MigrateAsync(cts.Token);
+
+        Console.WriteLine("   ✅ Database migration completed successfully");
+    }
+    catch (OperationCanceledException)
+    {
+        logger.LogError("Database operation timed out");
+        Console.WriteLine("   ❌ Database operation timed out - check if SQL Server is running");
     }
     catch (Exception ex)
     {
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
         logger.LogError(ex, "An error occurred while migrating the database");
+        Console.WriteLine($"   ❌ Database error: {ex.Message}");
+        if (ex.InnerException != null)
+        {
+            Console.WriteLine($"   ❌ Inner error: {ex.InnerException.Message}");
+        }
     }
 }
 

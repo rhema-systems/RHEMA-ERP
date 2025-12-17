@@ -193,9 +193,9 @@ public class QualityControlChecklistSeeder
         // Add category-specific checklists for categories that exist in the database
         foreach (var category in assetCategories)
         {
-            if (categoryChecklistMap.ContainsKey(category))
+            if (categoryChecklistMap.TryGetValue(category, out ChecklistTemplate[]? value))
             {
-                checklistTemplates.AddRange(categoryChecklistMap[category]);
+                checklistTemplates.AddRange(value);
             }
         }
 
@@ -279,9 +279,9 @@ public class QualityControlChecklistSeeder
         foreach (var checklist in checklistTemplates)
         {
             var exists = await _context.QualityControlChecklists
-                .AnyAsync(q => q.TenantId == tenantId && 
+                .AnyAsync(q => q.TenantId == tenantId &&
                               q.Name == checklist.Name);
-            
+
             if (!exists)
             {
                 var qcChecklist = new QualityControlChecklist
@@ -302,10 +302,10 @@ public class QualityControlChecklistSeeder
                 };
 
                 _context.QualityControlChecklists.Add(qcChecklist);
-                _logger.LogInformation("Seeded QC checklist: {Name} for {AssetCategory}/{WorkOrderType}/{MaintenanceType}", 
-                    checklist.Name, 
-                    checklist.AssetCategory ?? "All", 
-                    checklist.WorkOrderType, 
+                _logger.LogInformation("Seeded QC checklist: {Name} for {AssetCategory}/{WorkOrderType}/{MaintenanceType}",
+                    checklist.Name,
+                    checklist.AssetCategory ?? "All",
+                    checklist.WorkOrderType,
                     checklist.MaintenanceType);
             }
         }

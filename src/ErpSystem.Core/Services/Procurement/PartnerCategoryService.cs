@@ -1,4 +1,4 @@
-﻿using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -68,6 +68,7 @@ public class PartnerCategoryService : IPartnerCategoryService
         };
 
         var created = await _repository.CreateAsync(category);
+        await _repository.SaveChangesAsync();
         _logger.LogInformation("Created partner category {CategoryCode} - {CategoryName}", created.CategoryCode, created.CategoryName);
 
         return MapToDto(created);
@@ -75,18 +76,14 @@ public class PartnerCategoryService : IPartnerCategoryService
 
     public async Task<PartnerCategoryDto> UpdateAsync(Guid id, UpdatePartnerCategoryDto dto)
     {
-        var category = await _repository.GetByIdAsync(id);
-        if (category == null)
-        {
-            throw new InvalidOperationException($"Partner category with ID {id} not found.");
-        }
-
+        var category = await _repository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Partner category with ID {id} not found.");
         category.CategoryName = dto.CategoryName;
         category.Description = dto.Description;
         category.IsActive = dto.IsActive;
         category.UpdatedAt = DateTime.UtcNow;
 
         var updated = await _repository.UpdateAsync(category);
+        await _repository.SaveChangesAsync();
         _logger.LogInformation("Updated partner category {CategoryCode} - {CategoryName}", updated.CategoryCode, updated.CategoryName);
 
         return MapToDto(updated);
@@ -102,6 +99,7 @@ public class PartnerCategoryService : IPartnerCategoryService
         }
 
         await _repository.DeleteAsync(id);
+        await _repository.SaveChangesAsync();
         _logger.LogInformation("Deleted partner category with ID {CategoryId}", id);
     }
 

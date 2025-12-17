@@ -1,8 +1,8 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using ErpSystem.Shared;
-using ErpSystem.Core.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -92,7 +92,9 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 if (!ModelState.IsValid)
+                {
                     return BadRequest(ModelState);
+                }
 
                 var alert = await _securityService.CreateSecurityAlertAsync(request);
                 return CreatedAtAction(nameof(GetSecurityAlerts), new { id = alert.Id }, alert);
@@ -114,7 +116,9 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 if (!Guid.TryParse(alertId, out var alertGuid))
+                {
                     return BadRequest(new { message = "Invalid alert ID format" });
+                }
 
                 await _securityService.DismissSecurityAlertAsync(alertGuid);
                 return Ok(new { message = "Alert dismissed successfully" });
@@ -306,10 +310,14 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 if (!Guid.TryParse(threatId, out var threatGuid))
+                {
                     return BadRequest(new { message = "Invalid threat ID format" });
+                }
 
                 if (!ModelState.IsValid)
+                {
                     return BadRequest(ModelState);
+                }
 
                 await _securityService.UpdateThreatStatusAsync(threatGuid, request);
                 return Ok(new { message = "Threat status updated successfully" });
@@ -352,7 +360,9 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 if (!ModelState.IsValid)
+                {
                     return BadRequest(ModelState);
+                }
 
                 var result = await _securityService.EnableTwoFactorAsync(request);
                 return Ok(result);
@@ -378,7 +388,9 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 if (!ModelState.IsValid)
+                {
                     return BadRequest(ModelState);
+                }
 
                 await _securityService.DisableTwoFactorAsync(request);
                 return Ok(new { message = "Two-factor authentication disabled successfully" });
@@ -424,7 +436,9 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 if (!ModelState.IsValid)
+                {
                     return BadRequest(ModelState);
+                }
 
                 var policy = await _securityService.CreateSecurityPolicyAsync(request);
                 return CreatedAtAction(nameof(GetSecurityPolicies), new { id = policy.Id }, policy);
@@ -446,10 +460,14 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 if (!Guid.TryParse(policyId, out var policyGuid))
+                {
                     return BadRequest(new { message = "Invalid policy ID format" });
+                }
 
                 if (!ModelState.IsValid)
+                {
                     return BadRequest(ModelState);
+                }
 
                 var policy = await _securityService.UpdateSecurityPolicyAsync(policyGuid, request);
                 return Ok(policy);
@@ -476,7 +494,9 @@ namespace ErpSystem.Api.Controllers
             {
                 var sessionDetails = await _securityService.GetDeviceSessionDetailsAsync(sessionId);
                 if (sessionDetails == null)
+                {
                     return NotFound(new { message = "Device session not found" });
+                }
 
                 return Ok(sessionDetails);
             }
@@ -498,7 +518,9 @@ namespace ErpSystem.Api.Controllers
             {
                 var success = await _securityService.TerminateDeviceSessionAsync(sessionId, reason);
                 if (!success)
+                {
                     return NotFound(new { message = "Device session not found or could not be terminated" });
+                }
 
                 return Ok(new { message = "Device session terminated successfully" });
             }
@@ -519,12 +541,13 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var terminatedCount = await _securityService.TerminateAllDeviceSessionsExceptCurrentAsync(
-                    request.CurrentSessionId, 
+                    request.CurrentSessionId,
                     request.Reason ?? "Terminate other sessions");
 
-                return Ok(new { 
+                return Ok(new
+                {
                     message = $"Successfully terminated {terminatedCount} device sessions",
-                    terminatedCount 
+                    terminatedCount
                 });
             }
             catch (Exception ex)

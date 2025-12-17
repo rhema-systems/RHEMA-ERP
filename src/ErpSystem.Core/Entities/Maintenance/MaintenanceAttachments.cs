@@ -43,21 +43,21 @@ public class MaintenanceAttachment : BaseEntity
     // Image-specific properties
     public int? ImageWidth { get; set; }
     public int? ImageHeight { get; set; }
-    
+
     [MaxLength(500)]
     public string? ThumbnailPath { get; set; }
 
     // GPS coordinates for photos taken on-site
     public double? Latitude { get; set; }
     public double? Longitude { get; set; }
-    
+
     [MaxLength(200)]
     public string? LocationDescription { get; set; }
 
     // Document-specific properties
     [MaxLength(50)]
     public string? DocumentVersion { get; set; }
-    
+
     public bool IsArchived { get; set; } = false;
     public DateTime? ArchivedDate { get; set; }
 

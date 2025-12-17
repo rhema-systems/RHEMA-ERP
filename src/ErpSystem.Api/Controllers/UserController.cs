@@ -1,17 +1,17 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Identity;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
-using ErpSystem.Core.Entities;
 using ErpSystem.Shared;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class UserController : ControllerBase
+public partial class UserController : ControllerBase
 {
     private readonly IUserService _userService;
     private readonly ILogger<UserController> _logger;
@@ -20,7 +20,7 @@ public class UserController : ControllerBase
     private readonly ISettingsService _settingsService;
 
     public UserController(
-        IUserService userService, 
+        IUserService userService,
         ILogger<UserController> logger,
         IAuditLogService auditLogService,
         ICurrentUserService currentUserService,
@@ -37,7 +37,7 @@ public class UserController : ControllerBase
     /// Get all users
     /// </summary>
     [HttpGet]
-    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin + "," + Constants.Roles.Manager)]
     public async Task<ActionResult<IEnumerable<UserDto>>> GetUsers()
     {
         try
@@ -82,26 +82,26 @@ public class UserController : ControllerBase
     /// Search users by query
     /// </summary>
     [HttpGet("search")]
-    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin + "," + Constants.Roles.Manager)]
     public async Task<ActionResult<IEnumerable<UserDto>>> SearchUsers([FromQuery] string? query = null)
     {
         try
         {
             var users = await _userService.GetAllUsersAsync();
-            
+
             // Filter users based on query
             if (!string.IsNullOrWhiteSpace(query))
             {
                 var lowercaseQuery = query.ToLowerInvariant();
-                users = users.Where(u => 
-                    (u.UserName?.ToLowerInvariant().Contains(lowercaseQuery) == true) ||
-                    (u.Email?.ToLowerInvariant().Contains(lowercaseQuery) == true) ||
-                    (u.FirstName?.ToLowerInvariant().Contains(lowercaseQuery) == true) ||
-                    (u.LastName?.ToLowerInvariant().Contains(lowercaseQuery) == true) ||
-                    ($"{u.FirstName} {u.LastName}".ToLowerInvariant().Contains(lowercaseQuery))
+                users = users.Where(u =>
+                    (u.UserName?.ToLowerInvariant().Contains(lowercaseQuery, StringComparison.InvariantCultureIgnoreCase) == true) ||
+                    (u.Email?.ToLowerInvariant().Contains(lowercaseQuery, StringComparison.InvariantCultureIgnoreCase) == true) ||
+                    (u.FirstName?.ToLowerInvariant().Contains(lowercaseQuery, StringComparison.InvariantCultureIgnoreCase) == true) ||
+                    (u.LastName?.ToLowerInvariant().Contains(lowercaseQuery, StringComparison.InvariantCultureIgnoreCase) == true) ||
+                    ($"{u.FirstName} {u.LastName}".Contains(lowercaseQuery, StringComparison.InvariantCultureIgnoreCase))
                 );
             }
-            
+
             var userDtos = users.Select(u => new UserDto
             {
                 Id = u.Id.ToString(),
@@ -221,10 +221,10 @@ public class UserController : ControllerBase
                 var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
                 var currentUsername = _currentUserService.UserName;
                 var currentTenantId = _currentUserService.TenantId;
-                
-                _logger.LogInformation("DEBUG: Attempting to log user creation. UserId: {UserId}, Username: {Username}, TenantId: {TenantId}", 
+
+                _logger.LogInformation("DEBUG: Attempting to log user creation. UserId: {UserId}, Username: {Username}, TenantId: {TenantId}",
                     currentUserId, currentUsername, currentTenantId);
-                
+
                 await _auditLogService.LogUserActionAsync(
                     currentUserId ?? Guid.Empty,
                     currentUsername ?? "Unknown",
@@ -232,8 +232,9 @@ public class UserController : ControllerBase
                     "User",
                     createdUser.Id.ToString(),
                     null,
-                    new { 
-                        Username = request.Username, 
+                    new
+                    {
+                        Username = request.Username,
                         Email = request.Email,
                         FirstName = request.FirstName,
                         LastName = request.LastName,
@@ -243,7 +244,7 @@ public class UserController : ControllerBase
                     },
                     GetClientIpAddress(),
                     GetUserAgent());
-                    
+
                 _logger.LogInformation("DEBUG: User creation audit log completed successfully");
             }
             catch (Exception logEx)
@@ -290,7 +291,7 @@ public class UserController : ControllerBase
             }
 
             // Capture old values for audit logging
-            var oldValues = new 
+            var oldValues = new
             {
                 Username = user.UserName,
                 Email = user.Email,
@@ -319,7 +320,7 @@ public class UserController : ControllerBase
             // Log audit trail for user update
             try
             {
-                var newValues = new 
+                var newValues = new
                 {
                     Username = request.Username,
                     Email = request.Email,
@@ -400,8 +401,9 @@ public class UserController : ControllerBase
                     "Delete",
                     "User",
                     id.ToString(),
-                    new { 
-                        Username = userToDelete.UserName, 
+                    new
+                    {
+                        Username = userToDelete.UserName,
                         Email = userToDelete.Email,
                         FirstName = userToDelete.FirstName,
                         LastName = userToDelete.LastName
@@ -446,7 +448,7 @@ public class UserController : ControllerBase
             }
 
             // Capture old values for audit logging
-            var oldValues = new 
+            var oldValues = new
             {
                 FirstName = user.FirstName,
                 LastName = user.LastName,
@@ -456,14 +458,25 @@ public class UserController : ControllerBase
 
             // Update profile fields
             if (!string.IsNullOrEmpty(request.FirstName))
+            {
                 user.FirstName = request.FirstName;
+            }
+
             if (!string.IsNullOrEmpty(request.LastName))
+            {
                 user.LastName = request.LastName;
+            }
+
             if (!string.IsNullOrEmpty(request.Email))
+            {
                 user.Email = request.Email;
+            }
+
             if (!string.IsNullOrEmpty(request.PhoneNumber))
+            {
                 user.PhoneNumber = request.PhoneNumber;
-            
+            }
+
             // Handle tenant change if provided and user has permission
             if (request.TenantId.HasValue && request.TenantId != user.TenantId)
             {
@@ -484,7 +497,7 @@ public class UserController : ControllerBase
             // Log audit trail for profile update
             try
             {
-                var newValues = new 
+                var newValues = new
                 {
                     FirstName = updatedUser.FirstName,
                     LastName = updatedUser.LastName,
@@ -502,7 +515,7 @@ public class UserController : ControllerBase
                     newValues,
                     GetClientIpAddress(),
                     GetUserAgent());
-                    
+
                 _logger.LogInformation("DEBUG: User profile update audit log completed successfully");
             }
             catch (Exception logEx)
@@ -558,7 +571,7 @@ public class UserController : ControllerBase
             // Verify current password
             var passwordHasher = new PasswordHasher<ApplicationUser>();
             var verificationResult = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.CurrentPassword);
-            
+
             if (verificationResult == PasswordVerificationResult.Failed)
             {
                 return BadRequest("Current password is incorrect");
@@ -569,37 +582,37 @@ public class UserController : ControllerBase
             if (security != null)
             {
                 var errors = new List<string>();
-                
+
                 // Validate minimum length
                 if (request.NewPassword.Length < security.PasswordMinLength)
                 {
                     errors.Add($"Password must be at least {security.PasswordMinLength} characters long");
                 }
-                
+
                 // Validate uppercase requirement
-                if (security.PasswordRequireUppercase && !System.Text.RegularExpressions.Regex.IsMatch(request.NewPassword, @"[A-Z]"))
+                if (security.PasswordRequireUppercase && !MyRegex().IsMatch(request.NewPassword))
                 {
                     errors.Add("Password must contain at least one uppercase letter");
                 }
-                
+
                 // Validate lowercase requirement
                 if (security.PasswordRequireLowercase && !System.Text.RegularExpressions.Regex.IsMatch(request.NewPassword, @"[a-z]"))
                 {
                     errors.Add("Password must contain at least one lowercase letter");
                 }
-                
+
                 // Validate digits requirement
                 if (security.PasswordRequireDigits && !System.Text.RegularExpressions.Regex.IsMatch(request.NewPassword, @"[0-9]"))
                 {
                     errors.Add("Password must contain at least one digit");
                 }
-                
+
                 // Validate special characters requirement
                 if (security.PasswordRequireSpecialChars && !System.Text.RegularExpressions.Regex.IsMatch(request.NewPassword, @"[!@#$%^&*()_+\-=\[\]{};':""\\|,.<>\/?]"))
                 {
                     errors.Add("Password must contain at least one special character");
                 }
-                
+
                 if (errors.Any())
                 {
                     return BadRequest(new { message = "Password does not meet policy requirements", errors = errors });
@@ -653,6 +666,9 @@ public class UserController : ControllerBase
     {
         return HttpContext.Request.Headers["User-Agent"].ToString();
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"[A-Z]")]
+    private static partial System.Text.RegularExpressions.Regex MyRegex();
 }
 
 // DTOs

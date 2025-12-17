@@ -46,13 +46,13 @@ public class ToolCheckoutRepository : IToolCheckoutRepository
     public async Task<List<ToolCheckout>> GetOverdueCheckoutsAsync()
     {
         var now = DateTime.UtcNow;
-        
+
         return await _context.ToolCheckouts
             .Include(tc => tc.Tool)
             .Include(tc => tc.CheckedOutBy)
             .Include(tc => tc.WorkOrder)
-            .Where(tc => tc.Status == "CheckedOut" && 
-                        tc.ExpectedReturnDate.HasValue && 
+            .Where(tc => tc.Status == "CheckedOut" &&
+                        tc.ExpectedReturnDate.HasValue &&
                         tc.ExpectedReturnDate.Value < now)
             .OrderBy(tc => tc.ExpectedReturnDate)
             .ToListAsync();
@@ -107,7 +107,7 @@ public class ToolCheckoutRepository : IToolCheckoutRepository
     public Task UpdateAsync(ToolCheckout checkout)
     {
         var entry = _context.Entry(checkout);
-        
+
         if (entry.State == EntityState.Detached)
         {
             _context.ToolCheckouts.Attach(checkout);
@@ -117,7 +117,7 @@ public class ToolCheckoutRepository : IToolCheckoutRepository
         {
             _context.ToolCheckouts.Update(checkout);
         }
-        
+
         return Task.CompletedTask;
     }
 
@@ -127,7 +127,7 @@ public class ToolCheckoutRepository : IToolCheckoutRepository
             .Where(tc => tc.ToolId == toolId && tc.ActualReturnDate.HasValue)
             .ToListAsync();
 
-        return checkouts.Sum(tc => 
+        return checkouts.Sum(tc =>
         {
             var checkoutDate = tc.CheckoutDate;
             var returnDate = tc.ActualReturnDate ?? DateTime.UtcNow;
