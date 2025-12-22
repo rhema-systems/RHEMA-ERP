@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,27 +8,20 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Calculator, Save, X } from 'lucide-react';
+import { Calculator, Save, X, AlertTriangle, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import type { UnitType, UnitAccount } from '@/types/unit-accounts';
-
-// MOCK DATA
-const MOCK_UNIT_TYPES: UnitType[] = [
-    { id: 'ut-1', code: 'EMP', name: 'Employees', decimalPlaces: 0, isActive: true, createdAt: '', createdBy: '' },
-    { id: 'ut-2', code: 'SQFT', name: 'Square Footage', decimalPlaces: 2, isActive: true, createdAt: '', createdBy: '' },
-    { id: 'ut-3', code: 'HRS', name: 'Hours', decimalPlaces: 2, isActive: true, createdAt: '', createdBy: '' },
-    { id: 'ut-4', code: 'UNITS', name: 'Units', decimalPlaces: 0, isActive: true, createdAt: '', createdBy: '' },
-];
-
-const MOCK_PARENT_ACCOUNTS: UnitAccount[] = [
-    { id: 'ua-1', accountNumber: 'U-1000', name: 'Total Employees', unitTypeId: 'ut-1', accountLevel: 1, isPostingAccount: false, isActive: true, createdAt: '', createdBy: '' },
-    { id: 'ua-5', accountNumber: 'U-2000', name: 'Office Space', unitTypeId: 'ut-2', accountLevel: 1, isPostingAccount: false, isActive: true, createdAt: '', createdBy: '' },
-];
+import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
 
 export default function NewUnitAccountPage() {
     const router = useRouter();
+    const [unitTypes, setUnitTypes] = useState<UnitType[]>([]);
+    const [parentAccounts, setParentAccounts] = useState<UnitAccount[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
     const [formData, setFormData] = useState({
         accountNumber: '',
         name: '',
@@ -39,8 +32,28 @@ export default function NewUnitAccountPage() {
     });
     const [errors, setErrors] = useState<Record<string, string>>({});
 
+    // Load unit types and accounts from data service
+    useEffect(() => {
+        async function loadData() {
+            try {
+                const [types, accounts] = await Promise.all([
+                    unitAccountsDataService.getUnitTypes(),
+                    unitAccountsDataService.getUnitAccounts(),
+                ]);
+                setUnitTypes(types);
+                // Only show summary accounts as potential parents
+                setParentAccounts(accounts.filter(a => !a.isPostingAccount));
+            } catch (error) {
+                console.error('Failed to load data:', error);
+            } finally {
+                setLoading(false);
+            }
+        }
+        loadData();
+    }, []);
+
     // Filter parent accounts based on selected unit type
-    const availableParents = MOCK_PARENT_ACCOUNTS.filter(
+    const availableParents = parentAccounts.filter(
         (acc) => !formData.unitTypeId || acc.unitTypeId === formData.unitTypeId
     );
 
@@ -71,18 +84,39 @@ export default function NewUnitAccountPage() {
         return Object.keys(newErrors).length === 0;
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
         if (!validateForm()) {
             return;
         }
 
-        // TODO: Replace with API call
-        console.log('Creating unit account:', formData);
-        alert('DEMO MODE: Unit account would be created. Check console for data.');
-        router.push('/finance/unit-accounts');
+        setSaving(true);
+        try {
+            await unitAccountsDataService.createUnitAccount({
+                accountNumber: formData.accountNumber,
+                name: formData.name,
+                description: formData.description || undefined,
+                unitTypeId: formData.unitTypeId,
+                parentAccountId: formData.parentAccountId || undefined,
+                isPostingAccount: formData.isPostingAccount,
+            });
+            router.push('/finance/unit-accounts');
+        } catch (error) {
+            console.error('Failed to create unit account:', error);
+            alert('Failed to create unit account. Please try again.');
+        } finally {
+            setSaving(false);
+        }
     };
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-[400px]">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">
@@ -95,10 +129,15 @@ export default function NewUnitAccountPage() {
                 <p className="text-muted-foreground">
                     Create a new unit account for tracking quantities
                 </p>
-                <p className="text-sm text-orange-600 mt-1">
-                    ⚠️ DEMO FRONTEND UI
-                </p>
             </div>
+
+            {/* Demo Mode Alert */}
+            <Alert className="border-yellow-500 bg-yellow-50">
+                <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                <AlertDescription className="text-yellow-700">
+                    <strong>⚠️ DEMO FRONTEND UI</strong> - Data is stored in browser localStorage
+                </AlertDescription>
+            </Alert>
 
             {/* Breadcrumbs */}
             <Breadcrumb>
@@ -173,25 +212,31 @@ export default function NewUnitAccountPage() {
                                 <Label htmlFor="unitType">
                                     Unit Type <span className="text-destructive">*</span>
                                 </Label>
-                                <Select
-                                    value={formData.unitTypeId}
-                                    onValueChange={(value) => setFormData({
-                                        ...formData,
-                                        unitTypeId: value,
-                                        parentAccountId: '' // Reset parent when type changes
-                                    })}
-                                >
-                                    <SelectTrigger className={errors.unitTypeId ? 'border-destructive' : ''}>
-                                        <SelectValue placeholder="Select a unit type..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {MOCK_UNIT_TYPES.map((type) => (
-                                            <SelectItem key={type.id} value={type.id}>
-                                                {type.code} - {type.name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                {unitTypes.length === 0 ? (
+                                    <div className="p-3 bg-muted rounded-md text-sm text-muted-foreground">
+                                        No unit types available. <Link href="/finance/unit-types" className="text-primary underline">Create one first</Link>.
+                                    </div>
+                                ) : (
+                                    <Select
+                                        value={formData.unitTypeId}
+                                        onValueChange={(value) => setFormData({
+                                            ...formData,
+                                            unitTypeId: value,
+                                            parentAccountId: '' // Reset parent when type changes
+                                        })}
+                                    >
+                                        <SelectTrigger className={errors.unitTypeId ? 'border-destructive' : ''}>
+                                            <SelectValue placeholder="Select a unit type..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {unitTypes.map((type) => (
+                                                <SelectItem key={type.id} value={type.id}>
+                                                    {type.code} - {type.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                )}
                                 {errors.unitTypeId && (
                                     <p className="text-sm text-destructive">{errors.unitTypeId}</p>
                                 )}
@@ -204,15 +249,18 @@ export default function NewUnitAccountPage() {
                             <div className="space-y-2">
                                 <Label htmlFor="parentAccount">Parent Account</Label>
                                 <Select
-                                    value={formData.parentAccountId}
-                                    onValueChange={(value) => setFormData({ ...formData, parentAccountId: value })}
+                                    value={formData.parentAccountId || "none"}
+                                    onValueChange={(value) => setFormData({
+                                        ...formData,
+                                        parentAccountId: value === "none" ? '' : value
+                                    })}
                                     disabled={!formData.unitTypeId}
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="None (top-level account)" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="">None (top-level account)</SelectItem>
+                                        <SelectItem value="none">None (top-level account)</SelectItem>
                                         {availableParents.map((acc) => (
                                             <SelectItem key={acc.id} value={acc.id}>
                                                 {acc.accountNumber} - {acc.name}
@@ -264,13 +312,17 @@ export default function NewUnitAccountPage() {
                         {/* Actions */}
                         <div className="flex justify-end gap-4 pt-4 border-t">
                             <Link href="/finance/unit-accounts">
-                                <Button type="button" variant="outline">
+                                <Button type="button" variant="outline" disabled={saving}>
                                     <X className="mr-2 h-4 w-4" />
                                     Cancel
                                 </Button>
                             </Link>
-                            <Button type="submit">
-                                <Save className="mr-2 h-4 w-4" />
+                            <Button type="submit" disabled={saving || unitTypes.length === 0}>
+                                {saving ? (
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Save className="mr-2 h-4 w-4" />
+                                )}
                                 Create Unit Account
                             </Button>
                         </div>

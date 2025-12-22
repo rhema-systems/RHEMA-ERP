@@ -401,7 +401,9 @@ export default function AllocationsPage() {
                                                         Run Allocation
                                                     </DropdownMenuItem>
                                                     <DropdownMenuSeparator />
-                                                    <DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={() => {
+                                                        alert(`⚠️ DEMO MODE: Allocation History for ${rule.code}\n\nLast 3 Runs:\n• ${rule.lastRunDate ? new Date(rule.lastRunDate).toLocaleDateString() : 'N/A'} - $${(Math.random() * 10000 + 1000).toFixed(2)} allocated\n• ${rule.lastRunDate ? new Date(new Date(rule.lastRunDate).getTime() - 30 * 24 * 60 * 60 * 1000).toLocaleDateString() : 'N/A'} - $${(Math.random() * 10000 + 1000).toFixed(2)} allocated\n• ${rule.lastRunDate ? new Date(new Date(rule.lastRunDate).getTime() - 60 * 24 * 60 * 60 * 1000).toLocaleDateString() : 'N/A'} - $${(Math.random() * 10000 + 1000).toFixed(2)} allocated\n\nFull history available when connected to API.`);
+                                                    }}>
                                                         View History
                                                     </DropdownMenuItem>
                                                 </DropdownMenuContent>

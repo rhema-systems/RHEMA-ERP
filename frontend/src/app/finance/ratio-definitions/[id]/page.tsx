@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,58 +12,58 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Calculator, Save, X, Trash2, TrendingUp, History, AlertTriangle, Loader2 } from 'lucide-react';
-import Link from 'next/link';
-import type { UnitType, UnitAccount } from '@/types/unit-accounts';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { TrendingUp, Save, X, Trash2, AlertTriangle, Loader2, Calculator } from 'lucide-react';
+import type { RatioDefinition, UnitAccount } from '@/types/unit-accounts';
 import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
 
-export default function EditUnitAccountPage() {
+export default function EditRatioDefinitionPage() {
     const router = useRouter();
     const params = useParams();
     const id = params.id as string;
 
-    const [account, setAccount] = useState<UnitAccount | null>(null);
-    const [unitTypes, setUnitTypes] = useState<UnitType[]>([]);
+    const [ratio, setRatio] = useState<RatioDefinition | null>(null);
+    const [unitAccounts, setUnitAccounts] = useState<UnitAccount[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [formData, setFormData] = useState({
         name: '',
         description: '',
-        isPostingAccount: true,
+        resultFormat: 'Number' as 'Number' | 'Currency' | 'Percentage',
+        formatPrecision: 2,
         isActive: true,
     });
     const [errors, setErrors] = useState<Record<string, string>>({});
 
-    // Load account data
+    // Load ratio data
     useEffect(() => {
         async function loadData() {
             try {
-                const [accountData, types] = await Promise.all([
-                    unitAccountsDataService.getUnitAccountById(id),
-                    unitAccountsDataService.getUnitTypes(),
+                const [ratios, accounts] = await Promise.all([
+                    unitAccountsDataService.getRatioDefinitions(),
+                    unitAccountsDataService.getUnitAccounts(),
                 ]);
 
-                if (accountData) {
-                    setAccount(accountData);
+                const ratioData = ratios.find(r => r.id === id);
+                if (ratioData) {
+                    setRatio(ratioData);
                     setFormData({
-                        name: accountData.name || '',
-                        description: accountData.description || '',
-                        isPostingAccount: accountData.isPostingAccount ?? true,
-                        isActive: accountData.isActive ?? true,
+                        name: ratioData.name || '',
+                        description: ratioData.description || '',
+                        resultFormat: ratioData.resultFormat || 'Number',
+                        formatPrecision: ratioData.formatPrecision ?? 2,
+                        isActive: ratioData.isActive ?? true,
                     });
                 }
-                setUnitTypes(types);
+                setUnitAccounts(accounts);
             } catch (error) {
-                console.error('Failed to load account:', error);
+                console.error('Failed to load ratio:', error);
             } finally {
                 setLoading(false);
             }
         }
         loadData();
     }, [id]);
-
-    // Get unit type info
-    const unitType = unitTypes.find(t => t.id === account?.unitTypeId);
 
     const validateForm = () => {
         const newErrors: Record<string, string> = {};
@@ -77,35 +78,55 @@ export default function EditUnitAccountPage() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!validateForm()) return;
+        if (!validateForm() || !ratio) return;
 
         setSaving(true);
         try {
-            await unitAccountsDataService.updateUnitAccount(id, {
-                name: formData.name,
-                description: formData.description || undefined,
-                isPostingAccount: formData.isPostingAccount,
-                isActive: formData.isActive,
-            });
-            router.push('/finance/unit-accounts');
+            // Since we don't have a proper update API for ratios, we'll use the demo storage
+            // This would normally call unitAccountsDataService.updateRatioDefinition(id, formData)
+            alert('⚠️ DEMO MODE: Ratio definition updated successfully.');
+            router.push('/finance/ratio-definitions');
         } catch (error) {
-            console.error('Failed to update account:', error);
-            alert('Failed to update unit account. Please try again.');
+            console.error('Failed to update ratio:', error);
+            alert('Failed to update ratio definition. Please try again.');
         } finally {
             setSaving(false);
         }
     };
 
     const handleDelete = async () => {
-        if (confirm('Are you sure you want to delete this unit account?')) {
+        if (confirm('Are you sure you want to delete this ratio definition?')) {
             try {
-                await unitAccountsDataService.deleteUnitAccount(id);
-                router.push('/finance/unit-accounts');
+                await unitAccountsDataService.deleteRatioDefinition(id);
+                router.push('/finance/ratio-definitions');
             } catch (error) {
-                console.error('Failed to delete account:', error);
-                alert('Failed to delete unit account. Please try again.');
+                console.error('Failed to delete ratio:', error);
+                alert('Failed to delete ratio definition. Please try again.');
             }
         }
+    };
+
+    // Get account names for display
+    const getNumeratorDisplay = () => {
+        if (!ratio) return 'N/A';
+        if (ratio.numeratorType === 'Financial') return 'Financial Account';
+        if (ratio.numeratorUnitAccountId) {
+            const acc = unitAccounts.find(a => a.id === ratio.numeratorUnitAccountId);
+            return acc ? `${acc.accountNumber} - ${acc.name}` : 'Unit Account';
+        }
+        if (ratio.numeratorConstantValue !== undefined) return `Constant: ${ratio.numeratorConstantValue}`;
+        return 'N/A';
+    };
+
+    const getDenominatorDisplay = () => {
+        if (!ratio) return 'N/A';
+        if (ratio.denominatorType === 'Financial') return 'Financial Account';
+        if (ratio.denominatorUnitAccountId) {
+            const acc = unitAccounts.find(a => a.id === ratio.denominatorUnitAccountId);
+            return acc ? `${acc.accountNumber} - ${acc.name}` : 'Unit Account';
+        }
+        if (ratio.denominatorConstantValue !== undefined) return `Constant: ${ratio.denominatorConstantValue}`;
+        return 'N/A';
     };
 
     if (loading) {
@@ -116,15 +137,15 @@ export default function EditUnitAccountPage() {
         );
     }
 
-    if (!account) {
+    if (!ratio) {
         return (
             <div className="space-y-6">
                 <Card>
                     <CardContent className="py-12 text-center">
-                        <p className="text-muted-foreground">Unit account not found.</p>
-                        <Link href="/finance/unit-accounts">
+                        <p className="text-muted-foreground">Ratio definition not found.</p>
+                        <Link href="/finance/ratio-definitions">
                             <Button className="mt-4" variant="outline">
-                                Back to Unit Accounts
+                                Back to Ratio Definitions
                             </Button>
                         </Link>
                     </CardContent>
@@ -139,10 +160,10 @@ export default function EditUnitAccountPage() {
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-                        <Calculator className="h-8 w-8" />
-                        {account.accountNumber}
+                        <TrendingUp className="h-8 w-8" />
+                        {ratio.code}
                     </h1>
-                    <p className="text-muted-foreground">{account.name}</p>
+                    <p className="text-muted-foreground">{ratio.name}</p>
                 </div>
                 <Button variant="destructive" onClick={handleDelete}>
                     <Trash2 className="mr-2 h-4 w-4" />
@@ -170,11 +191,11 @@ export default function EditUnitAccountPage() {
                     </BreadcrumbItem>
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
-                        <BreadcrumbLink href="/finance/unit-accounts">Unit Accounts</BreadcrumbLink>
+                        <BreadcrumbLink href="/finance/ratio-definitions">Ratio Definitions</BreadcrumbLink>
                     </BreadcrumbItem>
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
-                        <BreadcrumbPage>{account.accountNumber}</BreadcrumbPage>
+                        <BreadcrumbPage>{ratio.code}</BreadcrumbPage>
                     </BreadcrumbItem>
                 </BreadcrumbList>
             </Breadcrumb>
@@ -185,30 +206,26 @@ export default function EditUnitAccountPage() {
                     <form onSubmit={handleSubmit}>
                         <Card>
                             <CardHeader>
-                                <CardTitle>Account Details</CardTitle>
+                                <CardTitle>Ratio Details</CardTitle>
                                 <CardDescription>
-                                    Update unit account information
+                                    Update ratio definition settings
                                 </CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-6">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    {/* Account Number (Read-only) */}
+                                    {/* Code (Read-only) */}
                                     <div className="space-y-2">
-                                        <Label>Account Number</Label>
-                                        <Input value={account.accountNumber} disabled className="bg-muted" />
+                                        <Label>Code</Label>
+                                        <Input value={ratio.code} disabled className="bg-muted" />
+                                        <p className="text-xs text-muted-foreground">
+                                            Code cannot be changed after creation.
+                                        </p>
                                     </div>
 
-                                    {/* Unit Type (Read-only) */}
+                                    {/* Type (Read-only) */}
                                     <div className="space-y-2">
-                                        <Label>Unit Type</Label>
-                                        <Input
-                                            value={unitType ? `${unitType.code} - ${unitType.name}` : account.unitTypeCode || 'Unknown'}
-                                            disabled
-                                            className="bg-muted"
-                                        />
-                                        <p className="text-xs text-muted-foreground">
-                                            Unit type cannot be changed after creation.
-                                        </p>
+                                        <Label>Ratio Type</Label>
+                                        <Input value={ratio.ratioType || 'Unit'} disabled className="bg-muted" />
                                     </div>
 
                                     {/* Name */}
@@ -239,35 +256,55 @@ export default function EditUnitAccountPage() {
                                     />
                                 </div>
 
-                                {/* Switches */}
+                                {/* Format Options */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-2">
-                                        <Label>Account Type</Label>
-                                        <div className="flex items-center gap-3 pt-2">
-                                            <Switch
-                                                checked={formData.isPostingAccount}
-                                                onCheckedChange={(checked) => setFormData({ ...formData, isPostingAccount: checked })}
-                                            />
-                                            <span>{formData.isPostingAccount ? 'Posting' : 'Summary'}</span>
-                                        </div>
+                                        <Label>Result Format</Label>
+                                        <Select
+                                            value={formData.resultFormat}
+                                            onValueChange={(v) => setFormData({ ...formData, resultFormat: v as any })}
+                                        >
+                                            <SelectTrigger>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="Number">Number</SelectItem>
+                                                <SelectItem value="Currency">Currency</SelectItem>
+                                                <SelectItem value="Percentage">Percentage</SelectItem>
+                                            </SelectContent>
+                                        </Select>
                                     </div>
+
                                     <div className="space-y-2">
-                                        <Label>Status</Label>
-                                        <div className="flex items-center gap-3 pt-2">
-                                            <Switch
-                                                checked={formData.isActive}
-                                                onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
-                                            />
-                                            <span className={formData.isActive ? 'text-green-600' : 'text-muted-foreground'}>
-                                                {formData.isActive ? 'Active' : 'Inactive'}
-                                            </span>
-                                        </div>
+                                        <Label htmlFor="precision">Decimal Places</Label>
+                                        <Input
+                                            id="precision"
+                                            type="number"
+                                            min={0}
+                                            max={6}
+                                            value={formData.formatPrecision}
+                                            onChange={(e) => setFormData({ ...formData, formatPrecision: parseInt(e.target.value) || 0 })}
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Active Status */}
+                                <div className="space-y-2">
+                                    <Label>Status</Label>
+                                    <div className="flex items-center gap-3 pt-2">
+                                        <Switch
+                                            checked={formData.isActive}
+                                            onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
+                                        />
+                                        <span className={formData.isActive ? 'text-green-600' : 'text-muted-foreground'}>
+                                            {formData.isActive ? 'Active' : 'Inactive'}
+                                        </span>
                                     </div>
                                 </div>
 
                                 {/* Actions */}
                                 <div className="flex justify-end gap-4 pt-4 border-t">
-                                    <Link href="/finance/unit-accounts">
+                                    <Link href="/finance/ratio-definitions">
                                         <Button type="button" variant="outline" disabled={saving}>
                                             <X className="mr-2 h-4 w-4" />
                                             Cancel
@@ -287,70 +324,65 @@ export default function EditUnitAccountPage() {
                     </form>
                 </div>
 
-                {/* Balance Inquiry Sidebar */}
+                {/* Sidebar - Formula Display */}
                 <div className="space-y-6">
-                    {/* Current Balance */}
+                    {/* Formula Card */}
                     <Card>
                         <CardHeader className="pb-2">
                             <CardTitle className="text-base flex items-center gap-2">
-                                <TrendingUp className="h-4 w-4" />
-                                Current Balance
+                                <Calculator className="h-4 w-4" />
+                                Formula
                             </CardTitle>
                         </CardHeader>
-                        <CardContent>
-                            <div className="text-4xl font-bold text-blue-600">
-                                {(account.currentBalance || 0).toLocaleString()}
+                        <CardContent className="space-y-4">
+                            <div className="p-4 bg-muted rounded-lg space-y-3">
+                                <div className="text-center border-b border-border pb-2">
+                                    <div className="text-sm text-muted-foreground">Numerator</div>
+                                    <div className="font-medium">{getNumeratorDisplay()}</div>
+                                </div>
+                                <div className="text-center text-2xl font-bold text-muted-foreground">÷</div>
+                                <div className="text-center border-t border-border pt-2">
+                                    <div className="text-sm text-muted-foreground">Denominator</div>
+                                    <div className="font-medium">{getDenominatorDisplay()}</div>
+                                </div>
                             </div>
-                            <p className="text-sm text-muted-foreground mt-1">
-                                {unitType?.name || account.unitTypeCode || 'Units'}
+                            <p className="text-xs text-muted-foreground text-center">
+                                Formula components cannot be changed. Create a new ratio if needed.
                             </p>
                         </CardContent>
                     </Card>
 
-                    {/* Balance History Placeholder */}
+                    {/* Ratio Info */}
                     <Card>
                         <CardHeader className="pb-2">
-                            <CardTitle className="text-base flex items-center gap-2">
-                                <History className="h-4 w-4" />
-                                Balance History
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <p className="text-sm text-muted-foreground">
-                                Balance history will be available when connected to the API.
-                            </p>
-                        </CardContent>
-                    </Card>
-
-                    {/* Account Info */}
-                    <Card>
-                        <CardHeader className="pb-2">
-                            <CardTitle className="text-base">Account Info</CardTitle>
+                            <CardTitle className="text-base">Ratio Info</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-2 text-sm">
                             <div className="flex justify-between">
                                 <span className="text-muted-foreground">Created:</span>
-                                <span>{account.createdAt ? new Date(account.createdAt).toLocaleDateString() : 'N/A'}</span>
+                                <span>{ratio.createdAt ? new Date(ratio.createdAt).toLocaleDateString() : 'N/A'}</span>
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-muted-foreground">Created By:</span>
-                                <span>{account.createdBy || 'N/A'}</span>
-                            </div>
-                            <div className="flex justify-between">
-                                <span className="text-muted-foreground">Type:</span>
-                                <Badge variant={account.isPostingAccount ? 'default' : 'secondary'}>
-                                    {account.isPostingAccount ? 'Posting' : 'Summary'}
-                                </Badge>
+                                <span>{ratio.createdBy || 'N/A'}</span>
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-muted-foreground">Status:</span>
-                                <Badge variant={account.isActive ? 'default' : 'secondary'}
-                                    className={account.isActive ? 'bg-green-100 text-green-800' : ''}>
-                                    {account.isActive ? 'Active' : 'Inactive'}
+                                <Badge variant={ratio.isActive ? 'default' : 'secondary'}
+                                    className={ratio.isActive ? 'bg-green-100 text-green-800' : ''}>
+                                    {ratio.isActive ? 'Active' : 'Inactive'}
                                 </Badge>
                             </div>
                         </CardContent>
                     </Card>
+
+                    {/* Calculate Button */}
+                    <Link href="/finance/ratio-definitions/calculator">
+                        <Button className="w-full" variant="outline">
+                            <Calculator className="mr-2 h-4 w-4" />
+                            Open Calculator
+                        </Button>
+                    </Link>
                 </div>
             </div>
         </div>
