@@ -302,7 +302,8 @@ namespace ErpSystem.Api.Services.Finance
             Guid? fiscalYearId = null,
             CancellationToken cancellationToken = default)
         {
-            var query = _unitOfWork.Repository<UnitAccountBalance>()
+            // Use IQueryable to avoid type mismatch with Include/Where chain
+            IQueryable<UnitAccountBalance> query = _unitOfWork.Repository<UnitAccountBalance>()
                 .GetQueryable(b => b.UnitAccountId == id && !b.IsDeleted)
                 .Include(b => b.FiscalYear)
                 .Include(b => b.FiscalPeriod);

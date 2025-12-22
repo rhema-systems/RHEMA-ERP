@@ -34,7 +34,7 @@ namespace ErpSystem.Api.Services.Finance
 
         private Guid TenantId => _currentUserService.TenantId ?? Guid.Empty;
         private string UserName => _currentUserService.UserName ?? "system";
-        private Guid UserId => _currentUserService.UserId;
+        private Guid UserId => Guid.TryParse(_currentUserService.UserId, out var id) ? id : Guid.Empty;
 
         public async Task<IReadOnlyList<UnitJournalEntryDto>> GetAllAsync(CancellationToken cancellationToken = default)
         {
@@ -52,7 +52,8 @@ namespace ErpSystem.Api.Services.Finance
             UnitJournalEntryFilters filters,
             CancellationToken cancellationToken = default)
         {
-            var query = _unitOfWork.Repository<UnitJournalEntry>()
+            // Use IQueryable to avoid type mismatch with Include/Where chain
+            IQueryable<UnitJournalEntry> query = _unitOfWork.Repository<UnitJournalEntry>()
                 .GetQueryable(e => e.TenantId == TenantId && !e.IsDeleted)
                 .Include(e => e.Lines);
 
