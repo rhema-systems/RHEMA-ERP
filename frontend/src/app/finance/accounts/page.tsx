@@ -1,176 +1,54 @@
-'use client';
+﻿'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { FolderTree, Plus, Search, Eye, Edit, Filter } from 'lucide-react';
+import { FolderTree, Plus, Search, Eye, Edit, Filter, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import type { Account, AccountType, AccountStatus } from '@/types/finance';
-
-// MOCK DATA
-const MOCK_ACCOUNTS: Account[] = [
-    {
-        id: 'acc-1',
-        tenantId: 'tenant-1',
-        accountCode: '1000',
-        accountNumber: '1000',
-        accountName: 'Cash and Cash Equivalents',
-        accountType: 'Asset',
-        currencyCode: 'GHS',
-        isMultiCurrency: false,
-        isSegmented: false,
-        isIFRSClassified: true,
-        isBaseClassified: true,
-        isLocalClassified: true,
-        allowDirectPosting: true,
-        isControlAccount: false,
-        budgetTrackingEnabled: false,
-        status: 'Active',
-        currentBalance: 150000,
-        createdAt: '2024-01-01T00:00:00Z',
-        updatedAt: '2024-01-01T00:00:00Z',
-    },
-    {
-        id: 'acc-2',
-        tenantId: 'tenant-1',
-        accountCode: '1100',
-        accountNumber: '1100',
-        accountName: 'Accounts Receivable',
-        accountType: 'Asset',
-        currencyCode: 'GHS',
-        isMultiCurrency: true,
-        isSegmented: false,
-        isIFRSClassified: true,
-        isBaseClassified: true,
-        isLocalClassified: true,
-        allowDirectPosting: true,
-        isControlAccount: true,
-        budgetTrackingEnabled: false,
-        status: 'Active',
-        currentBalance: 85000,
-        createdAt: '2024-01-01T00:00:00Z',
-        updatedAt: '2024-01-01T00:00:00Z',
-    },
-    {
-        id: 'acc-3',
-        tenantId: 'tenant-1',
-        accountCode: '2000',
-        accountNumber: '2000',
-        accountName: 'Accounts Payable',
-        accountType: 'Liability',
-        currencyCode: 'GHS',
-        isMultiCurrency: true,
-        isSegmented: false,
-        isIFRSClassified: true,
-        isBaseClassified: true,
-        isLocalClassified: true,
-        allowDirectPosting: true,
-        isControlAccount: true,
-        budgetTrackingEnabled: false,
-        status: 'Active',
-        currentBalance: -45000,
-        createdAt: '2024-01-01T00:00:00Z',
-        updatedAt: '2024-01-01T00:00:00Z',
-    },
-    {
-        id: 'acc-4',
-        tenantId: 'tenant-1',
-        accountCode: '3000',
-        accountNumber: '3000',
-        accountName: 'Retained Earnings',
-        accountType: 'Equity',
-        currencyCode: 'GHS',
-        isMultiCurrency: false,
-        isSegmented: false,
-        isIFRSClassified: true,
-        isBaseClassified: true,
-        isLocalClassified: true,
-        allowDirectPosting: false,
-        isControlAccount: false,
-        budgetTrackingEnabled: false,
-        status: 'Active',
-        currentBalance: -190000,
-        createdAt: '2024-01-01T00:00:00Z',
-        updatedAt: '2024-01-01T00:00:00Z',
-    },
-    {
-        id: 'acc-5',
-        tenantId: 'tenant-1',
-        accountCode: '4000',
-        accountNumber: '4000',
-        accountName: 'Sales Revenue',
-        accountType: 'Revenue',
-        currencyCode: 'GHS',
-        isMultiCurrency: true,
-        isSegmented: false,
-        isIFRSClassified: true,
-        isBaseClassified: true,
-        isLocalClassified: true,
-        allowDirectPosting: true,
-        isControlAccount: false,
-        budgetTrackingEnabled: true,
-        status: 'Active',
-        currentBalance: -250000,
-        createdAt: '2024-01-01T00:00:00Z',
-        updatedAt: '2024-01-01T00:00:00Z',
-    },
-    {
-        id: 'acc-6',
-        tenantId: 'tenant-1',
-        accountCode: '5000',
-        accountNumber: '5000',
-        accountName: 'Cost of Goods Sold',
-        accountType: 'Expense',
-        currencyCode: 'GHS',
-        isMultiCurrency: false,
-        isSegmented: false,
-        isIFRSClassified: true,
-        isBaseClassified: true,
-        isLocalClassified: true,
-        allowDirectPosting: true,
-        isControlAccount: false,
-        budgetTrackingEnabled: true,
-        status: 'Active',
-        currentBalance: 120000,
-        createdAt: '2024-01-01T00:00:00Z',
-        updatedAt: '2024-01-01T00:00:00Z',
-    },
-    {
-        id: 'acc-7',
-        tenantId: 'tenant-1',
-        accountCode: '5100',
-        accountNumber: '5100',
-        accountName: 'Salaries and Wages',
-        accountType: 'Expense',
-        currencyCode: 'GHS',
-        isMultiCurrency: false,
-        isSegmented: false,
-        isIFRSClassified: true,
-        isBaseClassified: true,
-        isLocalClassified: true,
-        allowDirectPosting: true,
-        isControlAccount: false,
-        budgetTrackingEnabled: true,
-        status: 'Active',
-        currentBalance: 80000,
-        createdAt: '2024-01-01T00:00:00Z',
-        updatedAt: '2024-01-01T00:00:00Z',
-    },
-];
+import { financeDataService } from '@/services/finance/finance-data.service';
+import { useDemoMode } from '@/contexts/demo-mode-context';
 
 export default function AccountsPage() {
-    const [accounts, setAccounts] = useState<Account[]>(MOCK_ACCOUNTS);
+    const demoContext = useDemoMode();
+    const isDemo = demoContext.isDemoMode('finance');
+
+    const [accounts, setAccounts] = useState<Account[]>([]);
+    const [coaType, setCoaType] = useState<'Standard' | 'Segmented'>('Standard');
+    const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [filters, setFilters] = useState({
         accountType: 'all',
         status: 'all',
         isMultiCurrency: 'all',
     });
+
+    // Load settings and accounts
+    useEffect(() => {
+        const loadData = async () => {
+            try {
+                setLoading(true);
+
+                // First load settings to get COA type
+                const settings = await financeDataService.getFinanceSettings();
+                setCoaType(settings.coaType);
+
+                // Then load accounts with the correct COA type
+                const accountsData = await financeDataService.getAccounts({ coaType: settings.coaType });
+                setAccounts(accountsData);
+            } catch (error) {
+                console.error('Error loading accounts:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadData();
+    }, []);
 
     const filteredAccounts = accounts.filter((account) => {
         // Search filter
@@ -222,6 +100,14 @@ export default function AccountsPage() {
         }).format(Math.abs(amount));
     };
 
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-[400px]">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-6">
             {/* Page Header */}
@@ -230,13 +116,18 @@ export default function AccountsPage() {
                     <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
                         <FolderTree className="h-8 w-8" />
                         Chart of Accounts
+                        <Badge variant="outline" className="ml-2">
+                            {coaType === 'Segmented' ? 'Segmented COA' : 'Standard COA'}
+                        </Badge>
                     </h1>
                     <p className="text-muted-foreground">
                         Manage your organization's chart of accounts
                     </p>
-                    <p className="text-sm text-orange-600 mt-1">
-                        ⚠️ DEMO MODE - Using mock data (backend not connected)
-                    </p>
+                    {isDemo && (
+                        <p className="text-sm text-orange-600 mt-1">
+                            ⚠️ DEMO FRONTEND UI
+                        </p>
+                    )}
                 </div>
                 <Link href="/finance/accounts/new">
                     <Button>
@@ -372,56 +263,55 @@ export default function AccountsPage() {
                                             <div>
                                                 <div className="font-medium">{account.accountName}</div>
                                                 <div className="text-sm text-muted-foreground">{account.accountNumber}</div>
+                                                {account.isSegmented && (
+                                                    <Badge variant="outline" className="mt-1 text-xs">Segmented</Badge>
+                                                )}
                                             </div>
                                         </td>
                                         <td className="p-4">{getAccountTypeBadge(account.accountType)}</td>
                                         <td className="p-4 text-right font-mono">
-                                            {account.currentBalance !== undefined ? formatCurrency(account.currentBalance) : '-'}
+                                            <span className={account.currentBalance < 0 ? 'text-red-600' : ''}>
+                                                {account.currentBalance < 0 ? '-' : ''}{formatCurrency(account.currentBalance)}
+                                            </span>
                                         </td>
-                                        <td className="p-4">
-                                            <div className="flex items-center gap-1">
-                                                <span className="font-mono text-sm">{account.currencyCode}</span>
-                                                {account.isMultiCurrency && (
-                                                    <Badge variant="outline" className="text-xs">
-                                                        Multi
-                                                    </Badge>
-                                                )}
-                                            </div>
-                                        </td>
+                                        <td className="p-4">{account.currencyCode}</td>
                                         <td className="p-4">{getStatusBadge(account.status)}</td>
                                         <td className="p-4">
                                             <div className="flex flex-wrap gap-1">
+                                                {account.isMultiCurrency && (
+                                                    <Badge variant="outline" className="text-xs">Multi-Currency</Badge>
+                                                )}
                                                 {account.isControlAccount && (
-                                                    <Badge variant="outline" className="text-xs">
-                                                        Control
-                                                    </Badge>
+                                                    <Badge variant="outline" className="text-xs">Control</Badge>
                                                 )}
                                                 {account.budgetTrackingEnabled && (
-                                                    <Badge variant="outline" className="text-xs">
-                                                        Budget
-                                                    </Badge>
-                                                )}
-                                                {!account.allowDirectPosting && (
-                                                    <Badge variant="outline" className="text-xs">
-                                                        No Posting
-                                                    </Badge>
+                                                    <Badge variant="outline" className="text-xs">Budget</Badge>
                                                 )}
                                             </div>
                                         </td>
-                                        <td className="p-4 text-right space-x-2">
-                                            <Link href={`/finance/accounts/${account.id}`}>
-                                                <Button variant="ghost" size="sm">
-                                                    <Eye className="h-4 w-4" />
-                                                </Button>
-                                            </Link>
-                                            <Link href={`/finance/accounts/${account.id}/edit`}>
-                                                <Button variant="ghost" size="sm">
-                                                    <Edit className="h-4 w-4" />
-                                                </Button>
-                                            </Link>
+                                        <td className="p-4 text-right">
+                                            <div className="flex justify-end gap-2">
+                                                <Link href={`/finance/accounts/${account.id}`}>
+                                                    <Button variant="ghost" size="sm">
+                                                        <Eye className="h-4 w-4" />
+                                                    </Button>
+                                                </Link>
+                                                <Link href={`/finance/accounts/${account.id}/edit`}>
+                                                    <Button variant="ghost" size="sm">
+                                                        <Edit className="h-4 w-4" />
+                                                    </Button>
+                                                </Link>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}
+                                {filteredAccounts.length === 0 && (
+                                    <tr>
+                                        <td colSpan={8} className="p-8 text-center text-muted-foreground">
+                                            No accounts found matching your criteria
+                                        </td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </div>

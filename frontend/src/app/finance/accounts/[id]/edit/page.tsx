@@ -57,7 +57,7 @@ export default function EditAccountPage({ params }: { params: { id: string } }) 
                         Update account details
                     </p>
                     <p className="text-sm text-orange-600 mt-1">
-                        ⚠️ DEMO MODE - Using mock data (backend not connected)
+                        ⚠️ DEMO FRONTEND UI
                     </p>
                 </div>
                 <Button variant="outline" onClick={() => router.back()}>

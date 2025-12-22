@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -208,7 +208,7 @@ export default function FiscalYearsPage() {
                         Manage fiscal years and accounting periods
                     </p>
                     <p className="text-sm text-orange-600 mt-1">
-                        ⚠️ DEMO MODE - Using mock data (backend not connected)
+                        ⚠️ DEMO FRONTEND UI
                     </p>
                 </div>
                 <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>

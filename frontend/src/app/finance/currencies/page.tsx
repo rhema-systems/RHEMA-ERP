@@ -1,6 +1,6 @@
-'use client';
+﻿'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,72 +8,93 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { DollarSign, Plus, Edit, Power, Search } from 'lucide-react';
-import type { Currency } from '@/types/finance';
+import { DollarSign, Plus, Edit, Power, Search, Globe } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { ISO_4217_CURRENCIES, type ISO4217Currency } from '@/lib/iso-4217-currencies';
+
+// Local currency type for UI (simplified from full Currency type)
+interface LocalCurrency {
+    id: string;
+    code: string;
+    name: string;
+    symbol: string;
+    decimalPlaces: number;
+    isActive: boolean;
+    isBaseCurrency: boolean;
+}
 
 // MOCK DATA
-const MOCK_CURRENCIES: Currency[] = [
+const MOCK_CURRENCIES: LocalCurrency[] = [
     {
         id: 'curr-1',
-        tenantId: 'tenant-1',
         code: 'GHS',
         name: 'Ghana Cedi',
         symbol: '₵',
         decimalPlaces: 2,
         isActive: true,
         isBaseCurrency: true,
-        createdAt: '2024-01-01T00:00:00Z',
-        updatedAt: '2024-01-01T00:00:00Z',
     },
     {
         id: 'curr-2',
-        tenantId: 'tenant-1',
         code: 'USD',
         name: 'US Dollar',
         symbol: '$',
         decimalPlaces: 2,
         isActive: true,
         isBaseCurrency: false,
-        createdAt: '2024-01-01T00:00:00Z',
-        updatedAt: '2024-01-01T00:00:00Z',
     },
     {
         id: 'curr-3',
-        tenantId: 'tenant-1',
         code: 'EUR',
         name: 'Euro',
         symbol: '€',
         decimalPlaces: 2,
         isActive: true,
         isBaseCurrency: false,
-        createdAt: '2024-01-01T00:00:00Z',
-        updatedAt: '2024-01-01T00:00:00Z',
     },
     {
         id: 'curr-4',
-        tenantId: 'tenant-1',
         code: 'GBP',
         name: 'British Pound',
         symbol: '£',
         decimalPlaces: 2,
         isActive: false,
         isBaseCurrency: false,
-        createdAt: '2024-01-01T00:00:00Z',
-        updatedAt: '2024-01-01T00:00:00Z',
     },
 ];
 
 export default function CurrenciesPage() {
-    const [currencies, setCurrencies] = useState<Currency[]>(MOCK_CURRENCIES);
+    const [currencies, setCurrencies] = useState<LocalCurrency[]>(MOCK_CURRENCIES);
     const [searchTerm, setSearchTerm] = useState('');
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-    const [editingCurrency, setEditingCurrency] = useState<Currency | null>(null);
+    const [editingCurrency, setEditingCurrency] = useState<LocalCurrency | null>(null);
+    const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+
+    // Currency selector state
+    const [currencySearch, setCurrencySearch] = useState('');
+    const [selectedISO, setSelectedISO] = useState<ISO4217Currency | null>(null);
+
+    // Form state
     const [formData, setFormData] = useState({
-        code: '',
-        name: '',
         symbol: '',
         decimalPlaces: 2,
     });
+
+    // Filter out currencies already in system
+    const availableCurrencies = useMemo(() => {
+        const existingCodes = new Set(currencies.map(c => c.code));
+        return ISO_4217_CURRENCIES.filter(c => !existingCodes.has(c.code));
+    }, [currencies]);
+
+    // Filter available currencies by search term
+    const filteredAvailableCurrencies = useMemo(() => {
+        if (!currencySearch) return availableCurrencies;
+        const search = currencySearch.toLowerCase();
+        return availableCurrencies.filter(
+            c => c.code.toLowerCase().includes(search) ||
+                c.name.toLowerCase().includes(search)
+        );
+    }, [availableCurrencies, currencySearch]);
 
     const filteredCurrencies = currencies.filter(
         (currency) =>
@@ -81,18 +102,25 @@ export default function CurrenciesPage() {
             currency.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    const handleSelectCurrency = (iso: ISO4217Currency) => {
+        setSelectedISO(iso);
+        setFormData({
+            symbol: iso.symbol,
+            decimalPlaces: iso.decimalPlaces,
+        });
+    };
+
     const handleCreate = () => {
-        const newCurrency: Currency = {
+        if (!selectedISO) return;
+
+        const newCurrency: LocalCurrency = {
             id: `curr-${Date.now()}`,
-            tenantId: 'tenant-1',
-            code: formData.code.toUpperCase(),
-            name: formData.name,
+            code: selectedISO.code,
+            name: selectedISO.name,
             symbol: formData.symbol,
             decimalPlaces: formData.decimalPlaces,
             isActive: true,
             isBaseCurrency: false,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
         };
         setCurrencies([...currencies, newCurrency]);
         setIsCreateDialogOpen(false);
@@ -106,15 +134,13 @@ export default function CurrenciesPage() {
                 c.id === editingCurrency.id
                     ? {
                         ...c,
-                        code: formData.code.toUpperCase(),
-                        name: formData.name,
                         symbol: formData.symbol,
                         decimalPlaces: formData.decimalPlaces,
-                        updatedAt: new Date().toISOString(),
                     }
                     : c
             )
         );
+        setIsEditDialogOpen(false);
         setEditingCurrency(null);
         resetForm();
     };
@@ -123,29 +149,28 @@ export default function CurrenciesPage() {
         setCurrencies(
             currencies.map((c) =>
                 c.id === id
-                    ? { ...c, isActive: !c.isActive, updatedAt: new Date().toISOString() }
+                    ? { ...c, isActive: !c.isActive }
                     : c
             )
         );
     };
 
     const resetForm = () => {
+        setSelectedISO(null);
+        setCurrencySearch('');
         setFormData({
-            code: '',
-            name: '',
             symbol: '',
             decimalPlaces: 2,
         });
     };
 
-    const openEditDialog = (currency: Currency) => {
+    const openEditDialog = (currency: LocalCurrency) => {
         setEditingCurrency(currency);
         setFormData({
-            code: currency.code,
-            name: currency.name,
             symbol: currency.symbol,
             decimalPlaces: currency.decimalPlaces,
         });
+        setIsEditDialogOpen(true);
     };
 
     return (
@@ -161,69 +186,130 @@ export default function CurrenciesPage() {
                         Manage currencies for multi-currency transactions
                     </p>
                     <p className="text-sm text-orange-600 mt-1">
-                        ⚠️ DEMO MODE - Using mock data (backend not connected)
+                        ⚠️ DEMO FRONTEND UI
                     </p>
                 </div>
-                <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+                <Dialog open={isCreateDialogOpen} onOpenChange={(open) => { setIsCreateDialogOpen(open); if (!open) resetForm(); }}>
                     <DialogTrigger asChild>
-                        <Button onClick={() => { resetForm(); setEditingCurrency(null); }}>
+                        <Button>
                             <Plus className="mr-2 h-4 w-4" />
                             Add Currency
                         </Button>
                     </DialogTrigger>
-                    <DialogContent>
+                    <DialogContent className="sm:max-w-[500px]">
                         <DialogHeader>
-                            <DialogTitle>Add New Currency</DialogTitle>
+                            <DialogTitle className="flex items-center gap-2">
+                                <Globe className="h-5 w-5" />
+                                Add New Currency
+                            </DialogTitle>
                             <DialogDescription>
-                                Create a new currency for multi-currency transactions
+                                Select from ISO 4217 standard currencies
                             </DialogDescription>
                         </DialogHeader>
                         <div className="space-y-4 py-4">
+                            {/* Currency Selector */}
                             <div className="space-y-2">
-                                <Label htmlFor="code">Currency Code</Label>
-                                <Input
-                                    id="code"
-                                    placeholder="USD"
-                                    value={formData.code}
-                                    onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                                    maxLength={3}
-                                />
+                                <Label>Select Currency (ISO 4217)</Label>
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                                    <Input
+                                        placeholder="Search currencies..."
+                                        value={currencySearch}
+                                        onChange={(e) => setCurrencySearch(e.target.value)}
+                                        className="pl-10 mb-2"
+                                    />
+                                    <div className="border rounded-md max-h-[200px] overflow-y-auto">
+                                        {filteredAvailableCurrencies.length === 0 ? (
+                                            <div className="p-4 text-center text-muted-foreground">
+                                                No currencies found
+                                            </div>
+                                        ) : (
+                                            filteredAvailableCurrencies.map((iso) => (
+                                                <div
+                                                    key={iso.code}
+                                                    className={cn(
+                                                        "flex items-center justify-between p-3 cursor-pointer hover:bg-muted transition-colors",
+                                                        selectedISO?.code === iso.code && "bg-primary/10 border-l-2 border-primary"
+                                                    )}
+                                                    onClick={() => handleSelectCurrency(iso)}
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="font-mono font-bold w-12">{iso.code}</span>
+                                                        <span>{iso.name}</span>
+                                                    </div>
+                                                    <span className="text-muted-foreground">{iso.symbol}</span>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                                {availableCurrencies.length < ISO_4217_CURRENCIES.length && (
+                                    <p className="text-xs text-muted-foreground">
+                                        {ISO_4217_CURRENCIES.length - availableCurrencies.length} currencies already in system
+                                    </p>
+                                )}
                             </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="name">Currency Name</Label>
-                                <Input
-                                    id="name"
-                                    placeholder="US Dollar"
-                                    value={formData.name}
-                                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="symbol">Symbol</Label>
-                                <Input
-                                    id="symbol"
-                                    placeholder="$"
-                                    value={formData.symbol}
-                                    onChange={(e) => setFormData({ ...formData, symbol: e.target.value })}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="decimalPlaces">Decimal Places</Label>
-                                <Input
-                                    id="decimalPlaces"
-                                    type="number"
-                                    min="0"
-                                    max="4"
-                                    value={formData.decimalPlaces}
-                                    onChange={(e) => setFormData({ ...formData, decimalPlaces: parseInt(e.target.value) || 0 })}
-                                />
-                            </div>
+
+                            {/* Auto-populated fields (shown when currency selected) */}
+                            {selectedISO && (
+                                <>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label>Currency Code</Label>
+                                            <Input
+                                                value={selectedISO.code}
+                                                disabled
+                                                className="font-mono font-bold bg-muted"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Currency Name</Label>
+                                            <Input
+                                                value={selectedISO.name}
+                                                disabled
+                                                className="bg-muted"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="symbol">Symbol</Label>
+                                            <Input
+                                                id="symbol"
+                                                value={formData.symbol}
+                                                onChange={(e) => setFormData({ ...formData, symbol: e.target.value })}
+                                                placeholder="$"
+                                            />
+                                            <p className="text-xs text-muted-foreground">
+                                                Default: {selectedISO.symbol}
+                                            </p>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="decimalPlaces">Decimal Places</Label>
+                                            <Input
+                                                id="decimalPlaces"
+                                                type="number"
+                                                min="0"
+                                                max="4"
+                                                value={formData.decimalPlaces}
+                                                onChange={(e) => setFormData({ ...formData, decimalPlaces: parseInt(e.target.value) || 0 })}
+                                            />
+                                            <p className="text-xs text-muted-foreground">
+                                                Default: {selectedISO.decimalPlaces}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
                         </div>
                         <DialogFooter>
                             <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                                 Cancel
                             </Button>
-                            <Button onClick={handleCreate}>Create Currency</Button>
+                            <Button onClick={handleCreate} disabled={!selectedISO}>
+                                Create Currency
+                            </Button>
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
@@ -305,70 +391,13 @@ export default function CurrenciesPage() {
                                             </Badge>
                                         </td>
                                         <td className="p-4 text-right space-x-2">
-                                            <Dialog>
-                                                <DialogTrigger asChild>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={() => openEditDialog(currency)}
-                                                    >
-                                                        <Edit className="h-4 w-4" />
-                                                    </Button>
-                                                </DialogTrigger>
-                                                <DialogContent>
-                                                    <DialogHeader>
-                                                        <DialogTitle>Edit Currency</DialogTitle>
-                                                        <DialogDescription>
-                                                            Update currency details
-                                                        </DialogDescription>
-                                                    </DialogHeader>
-                                                    <div className="space-y-4 py-4">
-                                                        <div className="space-y-2">
-                                                            <Label htmlFor="edit-code">Currency Code</Label>
-                                                            <Input
-                                                                id="edit-code"
-                                                                value={formData.code}
-                                                                onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                                                                maxLength={3}
-                                                                disabled
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            <Label htmlFor="edit-name">Currency Name</Label>
-                                                            <Input
-                                                                id="edit-name"
-                                                                value={formData.name}
-                                                                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            <Label htmlFor="edit-symbol">Symbol</Label>
-                                                            <Input
-                                                                id="edit-symbol"
-                                                                value={formData.symbol}
-                                                                onChange={(e) => setFormData({ ...formData, symbol: e.target.value })}
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            <Label htmlFor="edit-decimalPlaces">Decimal Places</Label>
-                                                            <Input
-                                                                id="edit-decimalPlaces"
-                                                                type="number"
-                                                                min="0"
-                                                                max="4"
-                                                                value={formData.decimalPlaces}
-                                                                onChange={(e) => setFormData({ ...formData, decimalPlaces: parseInt(e.target.value) || 0 })}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <DialogFooter>
-                                                        <Button variant="outline" onClick={() => setEditingCurrency(null)}>
-                                                            Cancel
-                                                        </Button>
-                                                        <Button onClick={handleUpdate}>Update Currency</Button>
-                                                    </DialogFooter>
-                                                </DialogContent>
-                                            </Dialog>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => openEditDialog(currency)}
+                                            >
+                                                <Edit className="h-4 w-4" />
+                                            </Button>
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
@@ -385,6 +414,67 @@ export default function CurrenciesPage() {
                     </div>
                 </CardContent>
             </Card>
+
+            {/* Edit Dialog */}
+            <Dialog open={isEditDialogOpen} onOpenChange={(open) => { setIsEditDialogOpen(open); if (!open) { setEditingCurrency(null); resetForm(); } }}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Edit Currency</DialogTitle>
+                        <DialogDescription>
+                            Update currency settings (code and name are ISO 4217 locked)
+                        </DialogDescription>
+                    </DialogHeader>
+                    {editingCurrency && (
+                        <div className="space-y-4 py-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label>Currency Code</Label>
+                                    <Input
+                                        value={editingCurrency.code}
+                                        disabled
+                                        className="font-mono font-bold bg-muted"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Currency Name</Label>
+                                    <Input
+                                        value={editingCurrency.name}
+                                        disabled
+                                        className="bg-muted"
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-symbol">Symbol</Label>
+                                    <Input
+                                        id="edit-symbol"
+                                        value={formData.symbol}
+                                        onChange={(e) => setFormData({ ...formData, symbol: e.target.value })}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-decimalPlaces">Decimal Places</Label>
+                                    <Input
+                                        id="edit-decimalPlaces"
+                                        type="number"
+                                        min="0"
+                                        max="4"
+                                        value={formData.decimalPlaces}
+                                        onChange={(e) => setFormData({ ...formData, decimalPlaces: parseInt(e.target.value) || 0 })}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                            Cancel
+                        </Button>
+                        <Button onClick={handleUpdate}>Update Currency</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

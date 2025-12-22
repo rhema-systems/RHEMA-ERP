@@ -8,10 +8,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Settings, Lock, AlertTriangle, Save, DollarSign } from 'lucide-react';
-import { financeService } from '@/services/finance.service';
+import { Settings, Lock, AlertTriangle, Save, DollarSign, Layers } from 'lucide-react';
+import { financeDataService } from '@/services/finance/finance-data.service';
 import type { FinanceSettings, UpdateFinanceSettingsDto, Account } from '@/types/finance';
 import { useToast } from '@/hooks/use-toast';
+import { FinanceDemoModeToggle } from '@/components/finance/finance-demo-mode-toggle';
+import Link from 'next/link';
 
 export default function FinanceSettingsPage() {
     const [settings, setSettings] = useState<FinanceSettings | null>(null);
@@ -33,13 +35,19 @@ export default function FinanceSettingsPage() {
 
     useEffect(() => {
         loadSettings();
-        loadAccounts();
     }, []);
+
+    // Reload accounts when COA type changes
+    useEffect(() => {
+        if (formData.coaType) {
+            loadAccounts(formData.coaType);
+        }
+    }, [formData.coaType]);
 
     const loadSettings = async () => {
         try {
             setLoading(true);
-            const data = await financeService.getSettings();
+            const data = await financeDataService.getFinanceSettings();
             setSettings(data);
             setFormData({
                 coaType: data.coaType,
@@ -50,9 +58,11 @@ export default function FinanceSettingsPage() {
                 suspenseAccountId: data.suspenseAccountId,
             });
 
-            // Check if COA type can be changed
-            const canChange = await financeService.canChangeCOAType();
-            setCanChangeCOA(canChange);
+            // In demo mode, COA type can always be changed
+            setCanChangeCOA(true);
+
+            // Load accounts for the current COA type
+            await loadAccounts(data.coaType);
         } catch (error: any) {
             console.error('Error loading settings:', error);
             toast({
@@ -65,19 +75,50 @@ export default function FinanceSettingsPage() {
         }
     };
 
-    const loadAccounts = async () => {
+    const loadAccounts = async (coaType: 'Standard' | 'Segmented') => {
         try {
-            const result = await financeService.getAccounts({ pageSize: 1000 });
-            setAccounts(result.items);
+            const accountsData = await financeDataService.getAccounts({ coaType });
+            setAccounts(accountsData);
         } catch (error) {
             console.error('Error loading accounts:', error);
         }
     };
 
+    // Account ID mappings between Standard and Segmented COA
+    const ACCOUNT_ID_MAP: Record<string, string> = {
+        // Standard -> Segmented
+        'acc-3100': 'seg-acc-retained',
+        'acc-7100': 'seg-acc-unrealized',
+        'acc-7200': 'seg-acc-realized',
+        'acc-9999': 'seg-acc-suspense',
+        // Segmented -> Standard
+        'seg-acc-retained': 'acc-3100',
+        'seg-acc-unrealized': 'acc-7100',
+        'seg-acc-realized': 'acc-7200',
+        'seg-acc-suspense': 'acc-9999',
+    };
+
+    const handleCOATypeChange = (newCoaType: 'Standard' | 'Segmented') => {
+        // Map the account IDs to the new COA type equivalents
+        const mapAccountId = (id: string | undefined): string | undefined => {
+            if (!id) return undefined;
+            return ACCOUNT_ID_MAP[id] || undefined;
+        };
+
+        setFormData({
+            ...formData,
+            coaType: newCoaType,
+            retainedEarningsAccountId: mapAccountId(formData.retainedEarningsAccountId),
+            unrealizedGainLossAccountId: mapAccountId(formData.unrealizedGainLossAccountId),
+            realizedGainLossAccountId: mapAccountId(formData.realizedGainLossAccountId),
+            suspenseAccountId: mapAccountId(formData.suspenseAccountId),
+        });
+    };
+
     const handleSave = async () => {
         try {
             setSaving(true);
-            const updated = await financeService.updateSettings(formData);
+            const updated = await financeDataService.updateFinanceSettings(formData);
             setSettings(updated);
 
             toast({
@@ -144,6 +185,45 @@ export default function FinanceSettingsPage() {
                 </BreadcrumbList>
             </Breadcrumb>
 
+            {/* Demo Mode Toggle - TEMPORARILY HIDDEN FOR DEMO
+            <FinanceDemoModeToggle />
+            */}
+
+            {/* Quick Links */}
+            <Card>
+                <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                        <CardTitle className="text-base">Quick Links</CardTitle>
+                        <span className={`text-xs px-2 py-1 rounded-full ${formData.coaType === 'Segmented' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {formData.coaType} COA
+                        </span>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    <div className="flex flex-wrap gap-2">
+                        {formData.coaType === 'Segmented' && (
+                            <Link href="/finance/settings/segments">
+                                <Button variant="outline" size="sm">
+                                    <Layers className="mr-2 h-4 w-4" />
+                                    Configure Segments
+                                </Button>
+                            </Link>
+                        )}
+                        <Link href="/finance/accounts">
+                            <Button variant="outline" size="sm">
+                                <DollarSign className="mr-2 h-4 w-4" />
+                                Chart of Accounts
+                            </Button>
+                        </Link>
+                    </div>
+                    {formData.coaType === 'Standard' && (
+                        <p className="text-xs text-muted-foreground mt-2">
+                            Segment configuration is only available for Segmented COA
+                        </p>
+                    )}
+                </CardContent>
+            </Card>
+
             {/* COA Lock Warning */}
             {settings?.coaConfigurationLocked && (
                 <Alert variant="destructive">
@@ -170,7 +250,7 @@ export default function FinanceSettingsPage() {
                         <Label>COA Type</Label>
                         <RadioGroup
                             value={formData.coaType}
-                            onValueChange={(value) => setFormData({ ...formData, coaType: value as 'Standard' | 'Segmented' })}
+                            onValueChange={(value) => handleCOATypeChange(value as 'Standard' | 'Segmented')}
                             disabled={!canChangeCOA || settings?.coaConfigurationLocked}
                         >
                             <div className="flex items-center space-x-2 border rounded-lg p-4">
@@ -250,14 +330,14 @@ export default function FinanceSettingsPage() {
                     <div className="space-y-2">
                         <Label htmlFor="retainedEarnings">Retained Earnings Account</Label>
                         <Select
-                            value={formData.retainedEarningsAccountId || ''}
-                            onValueChange={(value) => setFormData({ ...formData, retainedEarningsAccountId: value || undefined })}
+                            value={formData.retainedEarningsAccountId || '__none__'}
+                            onValueChange={(value) => setFormData({ ...formData, retainedEarningsAccountId: value === '__none__' ? undefined : value })}
                         >
                             <SelectTrigger id="retainedEarnings">
                                 <SelectValue placeholder="Select account" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="">None</SelectItem>
+                                <SelectItem value="__none__">None</SelectItem>
                                 {accounts
                                     .filter(a => a.accountType === 'Equity')
                                     .map(account => (
@@ -275,14 +355,14 @@ export default function FinanceSettingsPage() {
                     <div className="space-y-2">
                         <Label htmlFor="unrealizedGainLoss">Unrealized Gain/Loss Account</Label>
                         <Select
-                            value={formData.unrealizedGainLossAccountId || ''}
-                            onValueChange={(value) => setFormData({ ...formData, unrealizedGainLossAccountId: value || undefined })}
+                            value={formData.unrealizedGainLossAccountId || '__none__'}
+                            onValueChange={(value) => setFormData({ ...formData, unrealizedGainLossAccountId: value === '__none__' ? undefined : value })}
                         >
                             <SelectTrigger id="unrealizedGainLoss">
                                 <SelectValue placeholder="Select account" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="">None</SelectItem>
+                                <SelectItem value="__none__">None</SelectItem>
                                 {accounts
                                     .filter(a => a.accountType === 'Revenue' || a.accountType === 'Expense')
                                     .map(account => (
@@ -300,14 +380,14 @@ export default function FinanceSettingsPage() {
                     <div className="space-y-2">
                         <Label htmlFor="realizedGainLoss">Realized Gain/Loss Account</Label>
                         <Select
-                            value={formData.realizedGainLossAccountId || ''}
-                            onValueChange={(value) => setFormData({ ...formData, realizedGainLossAccountId: value || undefined })}
+                            value={formData.realizedGainLossAccountId || '__none__'}
+                            onValueChange={(value) => setFormData({ ...formData, realizedGainLossAccountId: value === '__none__' ? undefined : value })}
                         >
                             <SelectTrigger id="realizedGainLoss">
                                 <SelectValue placeholder="Select account" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="">None</SelectItem>
+                                <SelectItem value="__none__">None</SelectItem>
                                 {accounts
                                     .filter(a => a.accountType === 'Revenue' || a.accountType === 'Expense')
                                     .map(account => (
@@ -325,14 +405,14 @@ export default function FinanceSettingsPage() {
                     <div className="space-y-2">
                         <Label htmlFor="suspense">Suspense Account</Label>
                         <Select
-                            value={formData.suspenseAccountId || ''}
-                            onValueChange={(value) => setFormData({ ...formData, suspenseAccountId: value || undefined })}
+                            value={formData.suspenseAccountId || '__none__'}
+                            onValueChange={(value) => setFormData({ ...formData, suspenseAccountId: value === '__none__' ? undefined : value })}
                         >
                             <SelectTrigger id="suspense">
                                 <SelectValue placeholder="Select account" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="">None</SelectItem>
+                                <SelectItem value="__none__">None</SelectItem>
                                 {accounts
                                     .filter(a => a.accountType === 'Asset' || a.accountType === 'Liability')
                                     .map(account => (

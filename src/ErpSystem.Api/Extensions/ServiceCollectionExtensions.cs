@@ -474,9 +474,15 @@ namespace ErpSystem.Api.Extensions
                 ErpSystem.Core.Services.Maintenance.DeadLetterNotificationService>();
 
             // Finance Services
-            services.AddScoped<ISegmentConfigurationService, SegmentConfigurationService>();
+
             services.AddScoped<IGeneralLedgerService, GeneralLedgerService>();
             services.AddScoped<IFinanceSettingsService, FinanceSettingsService>();
+
+            // Unit Accounts Services
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitTypeService, UnitTypeService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitAccountService, UnitAccountService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitJournalEntryService, UnitJournalEntryService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IRatioDefinitionService, RatioDefinitionService>();
 
             // Add AutoMapper - using assembly scanning approach
             services.AddAutoMapper(typeof(Program).Assembly, typeof(ErpSystem.Core.Services.TenantService).Assembly, typeof(ErpSystem.Data.ApplicationDbContext).Assembly);

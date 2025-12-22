@@ -9,6 +9,7 @@ import { Toaster } from "../components/ui/toaster";
 import { PWAInit } from "../components/PWAInit";
 import { NotificationProvider } from "../contexts/NotificationContext";
 import { NotificationToast } from "../components/notifications/NotificationToast";
+import { DemoModeProvider } from "../contexts/demo-mode-context";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -46,12 +47,14 @@ export default function RootLayout({
           <ReactQueryProvider>
             <SessionBlacklistProvider>
               <TenantProvider>
-                <NotificationProvider>
-                  {children}
-                  <Toaster />
-                  <NotificationToast position="top-right" />
-                  <PWAInit />
-                </NotificationProvider>
+                <DemoModeProvider>
+                  <NotificationProvider>
+                    {children}
+                    <Toaster />
+                    <NotificationToast position="top-right" />
+                    <PWAInit />
+                  </NotificationProvider>
+                </DemoModeProvider>
               </TenantProvider>
             </SessionBlacklistProvider>
           </ReactQueryProvider>

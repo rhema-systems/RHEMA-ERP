@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -181,7 +181,7 @@ export default function NewJournalEntryPage() {
                     <h1 className="text-3xl font-bold tracking-tight">New Journal Entry</h1>
                     <p className="text-muted-foreground">Create a new general ledger entry</p>
                     <p className="text-sm text-orange-600 mt-1">
-                        ⚠️ DEMO MODE - Using mock data (backend not connected)
+                        ⚠️ DEMO FRONTEND UI
                     </p>
                 </div>
                 <div className="flex gap-2">

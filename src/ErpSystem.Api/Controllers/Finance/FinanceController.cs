@@ -20,44 +20,6 @@ namespace ErpSystem.Api.Controllers
             _currentUserService = currentUserService;
         }
 
-        [HttpPost("accounts")]
-        public async Task<IActionResult> CreateAccount([FromBody] AccountCreateDto accountDto)
-        {
-            try
-            {
-                if (accountDto == null)
-                    return BadRequest(new { error = "Request body cannot be null" });
-
-                var account = await _glService.CreateSegmentedAccountAsync(accountDto);
-                
-                return CreatedAtAction(
-                    nameof(GetAccountBalance),
-                    new { id = account.Id },
-                    new
-                    {
-                        id = account.Id,
-                        accountCode = account.AccountCode,
-                        accountNumber = account.AccountNumber,
-                        accountName = account.AccountName,
-                        accountType = account.AccountType.ToString(),
-                        currencyCode = account.CurrencyCode
-                    });
-            }
-            catch (ArgumentException ex)
-            {
-                return BadRequest(new { error = ex.Message, parameter = ex.ParamName });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new { error = ex.Message });
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"ERROR in CreateAccount: {ex.Message}");
-                return StatusCode(500, new { error = "An error occurred while creating the account", details = ex.Message });
-            }
-        }
-
         [HttpGet("debug/claims")]
         public IActionResult GetClaims()
         {
@@ -86,13 +48,6 @@ namespace ErpSystem.Api.Controllers
             {
                 return BadRequest(new { message = ex.Message });
             }
-        }
-
-        [HttpGet("accounts/{id}/balance")]
-        public async Task<IActionResult> GetAccountBalance(Guid id, [FromQuery] string currencyCode = "GHS")
-        {
-            var balance = await _glService.GetAccountBalanceAsync(id, currencyCode);
-            return Ok(balance);
         }
 
         [HttpPost("revaluation")]

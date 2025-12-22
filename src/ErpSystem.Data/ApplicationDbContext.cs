@@ -301,6 +301,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<AccountTransaction> AccountTransactions { get; set; }
     public DbSet<FinanceSettings> FinanceSettings { get; set; }
 
+    // Unit Accounts entities
+    public DbSet<UnitType> UnitTypes { get; set; }
+    public DbSet<UnitAccount> UnitAccounts { get; set; }
+    public DbSet<UnitJournalEntry> UnitJournalEntries { get; set; }
+    public DbSet<UnitJournalEntryLine> UnitJournalEntryLines { get; set; }
+    public DbSet<UnitAccountBalance> UnitAccountBalances { get; set; }
+    public DbSet<RatioDefinition> RatioDefinitions { get; set; }
+    public DbSet<UnitAccountBudget> UnitAccountBudgets { get; set; }
+    public DbSet<AllocationRule> AllocationRules { get; set; }
+    public DbSet<AllocationTarget> AllocationTargets { get; set; }
+
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -312,6 +323,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new UserTenantConfiguration());
         builder.ApplyConfiguration(new AssetTypeConfiguration());
         builder.ApplyConfiguration(new AssetTypeFieldConfiguration());
+
+        // Apply Unit Accounts configurations
+        builder.ApplyConfiguration(new UnitTypeConfiguration());
+        builder.ApplyConfiguration(new UnitAccountConfiguration());
+        builder.ApplyConfiguration(new UnitJournalEntryConfiguration());
+        builder.ApplyConfiguration(new UnitJournalEntryLineConfiguration());
+        builder.ApplyConfiguration(new UnitAccountBalanceConfiguration());
+        builder.ApplyConfiguration(new RatioDefinitionConfiguration());
+        builder.ApplyConfiguration(new UnitAccountBudgetConfiguration());
+        builder.ApplyConfiguration(new AllocationRuleConfiguration());
+        builder.ApplyConfiguration(new AllocationTargetConfiguration());
 
         // Configure Identity tables with custom names
         builder.Entity<ApplicationUser>(entity =>
@@ -2320,6 +2342,76 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 }
             );
         }
+
+        // Seed common Unit Types
+        builder.Entity<UnitType>().HasData(
+            new UnitType
+            {
+                Id = Guid.Parse("00000000-0000-0000-1001-000000000001"),
+                TenantId = defaultTenantId,
+                Code = "EMP",
+                Name = "Employees",
+                Description = "Headcount/Full-Time Equivalents (FTE)",
+                DecimalPlaces = 0,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            },
+            new UnitType
+            {
+                Id = Guid.Parse("00000000-0000-0000-1001-000000000002"),
+                TenantId = defaultTenantId,
+                Code = "SQFT",
+                Name = "Square Feet",
+                Description = "Floor space area measurement",
+                DecimalPlaces = 2,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            },
+            new UnitType
+            {
+                Id = Guid.Parse("00000000-0000-0000-1001-000000000003"),
+                TenantId = defaultTenantId,
+                Code = "HRS",
+                Name = "Hours",
+                Description = "Time measurement in hours",
+                DecimalPlaces = 2,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            },
+            new UnitType
+            {
+                Id = Guid.Parse("00000000-0000-0000-1001-000000000004"),
+                TenantId = defaultTenantId,
+                Code = "UNITS",
+                Name = "Units",
+                Description = "Generic unit count (production, sales, etc.)",
+                DecimalPlaces = 0,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            },
+            new UnitType
+            {
+                Id = Guid.Parse("00000000-0000-0000-1001-000000000005"),
+                TenantId = defaultTenantId,
+                Code = "PCT",
+                Name = "Percentage",
+                Description = "Percentage values (0-100)",
+                DecimalPlaces = 2,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            },
+            new UnitType
+            {
+                Id = Guid.Parse("00000000-0000-0000-1001-000000000006"),
+                TenantId = defaultTenantId,
+                Code = "KWH",
+                Name = "Kilowatt Hours",
+                Description = "Energy consumption measurement",
+                DecimalPlaces = 2,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            }
+        );
 
         // Seed permissions
         SeedPermissions(builder);

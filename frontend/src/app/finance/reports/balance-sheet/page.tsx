@@ -1,17 +1,18 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Download, Printer } from 'lucide-react';
+import { Download, Loader2, Printer } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
+import { financeDataService } from '@/services/finance/finance-data.service';
+import type { FinanceSettings } from '@/types/finance';
 
-// MOCK DATA
 interface BalanceSheetItem {
     id: string;
     accountCode: string;
@@ -20,39 +21,81 @@ interface BalanceSheetItem {
     category: 'Current Asset' | 'Non-Current Asset' | 'Current Liability' | 'Non-Current Liability' | 'Equity';
 }
 
-const MOCK_DATA: BalanceSheetItem[] = [
-    // Current Assets
-    { id: '1', accountCode: '1000', accountName: 'Cash on Hand', amount: 50000, category: 'Current Asset' },
-    { id: '2', accountCode: '1100', accountName: 'Accounts Receivable', amount: 35000, category: 'Current Asset' },
-    { id: '3', accountCode: '1200', accountName: 'Inventory', amount: 75000, category: 'Current Asset' },
-
-    // Non-Current Assets
-    { id: '4', accountCode: '1500', accountName: 'Property, Plant & Equipment', amount: 250000, category: 'Non-Current Asset' },
-    { id: '5', accountCode: '1600', accountName: 'Intangible Assets', amount: 40000, category: 'Non-Current Asset' },
-
-    // Current Liabilities
-    { id: '6', accountCode: '2000', accountName: 'Accounts Payable', amount: 45000, category: 'Current Liability' },
-    { id: '7', accountCode: '2100', accountName: 'VAT Payable', amount: 12000, category: 'Current Liability' },
-
-    // Non-Current Liabilities
-    { id: '8', accountCode: '2500', accountName: 'Long-term Loans', amount: 100000, category: 'Non-Current Liability' },
-
-    // Equity
-    { id: '9', accountCode: '3000', accountName: 'Share Capital', amount: 200000, category: 'Equity' },
-    { id: '10', accountCode: '3100', accountName: 'Retained Earnings', amount: 93000, category: 'Equity' }, // 450k Assets - 157k Liab = 293k Equity. 200k Share Cap. Need 93k Retained.
-];
-
 export default function BalanceSheetPage() {
     const router = useRouter();
     const [asOfDate, setAsOfDate] = useState(new Date().toISOString().split('T')[0]);
     const [currency, setCurrency] = useState('GHS');
 
+    // Data loading state
+    const [loading, setLoading] = useState(true);
+    const [settings, setSettings] = useState<FinanceSettings | null>(null);
+    const [balanceSheetData, setBalanceSheetData] = useState<BalanceSheetItem[]>([]);
+
+    useEffect(() => {
+        loadData();
+    }, []);
+
+    const loadData = async () => {
+        try {
+            setLoading(true);
+
+            const settingsData = await financeDataService.getFinanceSettings();
+            setSettings(settingsData);
+
+            const accounts = await financeDataService.getAccounts({ coaType: settingsData.coaType });
+
+            // Transform accounts to balance sheet items
+            const items: BalanceSheetItem[] = [];
+
+            accounts.forEach(account => {
+                const category = account.accountCategory || '';
+                const balance = Math.abs(account.currentBalance || 0);
+
+                if (account.accountType === 'Asset') {
+                    const isNonCurrent = category.toLowerCase().includes('fixed') ||
+                        category.toLowerCase().includes('non-current');
+                    items.push({
+                        id: account.id,
+                        accountCode: account.accountCode,
+                        accountName: account.accountName,
+                        amount: balance,
+                        category: isNonCurrent ? 'Non-Current Asset' : 'Current Asset',
+                    });
+                } else if (account.accountType === 'Liability') {
+                    const isNonCurrent = category.toLowerCase().includes('long') ||
+                        category.toLowerCase().includes('non-current');
+                    items.push({
+                        id: account.id,
+                        accountCode: account.accountCode,
+                        accountName: account.accountName,
+                        amount: balance,
+                        category: isNonCurrent ? 'Non-Current Liability' : 'Current Liability',
+                    });
+                } else if (account.accountType === 'Equity') {
+                    items.push({
+                        id: account.id,
+                        accountCode: account.accountCode,
+                        accountName: account.accountName,
+                        amount: balance,
+                        category: 'Equity',
+                    });
+                }
+            });
+
+            setBalanceSheetData(items);
+        } catch (error) {
+            console.error('Error loading balance sheet data:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     // Group Data
-    const currentAssets = MOCK_DATA.filter(i => i.category === 'Current Asset');
-    const nonCurrentAssets = MOCK_DATA.filter(i => i.category === 'Non-Current Asset');
-    const currentLiabilities = MOCK_DATA.filter(i => i.category === 'Current Liability');
-    const nonCurrentLiabilities = MOCK_DATA.filter(i => i.category === 'Non-Current Liability');
-    const equityItems = MOCK_DATA.filter(i => i.category === 'Equity');
+    const currentAssets = balanceSheetData.filter(i => i.category === 'Current Asset');
+    const nonCurrentAssets = balanceSheetData.filter(i => i.category === 'Non-Current Asset');
+    const currentLiabilities = balanceSheetData.filter(i => i.category === 'Current Liability');
+    const nonCurrentLiabilities = balanceSheetData.filter(i => i.category === 'Non-Current Liability');
+    const equityItems = balanceSheetData.filter(i => i.category === 'Equity');
 
     // Calculate Totals
     const totalCurrentAssets = currentAssets.reduce((sum, item) => sum + item.amount, 0);
@@ -89,11 +132,21 @@ export default function BalanceSheetPage() {
 
     const AccountRow = ({ item }: { item: BalanceSheetItem }) => (
         <TableRow key={item.id} className="border-0">
-            <TableCell className="w-[100px] text-muted-foreground">{item.accountCode}</TableCell>
+            <TableCell className={`${settings?.coaType === 'Segmented' ? 'w-[150px]' : 'w-[100px]'} text-muted-foreground font-mono text-sm`}>
+                {item.accountCode}
+            </TableCell>
             <TableCell>{item.accountName}</TableCell>
             <TableCell className="text-right w-[150px]">{formatMoney(item.amount)}</TableCell>
         </TableRow>
     );
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-96">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">
@@ -101,7 +154,14 @@ export default function BalanceSheetPage() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Balance Sheet</h1>
-                    <p className="text-muted-foreground">Statement of Financial Position</p>
+                    <p className="text-muted-foreground">
+                        Statement of Financial Position
+                        {settings?.coaType === 'Segmented' && (
+                            <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                                Segmented COA
+                            </span>
+                        )}
+                    </p>
                 </div>
                 <div className="flex gap-2">
                     <Button variant="outline" onClick={() => window.print()}>
@@ -181,12 +241,20 @@ export default function BalanceSheetPage() {
                                 <TableRow className="bg-slate-100 hover:bg-slate-100"><TableCell colSpan={3} className="font-bold text-lg py-4">ASSETS</TableCell></TableRow>
 
                                 <SectionHeader title="Current Assets" />
-                                {currentAssets.map(item => <AccountRow key={item.id} item={item} />)}
+                                {currentAssets.length > 0 ? (
+                                    currentAssets.map(item => <AccountRow key={item.id} item={item} />)
+                                ) : (
+                                    <TableRow><TableCell colSpan={3} className="text-muted-foreground italic">No current assets</TableCell></TableRow>
+                                )}
                                 <SectionTotal title="Total Current Assets" amount={totalCurrentAssets} />
 
                                 <TableRow className="h-4"><TableCell colSpan={3}></TableCell></TableRow>
                                 <SectionHeader title="Non-Current Assets" />
-                                {nonCurrentAssets.map(item => <AccountRow key={item.id} item={item} />)}
+                                {nonCurrentAssets.length > 0 ? (
+                                    nonCurrentAssets.map(item => <AccountRow key={item.id} item={item} />)
+                                ) : (
+                                    <TableRow><TableCell colSpan={3} className="text-muted-foreground italic">No non-current assets</TableCell></TableRow>
+                                )}
                                 <SectionTotal title="Total Non-Current Assets" amount={totalNonCurrentAssets} />
 
                                 <TableRow className="h-4"><TableCell colSpan={3}></TableCell></TableRow>
@@ -198,12 +266,20 @@ export default function BalanceSheetPage() {
                                 <TableRow className="bg-slate-100 hover:bg-slate-100"><TableCell colSpan={3} className="font-bold text-lg py-4">LIABILITIES</TableCell></TableRow>
 
                                 <SectionHeader title="Current Liabilities" />
-                                {currentLiabilities.map(item => <AccountRow key={item.id} item={item} />)}
+                                {currentLiabilities.length > 0 ? (
+                                    currentLiabilities.map(item => <AccountRow key={item.id} item={item} />)
+                                ) : (
+                                    <TableRow><TableCell colSpan={3} className="text-muted-foreground italic">No current liabilities</TableCell></TableRow>
+                                )}
                                 <SectionTotal title="Total Current Liabilities" amount={totalCurrentLiabilities} />
 
                                 <TableRow className="h-4"><TableCell colSpan={3}></TableCell></TableRow>
                                 <SectionHeader title="Non-Current Liabilities" />
-                                {nonCurrentLiabilities.map(item => <AccountRow key={item.id} item={item} />)}
+                                {nonCurrentLiabilities.length > 0 ? (
+                                    nonCurrentLiabilities.map(item => <AccountRow key={item.id} item={item} />)
+                                ) : (
+                                    <TableRow><TableCell colSpan={3} className="text-muted-foreground italic">No non-current liabilities</TableCell></TableRow>
+                                )}
                                 <SectionTotal title="Total Non-Current Liabilities" amount={totalNonCurrentLiabilities} />
 
                                 <TableRow className="h-4"><TableCell colSpan={3}></TableCell></TableRow>
@@ -214,7 +290,11 @@ export default function BalanceSheetPage() {
                                 <TableRow className="h-8"><TableCell colSpan={3}></TableCell></TableRow>
                                 <TableRow className="bg-slate-100 hover:bg-slate-100"><TableCell colSpan={3} className="font-bold text-lg py-4">EQUITY</TableCell></TableRow>
 
-                                {equityItems.map(item => <AccountRow key={item.id} item={item} />)}
+                                {equityItems.length > 0 ? (
+                                    equityItems.map(item => <AccountRow key={item.id} item={item} />)
+                                ) : (
+                                    <TableRow><TableCell colSpan={3} className="text-muted-foreground italic">No equity accounts</TableCell></TableRow>
+                                )}
                                 <SectionTotal title="Total Equity" amount={totalEquity} />
 
                                 {/* TOTAL LIABILITIES & EQUITY */}

@@ -214,7 +214,7 @@ export default function EditJournalEntryPage({ params }: { params: { id: string 
                     <h1 className="text-3xl font-bold tracking-tight">Edit Journal Entry</h1>
                     <p className="text-muted-foreground">{MOCK_ENTRY.journalEntryNumber}</p>
                     <p className="text-sm text-orange-600 mt-1">
-                        ⚠️ DEMO MODE - Using mock data (backend not connected)
+                        ⚠️ DEMO FRONTEND UI
                     </p>
                 </div>
                 <div className="flex gap-2">

@@ -295,9 +295,9 @@ export const MOCK_FINANCE_SETTINGS: FinanceSettings = {
     coaConfigurationLocked: false,
     baseCurrency: 'GHS',
     retainedEarningsAccountId: 'acc-3100',
-    unrealizedGainLossAccountId: undefined,
-    realizedGainLossAccountId: undefined,
-    suspenseAccountId: undefined,
+    unrealizedGainLossAccountId: 'acc-7100',
+    realizedGainLossAccountId: 'acc-7200',
+    suspenseAccountId: 'acc-9999',
 };
 
 // ===== HELPER FUNCTIONS =====

@@ -1,52 +1,88 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Download, Printer, Calendar as CalendarIcon } from 'lucide-react';
+import { Download, Loader2, Printer } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
+import { financeDataService } from '@/services/finance/finance-data.service';
+import type { Account, FinanceSettings } from '@/types/finance';
 
-// MOCK DATA
 interface IncomeStatementItem {
     id: string;
     accountCode: string;
     accountName: string;
-    amount: number; // Positive for Revenue, Negative for Expense (or handled by display logic)
+    amount: number;
     category: 'Revenue' | 'COGS' | 'Expense';
 }
 
-const MOCK_DATA: IncomeStatementItem[] = [
-    // Revenue
-    { id: '1', accountCode: '4000', accountName: 'Sales Revenue', amount: 150000, category: 'Revenue' },
-    { id: '2', accountCode: '4100', accountName: 'Service Income', amount: 45000, category: 'Revenue' },
-
-    // COGS
-    { id: '3', accountCode: '5000', accountName: 'Cost of Goods Sold', amount: 85000, category: 'COGS' },
-    { id: '4', accountCode: '5050', accountName: 'Freight In', amount: 5000, category: 'COGS' },
-
-    // Expenses
-    { id: '5', accountCode: '6000', accountName: 'Salaries Expense', amount: 35000, category: 'Expense' },
-    { id: '6', accountCode: '6100', accountName: 'Rent Expense', amount: 12000, category: 'Expense' },
-    { id: '7', accountCode: '6200', accountName: 'Utilities Expense', amount: 4500, category: 'Expense' },
-    { id: '8', accountCode: '6300', accountName: 'Marketing Expense', amount: 8000, category: 'Expense' },
-    { id: '9', accountCode: '6400', accountName: 'Depreciation Expense', amount: 2500, category: 'Expense' },
-];
-
 export default function IncomeStatementPage() {
     const router = useRouter();
-    const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0]); // Jan 1st
-    const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]); // Today
+    const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0]);
+    const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
     const [currency, setCurrency] = useState('GHS');
 
+    // Data loading state
+    const [loading, setLoading] = useState(true);
+    const [settings, setSettings] = useState<FinanceSettings | null>(null);
+    const [incomeData, setIncomeData] = useState<IncomeStatementItem[]>([]);
+
+    useEffect(() => {
+        loadData();
+    }, []);
+
+    const loadData = async () => {
+        try {
+            setLoading(true);
+
+            const settingsData = await financeDataService.getFinanceSettings();
+            setSettings(settingsData);
+
+            const accounts = await financeDataService.getAccounts({ coaType: settingsData.coaType });
+
+            // Transform accounts to income statement items
+            const items: IncomeStatementItem[] = [];
+
+            accounts.forEach(account => {
+                if (account.accountType === 'Revenue') {
+                    items.push({
+                        id: account.id,
+                        accountCode: account.accountCode,
+                        accountName: account.accountName,
+                        amount: Math.abs(account.currentBalance || 0),
+                        category: 'Revenue',
+                    });
+                } else if (account.accountType === 'Expense') {
+                    const isCOGS = account.accountName.toLowerCase().includes('cost') ||
+                        account.accountCode.startsWith('50') ||
+                        account.accountCode.includes('-50');
+                    items.push({
+                        id: account.id,
+                        accountCode: account.accountCode,
+                        accountName: account.accountName,
+                        amount: Math.abs(account.currentBalance || 0),
+                        category: isCOGS ? 'COGS' : 'Expense',
+                    });
+                }
+            });
+
+            setIncomeData(items);
+        } catch (error) {
+            console.error('Error loading income statement data:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     // Group Data
-    const revenueItems = MOCK_DATA.filter(i => i.category === 'Revenue');
-    const cogsItems = MOCK_DATA.filter(i => i.category === 'COGS');
-    const expenseItems = MOCK_DATA.filter(i => i.category === 'Expense');
+    const revenueItems = incomeData.filter(i => i.category === 'Revenue');
+    const cogsItems = incomeData.filter(i => i.category === 'COGS');
+    const expenseItems = incomeData.filter(i => i.category === 'Expense');
 
     // Calculate Totals
     const totalRevenue = revenueItems.reduce((sum, item) => sum + item.amount, 0);
@@ -80,11 +116,21 @@ export default function IncomeStatementPage() {
 
     const AccountRow = ({ item }: { item: IncomeStatementItem }) => (
         <TableRow key={item.id} className="border-0">
-            <TableCell className="w-[100px] text-muted-foreground">{item.accountCode}</TableCell>
+            <TableCell className={`${settings?.coaType === 'Segmented' ? 'w-[150px]' : 'w-[100px]'} text-muted-foreground font-mono text-sm`}>
+                {item.accountCode}
+            </TableCell>
             <TableCell>{item.accountName}</TableCell>
             <TableCell className="text-right w-[150px]">{formatMoney(item.amount)}</TableCell>
         </TableRow>
     );
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-96">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">
@@ -92,7 +138,14 @@ export default function IncomeStatementPage() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Income Statement</h1>
-                    <p className="text-muted-foreground">Profit and Loss Statement</p>
+                    <p className="text-muted-foreground">
+                        Profit and Loss Statement
+                        {settings?.coaType === 'Segmented' && (
+                            <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                                Segmented COA
+                            </span>
+                        )}
+                    </p>
                 </div>
                 <div className="flex gap-2">
                     <Button variant="outline" onClick={() => window.print()}>
@@ -178,13 +231,21 @@ export default function IncomeStatementPage() {
                             <TableBody>
                                 {/* REVENUE SECTION */}
                                 <SectionHeader title="Revenue" />
-                                {revenueItems.map(item => <AccountRow key={item.id} item={item} />)}
+                                {revenueItems.length > 0 ? (
+                                    revenueItems.map(item => <AccountRow key={item.id} item={item} />)
+                                ) : (
+                                    <TableRow><TableCell colSpan={3} className="text-muted-foreground italic">No revenue accounts</TableCell></TableRow>
+                                )}
                                 <SectionTotal title="Total Revenue" amount={totalRevenue} />
 
                                 {/* COGS SECTION */}
                                 <TableRow className="h-4"><TableCell colSpan={3}></TableCell></TableRow>
                                 <SectionHeader title="Cost of Goods Sold" />
-                                {cogsItems.map(item => <AccountRow key={item.id} item={item} />)}
+                                {cogsItems.length > 0 ? (
+                                    cogsItems.map(item => <AccountRow key={item.id} item={item} />)
+                                ) : (
+                                    <TableRow><TableCell colSpan={3} className="text-muted-foreground italic">No COGS accounts</TableCell></TableRow>
+                                )}
                                 <SectionTotal title="Total COGS" amount={totalCOGS} isNegative />
 
                                 {/* GROSS PROFIT */}
@@ -196,7 +257,11 @@ export default function IncomeStatementPage() {
                                 {/* EXPENSES SECTION */}
                                 <TableRow className="h-4"><TableCell colSpan={3}></TableCell></TableRow>
                                 <SectionHeader title="Operating Expenses" />
-                                {expenseItems.map(item => <AccountRow key={item.id} item={item} />)}
+                                {expenseItems.length > 0 ? (
+                                    expenseItems.map(item => <AccountRow key={item.id} item={item} />)
+                                ) : (
+                                    <TableRow><TableCell colSpan={3} className="text-muted-foreground italic">No expense accounts</TableCell></TableRow>
+                                )}
                                 <SectionTotal title="Total Expenses" amount={totalExpenses} isNegative />
 
                                 {/* NET INCOME */}

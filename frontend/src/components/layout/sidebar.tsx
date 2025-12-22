@@ -38,6 +38,9 @@ import {
   Activity,
   FolderTree,
   FileCheck,
+  Ruler,
+  Divide,
+  Calculator,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -63,11 +66,22 @@ const navigationItems: NavItem[] = [
     href: '/finance',
     icon: CreditCard,
     children: [
-      { title: 'Accounts', href: '/finance/accounts', icon: CreditCard },
-      { title: 'Invoices', href: '/finance/invoices', icon: CreditCard },
+      { title: 'Dashboard', href: '/finance/dashboard', icon: LayoutDashboard },
+      { title: 'Chart of Accounts', href: '/finance/accounts', icon: CreditCard },
+      { title: 'Journal Entries', href: '/finance/journal-entries', icon: FileText },
+      { title: 'Unit Types', href: '/finance/unit-types', icon: Ruler },
+      { title: 'Unit Accounts', href: '/finance/unit-accounts', icon: Calculator },
+      { title: 'Unit Journal Entries', href: '/finance/unit-journal-entries', icon: FileText },
+      { title: 'Ratio Definitions', href: '/finance/ratio-definitions', icon: Divide },
+      { title: 'Unit Budgets', href: '/finance/unit-budgets', icon: BarChart3 },
+      { title: 'Allocations', href: '/finance/allocations', icon: Workflow },
+      { title: 'Fiscal Years', href: '/finance/fiscal-years', icon: Calendar },
+      { title: 'Fiscal Periods', href: '/finance/fiscal-periods', icon: Calendar },
+      { title: 'Currencies', href: '/finance/currencies', icon: CreditCard },
+      { title: 'Exchange Rates', href: '/finance/exchange-rates', icon: BarChart3 },
+      { title: 'Revaluation', href: '/finance/revaluation', icon: BarChart3 },
       { title: 'Financial Reports', href: '/finance/reports', icon: BarChart3 },
-      { title: 'Budgets', href: '/finance/budgets', icon: CreditCard },
-      { title: 'Transactions', href: '/finance/transactions', icon: CreditCard },
+      { title: 'Settings', href: '/finance/settings', icon: Settings },
     ],
   },
   {
@@ -428,12 +442,12 @@ export function Sidebar({ className }: SidebarProps) {
 
   useEffect(() => {
     setMounted(true);
-    
+
     // Track global mouse movement for safe zone detection
     const handleMouseMove = (e: MouseEvent) => {
       setLastMousePosition({ x: e.clientX, y: e.clientY });
     };
-    
+
     document.addEventListener('mousemove', handleMouseMove);
     return () => document.removeEventListener('mousemove', handleMouseMove);
   }, []);
@@ -444,19 +458,19 @@ export function Sidebar({ className }: SidebarProps) {
       x: menuPosition.x - previousMouse.x,
       y: menuPosition.y - previousMouse.y
     };
-    
+
     const mouseVector = {
       x: currentMouse.x - previousMouse.x,
       y: currentMouse.y - previousMouse.y
     };
-    
+
     // Dot product to check if vectors are pointing in similar direction
     const dotProduct = menuVector.x * mouseVector.x + menuVector.y * mouseVector.y;
     const menuMagnitude = Math.sqrt(menuVector.x * menuVector.x + menuVector.y * menuVector.y);
     const mouseMagnitude = Math.sqrt(mouseVector.x * mouseVector.x + mouseVector.y * mouseVector.y);
-    
+
     if (menuMagnitude === 0 || mouseMagnitude === 0) return false;
-    
+
     // Cosine similarity - if > 0.3, mouse is moving roughly toward menu
     const similarity = dotProduct / (menuMagnitude * mouseMagnitude);
     return similarity > 0.3;
@@ -467,23 +481,23 @@ export function Sidebar({ className }: SidebarProps) {
     const viewportWidth = window.innerWidth;
     const menuWidth = 240; // Approximate menu width
     const padding = 20; // Padding from viewport edges
-    
+
     let x = rect.right + 8;
     let y = rect.top;
-    
+
     // Adjust horizontal position if menu would go off-screen
     if (x + menuWidth > viewportWidth - padding) {
       x = Math.max(padding, rect.left - menuWidth - 8); // Position to the left instead
     }
-    
+
     // Adjust vertical position if menu would go off-screen
     const maxMenuHeight = viewportHeight - (2 * padding);
     const actualMenuHeight = Math.min(estimatedHeight, maxMenuHeight);
-    
+
     if (y + actualMenuHeight > viewportHeight - padding) {
       const availableSpaceBelow = viewportHeight - y - padding;
       const availableSpaceAbove = rect.top - padding;
-      
+
       if (availableSpaceAbove > availableSpaceBelow && availableSpaceAbove >= 150) {
         // Position above if there's more space and at least 150px available
         y = Math.max(padding, rect.bottom - actualMenuHeight);
@@ -492,21 +506,21 @@ export function Sidebar({ className }: SidebarProps) {
         y = Math.max(padding, viewportHeight - actualMenuHeight - padding);
       }
     }
-    
+
     // Ensure minimum top position
     y = Math.max(padding, y);
-    
+
     return { x, y };
   };
 
   const handleMainItemHover = (itemTitle: string, event: React.MouseEvent) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    
+
     // Estimate menu height based on number of children
     const menuItem = filterNavItems(navigationItems).find(item => item.title === itemTitle);
     const childCount = menuItem?.children?.length || 0;
     const estimatedHeight = Math.min(600, (childCount * 40) + 16); // 40px per item + padding
-    
+
     const position = calculateMenuPosition(rect, itemTitle, estimatedHeight);
     setMenuPositions({ [itemTitle]: position });
     setHoveredItem(itemTitle);
@@ -519,17 +533,17 @@ export function Sidebar({ className }: SidebarProps) {
   const handleChildItemHover = (parentTitle: string, childTitle: string, event: React.MouseEvent) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const menuKey = `${parentTitle}-${childTitle}`;
-    
+
     // Estimate menu height based on number of grandchildren
     const parentItem = filterNavItems(navigationItems).find(item => item.title === parentTitle);
     const childItem = parentItem?.children?.find(child => child.title === childTitle);
     const grandChildCount = childItem?.children?.length || 0;
     const estimatedHeight = Math.min(600, (grandChildCount * 40) + 16); // 40px per item + padding
-    
+
     const position = calculateMenuPosition(rect, menuKey, estimatedHeight);
-    setMenuPositions(prev => ({ 
-      ...prev, 
-      [menuKey]: position 
+    setMenuPositions(prev => ({
+      ...prev,
+      [menuKey]: position
     }));
     setHoveredChild(childTitle);
     setHoveredGrandChild(null);
@@ -540,18 +554,18 @@ export function Sidebar({ className }: SidebarProps) {
   const handleGrandChildItemHover = (parentTitle: string, childTitle: string, grandChildTitle: string, event: React.MouseEvent) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const menuKey = `${parentTitle}-${childTitle}-${grandChildTitle}`;
-    
+
     // Estimate menu height based on number of great-grandchildren (if any)
     const parentItem = filterNavItems(navigationItems).find(item => item.title === parentTitle);
     const childItem = parentItem?.children?.find(child => child.title === childTitle);
     const grandChildItem = childItem?.children?.find(grandChild => grandChild.title === grandChildTitle);
     const greatGrandChildCount = grandChildItem?.children?.length || 0;
     const estimatedHeight = Math.min(600, (greatGrandChildCount * 40) + 16); // 40px per item + padding
-    
+
     const position = calculateMenuPosition(rect, menuKey, estimatedHeight);
-    setMenuPositions(prev => ({ 
-      ...prev, 
-      [menuKey]: position 
+    setMenuPositions(prev => ({
+      ...prev,
+      [menuKey]: position
     }));
     setHoveredGrandChild(grandChildTitle);
     setActiveMenuPath([parentTitle, childTitle, grandChildTitle]);
@@ -577,10 +591,10 @@ export function Sidebar({ className }: SidebarProps) {
 
   const handleMenuMouseLeave = (event: React.MouseEvent) => {
     setMouseInMenu(false);
-    
+
     // Check if mouse is moving toward a child menu
     const currentMouse = { x: event.clientX, y: event.clientY };
-    
+
     // Check if moving toward first level child menu
     if (hoveredItem && menuPositions[hoveredItem]) {
       const isMovingToChild = isMouseMovingTowardsMenu(
@@ -588,19 +602,19 @@ export function Sidebar({ className }: SidebarProps) {
         currentMouse,
         lastMousePosition
       );
-      
+
       if (isMovingToChild) {
         setIsMovingToChild(true);
         // Give more time when moving toward child
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(() => {
-      if (!mouseInMenu) clearMenus();
-      setIsMovingToChild(false);
-    }, 1200);
+        timeoutRef.current = setTimeout(() => {
+          if (!mouseInMenu) clearMenus();
+          setIsMovingToChild(false);
+        }, 1200);
         return;
       }
     }
-    
+
     // Check if moving toward second level child menu
     if (hoveredChild && hoveredItem && menuPositions[`${hoveredItem}-${hoveredChild}`]) {
       const isMovingToChild = isMouseMovingTowardsMenu(
@@ -608,7 +622,7 @@ export function Sidebar({ className }: SidebarProps) {
         currentMouse,
         lastMousePosition
       );
-      
+
       if (isMovingToChild) {
         setIsMovingToChild(true);
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -619,7 +633,7 @@ export function Sidebar({ className }: SidebarProps) {
         return;
       }
     }
-    
+
     // Default behavior - longer timeout for better UX
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
@@ -661,7 +675,7 @@ export function Sidebar({ className }: SidebarProps) {
     if (!mounted) {
       return items;
     }
-    
+
     return items.filter(item => {
       if (item.roles && !hasAnyRole(item.roles)) {
         return false;
@@ -705,33 +719,33 @@ export function Sidebar({ className }: SidebarProps) {
 
         {/* Navigation */}
         <nav className="flex-1 space-y-0 p-2">
-        {filterNavItems(navigationItems).map((item) => {
-          const Icon = item.icon;
-          const hasChildren = item.children && item.children.length > 0;
-          const itemIsActive = isActive(item.href);
+          {filterNavItems(navigationItems).map((item) => {
+            const Icon = item.icon;
+            const hasChildren = item.children && item.children.length > 0;
+            const itemIsActive = isActive(item.href);
 
-          return (
-            <div key={item.title} className="relative">
-              {hasChildren ? (
-                <button
-                  onMouseEnter={(e) => handleMainItemHover(item.title, e)}
-                  className={cn(
-                    'flex w-full items-center justify-between rounded-xl px-4 py-3 text-base font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
-                    itemIsActive
-                      ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 text-blue-700 dark:text-blue-300 border border-blue-200/50 dark:border-blue-800/50'
-                      : 'text-slate-700 dark:text-slate-300'
-                  )}
-                >
-                  <div className="flex items-center space-x-4">
-                    <Icon className="h-6 w-6 flex-shrink-0" />
-                    {!collapsed && <span>{item.title}</span>}
-                  </div>
-                  {!collapsed && hasChildren && (
-                    <ChevronRight className="h-5 w-5" />
-                  )}
-                </button>
-              ) : (
-                <Link
+            return (
+              <div key={item.title} className="relative">
+                {hasChildren ? (
+                  <button
+                    onMouseEnter={(e) => handleMainItemHover(item.title, e)}
+                    className={cn(
+                      'flex w-full items-center justify-between rounded-xl px-4 py-3 text-base font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
+                      itemIsActive
+                        ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 text-blue-700 dark:text-blue-300 border border-blue-200/50 dark:border-blue-800/50'
+                        : 'text-slate-700 dark:text-slate-300'
+                    )}
+                  >
+                    <div className="flex items-center space-x-4">
+                      <Icon className="h-6 w-6 flex-shrink-0" />
+                      {!collapsed && <span>{item.title}</span>}
+                    </div>
+                    {!collapsed && hasChildren && (
+                      <ChevronRight className="h-5 w-5" />
+                    )}
+                  </button>
+                ) : (
+                  <Link
                     href={item.href}
                     className={cn(
                       'flex items-center space-x-4 rounded-xl px-4 py-3 text-base font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
@@ -744,10 +758,10 @@ export function Sidebar({ className }: SidebarProps) {
                     {!collapsed && <span>{item.title}</span>}
                   </Link>
                 )}
-            </div>
-          );
-        })}
-      </nav>
+              </div>
+            );
+          })}
+        </nav>
       </div>
 
       {/* Invisible Bridge for First Level Menu */}
@@ -786,7 +800,7 @@ export function Sidebar({ className }: SidebarProps) {
               const ChildIcon = child.icon;
               const childIsActive = isActive(child.href);
               const childHasChildren = child.children && child.children.length > 0;
-              
+
               return (
                 <div key={child.title} className="relative">
                   {childHasChildren ? (
@@ -855,7 +869,7 @@ export function Sidebar({ className }: SidebarProps) {
               const GrandChildIcon = grandchild.icon;
               const grandchildIsActive = isActive(grandchild.href);
               const grandchildHasChildren = grandchild.children && grandchild.children.length > 0;
-              
+
               return (
                 <div key={grandchild.title} className="relative">
                   {grandchildHasChildren ? (
@@ -924,7 +938,7 @@ export function Sidebar({ className }: SidebarProps) {
             ?.children?.map((greatGrandchild) => {
               const GreatGrandChildIcon = greatGrandchild.icon;
               const greatGrandchildIsActive = isActive(greatGrandchild.href);
-              
+
               return (
                 <Link
                   key={greatGrandchild.title}

@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,10 +12,63 @@ namespace ErpSystem.Api.Controllers.Finance
     public class AccountController : ControllerBase
     {
         private readonly IAccountService _accountService;
+        private readonly IGeneralLedgerService _glService;
 
-        public AccountController(IAccountService accountService)
+        public AccountController(IAccountService accountService, IGeneralLedgerService glService)
         {
             _accountService = accountService;
+            _glService = glService;
+        }
+
+        /// <summary>
+        /// Create a new account
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> CreateAccount([FromBody] AccountCreateDto accountDto)
+        {
+            try
+            {
+                if (accountDto == null)
+                    return BadRequest(new { error = "Request body cannot be null" });
+
+                var account = await _glService.CreateSegmentedAccountAsync(accountDto);
+                
+                return CreatedAtAction(
+                    nameof(GetAccountBalance),
+                    new { id = account.Id },
+                    new
+                    {
+                        id = account.Id,
+                        accountCode = account.AccountCode,
+                        accountNumber = account.AccountNumber,
+                        accountName = account.AccountName,
+                        accountType = account.AccountType.ToString(),
+                        currencyCode = account.CurrencyCode
+                    });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message, parameter = ex.ParamName });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"ERROR in CreateAccount: {ex.Message}");
+                return StatusCode(500, new { error = "An error occurred while creating the account", details = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get account balance
+        /// </summary>
+        [HttpGet("{id}/balance")]
+        public async Task<IActionResult> GetAccountBalance(Guid id, [FromQuery] string currencyCode = "GHS")
+        {
+            var balance = await _glService.GetAccountBalanceAsync(id, currencyCode);
+            return Ok(balance);
         }
 
         #region Multi-Currency Management
