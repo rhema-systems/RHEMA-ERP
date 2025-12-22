@@ -30,6 +30,7 @@ import type {
     CreateAllocationRuleDto,
     AllocationType,
 } from '@/types/unit-accounts';
+import { apiService } from '@/services/api.service';
 
 // Delay to simulate API latency in demo mode
 const simulateApiDelay = (ms: number = 300) => new Promise(resolve => setTimeout(resolve, ms));
@@ -391,7 +392,8 @@ class UnitAccountsDataService {
             await simulateApiDelay();
             return demoStorage.getUnitTypes();
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.get<UnitType[]>('/finance/unit-types');
     }
 
     async getUnitTypeById(id: string): Promise<UnitType | null> {
@@ -400,7 +402,8 @@ class UnitAccountsDataService {
             const types = demoStorage.getUnitTypes();
             return types.find(t => t.id === id) || null;
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.get<UnitType>(`/finance/unit-types/${id}`);
     }
 
     async createUnitType(dto: CreateUnitTypeDto): Promise<UnitType> {
@@ -415,7 +418,8 @@ class UnitAccountsDataService {
             };
             return demoStorage.addUnitType(newType);
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.post<UnitType>('/finance/unit-types', dto);
     }
 
     async updateUnitType(id: string, dto: UpdateUnitTypeDto): Promise<UnitType> {
@@ -425,7 +429,8 @@ class UnitAccountsDataService {
             if (!updated) throw new Error(`Unit type ${id} not found`);
             return updated;
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.put<UnitType>(`/finance/unit-types/${id}`, dto);
     }
 
     async deleteUnitType(id: string): Promise<void> {
@@ -436,7 +441,8 @@ class UnitAccountsDataService {
             }
             return;
         }
-        throw new Error('API not implemented');
+        // API call
+        await apiService.delete(`/finance/unit-types/${id}`);
     }
 
     // ===== UNIT ACCOUNTS =====
@@ -445,7 +451,8 @@ class UnitAccountsDataService {
             await simulateApiDelay();
             return demoStorage.getUnitAccounts();
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.get<UnitAccount[]>('/finance/unit-accounts');
     }
 
     async getUnitAccountById(id: string): Promise<UnitAccount | null> {
@@ -454,7 +461,8 @@ class UnitAccountsDataService {
             const accounts = demoStorage.getUnitAccounts();
             return accounts.find(a => a.id === id) || null;
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.get<UnitAccount>(`/finance/unit-accounts/${id}`);
     }
 
     async createUnitAccount(dto: CreateUnitAccountDto): Promise<UnitAccount> {
@@ -473,7 +481,8 @@ class UnitAccountsDataService {
             };
             return demoStorage.addUnitAccount(newAccount);
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.post<UnitAccount>('/finance/unit-accounts', dto);
     }
 
     async updateUnitAccount(id: string, dto: UpdateUnitAccountDto): Promise<UnitAccount> {
@@ -483,7 +492,8 @@ class UnitAccountsDataService {
             if (!updated) throw new Error(`Unit account ${id} not found`);
             return updated;
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.put<UnitAccount>(`/finance/unit-accounts/${id}`, dto);
     }
 
     async deleteUnitAccount(id: string): Promise<void> {
@@ -494,7 +504,8 @@ class UnitAccountsDataService {
             }
             return;
         }
-        throw new Error('API not implemented');
+        // API call
+        await apiService.delete(`/finance/unit-accounts/${id}`);
     }
 
     // ===== UNIT JOURNAL ENTRIES =====
@@ -503,7 +514,8 @@ class UnitAccountsDataService {
             await simulateApiDelay();
             return demoStorage.getUnitJournalEntries();
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.get<UnitJournalEntry[]>('/finance/unit-journal-entries');
     }
 
     async getUnitJournalEntryById(id: string): Promise<UnitJournalEntry | null> {
@@ -512,7 +524,8 @@ class UnitAccountsDataService {
             const entries = demoStorage.getUnitJournalEntries();
             return entries.find(e => e.id === id) || null;
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.get<UnitJournalEntry>(`/finance/unit-journal-entries/${id}`);
     }
 
     async createUnitJournalEntry(dto: CreateUnitJournalEntryDto): Promise<UnitJournalEntry> {
@@ -529,7 +542,8 @@ class UnitAccountsDataService {
             };
             return demoStorage.addUnitJournalEntry(newEntry);
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.post<UnitJournalEntry>('/finance/unit-journal-entries', dto);
     }
 
     async updateUnitJournalEntryStatus(id: string, status: string): Promise<UnitJournalEntry> {
@@ -539,7 +553,8 @@ class UnitAccountsDataService {
             if (!updated) throw new Error(`Journal entry ${id} not found`);
             return updated;
         }
-        throw new Error('API not implemented');
+        // API call - Use PATCH for status update
+        return apiService.patch<UnitJournalEntry>(`/finance/unit-journal-entries/${id}/${status.toLowerCase()}`, {});
     }
 
     async deleteUnitJournalEntry(id: string): Promise<void> {
@@ -550,7 +565,8 @@ class UnitAccountsDataService {
             }
             return;
         }
-        throw new Error('API not implemented');
+        // API call
+        await apiService.delete(`/finance/unit-journal-entries/${id}`);
     }
 
     // ===== RATIO DEFINITIONS =====
@@ -559,7 +575,8 @@ class UnitAccountsDataService {
             await simulateApiDelay();
             return demoStorage.getRatioDefinitions();
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.get<RatioDefinition[]>('/finance/ratio-definitions');
     }
 
     async createRatioDefinition(dto: CreateRatioDefinitionDto): Promise<RatioDefinition> {
@@ -574,7 +591,8 @@ class UnitAccountsDataService {
             };
             return demoStorage.addRatioDefinition(newDef);
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.post<RatioDefinition>('/finance/ratio-definitions', dto);
     }
 
     async deleteRatioDefinition(id: string): Promise<void> {
@@ -585,7 +603,8 @@ class UnitAccountsDataService {
             }
             return;
         }
-        throw new Error('API not implemented');
+        // API call
+        await apiService.delete(`/finance/ratio-definitions/${id}`);
     }
 
     // ===== UNIT BUDGETS =====
