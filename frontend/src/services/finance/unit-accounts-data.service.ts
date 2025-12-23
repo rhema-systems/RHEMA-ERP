@@ -613,7 +613,8 @@ class UnitAccountsDataService {
             await simulateApiDelay();
             return demoStorage.getUnitBudgets();
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.get<UnitAccountBudget[]>('/finance/unit-budgets');
     }
 
     async getBudgetVariances(periodId?: string): Promise<BudgetVariance[]> {
@@ -630,7 +631,7 @@ class UnitAccountsDataService {
                     unitAccountId: b.unitAccountId,
                     accountNumber: account?.accountNumber || '',
                     accountName: account?.name || '',
-                    unitTypeCode: account?.unitTypeCode || '',
+                    unitTypeCode: account?.unitType?.code || '',
                     periodName: b.periodName || '',
                     budgetQuantity: b.budgetQuantity,
                     actualQuantity: actual,
@@ -640,7 +641,9 @@ class UnitAccountsDataService {
                 };
             });
         }
-        throw new Error('API not implemented');
+        // API call
+        const periodQuery = periodId ? `?periodId=${periodId}` : '';
+        return apiService.get<BudgetVariance[]>(`/finance/unit-budgets/variances${periodQuery}`);
     }
 
     async createUnitBudget(dto: CreateBudgetDto): Promise<UnitAccountBudget> {
@@ -656,7 +659,8 @@ class UnitAccountsDataService {
             };
             return demoStorage.addUnitBudget(newBudget);
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.post<UnitAccountBudget>('/finance/unit-budgets', dto);
     }
 
     async updateUnitBudget(id: string, dto: UpdateBudgetDto): Promise<UnitAccountBudget> {
@@ -666,7 +670,8 @@ class UnitAccountsDataService {
             if (!updated) throw new Error(`Budget ${id} not found`);
             return updated;
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.put<UnitAccountBudget>(`/finance/unit-budgets/${id}`, dto);
     }
 
     async deleteUnitBudget(id: string): Promise<void> {
@@ -677,7 +682,8 @@ class UnitAccountsDataService {
             }
             return;
         }
-        throw new Error('API not implemented');
+        // API call
+        await apiService.delete(`/finance/unit-budgets/${id}`);
     }
 
     // ===== ALLOCATION RULES =====
@@ -686,7 +692,8 @@ class UnitAccountsDataService {
             await simulateApiDelay();
             return demoStorage.getAllocationRules();
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.get<AllocationRule[]>('/finance/allocations/rules');
     }
 
     async getAllocationRuleById(id: string): Promise<AllocationRule | null> {
@@ -695,7 +702,8 @@ class UnitAccountsDataService {
             const rules = demoStorage.getAllocationRules();
             return rules.find(r => r.id === id) || null;
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.get<AllocationRule>(`/finance/allocations/rules/${id}`);
     }
 
     async createAllocationRule(dto: CreateAllocationRuleDto): Promise<AllocationRule> {
@@ -715,7 +723,8 @@ class UnitAccountsDataService {
             };
             return demoStorage.addAllocationRule(newRule);
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.post<AllocationRule>('/finance/allocations/rules', dto);
     }
 
     async updateAllocationRule(id: string, updates: Partial<AllocationRule>): Promise<AllocationRule> {
@@ -725,7 +734,8 @@ class UnitAccountsDataService {
             if (!updated) throw new Error(`Allocation rule ${id} not found`);
             return updated;
         }
-        throw new Error('API not implemented');
+        // API call
+        return apiService.put<AllocationRule>(`/finance/allocations/rules/${id}`, updates);
     }
 
     async deleteAllocationRule(id: string): Promise<void> {
@@ -736,7 +746,8 @@ class UnitAccountsDataService {
             }
             return;
         }
-        throw new Error('API not implemented');
+        // API call
+        await apiService.delete(`/finance/allocations/rules/${id}`);
     }
 
     async runAllocation(ruleId: string): Promise<{ success: boolean; message: string }> {
@@ -745,7 +756,10 @@ class UnitAccountsDataService {
             demoStorage.updateAllocationRule(ruleId, { lastRunDate: new Date().toISOString() });
             return { success: true, message: 'Allocation completed successfully (demo mode)' };
         }
-        throw new Error('API not implemented');
+        // API call
+        const dto = { allocationRuleId: ruleId, fiscalPeriodId: '', allocationDate: new Date().toISOString() };
+        await apiService.post(`/finance/allocations/rules/${ruleId}/run`, dto);
+        return { success: true, message: 'Allocation completed successfully' };
     }
 }
 

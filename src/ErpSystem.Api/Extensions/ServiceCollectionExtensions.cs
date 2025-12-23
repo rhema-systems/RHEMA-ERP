@@ -483,6 +483,8 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitAccountService, UnitAccountService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitJournalEntryService, UnitJournalEntryService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IRatioDefinitionService, RatioDefinitionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitBudgetService, UnitBudgetService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAllocationService, AllocationService>();
 
             // Add AutoMapper - using assembly scanning approach
             services.AddAutoMapper(typeof(Program).Assembly, typeof(ErpSystem.Core.Services.TenantService).Assembly, typeof(ErpSystem.Data.ApplicationDbContext).Assembly);
