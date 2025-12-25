@@ -478,6 +478,12 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<IGeneralLedgerService, GeneralLedgerService>();
             services.AddScoped<IFinanceSettingsService, FinanceSettingsService>();
 
+            // Segment Services
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISegmentStructureService, SegmentStructureService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountSegmentStructureService, AccountSegmentStructureService>();
+            services.AddScoped<ErpSystem.Core.Services.Finance.IAccountSegmentValueService, AccountSegmentValueService>();
+            services.AddScoped<ErpSystem.Core.Services.Finance.ISegmentLookupValueService, SegmentLookupValueService>();
+
             // Unit Accounts Services
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitTypeService, UnitTypeService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitAccountService, UnitAccountService>();
