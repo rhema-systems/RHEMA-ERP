@@ -276,7 +276,7 @@ namespace ErpSystem.Api.Services.Finance
                 throw new InvalidOperationException("Cannot run an inactive allocation rule.");
 
             // Get source account balance (simplified - would need to get actual balance)
-            var sourceBalance = rule.SourceAccount?.CurrentBalance ?? 0;
+            var sourceBalance = rule.SourceAccount?.Balance ?? 0;
             
             // Calculate allocation based on type
             var lines = new List<AllocationLineResultDto>();
