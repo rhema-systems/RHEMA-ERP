@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -12,11 +13,16 @@ namespace ErpSystem.Api.Controllers
     public class FinanceController : ControllerBase
     {
         private readonly IGeneralLedgerService _glService;
+        private readonly ICurrencyRevaluationService _revaluationService;
         private readonly ICurrentUserService _currentUserService;
 
-        public FinanceController(IGeneralLedgerService glService, ICurrentUserService currentUserService)
+        public FinanceController(
+            IGeneralLedgerService glService,
+            ICurrencyRevaluationService revaluationService,
+            ICurrentUserService currentUserService)
         {
             _glService = glService;
+            _revaluationService = revaluationService;
             _currentUserService = currentUserService;
         }
 
@@ -55,7 +61,7 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var journalEntry = await _glService.RunCurrencyRevaluationAsync(requestDto);
+                var journalEntry = await _revaluationService.RunCurrencyRevaluationAsync(requestDto);
                 return Ok(journalEntry);
             }
             catch (Exception ex)

@@ -477,6 +477,7 @@ namespace ErpSystem.Api.Extensions
 
             services.AddScoped<IGeneralLedgerService, GeneralLedgerService>();
             services.AddScoped<IFinanceSettingsService, FinanceSettingsService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICurrencyRevaluationService, CurrencyRevaluationService>();
 
             // Segment Services
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISegmentStructureService, SegmentStructureService>();
