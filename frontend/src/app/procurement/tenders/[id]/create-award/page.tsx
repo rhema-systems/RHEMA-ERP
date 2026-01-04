@@ -9,13 +9,15 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Award, TrendingUp, Save, Clock, XCircle } from 'lucide-react';
+import { ArrowLeft, Award, TrendingUp, Save, Clock, XCircle, ClipboardCheck, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as tenderAwardService from '@/services/tenderAwardService';
 import * as tenderService from '@/services/tenderService';
 import { type CreateAwardDto, type AwardRecommendationDto } from '@/services/tenderAwardService';
 import { type TenderDetailDto } from '@/services/tenderService';
 import { format } from 'date-fns';
+import { AwardVerificationDialog } from '@/components/procurement/tenders/AwardVerificationDialog';
+import { awardVerificationService, TenderAwardVerification } from '@/services/awardVerificationService';
 
 export default function CreateAwardPage() {
   const params = useParams();
@@ -35,6 +37,11 @@ export default function CreateAwardPage() {
   const [awardJustification, setAwardJustification] = useState('');
   const [notes, setNotes] = useState('');
 
+  // Verification state
+  const [showVerificationDialog, setShowVerificationDialog] = useState(false);
+  const [verificationComplete, setVerificationComplete] = useState(false);
+  const [existingVerification, setExistingVerification] = useState<TenderAwardVerification | null>(null);
+
   useEffect(() => {
     if (tenderId) {
       loadData();
@@ -44,7 +51,7 @@ export default function CreateAwardPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      
+
       // Load tender details
       const tenderData = await tenderService.getTenderById(tenderId);
       setTender(tenderData);
@@ -60,6 +67,17 @@ export default function CreateAwardPage() {
         setAwardJustification(
           `Recommended based on evaluation scores. Average score: ${recommendationData.recommendedScore.toFixed(2)}%`
         );
+      }
+
+      // Check for existing verification
+      try {
+        const verification = await awardVerificationService.getVerificationByTender(tenderId);
+        if (verification) {
+          setExistingVerification(verification);
+          setVerificationComplete(verification.status === 'Completed');
+        }
+      } catch {
+        // No existing verification, that's fine
       }
     } catch (error) {
       console.error('Error loading data:', error);
@@ -127,6 +145,24 @@ export default function CreateAwardPage() {
     } catch {
       return dateString;
     }
+  };
+
+  const handleVerificationComplete = (verification: TenderAwardVerification) => {
+    setExistingVerification(verification);
+    setVerificationComplete(true);
+  };
+
+  const getSelectedBidderForVerification = () => {
+    if (!selectedBidId || !recommendation) return [];
+    const selectedBid = recommendation.bidRecommendations.find(b => b.bidId === selectedBidId);
+    if (!selectedBid) return [];
+    return [{
+      bidId: selectedBid.bidId,
+      businessPartnerId: selectedBid.businessPartnerId || '',
+      businessPartnerName: selectedBid.businessPartnerName,
+      bidNumber: selectedBid.bidNumber,
+      totalBidAmount: selectedBid.totalBidAmount,
+    }];
   };
 
   if (loading) {
@@ -371,6 +407,42 @@ export default function CreateAwardPage() {
         </CardContent>
       </Card>
 
+      {/* Optional Verification */}
+      {selectedBidId && (
+        <Card className={verificationComplete ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'}>
+          <CardHeader className="pb-3">
+            <CardTitle className={`flex items-center gap-2 ${verificationComplete ? 'text-green-800' : 'text-blue-800'}`}>
+              {verificationComplete ? (
+                <>
+                  <CheckCircle2 className="h-5 w-5" />
+                  Verification Complete
+                </>
+              ) : (
+                <>
+                  <ClipboardCheck className="h-5 w-5" />
+                  Background Verification (Optional)
+                </>
+              )}
+            </CardTitle>
+            <CardDescription className={verificationComplete ? 'text-green-600' : 'text-blue-600'}>
+              {verificationComplete
+                ? 'Background verification has been completed for the selected bidder.'
+                : 'You can optionally verify the selected bidder before creating the award.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant={verificationComplete ? 'outline' : 'secondary'}
+              onClick={() => setShowVerificationDialog(true)}
+              disabled={!selectedBidId}
+            >
+              <ClipboardCheck className="h-4 w-4 mr-2" />
+              {verificationComplete ? 'View Verification' : 'Verify Bidder'}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Actions */}
       <div className="flex items-center justify-end gap-4">
         <Button
@@ -387,6 +459,15 @@ export default function CreateAwardPage() {
           {saving ? 'Creating Award...' : 'Create Award'}
         </Button>
       </div>
+
+      {/* Verification Dialog */}
+      <AwardVerificationDialog
+        open={showVerificationDialog}
+        onOpenChange={setShowVerificationDialog}
+        tenderId={tenderId}
+        bidders={getSelectedBidderForVerification()}
+        onVerificationComplete={handleVerificationComplete}
+      />
     </div>
   );
 }

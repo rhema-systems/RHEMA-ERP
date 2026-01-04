@@ -470,6 +470,12 @@ public class TenderEvaluationService : ITenderEvaluationService
                     WeightedDeliveryScore = submittedEvaluations.Any() ? submittedEvaluations.Average(e => e.DeliveryScore) : null,
                     WeightedExperienceScore = submittedEvaluations.Any() ? submittedEvaluations.Average(e => e.ExperienceScore) : null,
                     FinalScore = avgTotalScore,
+                    // QCBS Scores from bid entity
+                    TechnicalScore = bid.TechnicalScore,
+                    FinancialScore = bid.FinancialScore,
+                    CombinedScore = bid.CombinedScore,
+                    IsQualifiedTechnically = bid.IsQualifiedTechnically,
+                    DisqualificationReason = bid.DisqualificationReason,
                     Rank = 0, // Will be assigned after sorting
                     RecommendationCount = recommendationCount,
                     IsRecommended = recommendationCount > 0
@@ -490,6 +496,17 @@ public class TenderEvaluationService : ITenderEvaluationService
             var evaluatedBids = bidEvaluations.Count(b => b.BidStatus == "Evaluated");
             var topBid = rankedBids.FirstOrDefault();
 
+            // Calculate QCBS-specific statistics
+            var qualifiedBidsCount = tender.UseQCBSEvaluation
+                ? bidEvaluations.Count(b => b.IsQualifiedTechnically == true)
+                : (int?)null;
+            var disqualifiedBidsCount = tender.UseQCBSEvaluation
+                ? bidEvaluations.Count(b => b.IsQualifiedTechnically == false)
+                : (int?)null;
+            var lowestBidAmount = tender.UseQCBSEvaluation && bidEvaluations.Any(b => b.IsQualifiedTechnically == true)
+                ? bidEvaluations.Where(b => b.IsQualifiedTechnically == true).Min(b => b.TotalBidAmount)
+                : (decimal?)null;
+
             return new EvaluationReportDto
             {
                 TenderId = tenderId,
@@ -499,10 +516,19 @@ public class TenderEvaluationService : ITenderEvaluationService
                 PublishDate = tender.PublishDate,
                 SubmissionDeadline = tender.SubmissionDeadline,
                 EstimatedValue = tender.EstimatedValue,
+                Currency = tender.Currency,
                 PriceWeightage = tender.PriceWeightage,
                 QualityWeightage = tender.QualityWeightage,
                 DeliveryWeightage = tender.DeliveryWeightage,
                 ExperienceWeightage = tender.ExperienceWeightage,
+                // QCBS Configuration
+                UseQCBSEvaluation = tender.UseQCBSEvaluation,
+                TechnicalWeight = tender.TechnicalWeight,
+                FinancialWeight = tender.FinancialWeight,
+                MinimumTechnicalScore = tender.MinimumTechnicalScore,
+                LowestBidAmount = lowestBidAmount,
+                QualifiedBidsCount = qualifiedBidsCount,
+                DisqualifiedBidsCount = disqualifiedBidsCount,
                 TotalBidsReceived = bids.Count(),
                 CompliantBids = compliantBids,
                 NonCompliantBids = bids.Count() - compliantBids,
@@ -654,6 +680,224 @@ public class TenderEvaluationService : ITenderEvaluationService
             SubmittedDate = evaluation.SubmittedDate
         };
     }
+
+    /// <summary>
+    /// Calculates QCBS (Quality and Cost Based Selection) scores for all bids in a tender.
+    /// Formula: Combined Score = (Technical Weight × Technical Score) + (Financial Weight × Financial Score)
+    /// Financial Score = (Lowest Bid Amount / Bid Amount) × 100
+    /// </summary>
+    public async Task<QCBSEvaluationResultDto> CalculateQCBSScoresAsync(Guid tenderId)
+    {
+        try
+        {
+            var tender = await _tenderRepository.GetByIdAsync(tenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+
+            if (!tender.UseQCBSEvaluation)
+            {
+                throw new InvalidOperationException("This tender is not configured for QCBS evaluation");
+            }
+
+            var bids = await _bidRepository.GetByTenderIdAsync(tenderId);
+            var evaluatedBids = bids.Where(b => b.Status == "Evaluated" || b.Status == "Opened").ToList();
+
+            if (!evaluatedBids.Any())
+            {
+                throw new InvalidOperationException("No evaluated bids found for this tender");
+            }
+
+            var bidScores = new List<QCBSBidScoreDto>();
+            var technicalWeight = tender.TechnicalWeight / 100m;
+            var financialWeight = tender.FinancialWeight / 100m;
+            var minimumTechnicalScore = tender.MinimumTechnicalScore;
+
+            // First pass: Calculate technical scores and identify qualified bids
+            foreach (var bid in evaluatedBids)
+            {
+                var evaluations = await _evaluationRepository.GetByBidIdAsync(bid.Id);
+                var submittedEvaluations = evaluations.Where(e => e.Status == "Submitted").ToList();
+
+                // Calculate average technical score from evaluations
+                decimal technicalScore = 0;
+                if (submittedEvaluations.Any())
+                {
+                    technicalScore = submittedEvaluations.Average(e => e.TotalScore ?? 0);
+                }
+
+                var isQualified = technicalScore >= minimumTechnicalScore;
+                var disqualificationReason = !isQualified
+                    ? $"Technical score ({technicalScore:F2}) is below minimum threshold ({minimumTechnicalScore})"
+                    : null;
+
+                bidScores.Add(new QCBSBidScoreDto
+                {
+                    BidId = bid.Id,
+                    BidNumber = bid.BidNumber,
+                    BusinessPartnerId = bid.BusinessPartnerId,
+                    BusinessPartnerName = bid.BusinessPartner?.PartnerName ?? string.Empty,
+                    TotalBidAmount = bid.TotalBidAmount,
+                    Currency = bid.Currency ?? tender.Currency ?? "USD",
+                    TechnicalScore = technicalScore,
+                    IsQualifiedTechnically = isQualified,
+                    DisqualificationReason = disqualificationReason
+                });
+            }
+
+            // Find lowest bid amount among qualified bids
+            var qualifiedBids = bidScores.Where(b => b.IsQualifiedTechnically).ToList();
+            decimal? lowestBidAmount = qualifiedBids.Any()
+                ? qualifiedBids.Min(b => b.TotalBidAmount)
+                : null;
+
+            // Second pass: Calculate financial scores and combined scores for qualified bids
+            foreach (var bidScore in bidScores)
+            {
+                if (bidScore.IsQualifiedTechnically && lowestBidAmount.HasValue && bidScore.TotalBidAmount > 0)
+                {
+                    // Financial Score = (Lowest Bid / Current Bid) × 100
+                    bidScore.FinancialScore = (lowestBidAmount.Value / bidScore.TotalBidAmount) * 100;
+
+                    // Combined Score = (Technical Weight × Technical Score) + (Financial Weight × Financial Score)
+                    bidScore.CombinedScore = (technicalWeight * bidScore.TechnicalScore) +
+                                            (financialWeight * bidScore.FinancialScore);
+                }
+                else
+                {
+                    bidScore.FinancialScore = 0;
+                    bidScore.CombinedScore = 0;
+                }
+            }
+
+            // Rank bids by combined score (qualified bids first, then by score descending)
+            var rankedBids = bidScores
+                .OrderByDescending(b => b.IsQualifiedTechnically)
+                .ThenByDescending(b => b.CombinedScore)
+                .ToList();
+
+            for (int i = 0; i < rankedBids.Count; i++)
+            {
+                rankedBids[i].Rank = i + 1;
+            }
+
+            // Update bid entities with QCBS scores
+            foreach (var bidScore in bidScores)
+            {
+                var bid = evaluatedBids.First(b => b.Id == bidScore.BidId);
+                bid.TechnicalScore = bidScore.TechnicalScore;
+                bid.FinancialScore = bidScore.FinancialScore;
+                bid.CombinedScore = bidScore.CombinedScore;
+                bid.IsQualifiedTechnically = bidScore.IsQualifiedTechnically;
+                bid.DisqualificationReason = bidScore.DisqualificationReason;
+                bid.Rank = bidScore.Rank;
+                bid.UpdatedAt = DateTime.UtcNow;
+
+                await _bidRepository.UpdateAsync(bid);
+            }
+
+            await _unitOfWork.SaveChangesAsync();
+
+            var recommendedBid = rankedBids.FirstOrDefault(b => b.IsQualifiedTechnically);
+
+            _logger.LogInformation(
+                "Calculated QCBS scores for tender {TenderId}. Total bids: {TotalBids}, Qualified: {QualifiedBids}",
+                tenderId, rankedBids.Count, qualifiedBids.Count);
+
+            return new QCBSEvaluationResultDto
+            {
+                TenderId = tenderId,
+                TenderNumber = tender.TenderNumber,
+                TenderTitle = tender.Title,
+                TechnicalWeight = tender.TechnicalWeight,
+                FinancialWeight = tender.FinancialWeight,
+                MinimumTechnicalScore = minimumTechnicalScore,
+                LowestBidAmount = lowestBidAmount,
+                TotalBids = rankedBids.Count,
+                QualifiedBids = qualifiedBids.Count,
+                DisqualifiedBids = rankedBids.Count - qualifiedBids.Count,
+                BidScores = rankedBids,
+                RecommendedBid = recommendedBid,
+                CalculatedAt = DateTime.UtcNow,
+                CalculatedByName = _currentUserProvider.FullName
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error calculating QCBS scores for tender {TenderId}", tenderId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Gets the stored QCBS evaluation results for a tender without recalculating.
+    /// Returns null if QCBS evaluation has not been run yet.
+    /// </summary>
+    public async Task<QCBSEvaluationResultDto?> GetQCBSEvaluationResultsAsync(Guid tenderId)
+    {
+        try
+        {
+            var tender = await _tenderRepository.GetByIdAsync(tenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+
+            if (!tender.UseQCBSEvaluation)
+            {
+                return null;
+            }
+
+            var bids = await _bidRepository.GetByTenderIdAsync(tenderId);
+            var evaluatedBids = bids.Where(b => b.TechnicalScore.HasValue || b.CombinedScore.HasValue).ToList();
+
+            if (!evaluatedBids.Any())
+            {
+                return null; // QCBS evaluation has not been run yet
+            }
+
+            var technicalWeight = tender.TechnicalWeight / 100m;
+            var financialWeight = tender.FinancialWeight / 100m;
+            var minimumTechnicalScore = tender.MinimumTechnicalScore;
+
+            var bidScores = evaluatedBids.Select(bid => new QCBSBidScoreDto
+            {
+                BidId = bid.Id,
+                BidNumber = bid.BidNumber,
+                BusinessPartnerId = bid.BusinessPartnerId,
+                BusinessPartnerName = bid.BusinessPartner?.PartnerName ?? string.Empty,
+                TotalBidAmount = bid.TotalBidAmount,
+                Currency = bid.Currency ?? tender.Currency ?? "USD",
+                TechnicalScore = bid.TechnicalScore ?? 0,
+                FinancialScore = bid.FinancialScore ?? 0,
+                CombinedScore = bid.CombinedScore ?? 0,
+                IsQualifiedTechnically = bid.IsQualifiedTechnically,
+                DisqualificationReason = bid.DisqualificationReason,
+                Rank = bid.Rank ?? 0,
+                IsRecommendedForAward = bid.Rank == 1 && bid.IsQualifiedTechnically
+            }).OrderBy(b => b.Rank == 0 ? int.MaxValue : b.Rank).ToList();
+
+            var qualifiedBids = bidScores.Where(b => b.IsQualifiedTechnically).ToList();
+            var lowestBidAmount = qualifiedBids.Any() ? qualifiedBids.Min(b => b.TotalBidAmount) : (decimal?)null;
+            var recommendedBid = bidScores.FirstOrDefault(b => b.IsRecommendedForAward);
+
+            return new QCBSEvaluationResultDto
+            {
+                TenderId = tenderId,
+                TenderNumber = tender.TenderNumber,
+                TenderTitle = tender.Title,
+                TechnicalWeight = tender.TechnicalWeight,
+                FinancialWeight = tender.FinancialWeight,
+                MinimumTechnicalScore = minimumTechnicalScore,
+                LowestBidAmount = lowestBidAmount,
+                TotalBids = bidScores.Count,
+                QualifiedBids = qualifiedBids.Count,
+                DisqualifiedBids = bidScores.Count - qualifiedBids.Count,
+                BidScores = bidScores,
+                RecommendedBid = recommendedBid,
+                CalculatedAt = tender.UpdatedAt ?? DateTime.UtcNow,
+                CalculatedByName = null // Not available from stored data
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting QCBS evaluation results for tender {TenderId}", tenderId);
+            throw;
+        }
+    }
 }
-
-

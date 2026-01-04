@@ -106,6 +106,7 @@ export interface WarehouseInventoryDto {
   availableStock: number;
   allocatedStock: number;
   unitCost: number;
+  dailyRentalRate: number;
   categoryName?: string;
 }
 

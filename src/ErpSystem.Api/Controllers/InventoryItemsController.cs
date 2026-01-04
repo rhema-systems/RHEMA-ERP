@@ -497,6 +497,7 @@ public class InventoryItemsController : ControllerBase
                 AvailableStock = wq.AvailableStock,
                 AllocatedStock = wq.AllocatedStock,
                 UnitCost = wq.InventoryItem.StandardCost,
+                DailyRentalRate = wq.InventoryItem.DailyRentalRate,
                 CategoryName = wq.InventoryItem.Category?.Name
             });
 
@@ -576,5 +577,6 @@ public class WarehouseInventoryDto
     public decimal AvailableStock { get; set; }
     public decimal AllocatedStock { get; set; }
     public decimal UnitCost { get; set; }
+    public decimal DailyRentalRate { get; set; }
     public string? CategoryName { get; set; }
 }

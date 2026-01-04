@@ -12,7 +12,7 @@ import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
 // Import step components
 import BasicInformation from '@/components/procurement/tenders/BasicInformation';
-import TenderItems from '@/components/procurement/tenders/TenderItems';
+import TenderLots from '@/components/procurement/tenders/TenderLots';
 import TenderDocuments from '@/components/procurement/tenders/TenderDocuments';
 import TenderFees from '@/components/procurement/tenders/TenderFees';
 import TenderInvitations from '@/components/procurement/tenders/TenderInvitations';
@@ -22,7 +22,7 @@ import { TenderFormData, DocumentRequirement } from '../../new/page';
 
 const STEPS = [
   { id: 1, name: 'Basic Information', icon: FileText, component: 'BasicInformation' },
-  { id: 2, name: 'Tender Lots', icon: Package, component: 'TenderItems' },
+  { id: 2, name: 'Tender Lots', icon: Package, component: 'TenderLots' },
   { id: 3, name: 'Proposal', icon: ClipboardList, component: 'TenderProposals' },
   { id: 4, name: 'Documents', icon: Upload, component: 'TenderDocuments' },
   { id: 5, name: 'Fees', icon: DollarSign, component: 'TenderFees' },
@@ -59,8 +59,14 @@ export default function EditTenderPage() {
     evaluationCriteriaJson: '',
     notes: '',
     termsAndConditions: '',
+    // QCBS Evaluation defaults
+    useQCBSEvaluation: false,
+    technicalWeight: 80,
+    financialWeight: 20,
+    minimumTechnicalScore: 70,
     evaluationTemplateId: null,
     evaluationTemplateName: '',
+    lots: [],
     items: [],
     documentRequirements: [],
     requiresAcceptanceDeclaration: false,
@@ -129,8 +135,35 @@ export default function EditTenderPage() {
         evaluationCriteriaJson: data.evaluationCriteriaJson || '',
         notes: data.notes || '',
         termsAndConditions: data.termsAndConditions || '',
+        // QCBS Evaluation fields
+        useQCBSEvaluation: data.useQCBSEvaluation || false,
+        technicalWeight: data.technicalWeight ?? 80,
+        financialWeight: data.financialWeight ?? 20,
+        minimumTechnicalScore: data.minimumTechnicalScore ?? 70,
         evaluationTemplateId: data.evaluationTemplateId || null,
         evaluationTemplateName: data.evaluationTemplateName || '',
+        lots: (data.lots || []).map((lot, lotIndex) => ({
+          id: lot.id,
+          lotNumber: lot.lotNumber || lotIndex + 1,
+          lotCode: lot.lotCode || `LOT-${String(lotIndex + 1).padStart(3, '0')}`,
+          title: lot.title,
+          description: lot.description || '',
+          estimatedValue: lot.estimatedValue,
+          requiredDeliveryDate: lot.requiredDeliveryDate || '',
+          deliveryLocation: lot.deliveryLocation || '',
+          displayOrder: lot.displayOrder || lotIndex,
+          items: (lot.items || []).map((item, itemIndex) => ({
+            id: item.id,
+            lineNumber: item.lineNumber || itemIndex + 1,
+            itemCode: item.itemCode || '',
+            description: item.description,
+            quantity: item.quantity,
+            unitOfMeasure: item.unitOfMeasure || '',
+            specifications: item.specifications || '',
+            requiredDeliveryDate: item.requiredDeliveryDate || '',
+            deliveryLocation: item.deliveryLocation || '',
+          })),
+        })),
         items: data.items.map(item => ({
           itemCode: item.itemCode || '',
           description: item.description,
@@ -230,6 +263,11 @@ export default function EditTenderPage() {
         termsAndConditions: formData.termsAndConditions || undefined,
         requiredDocuments, // Include document requirements
         requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
+        // QCBS Evaluation fields
+        useQCBSEvaluation: formData.useQCBSEvaluation,
+        technicalWeight: formData.technicalWeight,
+        financialWeight: formData.financialWeight,
+        minimumTechnicalScore: formData.minimumTechnicalScore,
       };
 
       console.log('TenderEdit - updateDto:', updateDto);
@@ -309,6 +347,11 @@ export default function EditTenderPage() {
         termsAndConditions: formData.termsAndConditions || undefined,
         requiredDocuments,
         requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
+        // QCBS Evaluation fields
+        useQCBSEvaluation: formData.useQCBSEvaluation,
+        technicalWeight: formData.technicalWeight,
+        financialWeight: formData.financialWeight,
+        minimumTechnicalScore: formData.minimumTechnicalScore,
       };
 
       console.log('🔵 updateDto:', updateDto);
@@ -358,7 +401,7 @@ export default function EditTenderPage() {
       case 1:
         return <BasicInformation formData={formData} updateFormData={updateFormData} />;
       case 2:
-        return <TenderItems formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
+        return <TenderLots formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
       case 3:
         return <TenderProposals formData={formData} updateFormData={updateFormData} tenderId={tenderId} isEditMode={true} />;
       case 4:

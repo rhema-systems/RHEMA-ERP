@@ -325,6 +325,9 @@ public class TenderNotificationService : ITenderNotificationService
                 return;
             }
 
+            _logger.LogInformation("Processing award notification for business partner {PartnerCode} ({PartnerId}), UserId: {UserId}, Email: {Email}",
+                businessPartner.PartnerCode, businessPartner.Id, businessPartner.UserId, businessPartner.PrimaryEmail);
+
             // Send in-app notification if business partner has a linked user account
             if (businessPartner.UserId.HasValue)
             {
@@ -347,10 +350,18 @@ public class TenderNotificationService : ITenderNotificationService
                 _logger.LogInformation("Sent in-app award notification to user {UserId} for award {AwardId}",
                     businessPartner.UserId.Value, awardId);
             }
+            else
+            {
+                _logger.LogWarning("Business partner {PartnerCode} ({PartnerId}) has no linked UserId, skipping in-app notification",
+                    businessPartner.PartnerCode, businessPartner.Id);
+            }
 
             // Send email notification if business partner has email
             if (!string.IsNullOrEmpty(businessPartner.PrimaryEmail))
             {
+                _logger.LogInformation("Sending award email to {Email} for award {AwardId}",
+                    businessPartner.PrimaryEmail, awardId);
+
                 var emailSubject = $"🏆 Congratulations! You Have Been Awarded Tender {tender.TenderNumber}";
                 var emailBody = GenerateAwardEmailBody(tender, businessPartner, award, bid);
 
@@ -361,11 +372,16 @@ public class TenderNotificationService : ITenderNotificationService
                     isHtml: true
                 );
 
-                _logger.LogInformation("Sent award email to {Email} for award {AwardId}",
+                _logger.LogInformation("Award email sent successfully to {Email} for award {AwardId}",
                     businessPartner.PrimaryEmail, awardId);
             }
+            else
+            {
+                _logger.LogWarning("Business partner {PartnerCode} ({PartnerId}) has no PrimaryEmail configured, skipping email notification",
+                    businessPartner.PartnerCode, businessPartner.Id);
+            }
 
-            _logger.LogInformation("Sent award notification for award {AwardId}", awardId);
+            _logger.LogInformation("Completed award notification for award {AwardId}", awardId);
         }
         catch (Exception ex)
         {

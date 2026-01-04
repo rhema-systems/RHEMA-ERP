@@ -18,6 +18,12 @@ public class EvaluationTemplateDto
     public decimal PassingScore { get; set; } = 70;
     public string ScoringMethod { get; set; } = "WeightedAverage";
     public int DisplayOrder { get; set; } = 0;
+
+    // QCBS Configuration (used when ScoringMethod = "QCBS")
+    public decimal TechnicalWeight { get; set; } = 80;
+    public decimal FinancialWeight { get; set; } = 20;
+    public decimal MinimumTechnicalScore { get; set; } = 70;
+
     public DateTime? CreatedAt { get; set; }
     public string? CreatedByName { get; set; }
     public int CriteriaCount { get; set; } = 0;
@@ -80,6 +86,16 @@ public class CreateEvaluationTemplateDto
 
     public int DisplayOrder { get; set; } = 0;
 
+    // QCBS Configuration (used when ScoringMethod = "QCBS")
+    [Range(0, 100)]
+    public decimal TechnicalWeight { get; set; } = 80;
+
+    [Range(0, 100)]
+    public decimal FinancialWeight { get; set; } = 20;
+
+    [Range(0, 100)]
+    public decimal MinimumTechnicalScore { get; set; } = 70;
+
     public List<CreateEvaluationTemplateCriterionDto> Criteria { get; set; } = new();
 }
 
@@ -137,6 +153,16 @@ public class UpdateEvaluationTemplateDto
     public string ScoringMethod { get; set; } = "WeightedAverage";
 
     public int DisplayOrder { get; set; } = 0;
+
+    // QCBS Configuration (used when ScoringMethod = "QCBS")
+    [Range(0, 100)]
+    public decimal TechnicalWeight { get; set; } = 80;
+
+    [Range(0, 100)]
+    public decimal FinancialWeight { get; set; } = 20;
+
+    [Range(0, 100)]
+    public decimal MinimumTechnicalScore { get; set; } = 70;
 
     public List<CreateEvaluationTemplateCriterionDto> Criteria { get; set; } = new();
 }

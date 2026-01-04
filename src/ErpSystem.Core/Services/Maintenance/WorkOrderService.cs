@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Services;
 using ErpSystem.Shared;
 using Microsoft.Extensions.Logging;
 using WorkOrderTaskDtoFull = ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto;
@@ -28,6 +29,7 @@ public class WorkOrderService : IWorkOrderService
     private readonly ITaskTemplateService _taskTemplateService;
     private readonly IMaintenanceStaffScheduleRepository _scheduleRepository;
     private readonly IMaintenanceExpenseRepository _expenseRepository;
+    private readonly IUserService _userService;
     private readonly ILogger<WorkOrderService> _logger;
     private readonly IUnitOfWork _unitOfWork;
 
@@ -45,6 +47,7 @@ public class WorkOrderService : IWorkOrderService
         ITaskTemplateService taskTemplateService,
         IMaintenanceStaffScheduleRepository scheduleRepository,
         IMaintenanceExpenseRepository expenseRepository,
+        IUserService userService,
         ILogger<WorkOrderService> logger,
         IUnitOfWork unitOfWork)
     {
@@ -61,6 +64,7 @@ public class WorkOrderService : IWorkOrderService
         _taskTemplateService = taskTemplateService;
         _scheduleRepository = scheduleRepository;
         _expenseRepository = expenseRepository;
+        _userService = userService;
         _logger = logger;
         _unitOfWork = unitOfWork;
     }
@@ -1475,6 +1479,58 @@ public class WorkOrderService : IWorkOrderService
             }
         }
 
+        // Build labor list with technician information
+        var laborDtos = new List<WorkOrderLaborDto>();
+        if (workOrder.Labor != null)
+        {
+            foreach (var labor in workOrder.Labor)
+            {
+                var laborDto = new WorkOrderLaborDto
+                {
+                    Id = labor.Id,
+                    WorkOrderId = labor.WorkOrderId,
+                    TechnicianId = labor.TechnicianId,
+                    StartTime = labor.StartTime,
+                    EndTime = labor.EndTime,
+                    Hours = labor.Hours,
+                    HourlyRate = labor.HourlyRate,
+                    TotalCost = labor.TotalCost,
+                    Notes = labor.Notes,
+                    LaborType = labor.LaborType ?? "Regular",
+                    CreatedAt = labor.CreatedAt,
+                    UpdatedAt = labor.UpdatedAt
+                };
+
+                // Look up technician information from ApplicationUser
+                try
+                {
+                    _logger.LogInformation("Looking up technician with ID: {TechnicianId} for labor record {LaborId}", labor.TechnicianId, labor.Id);
+                    var user = await _userService.GetUserByIdAsync(labor.TechnicianId);
+                    if (user != null)
+                    {
+                        _logger.LogInformation("Found user: {UserId}, FirstName: {FirstName}, LastName: {LastName}, UserName: {UserName}",
+                            user.Id, user.FirstName, user.LastName, user.UserName);
+                        laborDto.Technician = new ErpSystem.Core.DTOs.HR.EmployeeDto
+                        {
+                            Id = user.Id,
+                            FullName = $"{user.FirstName} {user.LastName}",
+                            EmployeeNumber = user.UserName ?? string.Empty
+                        };
+                    }
+                    else
+                    {
+                        _logger.LogWarning("No user found for TechnicianId: {TechnicianId}", labor.TechnicianId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error looking up technician {TechnicianId} for labor record", labor.TechnicianId);
+                }
+
+                laborDtos.Add(laborDto);
+            }
+        }
+
         return new WorkOrderDto
         {
             Id = workOrder.Id,
@@ -1566,6 +1622,7 @@ public class WorkOrderService : IWorkOrderService
                 EstimatedHours = t.EstimatedHours,
                 ActualHours = t.ActualHours,
                 IsRequired = t.IsRequired,
+                PhotoPath = t.PhotoPath,
                 AssignedTechnicianId = t.AssignedTechnicianId,
                 StartedAt = t.StartedAt,
                 CompletedAt = t.CompletedAt,
@@ -1597,21 +1654,7 @@ public class WorkOrderService : IWorkOrderService
                 CreatedAt = p.CreatedAt,
                 UpdatedAt = p.UpdatedAt
             }).ToList() ?? new List<WorkOrderPartDto>(),
-            Labor = workOrder.Labor?.Select(l => new WorkOrderLaborDto
-            {
-                Id = l.Id,
-                WorkOrderId = l.WorkOrderId,
-                TechnicianId = l.TechnicianId,
-                StartTime = l.StartTime,
-                EndTime = l.EndTime,
-                Hours = l.Hours,
-                HourlyRate = l.HourlyRate,
-                TotalCost = l.TotalCost,
-                Notes = l.Notes,
-                LaborType = l.LaborType ?? "Regular",
-                CreatedAt = l.CreatedAt,
-                UpdatedAt = l.UpdatedAt
-            }).ToList() ?? new List<WorkOrderLaborDto>(),
+            Labor = laborDtos,
             Tools = workOrder.Tools?.Select(t => new WorkOrderToolDto
             {
                 Id = t.Id,
@@ -1997,6 +2040,7 @@ public class WorkOrderService : IWorkOrderService
                 EstimatedHours = task.EstimatedHours,
                 ActualHours = task.ActualHours,
                 IsRequired = task.IsRequired,
+                PhotoPath = task.PhotoPath,
                 AssignedTechnicianId = task.AssignedTechnicianId,
                 StartedAt = task.StartedAt,
                 CompletedAt = task.CompletedAt,
@@ -2013,6 +2057,72 @@ public class WorkOrderService : IWorkOrderService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating task {TaskId} status", taskId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Updates a work order task photo path
+    /// </summary>
+    public async Task<WorkOrderTaskDtoFull?> UpdateTaskPhotoAsync(Guid taskId, string? photoPath)
+    {
+        try
+        {
+            var task = await _taskRepository.GetByIdAsync(taskId);
+            if (task == null)
+            {
+                _logger.LogWarning("Task {TaskId} not found for photo update", taskId);
+                return null;
+            }
+
+            var currentUserId = _currentUserService.UserId;
+
+            _logger.LogInformation(
+                "Updating task {TaskId} photo by user {UserId}",
+                taskId, currentUserId);
+
+            task.PhotoPath = photoPath;
+            task.UpdatedAt = DateTime.UtcNow;
+            task.UpdatedBy = currentUserId ?? "System";
+
+            await _taskRepository.UpdateAsync(task);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Task {TaskId} photo updated successfully", taskId);
+
+            // Map to DTO and include technician information
+            var technician = task.AssignedTechnicianId.HasValue
+                ? await _employeeRepository.GetByIdAsync(task.AssignedTechnicianId.Value)
+                : null;
+
+            return new WorkOrderTaskDtoFull
+            {
+                Id = task.Id,
+                WorkOrderId = task.WorkOrderId,
+                TaskName = task.TaskName,
+                Description = task.Description,
+                Sequence = task.Sequence,
+                Status = task.Status,
+                EstimatedHours = task.EstimatedHours,
+                ActualHours = task.ActualHours,
+                IsRequired = task.IsRequired,
+                PhotoPath = task.PhotoPath,
+                AssignedTechnicianId = task.AssignedTechnicianId,
+                StartedAt = task.StartedAt,
+                CompletedAt = task.CompletedAt,
+                CompletionNotes = task.CompletionNotes,
+                CreatedAt = task.CreatedAt,
+                AssignedTechnician = technician != null ? new ErpSystem.Core.DTOs.HR.EmployeeDto
+                {
+                    Id = technician.Id,
+                    FullName = $"{technician.FirstName} {technician.LastName}",
+                    EmployeeNumber = technician.EmployeeNumber
+                } : null
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating task {TaskId} photo", taskId);
             throw;
         }
     }

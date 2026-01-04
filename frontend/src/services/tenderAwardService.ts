@@ -224,8 +224,8 @@ export async function cancelAward(id: string, data: CancelAwardDto): Promise<voi
 }
 
 // Send award notifications
-export async function sendAwardNotifications(tenderId: string, data: AwardNotificationDto): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/procurement/TenderAwards/${tenderId}/notify`, {
+export async function sendAwardNotifications(awardId: string, data: AwardNotificationDto): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/procurement/TenderAwards/${awardId}/notify`, {
     method: 'POST',
     headers: getAuthHeaders(),
     body: JSON.stringify(data),

@@ -21,7 +21,10 @@ public class BusinessPartnerUserRepository : GenericRepository<BusinessPartnerUs
 
     public async Task<BusinessPartnerUser?> GetByUserIdAsync(Guid userId)
     {
+        // Use IgnoreQueryFilters to bypass tenant filtering for external users
+        // External users need to access their business partner user link regardless of tenant context
         return await _dbSet
+            .IgnoreQueryFilters()
             .Include(bpu => bpu.BusinessPartner)
             .Include(bpu => bpu.User)
             .Where(bpu => bpu.UserId == userId && !bpu.IsDeleted)

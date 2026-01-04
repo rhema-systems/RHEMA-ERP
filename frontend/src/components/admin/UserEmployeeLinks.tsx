@@ -22,7 +22,19 @@ import { Badge } from '@/components/ui/badge';
 import { UserPlus, UserMinus, Link, Unlink } from 'lucide-react';
 import { useToast } from '../../hooks/use-toast';
 import { apiService } from '../../services/api.service';
-import { Employee, maintenanceApiService } from '../../services/maintenanceApiService';
+
+// Define Employee interface locally for all employees (not just maintenance technicians)
+interface Employee {
+  id: string;
+  firstName: string;
+  lastName: string;
+  fullName?: string;
+  emailAddress?: string;
+  employeeNumber?: string;
+  departmentName?: string;
+  positionTitle?: string;
+  isActive: boolean;
+}
 
 interface UserEmployeeLink {
   userId: string;
@@ -59,11 +71,12 @@ const UserEmployeeLinks: React.FC = () => {
       setLoading(true);
       const [linksData, employeesData] = await Promise.all([
         apiService.get<UserEmployeeLink[]>('/useremployeelink/user-employee-links'),
-        maintenanceApiService.getTechnicians() // This gets all employees
+        apiService.get<Employee[]>('/employees?pageSize=1000') // Fetch all employees, not just maintenance technicians
       ]);
 
       setLinks(linksData);
-      setEmployees(employeesData);
+      // Filter to only active employees
+      setEmployees(employeesData.filter(e => e.isActive));
     } catch (error) {
       console.error('Error loading data:', error);
       toast({
@@ -251,7 +264,9 @@ const UserEmployeeLinks: React.FC = () => {
                   <SelectContent>
                     {employees.map((employee) => (
                       <SelectItem key={employee.id} value={employee.id}>
-                        {employee.firstName} {employee.lastName} ({employee.position})
+                        {employee.fullName || `${employee.firstName} ${employee.lastName}`}
+                        {employee.employeeNumber && ` - ${employee.employeeNumber}`}
+                        {employee.positionTitle && ` (${employee.positionTitle})`}
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,13 +12,16 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 public class MaintenanceExpenseController : ControllerBase
 {
     private readonly IMaintenanceExpenseService _expenseService;
+    private readonly IFileStorageService _storageService;
     private readonly ILogger<MaintenanceExpenseController> _logger;
 
     public MaintenanceExpenseController(
         IMaintenanceExpenseService expenseService,
+        IFileStorageService storageService,
         ILogger<MaintenanceExpenseController> logger)
     {
         _expenseService = expenseService;
+        _storageService = storageService;
         _logger = logger;
     }
 
@@ -166,6 +170,52 @@ public class MaintenanceExpenseController : ControllerBase
         {
             _logger.LogError(ex, "Error getting total expenses for work order {WorkOrderId}", workOrderId);
             return BadRequest(new { message = "Failed to get total expenses", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Upload a receipt file for an expense
+    /// </summary>
+    [HttpPost("upload-receipt")]
+    [RequestSizeLimit(10_000_000)] // 10MB
+    public async Task<IActionResult> UploadReceipt(IFormFile file)
+    {
+        try
+        {
+            if (file == null || file.Length == 0)
+            {
+                return BadRequest(new { message = "No file uploaded" });
+            }
+
+            // Validate file extension
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".pdf", ".doc", ".docx", ".xls", ".xlsx" };
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (!allowedExtensions.Contains(extension))
+            {
+                return BadRequest(new { message = $"File type {extension} is not allowed. Allowed types: {string.Join(", ", allowedExtensions)}" });
+            }
+
+            // Generate unique file path
+            var fileName = $"{Guid.NewGuid()}{extension}";
+            var filePath = $"expenses/receipts/{fileName}";
+
+            // Upload file
+            using var stream = file.OpenReadStream();
+            var uploadedPath = await _storageService.UploadFileAsync(stream, file.FileName, filePath);
+
+            if (string.IsNullOrEmpty(uploadedPath))
+            {
+                return StatusCode(500, new { message = "Failed to upload file" });
+            }
+
+            _logger.LogInformation("Uploaded expense receipt: {FilePath}", uploadedPath);
+
+            return Ok(new { filePath = uploadedPath, fileName = file.FileName });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error uploading expense receipt");
+            return StatusCode(500, new { message = "Failed to upload receipt", error = ex.Message });
         }
     }
 }

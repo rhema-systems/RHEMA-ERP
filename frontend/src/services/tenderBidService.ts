@@ -72,6 +72,8 @@ export interface TenderBidDetailDto {
 export interface TenderBidItemDto {
   id: string;
   tenderBidId: string;
+  bidLotId?: string;
+  lotCode?: string;
   tenderItemId: string;
   tenderItemDescription: string;
   requestedQuantity: number;

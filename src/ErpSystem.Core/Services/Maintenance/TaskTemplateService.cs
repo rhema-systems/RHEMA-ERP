@@ -15,6 +15,7 @@ public class TaskTemplateService : ITaskTemplateService
     private readonly IMaintenanceTaskTemplateRepository _maintenanceTaskTemplateRepository;
     private readonly IMaintenanceAssetRepository _assetRepository;
     private readonly IMaintenanceTypeRepository _maintenanceTypeRepository;
+    private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<TaskTemplateService> _logger;
     private readonly IUnitOfWork _unitOfWork;
 
@@ -24,6 +25,7 @@ public class TaskTemplateService : ITaskTemplateService
         IMaintenanceTaskTemplateRepository maintenanceTaskTemplateRepository,
         IMaintenanceAssetRepository assetRepository,
         IMaintenanceTypeRepository maintenanceTypeRepository,
+        ICurrentUserService currentUserService,
         ILogger<TaskTemplateService> logger,
         IUnitOfWork unitOfWork)
     {
@@ -32,6 +34,7 @@ public class TaskTemplateService : ITaskTemplateService
         _maintenanceTaskTemplateRepository = maintenanceTaskTemplateRepository;
         _assetRepository = assetRepository;
         _maintenanceTypeRepository = maintenanceTypeRepository;
+        _currentUserService = currentUserService;
         _logger = logger;
         _unitOfWork = unitOfWork;
     }
@@ -154,6 +157,7 @@ public class TaskTemplateService : ITaskTemplateService
 
     public async Task<AssetTaskTemplateDto> CreateAssetTaskTemplateAsync(CreateAssetTaskTemplateDto createDto)
     {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         var template = new AssetTaskTemplate
         {
             AssetId = createDto.AssetId,
@@ -168,7 +172,8 @@ public class TaskTemplateService : ITaskTemplateService
             SafetyRequirements = createDto.SafetyRequirements,
             RequiredTools = createDto.RequiredTools,
             RequiredParts = createDto.RequiredParts,
-            IsActive = createDto.IsActive
+            IsActive = createDto.IsActive,
+            TenantId = tenantId
         };
 
         await _assetTaskTemplateRepository.AddAsync(template);
@@ -222,6 +227,7 @@ public class TaskTemplateService : ITaskTemplateService
 
     public async Task<AssetTypeTaskTemplateDto> CreateAssetTypeTaskTemplateAsync(CreateAssetTypeTaskTemplateDto createDto)
     {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         var template = new AssetTypeTaskTemplate
         {
             AssetTypeId = createDto.AssetTypeId,
@@ -236,7 +242,8 @@ public class TaskTemplateService : ITaskTemplateService
             SafetyRequirements = createDto.SafetyRequirements,
             RequiredTools = createDto.RequiredTools,
             RequiredParts = createDto.RequiredParts,
-            IsActive = createDto.IsActive
+            IsActive = createDto.IsActive,
+            TenantId = tenantId
         };
 
         await _assetTypeTaskTemplateRepository.AddAsync(template);
@@ -296,6 +303,7 @@ public class TaskTemplateService : ITaskTemplateService
 
     public async Task<MaintenanceTaskTemplateDto> CreateMaintenanceTaskTemplateAsync(CreateMaintenanceTaskTemplateDto createDto)
     {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         var template = new MaintenanceTaskTemplate
         {
             MaintenanceTypeId = createDto.MaintenanceTypeId,
@@ -307,7 +315,8 @@ public class TaskTemplateService : ITaskTemplateService
             AssignedTechnicianId = createDto.AssignedTechnicianId,
             Instructions = createDto.Instructions,
             SafetyRequirements = createDto.SafetyRequirements,
-            IsActive = createDto.IsActive
+            IsActive = createDto.IsActive,
+            TenantId = tenantId
         };
 
         await _maintenanceTaskTemplateRepository.AddAsync(template);

@@ -15,12 +15,24 @@ interface BidReviewStepProps {
 }
 
 export default function BidReviewStep({ tender, bidData, uploadedDocuments = [], selectedLotIds }: BidReviewStepProps) {
+  // Get selected lots
+  const selectedLots = selectedLotIds && selectedLotIds.length > 0
+    ? tender.lots?.filter(lot => selectedLotIds.includes(lot.id)) || []
+    : tender.lots || [];
+
   const calculateItemTotal = (item: any) => {
     return item.offeredQuantity * item.unitPrice;
   };
 
   const calculateTotalBidAmount = () => {
     return bidData.items.reduce((sum, item) => sum + calculateItemTotal(item), 0);
+  };
+
+  const calculateLotTotal = (lotItems: typeof selectedLots[0]['items']) => {
+    return (lotItems || []).reduce((sum, tenderItem) => {
+      const bidItem = bidData.items.find(item => item.tenderItemId === tenderItem.id);
+      return sum + (bidItem ? calculateItemTotal(bidItem) : 0);
+    }, 0);
   };
 
   // Get proposal documents
@@ -81,65 +93,84 @@ export default function BidReviewStep({ tender, bidData, uploadedDocuments = [],
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Package className="h-5 w-5" />
-            Bid Lots ({bidData.items.length})
+            Bid Lots ({selectedLots.length} lot{selectedLots.length !== 1 ? 's' : ''}, {bidData.items.length} item{bidData.items.length !== 1 ? 's' : ''})
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[50px]">#</TableHead>
-                  <TableHead className="min-w-[250px]">Description</TableHead>
-                  <TableHead className="min-w-[120px]">Quantity</TableHead>
-                  <TableHead className="min-w-[150px]">Unit Price</TableHead>
-                  <TableHead className="min-w-[150px]">Total</TableHead>
-                  <TableHead className="min-w-[120px]">Delivery</TableHead>
-                  <TableHead className="min-w-[150px]">Brand/Model</TableHead>
-                </TableRow>
-              </TableHeader>
-            <TableBody>
-              {bidData.items.map((item, index) => {
-                // Find the corresponding tender item by tenderItemId
-                const tenderItem = tender.items?.find(ti => ti.id === item.tenderItemId);
-                return (
-                  <TableRow key={index}>
-                    <TableCell>{index + 1}</TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="font-medium">{tenderItem?.description}</p>
-                        {tenderItem?.specifications && (
-                          <p className="text-xs text-gray-500">{tenderItem.specifications}</p>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>{item.offeredQuantity} {tenderItem?.unitOfMeasure || ''}</TableCell>
-                    <TableCell>
-                      {tender.currency} {item.unitPrice.toLocaleString()}
-                    </TableCell>
-                    <TableCell className="font-bold text-green-600">
-                      {tender.currency} {calculateItemTotal(item).toLocaleString()}
-                    </TableCell>
-                    <TableCell>{item.deliveryDays ? `${item.deliveryDays} days` : 'N/A'}</TableCell>
-                    <TableCell>
-                      {item.brand && (
-                        <div className="text-sm">
-                          <p className="font-medium">{item.brand}</p>
-                          {item.model && <p className="text-gray-500">{item.model}</p>}
-                        </div>
-                      )}
-                      {!item.brand && <span className="text-gray-400">-</span>}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-          </div>
+        <CardContent className="space-y-6">
+          {selectedLots.map((lot) => (
+            <div key={lot.id} className="border rounded-lg overflow-hidden">
+              {/* Lot Header */}
+              <div className="bg-gray-50 px-4 py-3 border-b flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="font-mono">{lot.lotCode}</Badge>
+                  <span className="font-medium">{lot.title}</span>
+                </div>
+                <div className="font-bold text-green-600">
+                  {tender.currency} {calculateLotTotal(lot.items).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              </div>
+              {/* Lot Items */}
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[50px]">#</TableHead>
+                      <TableHead className="min-w-[250px]">Item Description</TableHead>
+                      <TableHead className="min-w-[120px]">Quantity</TableHead>
+                      <TableHead className="min-w-[150px]">Unit Price</TableHead>
+                      <TableHead className="min-w-[150px]">Total</TableHead>
+                      <TableHead className="min-w-[120px]">Delivery</TableHead>
+                      <TableHead className="min-w-[150px]">Brand/Model</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(lot.items || []).map((tenderItem, index) => {
+                      const bidItem = bidData.items.find(item => item.tenderItemId === tenderItem.id);
+                      if (!bidItem) return null;
+                      return (
+                        <TableRow key={tenderItem.id}>
+                          <TableCell>{index + 1}</TableCell>
+                          <TableCell>
+                            <div>
+                              <p className="font-medium">{tenderItem.description}</p>
+                              {tenderItem.specifications && (
+                                <p className="text-xs text-gray-500">{tenderItem.specifications}</p>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>{bidItem.offeredQuantity} {tenderItem.unitOfMeasure || ''}</TableCell>
+                          <TableCell>
+                            {tender.currency} {bidItem.unitPrice.toLocaleString()}
+                          </TableCell>
+                          <TableCell className="font-bold text-green-600">
+                            {tender.currency} {calculateItemTotal(bidItem).toLocaleString()}
+                          </TableCell>
+                          <TableCell>{bidItem.deliveryDays ? `${bidItem.deliveryDays} days` : 'N/A'}</TableCell>
+                          <TableCell>
+                            {bidItem.brand && (
+                              <div className="text-sm">
+                                <p className="font-medium">{bidItem.brand}</p>
+                                {bidItem.model && <p className="text-gray-500">{bidItem.model}</p>}
+                              </div>
+                            )}
+                            {!bidItem.brand && <span className="text-gray-400">-</span>}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          ))}
 
-          <div className="mt-6 flex justify-end">
+          <div className="flex justify-end">
             <div className="bg-green-50 border border-green-200 rounded-lg p-6 min-w-[450px] max-w-[600px]">
               <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm text-gray-600">
+                  <span>Total Lots:</span>
+                  <span className="font-medium">{selectedLots.length}</span>
+                </div>
                 <div className="flex items-center justify-between text-sm text-gray-600">
                   <span>Total Items:</span>
                   <span className="font-medium">{bidData.items.length}</span>

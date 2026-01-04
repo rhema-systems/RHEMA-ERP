@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, ChevronDown, User, ClipboardList, History, FileText, Wrench, Package, Trash2, Pencil, FlaskConical, CalendarClock, DollarSign, HelpCircle, ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, CalendarIcon, ShieldCheck } from 'lucide-react';
+import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, ChevronDown, User, Users, ClipboardList, History, FileText, Wrench, Package, Trash2, Pencil, FlaskConical, CalendarClock, DollarSign, HelpCircle, ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, CalendarIcon, ShieldCheck, Camera, Image, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { DateRange } from '@/components/ui/calendar';
@@ -42,6 +42,7 @@ import { toolCheckoutService, MaintenanceToolDto } from '@/services/toolCheckout
 import workOrderPartService, { WorkOrderPartDto, CreateWorkOrderPartDto, InventoryItemDto, WarehouseLocationDto, WarehouseDto, WarehouseInventoryDto } from '@/services/workOrderPartService';
 import { fileUploadService } from '@/services/fileUploadService';
 import { ClientOnly } from '@/components/ClientOnly';
+import workOrderLaborService, { WorkOrderLaborDto, CreateWorkOrderLaborDto } from '@/services/workOrderLaborService';
 
 import assetAdmissionService from '@/services/assetAdmissionService';
 
@@ -123,6 +124,18 @@ export default function WorkOrdersPage() {
   const [selectedTask, setSelectedTask] = useState<WorkOrderTask | null>(null);
   const [taskActualHours, setTaskActualHours] = useState<number>(0);
   const [taskCompletionNotes, setTaskCompletionNotes] = useState<string>('');
+  const [taskLaborType, setTaskLaborType] = useState<string>('Regular');
+  const [taskHourlyRate, setTaskHourlyRate] = useState<number>(0);
+
+  // Manual labor entry dialog state
+  const [isLaborDialogOpen, setIsLaborDialogOpen] = useState(false);
+  const [laborForm, setLaborForm] = useState({
+    technicianId: '',
+    hours: 0,
+    hourlyRate: 0,
+    laborType: 'Regular',
+    notes: '',
+  });
 
   // Data from services
   const [technicians, setTechnicians] = useState<Employee[]>([]);
@@ -206,6 +219,21 @@ export default function WorkOrdersPage() {
   const [availableVehicles, setAvailableVehicles] = useState<Asset[]>([]);
   const [expenseReceiptFile, setExpenseReceiptFile] = useState<File | null>(null);
   const [pendingExpenseDeletes, setPendingExpenseDeletes] = useState<string[]>([]);
+
+  // Task photo preview state
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
+  const [previewPhotoTaskName, setPreviewPhotoTaskName] = useState<string>('');
+
+  // Helper function to get file URL from storage path
+  const getFileUrl = (filePath: string | undefined | null): string => {
+    if (!filePath) return '';
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5000';
+    // Ensure path has leading slash
+    const normalizedPath = filePath.startsWith('/') ? filePath : `/${filePath}`;
+    // Add /uploads prefix if not already present
+    const uploadsPath = normalizedPath.startsWith('/uploads') ? normalizedPath : `/uploads${normalizedPath}`;
+    return `${baseUrl}${uploadsPath}`;
+  };
 
   // Start work order confirmation dialog state
   const [isStartWorkOrderDialogOpen, setIsStartWorkOrderDialogOpen] = useState(false);
@@ -928,17 +956,194 @@ export default function WorkOrdersPage() {
     setSelectedTask(task);
     setTaskActualHours(task.actualHours || task.estimatedHours);
     setTaskCompletionNotes('');
+    setTaskLaborType('Regular');
+    setTaskHourlyRate(50); // Default hourly rate - could be fetched from technician profile
     setIsTaskCompletionDialogOpen(true);
   };
 
   const handleCompleteTaskSubmit = async () => {
-    if (!selectedTask) return;
+    if (!selectedTask || !selectedOrder) return;
 
-    await handleTaskStatusUpdate(selectedTask.id, 'Completed', taskActualHours, taskCompletionNotes);
+    try {
+      // Complete the task first
+      await handleTaskStatusUpdate(selectedTask.id, 'Completed', taskActualHours, taskCompletionNotes);
+
+      // Auto-create labor record if hours > 0 and hourly rate is set
+      if (taskActualHours > 0 && taskHourlyRate > 0) {
+        const technicianId = selectedTask.assignedTechnicianId || selectedOrder.assignedTechnicianId;
+
+        if (technicianId) {
+          const laborData: CreateWorkOrderLaborDto = {
+            workOrderId: selectedOrder.id,
+            technicianId: technicianId,
+            startTime: new Date().toISOString(),
+            hourlyRate: taskHourlyRate,
+            notes: `Task: ${selectedTask.taskName}${taskCompletionNotes ? ' - ' + taskCompletionNotes : ''}`,
+            laborType: taskLaborType,
+          };
+
+          try {
+            // Calculate start time based on hours worked (start = now - hours)
+            const endTime = new Date();
+            const startTime = new Date(endTime.getTime() - (taskActualHours * 60 * 60 * 1000));
+
+            // Update laborData with the calculated start time
+            laborData.startTime = startTime.toISOString();
+
+            // Start labor with calculated start time
+            const labor = await workOrderLaborService.startLabor(laborData);
+
+            // End labor with current time - hours will be calculated correctly
+            await workOrderLaborService.endLabor(labor.id, {
+              endTime: endTime.toISOString(),
+              notes: `Completed: ${taskActualHours} hours`,
+            });
+
+            // Refresh labor records
+            const laborRecords = await workOrderLaborService.getLaborByWorkOrder(selectedOrder.id);
+            setWorkOrderLabor(laborRecords);
+
+            toast({
+              title: 'Success',
+              description: `Task completed and ${taskActualHours} hours of labor recorded`,
+              className: 'bg-green-50 border-green-200',
+            });
+          } catch (laborError) {
+            console.error('Error creating labor record:', laborError);
+            toast({
+              title: 'Partial Success',
+              description: 'Task completed but failed to create labor record',
+              variant: 'destructive',
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error completing task:', error);
+    }
+
     setIsTaskCompletionDialogOpen(false);
     setSelectedTask(null);
     setTaskActualHours(0);
     setTaskCompletionNotes('');
+    setTaskLaborType('Regular');
+    setTaskHourlyRate(0);
+  };
+
+  // Handle manual labor entry submission
+  const handleAddManualLabor = async () => {
+    if (!selectedOrder) return;
+
+    if (!laborForm.technicianId || laborForm.hours <= 0 || laborForm.hourlyRate <= 0) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please fill in all required fields',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      // Calculate start time based on hours worked (start = now - hours)
+      const endTime = new Date();
+      const startTime = new Date(endTime.getTime() - (laborForm.hours * 60 * 60 * 1000));
+
+      const laborData: CreateWorkOrderLaborDto = {
+        workOrderId: selectedOrder.id,
+        technicianId: laborForm.technicianId,
+        startTime: startTime.toISOString(),
+        hourlyRate: laborForm.hourlyRate,
+        notes: laborForm.notes || 'Manual entry',
+        laborType: laborForm.laborType,
+      };
+
+      // Start labor with calculated start time
+      const labor = await workOrderLaborService.startLabor(laborData);
+
+      // End labor with current time - hours will be calculated correctly
+      await workOrderLaborService.endLabor(labor.id, {
+        endTime: endTime.toISOString(),
+        notes: laborForm.notes || `Hours: ${laborForm.hours}`,
+      });
+
+      // Refresh labor records
+      const laborRecords = await workOrderLaborService.getLaborByWorkOrder(selectedOrder.id);
+      setWorkOrderLabor(laborRecords);
+
+      toast({
+        title: 'Success',
+        description: `Labour entry added: ${laborForm.hours} hours`,
+        className: 'bg-green-50 border-green-200',
+      });
+
+      setIsLaborDialogOpen(false);
+      setLaborForm({
+        technicianId: '',
+        hours: 0,
+        hourlyRate: 0,
+        laborType: 'Regular',
+        notes: '',
+      });
+    } catch (error) {
+      console.error('Error adding labour entry:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to add labour entry',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleTaskPhotoUpload = async (taskId: string, file: File) => {
+    try {
+      const result = await maintenanceApiService.uploadTaskPhoto(taskId, file);
+
+      // Update local state with the new photo path
+      setSelectedOrderTasks(prevTasks =>
+        prevTasks.map(task =>
+          task.id === taskId ? { ...task, photoPath: result.filePath } : task
+        )
+      );
+
+      toast({
+        title: 'Success',
+        description: 'Task photo uploaded successfully',
+        variant: 'success'
+      });
+    } catch (error) {
+      console.error('Error uploading task photo:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to upload task photo',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleTaskPhotoDelete = async (taskId: string) => {
+    try {
+      await maintenanceApiService.deleteTaskPhoto(taskId);
+
+      // Update local state to remove the photo path
+      setSelectedOrderTasks(prevTasks =>
+        prevTasks.map(task =>
+          task.id === taskId ? { ...task, photoPath: undefined } : task
+        )
+      );
+
+      toast({
+        title: 'Success',
+        description: 'Task photo deleted successfully',
+        variant: 'success'
+      });
+    } catch (error) {
+      console.error('Error deleting task photo:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete task photo',
+        variant: 'destructive'
+      });
+    }
   };
 
   const handleSort = (column: string) => {
@@ -1144,16 +1349,6 @@ export default function WorkOrdersPage() {
                     ) : (
                       <span>{order.assetName}</span>
                     )}
-                      {order.assetId && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => window.open(`/maintenance/asset-admission?assetId=${order.assetId}&workOrderId=${order.id}`, '_blank')}
-                          className="ml-2 text-xs"
-                        >
-                          Admit
-                        </Button>
-                      )}
 
                   </TableCell>
                   <TableCell>
@@ -1271,17 +1466,18 @@ export default function WorkOrdersPage() {
                                 );
                                 setWorkOrderTools(toolsWithDetails);
                                 console.log('Set tools history with', toolsWithDetails.length, 'tools');
-
-                                // Try to get tool summary
-                                try {
-                                  const summaryData = await workOrderToolService.getToolSummary(order.id);
-                                  setToolSummary(summaryData);
-                                } catch (error) {
-                                  console.error('Error loading tool summary:', error);
-                                }
                               } else {
                                 console.warn('No tools array in response');
                                 setWorkOrderTools([]);
+                              }
+
+                              // Always try to get tool summary for completed work orders
+                              try {
+                                const summaryData = await workOrderToolService.getToolSummary(order.id);
+                                setToolSummary(summaryData);
+                              } catch (error) {
+                                console.error('Error loading tool summary:', error);
+                                setToolSummary(null);
                               }
                             } else {
                               console.log('Loading current data for active work order');
@@ -1324,12 +1520,18 @@ export default function WorkOrdersPage() {
                             // Load expenses for this work order
                             let expensesData: MaintenanceExpense[] = [];
                             try {
-                              expensesData = await maintenanceApiService.getExpensesByWorkOrder(order.id);
-                              setExpenses(expensesData);
-                              console.log('Set expenses with', expensesData.length, 'records');
+                              const [expensesList, expensesTotal] = await Promise.all([
+                                maintenanceApiService.getExpensesByWorkOrder(order.id),
+                                maintenanceApiService.getTotalExpensesByWorkOrder(order.id)
+                              ]);
+                              expensesData = expensesList;
+                              setExpenses(expensesList);
+                              setTotalExpenses(expensesTotal);
+                              console.log('Set expenses with', expensesList.length, 'records, total:', expensesTotal);
                             } catch (error) {
                               console.error('Error loading expenses:', error);
                               setExpenses([]);
+                              setTotalExpenses(0);
                             }
 
                             // Calculate and cache total cost for this work order (after all data is loaded)
@@ -1491,7 +1693,7 @@ export default function WorkOrdersPage() {
           </DialogHeader>
           {selectedOrder && (
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col flex-1 overflow-hidden">
-              <TabsList className="grid w-full grid-cols-8 flex-shrink-0 bg-muted/50 p-1 rounded-lg gap-1">
+              <TabsList className="grid w-full grid-cols-9 flex-shrink-0 bg-muted/50 p-1 rounded-lg gap-1">
                 <TabsTrigger value="details">
                   <FileText className="h-4 w-4 mr-2" />
                   Details
@@ -1520,7 +1722,10 @@ export default function WorkOrdersPage() {
                   <DollarSign className="h-4 w-4 mr-2" />
                   Expenses
                 </TabsTrigger>
-                {/* Labor tab temporarily hidden as requested */}
+                <TabsTrigger value="labor">
+                  <Users className="h-4 w-4 mr-2" />
+                  Labour ({workOrderLabor.length})
+                </TabsTrigger>
                 <TabsTrigger value="history">
                   <History className="h-4 w-4 mr-2" />
                   Workflow History
@@ -1566,7 +1771,7 @@ export default function WorkOrdersPage() {
                           const laborCost = workOrderLabor?.reduce((sum: number, l: any) => sum + (l.totalCost || 0), 0) || 0;
                           const partsCost = workOrderParts?.reduce((sum, p) => sum + (p.totalCost || 0), 0) || 0;
                           const toolsCost = toolSummary?.totalRentalCost || 0;
-                          const expensesCost = totalExpenses || 0;
+                          const expensesCost = Number(totalExpenses) || 0;
                           const actualTotal = laborCost + partsCost + toolsCost + expensesCost;
 
                           return (
@@ -1851,6 +2056,81 @@ export default function WorkOrdersPage() {
                             )}
                           </div>
                         )}
+
+                        {/* Task Photo Section */}
+                        <div className="mt-3 pl-11">
+                          {task.photoPath ? (
+                            <div className="flex items-center gap-3">
+                              <div className="relative group">
+                                <div
+                                  className="relative h-16 w-24 rounded-lg overflow-hidden border-2 border-muted bg-muted/30 cursor-pointer hover:border-primary/50 transition-all shadow-sm hover:shadow-md"
+                                  onClick={() => {
+                                    setPreviewPhotoUrl(getFileUrl(task.photoPath));
+                                    setPreviewPhotoTaskName(task.taskName);
+                                  }}
+                                >
+                                  <img
+                                    src={getFileUrl(task.photoPath)}
+                                    alt={`Photo for ${task.taskName}`}
+                                    className="h-full w-full object-cover"
+                                  />
+                                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                                    <Eye className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" />
+                                  </div>
+                                </div>
+                                {selectedOrder.status !== 'Completed' && selectedOrder.status !== 'Cancelled' && (
+                                  <Button
+                                    size="icon"
+                                    variant="destructive"
+                                    className="absolute -top-2 -right-2 h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleTaskPhotoDelete(task.id);
+                                    }}
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                )}
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                                  <Image className="h-3 w-3" />
+                                  Task Photo
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  Click to view full size
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            selectedOrder.status !== 'Completed' && selectedOrder.status !== 'Cancelled' && (
+                              <div className="flex items-center gap-2">
+                                <label className="cursor-pointer">
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        handleTaskPhotoUpload(task.id, file);
+                                        e.target.value = '';
+                                      }
+                                    }}
+                                  />
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="pointer-events-none gap-1"
+                                  >
+                                    <Camera className="h-4 w-4" />
+                                    Add Photo
+                                  </Button>
+                                </label>
+                              </div>
+                            )
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -2387,7 +2667,102 @@ export default function WorkOrdersPage() {
                 </div>
               </TabsContent>
 
-              {/* Labor Tab temporarily removed as requested */}
+              {/* Labor Tab */}
+              <TabsContent value="labor" className="flex-1 overflow-y-auto mt-4">
+                <div className="space-y-4">
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <div>
+                        <CardTitle className="text-lg flex items-center gap-2">
+                          <Users className="h-5 w-5" />
+                          Labour Records
+                        </CardTitle>
+                        <CardDescription>
+                          Time and labour costs recorded for this work order
+                        </CardDescription>
+                      </div>
+                      {selectedOrder.status !== 'Completed' && selectedOrder.status !== 'Cancelled' && (
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setLaborForm({
+                              technicianId: selectedOrder.assignedTechnicianId || '',
+                              hours: 0,
+                              hourlyRate: 50,
+                              laborType: 'Regular',
+                              notes: '',
+                            });
+                            setIsLaborDialogOpen(true);
+                          }}
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          Add Labour Entry
+                        </Button>
+                      )}
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-xs text-muted-foreground mb-3">
+                        💡 Labour is automatically recorded when tasks are completed. Use "Add Labour Entry" for non-task work (travel time, setup, etc.)
+                      </p>
+                      {workOrderLabor.length === 0 ? (
+                        <div className="text-center py-8 text-muted-foreground">
+                          <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                          <p>No labour records found for this work order</p>
+                          <p className="text-xs mt-1">Complete tasks or add manual entries to track labour</p>
+                        </div>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Technician</TableHead>
+                              <TableHead>Type</TableHead>
+                              <TableHead>Date</TableHead>
+                              <TableHead>Hours</TableHead>
+                              <TableHead>Rate</TableHead>
+                              <TableHead className="text-right">Total Cost</TableHead>
+                              <TableHead>Notes</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {workOrderLabor.map((labor: any, index: number) => (
+                              <TableRow key={labor.id || index}>
+                                <TableCell className="font-medium">{labor.technician?.fullName || labor.technicianName || 'Unknown'}</TableCell>
+                                <TableCell>
+                                  <Badge variant={
+                                    labor.laborType === 'Overtime' ? 'secondary' :
+                                    labor.laborType === 'Emergency' ? 'destructive' :
+                                    'outline'
+                                  }>
+                                    {labor.laborType || 'Regular'}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>{labor.workDate ? format(new Date(labor.workDate), 'MMM dd, yyyy') : (labor.startTime ? format(new Date(labor.startTime), 'MMM dd, yyyy') : 'N/A')}</TableCell>
+                                <TableCell>{labor.hoursWorked?.toFixed(2) || labor.hours?.toFixed(2) || '0.00'}</TableCell>
+                                <TableCell>${labor.hourlyRate?.toFixed(2) || '0.00'}/hr</TableCell>
+                                <TableCell className="text-right font-medium">${labor.totalCost?.toFixed(2) || '0.00'}</TableCell>
+                                <TableCell className="max-w-[200px] truncate">{labor.notes || '-'}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
+                      {workOrderLabor.length > 0 && (
+                        <div className="mt-4 pt-4 border-t flex justify-between items-center">
+                          <div className="text-xs text-muted-foreground">
+                            {workOrderLabor.length} record(s) • {workOrderLabor.reduce((sum: number, l: any) => sum + (l.hoursWorked || l.hours || 0), 0).toFixed(2)} total hours
+                          </div>
+                          <div className="text-right">
+                            <span className="text-sm text-muted-foreground">Total Labour Cost: </span>
+                            <span className="text-lg font-bold">
+                              ${workOrderLabor.reduce((sum: number, l: any) => sum + (l.totalCost || 0), 0).toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
 
               {/* Workflow History Tab */}
               <TabsContent value="history" className="flex-1 overflow-y-auto mt-4">
@@ -3405,11 +3780,12 @@ export default function WorkOrdersPage() {
                                             expenseDate: expense.expenseDate.split('T')[0],
                                             mileageDriven: expense.mileageDriven || 0,
                                             mileageRate: expense.mileageRate || 0,
-                                            vehicleUsed: expense.vehicleUsed || '',
-                                            vendor: expense.vendor || '',
-                                            receiptNumber: expense.receiptNumber || '',
+                                            // Map backend field names to form field names
+                                            vehicleUsed: expense.vehicleId || expense.vehicleUsed || '',
+                                            vendor: expense.vendorName || expense.vendor || '',
+                                            receiptNumber: expense.referenceNumber || expense.receiptNumber || '',
                                             receiptPath: expense.receiptPath || '',
-                                            notes: expense.notes || '',
+                                            notes: expense.location || expense.notes || '',
                                           });
                                           setIsExpenseDialogOpen(true);
                                         }}
@@ -3744,11 +4120,11 @@ export default function WorkOrdersPage() {
       {/* Task Completion Dialog */}
       <ClientOnly>
       <Dialog open={isTaskCompletionDialogOpen} onOpenChange={setIsTaskCompletionDialogOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Complete Task</DialogTitle>
+            <DialogTitle>Complete Task & Record Labour</DialogTitle>
             <DialogDescription>
-              Enter actual hours worked and completion notes
+              Enter actual hours worked - a labour record will be created automatically
             </DialogDescription>
           </DialogHeader>
           {selectedTask && (
@@ -3757,18 +4133,45 @@ export default function WorkOrdersPage() {
                 <Label className="text-sm font-medium">Task</Label>
                 <p className="text-sm text-muted-foreground">{selectedTask.taskName}</p>
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="actualHours">Actual Hours <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="actualHours"
+                    type="number"
+                    min="0"
+                    step="0.25"
+                    value={taskActualHours}
+                    onChange={(e) => setTaskActualHours(parseFloat(e.target.value) || 0)}
+                    placeholder="Hours worked"
+                  />
+                  <p className="text-xs text-muted-foreground">Estimated: {selectedTask.estimatedHours} hrs</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="hourlyRate">Hourly Rate <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="hourlyRate"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={taskHourlyRate}
+                    onChange={(e) => setTaskHourlyRate(parseFloat(e.target.value) || 0)}
+                    placeholder="Rate per hour"
+                  />
+                </div>
+              </div>
               <div className="space-y-2">
-                <Label htmlFor="actualHours">Actual Hours</Label>
-                <Input
-                  id="actualHours"
-                  type="number"
-                  min="0"
-                  step="0.25"
-                  value={taskActualHours}
-                  onChange={(e) => setTaskActualHours(parseFloat(e.target.value) || 0)}
-                  placeholder="Enter actual hours worked"
-                />
-                <p className="text-xs text-muted-foreground">Estimated: {selectedTask.estimatedHours} hours</p>
+                <Label htmlFor="laborType">Labour Type</Label>
+                <Select value={taskLaborType} onValueChange={setTaskLaborType}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select labour type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Regular">Regular</SelectItem>
+                    <SelectItem value="Overtime">Overtime</SelectItem>
+                    <SelectItem value="Emergency">Emergency</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="completionNotes">Completion Notes (Optional)</Label>
@@ -3780,14 +4183,129 @@ export default function WorkOrdersPage() {
                   rows={3}
                 />
               </div>
+              {taskActualHours > 0 && taskHourlyRate > 0 && (
+                <div className="bg-muted/50 rounded-lg p-3">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Labour Cost:</span>
+                    <span className="font-semibold">${(taskActualHours * taskHourlyRate).toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsTaskCompletionDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCompleteTaskSubmit}>
+            <Button onClick={handleCompleteTaskSubmit} disabled={taskActualHours <= 0 || taskHourlyRate <= 0}>
               Complete Task
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      </ClientOnly>
+
+      {/* Manual Labour Entry Dialog */}
+      <ClientOnly>
+      <Dialog open={isLaborDialogOpen} onOpenChange={setIsLaborDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add Manual Labour Entry</DialogTitle>
+            <DialogDescription>
+              Add labour time for non-task work (travel, setup, waiting, etc.)
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="laborTechnician">Technician <span className="text-red-500">*</span></Label>
+              <Select
+                value={laborForm.technicianId}
+                onValueChange={(value) => setLaborForm({...laborForm, technicianId: value})}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select technician" />
+                </SelectTrigger>
+                <SelectContent>
+                  {technicians.map((tech) => (
+                    <SelectItem key={tech.id} value={tech.id}>
+                      {tech.firstName} {tech.lastName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="laborHours">Hours <span className="text-red-500">*</span></Label>
+                <Input
+                  id="laborHours"
+                  type="number"
+                  min="0"
+                  step="0.25"
+                  value={laborForm.hours}
+                  onChange={(e) => setLaborForm({...laborForm, hours: parseFloat(e.target.value) || 0})}
+                  placeholder="Hours worked"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="laborRate">Hourly Rate <span className="text-red-500">*</span></Label>
+                <Input
+                  id="laborRate"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={laborForm.hourlyRate}
+                  onChange={(e) => setLaborForm({...laborForm, hourlyRate: parseFloat(e.target.value) || 0})}
+                  placeholder="Rate per hour"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="laborEntryType">Labour Type</Label>
+              <Select
+                value={laborForm.laborType}
+                onValueChange={(value) => setLaborForm({...laborForm, laborType: value})}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select labour type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Regular">Regular</SelectItem>
+                  <SelectItem value="Overtime">Overtime</SelectItem>
+                  <SelectItem value="Emergency">Emergency</SelectItem>
+                  <SelectItem value="Travel">Travel</SelectItem>
+                  <SelectItem value="Setup">Setup</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="laborNotes">Notes</Label>
+              <Textarea
+                id="laborNotes"
+                value={laborForm.notes}
+                onChange={(e) => setLaborForm({...laborForm, notes: e.target.value})}
+                placeholder="Describe the work performed..."
+                rows={2}
+              />
+            </div>
+            {laborForm.hours > 0 && laborForm.hourlyRate > 0 && (
+              <div className="bg-muted/50 rounded-lg p-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Labour Cost:</span>
+                  <span className="font-semibold">${(laborForm.hours * laborForm.hourlyRate).toFixed(2)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsLaborDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddManualLabor}
+              disabled={!laborForm.technicianId || laborForm.hours <= 0 || laborForm.hourlyRate <= 0}
+            >
+              Add Labour Entry
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -4506,10 +5024,33 @@ export default function WorkOrdersPage() {
                 }
 
                 try {
+                  // Upload receipt file if present
+                  let receiptPath = expenseForm.receiptPath;
+                  if (expenseReceiptFile) {
+                    try {
+                      const uploadResult = await maintenanceApiService.uploadExpenseReceipt(expenseReceiptFile);
+                      receiptPath = uploadResult.filePath;
+                      console.log('💰 Receipt uploaded:', receiptPath);
+                    } catch (uploadError) {
+                      console.error('Error uploading receipt:', uploadError);
+                      toast({
+                        title: 'Warning',
+                        description: 'Failed to upload receipt file. Expense will be saved without receipt.',
+                        variant: 'destructive',
+                      });
+                    }
+                  }
+
+                  // Create expense data with uploaded receipt path
+                  const expenseData = {
+                    ...expenseForm,
+                    receiptPath,
+                  };
+
                   // Use local state pattern - don't save to database yet
                   if (editingExpense?.id) {
                     // Update existing expense in local state
-                    const updatedExpense = { ...editingExpense, ...expenseForm, workOrderId: selectedOrder?.id || '' };
+                    const updatedExpense = { ...editingExpense, ...expenseData, workOrderId: selectedOrder?.id || '' };
                     console.log('💰 Updating expense in state:', updatedExpense);
                     setExpenses((prev) => {
                       const updated = prev.map((expense) =>
@@ -4522,10 +5063,11 @@ export default function WorkOrdersPage() {
                     // Add new expense to local state with temp ID
                     const newExpense: MaintenanceExpense = {
                       id: `temp-${Date.now()}`,
-                      ...expenseForm,
+                      ...expenseData,
                       workOrderId: selectedOrder?.id || '',
                       technicianId: selectedOrder?.assignedTechnicianId || '',
                       technicianName: selectedOrder?.assignedTechnician || '',
+                      status: 'Pending',
                       isApproved: false,
                       approvedById: '',
                       approvedByName: '',
@@ -4538,9 +5080,6 @@ export default function WorkOrdersPage() {
                       return updated;
                     });
                   }
-
-                  // Store file temporarily (will upload when saving work order)
-                  // Note: File upload will happen in bulk save
 
                   toast({
                     title: 'Success',
@@ -4695,6 +5234,67 @@ export default function WorkOrdersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Task Photo Preview Modal */}
+      {previewPhotoUrl && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => {
+            setPreviewPhotoUrl(null);
+            setPreviewPhotoTaskName('');
+          }}
+        >
+          <div className="relative max-w-4xl max-h-[90vh] w-full">
+            {/* Close button */}
+            <Button
+              size="icon"
+              variant="ghost"
+              className="absolute -top-12 right-0 text-white hover:bg-white/20 h-10 w-10"
+              onClick={() => {
+                setPreviewPhotoUrl(null);
+                setPreviewPhotoTaskName('');
+              }}
+            >
+              <X className="h-6 w-6" />
+            </Button>
+
+            {/* Task name header */}
+            {previewPhotoTaskName && (
+              <div className="absolute -top-12 left-0 text-white font-medium flex items-center gap-2">
+                <Image className="h-5 w-5" />
+                {previewPhotoTaskName}
+              </div>
+            )}
+
+            {/* Image container */}
+            <div
+              className="bg-black/50 rounded-lg overflow-hidden shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <img
+                src={previewPhotoUrl}
+                alt={previewPhotoTaskName || 'Task photo'}
+                className="max-w-full max-h-[85vh] w-auto h-auto mx-auto object-contain"
+              />
+            </div>
+
+            {/* Actions */}
+            <div className="flex justify-center gap-3 mt-4">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(previewPhotoUrl, '_blank');
+                }}
+              >
+                <ExternalLink className="h-4 w-4 mr-2" />
+                Open in New Tab
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

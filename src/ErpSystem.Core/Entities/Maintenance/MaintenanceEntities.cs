@@ -1257,6 +1257,12 @@ public class WorkOrderTask : TenantEntity
 
     public bool IsRequired { get; set; } = true;
 
+    /// <summary>
+    /// Path to the photo uploaded for this task (e.g., before/after photos)
+    /// </summary>
+    [MaxLength(500)]
+    public string? PhotoPath { get; set; }
+
     // Navigation properties
     public virtual WorkOrder WorkOrder { get; set; } = null!;
     public virtual Employee? AssignedTechnician { get; set; }
@@ -1365,7 +1371,9 @@ public class WorkOrderLabor : TenantEntity
 
     // Navigation properties
     public virtual WorkOrder WorkOrder { get; set; } = null!;
-    public virtual Employee Technician { get; set; } = null!;
+
+    [ForeignKey("TechnicianId")]
+    public virtual ApplicationUser Technician { get; set; } = null!;
 }
 
 public class WorkOrderDocument : TenantEntity

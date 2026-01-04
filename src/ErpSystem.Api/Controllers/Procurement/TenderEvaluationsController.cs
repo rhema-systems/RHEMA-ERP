@@ -267,4 +267,58 @@ public class TenderEvaluationsController : ControllerBase
             return StatusCode(500, "An error occurred while generating the evaluation report");
         }
     }
+
+    /// <summary>
+    /// Calculate QCBS (Quality and Cost Based Selection) scores for a tender.
+    /// This applies the technical/financial weighting and ranks bids accordingly.
+    /// </summary>
+    [HttpPost("qcbs/{tenderId}")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    public async Task<ActionResult<QCBSEvaluationResultDto>> CalculateQCBSScores(Guid tenderId)
+    {
+        try
+        {
+            var result = await _evaluationService.CalculateQCBSScoresAsync(tenderId);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Invalid operation calculating QCBS scores for tender {TenderId}", tenderId);
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error calculating QCBS scores for tender {TenderId}", tenderId);
+            return StatusCode(500, "An error occurred while calculating QCBS scores");
+        }
+    }
+
+    /// <summary>
+    /// Get stored QCBS evaluation results for a tender without recalculating.
+    /// Returns 404 if QCBS evaluation has not been run yet.
+    /// </summary>
+    [HttpGet("qcbs/{tenderId}")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,Employee")]
+    public async Task<ActionResult<QCBSEvaluationResultDto>> GetQCBSEvaluationResults(Guid tenderId)
+    {
+        try
+        {
+            var result = await _evaluationService.GetQCBSEvaluationResultsAsync(tenderId);
+            if (result == null)
+            {
+                return NotFound("QCBS evaluation has not been run for this tender yet");
+            }
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Invalid operation getting QCBS results for tender {TenderId}", tenderId);
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting QCBS evaluation results for tender {TenderId}", tenderId);
+            return StatusCode(500, "An error occurred while retrieving QCBS evaluation results");
+        }
+    }
 }

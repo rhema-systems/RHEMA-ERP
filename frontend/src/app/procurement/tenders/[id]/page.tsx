@@ -18,6 +18,8 @@ import { Label } from '@/components/ui/label';
 import { TenderAward } from '@/components/procurement/tenders/TenderAward';
 import { AnswerClarificationDialog } from '@/components/procurement/tenders/AnswerClarificationDialog';
 import TenderEvaluators from '@/components/procurement/tenders/TenderEvaluators';
+import QCBSEvaluationPanel from '@/components/procurement/tenders/QCBSEvaluationPanel';
+import { Calculator } from 'lucide-react';
 
 export default function TenderDetailPage() {
   const params = useParams();
@@ -255,14 +257,14 @@ export default function TenderDetailPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-10">
+        <TabsList className="grid w-full grid-cols-11">
           <TabsTrigger value="overview">
             <FileText className="h-4 w-4 mr-2" />
             Overview
           </TabsTrigger>
           <TabsTrigger value="items">
             <Package className="h-4 w-4 mr-2" />
-            Lots ({tender.items?.length || 0})
+            Lots ({tender.lots?.length || 0})
           </TabsTrigger>
           <TabsTrigger value="proposals">
             <ClipboardList className="h-4 w-4 mr-2" />
@@ -287,6 +289,10 @@ export default function TenderDetailPage() {
           <TabsTrigger value="evaluators">
             <Users className="h-4 w-4 mr-2" />
             Evaluators ({tender.evaluators?.length || 0})
+          </TabsTrigger>
+          <TabsTrigger value="qcbs" disabled={!tender.useQCBSEvaluation}>
+            <Calculator className="h-4 w-4 mr-2" />
+            QCBS
           </TabsTrigger>
           <TabsTrigger value="bids">
             <Award className="h-4 w-4 mr-2" />
@@ -409,8 +415,57 @@ export default function TenderDetailPage() {
                 )}
                 <span>Allow Partial Bids</span>
               </div>
+              <div className="flex items-center gap-2">
+                {tender.useQCBSEvaluation ? (
+                  <CheckCircle2 className="h-5 w-5 text-green-500" />
+                ) : (
+                  <XCircle className="h-5 w-5 text-gray-300" />
+                )}
+                <span>QCBS Evaluation</span>
+                {tender.useQCBSEvaluation && (
+                  <Badge variant="outline" className="ml-2">
+                    Tech: {tender.technicalWeight}% | Fin: {tender.financialWeight}%
+                  </Badge>
+                )}
+              </div>
             </CardContent>
           </Card>
+
+          {/* QCBS Configuration Card - only shown if enabled */}
+          {tender.useQCBSEvaluation && (
+            <Card className="border-blue-200 bg-blue-50/30">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Calculator className="h-5 w-5" />
+                  QCBS Evaluation Configuration
+                </CardTitle>
+                <CardDescription>
+                  Quality and Cost-Based Selection settings
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-4 bg-white rounded-lg border">
+                    <p className="text-sm text-gray-500">Technical Weight</p>
+                    <p className="text-2xl font-bold text-blue-600">{tender.technicalWeight}%</p>
+                  </div>
+                  <div className="p-4 bg-white rounded-lg border">
+                    <p className="text-sm text-gray-500">Financial Weight</p>
+                    <p className="text-2xl font-bold text-green-600">{tender.financialWeight}%</p>
+                  </div>
+                  <div className="p-4 bg-white rounded-lg border">
+                    <p className="text-sm text-gray-500">Minimum Technical Score</p>
+                    <p className="text-2xl font-bold text-orange-600">{tender.minimumTechnicalScore}%</p>
+                  </div>
+                </div>
+                <div className="mt-4 p-3 bg-white rounded-lg border text-sm text-muted-foreground">
+                  <strong>Formula:</strong> Combined Score = (Technical Score × {tender.technicalWeight}%) + (Financial Score × {tender.financialWeight}%)
+                  <br />
+                  Financial Score = (Lowest Bid / Bidder&apos;s Price) × 100
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {tender.termsAndConditions && (
             <Card>
@@ -429,45 +484,71 @@ export default function TenderDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Tender Lots</CardTitle>
-              <CardDescription>{tender.items?.length || 0} lot(s)</CardDescription>
+              <CardDescription>{tender.lots?.length || 0} lot(s)</CardDescription>
             </CardHeader>
             <CardContent>
-              {!tender.items || tender.items.length === 0 ? (
+              {!tender.lots || tender.lots.length === 0 ? (
                 <p className="text-center py-8 text-gray-500">No lots added yet</p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-16">#</TableHead>
-                      <TableHead>Lot Code</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Quantity</TableHead>
-                      <TableHead>Unit</TableHead>
-                      <TableHead>Delivery Date</TableHead>
-                      <TableHead>Location</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {tender.items.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell>{item.lineNumber}</TableCell>
-                        <TableCell>{item.itemCode || '-'}</TableCell>
-                        <TableCell>
+                <div className="space-y-4">
+                  {tender.lots.map((lot, lotIndex) => (
+                    <div key={lot.id} className="border rounded-lg overflow-hidden">
+                      {/* Lot Header */}
+                      <div className="bg-gray-50 px-4 py-3 border-b">
+                        <div className="flex justify-between items-start">
                           <div>
-                            <p className="font-medium">{item.description}</p>
-                            {item.specifications && (
-                              <p className="text-sm text-gray-500">{item.specifications}</p>
+                            <h4 className="font-medium">{lot.lotCode}: {lot.title}</h4>
+                            {lot.description && (
+                              <p className="text-sm text-gray-500 mt-1">{lot.description}</p>
                             )}
                           </div>
-                        </TableCell>
-                        <TableCell>{item.quantity}</TableCell>
-                        <TableCell>{item.unitOfMeasure || '-'}</TableCell>
-                        <TableCell>{item.requiredDeliveryDate ? format(new Date(item.requiredDeliveryDate), 'PP') : '-'}</TableCell>
-                        <TableCell>{item.deliveryLocation || '-'}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                          <div className="text-right text-sm">
+                            {lot.estimatedValue && (
+                              <p className="font-medium">{lot.currency || 'USD'} {lot.estimatedValue.toLocaleString()}</p>
+                            )}
+                            <p className="text-gray-500">{lot.items?.length || 0} item(s)</p>
+                          </div>
+                        </div>
+                      </div>
+                      {/* Lot Items */}
+                      {lot.items && lot.items.length > 0 && (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-16">#</TableHead>
+                              <TableHead>Item Code</TableHead>
+                              <TableHead>Description</TableHead>
+                              <TableHead>Quantity</TableHead>
+                              <TableHead>Unit</TableHead>
+                              <TableHead>Delivery Date</TableHead>
+                              <TableHead>Location</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {lot.items.map((item) => (
+                              <TableRow key={item.id}>
+                                <TableCell>{item.lineNumber}</TableCell>
+                                <TableCell>{item.itemCode || '-'}</TableCell>
+                                <TableCell>
+                                  <div>
+                                    <p className="font-medium">{item.description}</p>
+                                    {item.specifications && (
+                                      <p className="text-sm text-gray-500">{item.specifications}</p>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell>{item.quantity}</TableCell>
+                                <TableCell>{item.unitOfMeasure || '-'}</TableCell>
+                                <TableCell>{item.requiredDeliveryDate ? format(new Date(item.requiredDeliveryDate), 'PP') : '-'}</TableCell>
+                                <TableCell>{item.deliveryLocation || '-'}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </div>
+                  ))}
+                </div>
               )}
             </CardContent>
           </Card>
@@ -978,6 +1059,18 @@ export default function TenderDetailPage() {
           </Card>
         </TabsContent>
 
+        {/* QCBS Evaluation Tab */}
+        <TabsContent value="qcbs" className="space-y-4">
+          <QCBSEvaluationPanel
+            tenderId={tenderId}
+            useQCBSEvaluation={tender.useQCBSEvaluation}
+            technicalWeight={tender.technicalWeight}
+            financialWeight={tender.financialWeight}
+            minimumTechnicalScore={tender.minimumTechnicalScore}
+            tenderStatus={tender.status}
+          />
+        </TabsContent>
+
         {/* Award Tab */}
         <TabsContent value="award" className="space-y-4">
           <TenderAward
@@ -1029,7 +1122,7 @@ export default function TenderDetailPage() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Lots:</span>
-                  <span className="font-medium">{tender?.items?.length || 0} lot(s)</span>
+                  <span className="font-medium">{tender?.lots?.length || 0} lot(s)</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Document Requirements:</span>

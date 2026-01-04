@@ -1,36 +1,16 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { authService } from '@/services/auth';
+// This layout allows public access to the /register page for new user self-registration.
+// Authentication checks for sub-routes like /register/business-partner are handled
+// in their own layout files.
 
 export default function RegisterLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const router = useRouter();
-
-  useEffect(() => {
-    // Check if user is authenticated
-    if (typeof window === 'undefined') return;
-
-    const user = authService.getStoredUser();
-    
-    // If not authenticated, redirect to login
-    if (!user) {
-      router.push('/login');
-      return;
-    }
-
-    // If user is LDAP (internal), redirect to dashboard
-    if (user.authenticationProvider !== 'Local') {
-      router.push('/dashboard');
-      return;
-    }
-  }, [router]);
-
-  // For external users (Local authentication), use external portal layout
+  // Simply render children - no authentication check needed here
+  // The main /register page is for public self-registration
   return <>{children}</>;
 }
 

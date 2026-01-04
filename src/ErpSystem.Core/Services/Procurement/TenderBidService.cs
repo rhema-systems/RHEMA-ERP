@@ -16,6 +16,7 @@ public class TenderBidService : ITenderBidService
     private readonly ITenderPaymentRepository _paymentRepository;
     private readonly ITenderInterviewRepository _interviewRepository;
     private readonly ITenderAssignmentRepository _assignmentRepository;
+    private readonly ITenderBidLotRepository _bidLotRepository;
     private readonly ITenderNotificationService _notificationService;
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
     private readonly IBusinessPartnerUserRepository _businessPartnerUserRepository;
@@ -32,6 +33,7 @@ public class TenderBidService : ITenderBidService
         ITenderPaymentRepository paymentRepository,
         ITenderInterviewRepository interviewRepository,
         ITenderAssignmentRepository assignmentRepository,
+        ITenderBidLotRepository bidLotRepository,
         ITenderNotificationService notificationService,
         IBusinessPartnerRepository businessPartnerRepository,
         IBusinessPartnerUserRepository businessPartnerUserRepository,
@@ -47,6 +49,7 @@ public class TenderBidService : ITenderBidService
         _paymentRepository = paymentRepository;
         _interviewRepository = interviewRepository;
         _assignmentRepository = assignmentRepository;
+        _bidLotRepository = bidLotRepository;
         _notificationService = notificationService;
         _businessPartnerRepository = businessPartnerRepository;
         _businessPartnerUserRepository = businessPartnerUserRepository;
@@ -1115,7 +1118,13 @@ public class TenderBidService : ITenderBidService
             TotalScore = bid.TotalScore,
             Rank = bid.Rank,
             HasPaidFees = payment != null && payment.Status == "Completed",
-            PaymentStatus = payment?.Status
+            PaymentStatus = payment?.Status,
+            // QCBS Scores
+            TechnicalScore = bid.TechnicalScore,
+            FinancialScore = bid.FinancialScore,
+            CombinedScore = bid.CombinedScore,
+            IsQualifiedTechnically = bid.IsQualifiedTechnically,
+            DisqualificationReason = bid.DisqualificationReason
         };
     }
 
@@ -1149,6 +1158,12 @@ public class TenderBidService : ITenderBidService
             ExperienceScore = bid.ExperienceScore,
             TotalScore = bid.TotalScore,
             Rank = bid.Rank,
+            // QCBS Scores
+            TechnicalScore = bid.TechnicalScore,
+            FinancialScore = bid.FinancialScore,
+            CombinedScore = bid.CombinedScore,
+            IsQualifiedTechnically = bid.IsQualifiedTechnically,
+            DisqualificationReason = bid.DisqualificationReason,
             OpenedDate = bid.OpenedDate,
             OpenedByName = bid.OpenedBy != null ? $"{bid.OpenedBy.FirstName} {bid.OpenedBy.LastName}" : null,
             EvaluationNotes = bid.EvaluationNotes,
@@ -1168,6 +1183,8 @@ public class TenderBidService : ITenderBidService
         {
             Id = item.Id,
             TenderBidId = item.TenderBidId,
+            BidLotId = item.BidLotId,
+            LotCode = item.TenderItem?.Lot?.LotCode,
             TenderItemId = item.TenderItemId,
             TenderItemDescription = item.TenderItem?.Description ?? string.Empty,
             RequestedQuantity = item.TenderItem?.Quantity ?? 0,
@@ -1269,5 +1286,230 @@ public class TenderBidService : ITenderBidService
             ConductedByName = string.Empty // Would need to fetch from User entity
         };
     }
+
+    #region Bid LOT Methods
+
+    public async Task<TenderBidLotDto> AddBidLotAsync(Guid bidId, CreateTenderBidLotDto dto)
+    {
+        try
+        {
+            var bid = await _bidRepository.GetByIdAsync(bidId);
+            if (bid == null)
+                throw new InvalidOperationException($"Bid with ID {bidId} not found");
+
+            var bidLot = new TenderBidLot
+            {
+                Id = Guid.NewGuid(),
+                TenantId = _currentUserProvider.TenantId,
+                TenderBidId = bidId,
+                LotId = dto.LotId,
+                TotalLotAmount = 0, // Will be calculated from items
+                Currency = bid.Currency,
+                DeliveryDays = dto.DeliveryDays,
+                PaymentTerms = dto.PaymentTerms,
+                WarrantyTerms = dto.WarrantyTerms,
+                TechnicalProposal = dto.TechnicalProposal,
+                CommercialProposal = dto.CommercialProposal,
+                Notes = dto.Notes,
+                Status = "Draft"
+            };
+
+            await _bidLotRepository.CreateAsync(bidLot);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Created bid lot for bid {BidId}, lot {LotId}", bidId, dto.LotId);
+
+            return MapToBidLotDto(bidLot);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating bid lot for bid {BidId}", bidId);
+            throw;
+        }
+    }
+
+    public async Task<TenderBidLotDto> UpdateBidLotAsync(Guid bidLotId, UpdateTenderBidLotDto dto)
+    {
+        try
+        {
+            var bidLot = await _bidLotRepository.GetByIdAsync(bidLotId);
+            if (bidLot == null)
+                throw new InvalidOperationException($"Bid lot with ID {bidLotId} not found");
+
+            bidLot.DeliveryDays = dto.DeliveryDays ?? bidLot.DeliveryDays;
+            bidLot.PaymentTerms = dto.PaymentTerms ?? bidLot.PaymentTerms;
+            bidLot.WarrantyTerms = dto.WarrantyTerms ?? bidLot.WarrantyTerms;
+            bidLot.TechnicalProposal = dto.TechnicalProposal ?? bidLot.TechnicalProposal;
+            bidLot.CommercialProposal = dto.CommercialProposal ?? bidLot.CommercialProposal;
+            bidLot.Notes = dto.Notes ?? bidLot.Notes;
+
+            await _bidLotRepository.UpdateAsync(bidLot);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Updated bid lot {BidLotId}", bidLotId);
+
+            return MapToBidLotDto(bidLot);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating bid lot {BidLotId}", bidLotId);
+            throw;
+        }
+    }
+
+    public async Task DeleteBidLotAsync(Guid bidLotId)
+    {
+        try
+        {
+            var bidLot = await _bidLotRepository.GetByIdWithItemsAsync(bidLotId);
+            if (bidLot == null)
+                throw new InvalidOperationException($"Bid lot with ID {bidLotId} not found");
+
+            // Remove lot assignment from bid items
+            if (bidLot.Items != null)
+            {
+                foreach (var item in bidLot.Items)
+                {
+                    item.BidLotId = null;
+                    await _bidItemRepository.UpdateAsync(item);
+                }
+            }
+
+            await _bidLotRepository.DeleteAsync(bidLotId);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Deleted bid lot {BidLotId}", bidLotId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting bid lot {BidLotId}", bidLotId);
+            throw;
+        }
+    }
+
+    public async Task<IEnumerable<TenderBidLotDto>> GetBidLotsAsync(Guid bidId)
+    {
+        try
+        {
+            var bidLots = await _bidLotRepository.GetByBidIdAsync(bidId);
+            return bidLots.Select(MapToBidLotDto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting bid lots for bid {BidId}", bidId);
+            throw;
+        }
+    }
+
+    public async Task<TenderBidLotDto?> GetBidLotByIdAsync(Guid bidLotId)
+    {
+        try
+        {
+            var bidLot = await _bidLotRepository.GetByIdWithItemsAsync(bidLotId);
+            return bidLot != null ? MapToBidLotDto(bidLot) : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting bid lot {BidLotId}", bidLotId);
+            throw;
+        }
+    }
+
+    public async Task AssignBidItemToLotAsync(Guid bidItemId, Guid bidLotId)
+    {
+        try
+        {
+            var bidItem = await _bidItemRepository.GetByIdAsync(bidItemId);
+            if (bidItem == null)
+                throw new InvalidOperationException($"Bid item with ID {bidItemId} not found");
+
+            var bidLot = await _bidLotRepository.GetByIdAsync(bidLotId);
+            if (bidLot == null)
+                throw new InvalidOperationException($"Bid lot with ID {bidLotId} not found");
+
+            if (bidItem.TenderBidId != bidLot.TenderBidId)
+                throw new InvalidOperationException("Bid item and bid lot must belong to the same bid");
+
+            bidItem.BidLotId = bidLotId;
+            await _bidItemRepository.UpdateAsync(bidItem);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Assigned bid item {BidItemId} to bid lot {BidLotId}", bidItemId, bidLotId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error assigning bid item {BidItemId} to bid lot {BidLotId}", bidItemId, bidLotId);
+            throw;
+        }
+    }
+
+    public async Task RemoveBidItemFromLotAsync(Guid bidItemId)
+    {
+        try
+        {
+            var bidItem = await _bidItemRepository.GetByIdAsync(bidItemId);
+            if (bidItem == null)
+                throw new InvalidOperationException($"Bid item with ID {bidItemId} not found");
+
+            bidItem.BidLotId = null;
+            await _bidItemRepository.UpdateAsync(bidItem);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Removed bid item {BidItemId} from lot", bidItemId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error removing bid item {BidItemId} from lot", bidItemId);
+            throw;
+        }
+    }
+
+    private static TenderBidLotDto MapToBidLotDto(TenderBidLot bidLot)
+    {
+        return new TenderBidLotDto
+        {
+            Id = bidLot.Id,
+            TenderBidId = bidLot.TenderBidId,
+            LotId = bidLot.LotId,
+            LotCode = bidLot.Lot?.LotCode ?? string.Empty,
+            LotTitle = bidLot.Lot?.Title ?? string.Empty,
+            TotalLotAmount = bidLot.TotalLotAmount,
+            Currency = bidLot.Currency,
+            DeliveryDays = bidLot.DeliveryDays,
+            PaymentTerms = bidLot.PaymentTerms,
+            WarrantyTerms = bidLot.WarrantyTerms,
+            TechnicalProposal = bidLot.TechnicalProposal,
+            CommercialProposal = bidLot.CommercialProposal,
+            Status = bidLot.Status,
+            PriceScore = bidLot.PriceScore,
+            QualityScore = bidLot.QualityScore,
+            DeliveryScore = bidLot.DeliveryScore,
+            TotalScore = bidLot.TotalScore,
+            Rank = bidLot.Rank,
+            EvaluationNotes = bidLot.EvaluationNotes,
+            Notes = bidLot.Notes,
+            ItemCount = bidLot.Items?.Count ?? 0,
+            Items = bidLot.Items?.Select(i => new TenderBidItemDto
+            {
+                Id = i.Id,
+                TenderBidId = i.TenderBidId,
+                BidLotId = i.BidLotId,
+                TenderItemId = i.TenderItemId,
+                TenderItemDescription = i.TenderItem?.Description ?? string.Empty,
+                RequestedQuantity = i.TenderItem?.Quantity ?? 0,
+                OfferedQuantity = i.OfferedQuantity,
+                UnitOfMeasure = i.TenderItem?.UnitOfMeasure,
+                UnitPrice = i.UnitPrice,
+                TotalPrice = i.TotalPrice,
+                DeliveryDays = i.DeliveryDays,
+                Specifications = i.Specifications,
+                Brand = i.Brand,
+                Model = i.Model,
+                TechnicalDetails = i.TechnicalDetails
+            }).ToList() ?? new List<TenderBidItemDto>()
+        };
+    }
+
+    #endregion
 }
 

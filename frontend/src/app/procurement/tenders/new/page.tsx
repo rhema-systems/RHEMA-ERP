@@ -7,12 +7,12 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { ArrowLeft, ArrowRight, Save, FileText, Package, Upload, DollarSign, Users, CheckCircle2, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
-import { tenderService, type CreateTenderDto, type CreateTenderItemDto, type TenderDocumentDto } from '@/services/tenderService';
+import { tenderService, type CreateTenderDto, type CreateTenderItemDto, type TenderDocumentDto, type CreateTenderLotDto, type TenderLotDto } from '@/services/tenderService';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
 // Import step components (we'll create these)
 import BasicInformation from '@/components/procurement/tenders/BasicInformation';
-import TenderItems from '@/components/procurement/tenders/TenderItems';
+import TenderLots from '@/components/procurement/tenders/TenderLots';
 import TenderDocuments from '@/components/procurement/tenders/TenderDocuments';
 import TenderFees from '@/components/procurement/tenders/TenderFees';
 import TenderInvitations from '@/components/procurement/tenders/TenderInvitations';
@@ -21,7 +21,7 @@ import TenderProposals from '@/components/procurement/tenders/TenderProposals';
 
 const STEPS = [
   { id: 1, name: 'Basic Information', icon: FileText, component: 'BasicInformation' },
-  { id: 2, name: 'Tender Lots', icon: Package, component: 'TenderItems' },
+  { id: 2, name: 'Tender Lots', icon: Package, component: 'TenderLots' },
   { id: 3, name: 'Proposal', icon: ClipboardList, component: 'TenderProposals' },
   { id: 4, name: 'Documents', icon: Upload, component: 'TenderDocuments' },
   { id: 5, name: 'Fees', icon: DollarSign, component: 'TenderFees' },
@@ -36,6 +36,37 @@ export interface DocumentRequirement {
   description: string;
   maxFileSizeMB: number;
   allowedFileTypes: string;
+}
+
+// Interface for LOT data in the form (includes items within the LOT)
+export interface TenderLotFormData {
+  id?: string;  // Set after saving to backend
+  lotNumber: number;
+  lotCode: string;
+  title: string;
+  description?: string;
+  estimatedValue?: number;
+  currency?: string;
+  requiredDeliveryDate?: string;
+  deliveryLocation?: string;
+  specifications?: string;
+  notes?: string;
+  displayOrder: number;
+  // Items within this LOT
+  items: TenderLotItemFormData[];
+}
+
+// Interface for item data within a LOT
+export interface TenderLotItemFormData {
+  id?: string;  // Set after saving to backend
+  lineNumber: number;
+  itemCode?: string;
+  description: string;
+  quantity: number;
+  unitOfMeasure?: string;
+  specifications?: string;
+  requiredDeliveryDate?: string;
+  deliveryLocation?: string;
 }
 
 export interface TenderFormData {
@@ -58,11 +89,20 @@ export interface TenderFormData {
   notes: string;
   termsAndConditions: string;
 
+  // QCBS Evaluation Settings
+  useQCBSEvaluation: boolean;
+  technicalWeight: number;
+  financialWeight: number;
+  minimumTechnicalScore: number;
+
   // Evaluation Template
   evaluationTemplateId: string | null;
   evaluationTemplateName: string;
 
-  // Tender Items
+  // Tender LOTs (groups of items that must be bid together)
+  lots: TenderLotFormData[];
+
+  // Tender Items (for backward compatibility, items not in any LOT)
   items: CreateTenderItemDto[];
 
   // Document Requirements (for bidders to upload)
@@ -127,8 +167,16 @@ const validateStep1 = (formData: TenderFormData): string[] => {
 
 const validateStep2 = (formData: TenderFormData): string[] => {
   const errors: string[] = [];
-  if (!formData.items || formData.items.length === 0) {
-    errors.push('At least one tender item is required');
+  if ((!formData.lots || formData.lots.length === 0) && (!formData.items || formData.items.length === 0)) {
+    errors.push('At least one LOT with items is required');
+  }
+  // Check that each LOT has at least one item
+  if (formData.lots && formData.lots.length > 0) {
+    formData.lots.forEach((lot, index) => {
+      if (!lot.items || lot.items.length === 0) {
+        errors.push(`LOT ${lot.lotCode || index + 1} must have at least one item`);
+      }
+    });
   }
   return errors;
 };
@@ -207,8 +255,14 @@ export default function NewTenderPage() {
     evaluationCriteriaJson: '',
     notes: '',
     termsAndConditions: '',
+    // QCBS defaults
+    useQCBSEvaluation: false,
+    technicalWeight: 80,
+    financialWeight: 20,
+    minimumTechnicalScore: 70,
     evaluationTemplateId: null,
     evaluationTemplateName: '',
+    lots: [],
     items: [],
     documentRequirements: [],
     requiresAcceptanceDeclaration: false,
@@ -594,7 +648,7 @@ export default function NewTenderPage() {
       case 1:
         return <BasicInformation formData={formData} updateFormData={updateFormData} />;
       case 2:
-        return <TenderItems formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
+        return <TenderLots formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
       case 3:
         return <TenderProposals formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
       case 4:

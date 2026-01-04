@@ -16,6 +16,8 @@ public class TenderRepository : GenericRepository<Tender>, ITenderRepository
     {
         return await _dbSet
             .Where(t => t.Id == id && !t.IsDeleted)
+            .Include(t => t.Lots)
+                .ThenInclude(l => l.Items.Where(i => !i.IsDeleted))
             .Include(t => t.Items)
             .Include(t => t.Documents)
             .Include(t => t.EvaluationTemplate)
@@ -26,6 +28,8 @@ public class TenderRepository : GenericRepository<Tender>, ITenderRepository
     {
         return await _dbSet
             .Where(t => t.Id == id && !t.IsDeleted)
+            .Include(t => t.Lots)
+                .ThenInclude(l => l.Items.Where(i => !i.IsDeleted))
             .Include(t => t.Items)
             .Include(t => t.Documents)
             .Include(t => t.Invitations)
@@ -47,6 +51,8 @@ public class TenderRepository : GenericRepository<Tender>, ITenderRepository
     {
         return await _dbSet
             .Where(t => t.TenderNumber == tenderNumber && !t.IsDeleted)
+            .Include(t => t.Lots)
+                .ThenInclude(l => l.Items.Where(i => !i.IsDeleted))
             .Include(t => t.Items)
             .Include(t => t.Documents)
             .FirstOrDefaultAsync();
@@ -1662,6 +1668,291 @@ public class EvaluationTemplateCriterionRepository : GenericRepository<Evaluatio
             .ToListAsync();
 
         await HardDeleteRangeAsync(criteria);
+    }
+}
+
+#endregion
+
+#region Tender Lot Repository
+
+public class TenderLotRepository : GenericRepository<TenderLot>, ITenderLotRepository
+{
+    public TenderLotRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<TenderLot?> GetByIdAsync(Guid id)
+    {
+        return await _dbSet
+            .Where(l => l.Id == id && !l.IsDeleted)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<TenderLot?> GetByIdWithItemsAsync(Guid id)
+    {
+        return await _dbSet
+            .Where(l => l.Id == id && !l.IsDeleted)
+            .Include(l => l.Items.Where(i => !i.IsDeleted))
+            .Include(l => l.BidLots.Where(bl => !bl.IsDeleted))
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<IEnumerable<TenderLot>> GetByTenderIdAsync(Guid tenderId)
+    {
+        return await _dbSet
+            .Where(l => l.TenderId == tenderId && !l.IsDeleted)
+            .Include(l => l.Items.Where(i => !i.IsDeleted))
+            .OrderBy(l => l.LotCode)
+            .ToListAsync();
+    }
+
+    public async Task<TenderLot?> GetByTenderAndLotCodeAsync(Guid tenderId, string lotCode)
+    {
+        return await _dbSet
+            .Where(l => l.TenderId == tenderId && l.LotCode == lotCode && !l.IsDeleted)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<TenderLot> CreateAsync(TenderLot lot)
+    {
+        await _dbSet.AddAsync(lot);
+        return lot;
+    }
+
+    public async Task<TenderLot> UpdateAsync(TenderLot lot)
+    {
+        _dbSet.Update(lot);
+        return await Task.FromResult(lot);
+    }
+
+    public async Task DeleteAsync(Guid id)
+    {
+        var lot = await _dbSet.FindAsync(id);
+        if (lot != null)
+        {
+            lot.IsDeleted = true;
+            _dbSet.Update(lot);
+        }
+    }
+
+    public async Task DeleteByTenderIdAsync(Guid tenderId)
+    {
+        var lots = await _dbSet
+            .Where(l => l.TenderId == tenderId && !l.IsDeleted)
+            .ToListAsync();
+
+        foreach (var lot in lots)
+        {
+            lot.IsDeleted = true;
+            _dbSet.Update(lot);
+        }
+    }
+
+    public async Task<string> GenerateLotCodeAsync(Guid tenderId)
+    {
+        var existingLots = await _dbSet
+            .Where(l => l.TenderId == tenderId)
+            .CountAsync();
+
+        return $"LOT-{existingLots + 1:D3}";
+    }
+}
+
+#endregion
+
+#region Tender Bid Lot Repository
+
+public class TenderBidLotRepository : GenericRepository<TenderBidLot>, ITenderBidLotRepository
+{
+    public TenderBidLotRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<TenderBidLot?> GetByIdAsync(Guid id)
+    {
+        return await _dbSet
+            .Where(bl => bl.Id == id && !bl.IsDeleted)
+            .Include(bl => bl.Lot)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<TenderBidLot?> GetByIdWithItemsAsync(Guid id)
+    {
+        return await _dbSet
+            .Where(bl => bl.Id == id && !bl.IsDeleted)
+            .Include(bl => bl.Lot)
+            .Include(bl => bl.Items.Where(i => !i.IsDeleted))
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<IEnumerable<TenderBidLot>> GetByBidIdAsync(Guid bidId)
+    {
+        return await _dbSet
+            .Where(bl => bl.TenderBidId == bidId && !bl.IsDeleted)
+            .Include(bl => bl.Lot)
+            .Include(bl => bl.Items.Where(i => !i.IsDeleted))
+            .OrderBy(bl => bl.Lot.LotCode)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<TenderBidLot>> GetByLotIdAsync(Guid lotId)
+    {
+        return await _dbSet
+            .Where(bl => bl.LotId == lotId && !bl.IsDeleted)
+            .Include(bl => bl.TenderBid)
+                .ThenInclude(b => b.BusinessPartner)
+            .ToListAsync();
+    }
+
+    public async Task<TenderBidLot?> GetByBidAndLotAsync(Guid bidId, Guid lotId)
+    {
+        return await _dbSet
+            .Where(bl => bl.TenderBidId == bidId && bl.LotId == lotId && !bl.IsDeleted)
+            .Include(bl => bl.Items.Where(i => !i.IsDeleted))
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<TenderBidLot> CreateAsync(TenderBidLot bidLot)
+    {
+        await _dbSet.AddAsync(bidLot);
+        return bidLot;
+    }
+
+    public async Task<TenderBidLot> UpdateAsync(TenderBidLot bidLot)
+    {
+        _dbSet.Update(bidLot);
+        return await Task.FromResult(bidLot);
+    }
+
+    public async Task DeleteAsync(Guid id)
+    {
+        var bidLot = await _dbSet.FindAsync(id);
+        if (bidLot != null)
+        {
+            bidLot.IsDeleted = true;
+            _dbSet.Update(bidLot);
+        }
+    }
+
+    public async Task DeleteByBidIdAsync(Guid bidId)
+    {
+        var bidLots = await _dbSet
+            .Where(bl => bl.TenderBidId == bidId && !bl.IsDeleted)
+            .ToListAsync();
+
+        foreach (var bidLot in bidLots)
+        {
+            bidLot.IsDeleted = true;
+            _dbSet.Update(bidLot);
+        }
+    }
+}
+
+#endregion
+
+#region Performance Bond Request Repository
+
+public class PerformanceBondRequestRepository : GenericRepository<PerformanceBondRequest>, IPerformanceBondRequestRepository
+{
+    public PerformanceBondRequestRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<PerformanceBondRequest?> GetByIdAsync(Guid id)
+    {
+        return await _dbSet
+            .Where(p => p.Id == id && !p.IsDeleted)
+            .Include(p => p.TenderAward)
+                .ThenInclude(a => a.Tender)
+            .Include(p => p.TenderBid)
+            .Include(p => p.BusinessPartner)
+            .Include(p => p.RequestedBy)
+            .Include(p => p.SubmittedBy)
+            .Include(p => p.ReviewedBy)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<PerformanceBondRequest?> GetByAwardIdAsync(Guid awardId)
+    {
+        return await _dbSet
+            .Where(p => p.TenderAwardId == awardId && !p.IsDeleted)
+            .Include(p => p.TenderAward)
+                .ThenInclude(a => a.Tender)
+            .Include(p => p.TenderBid)
+            .Include(p => p.BusinessPartner)
+            .Include(p => p.RequestedBy)
+            .Include(p => p.SubmittedBy)
+            .Include(p => p.ReviewedBy)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<PerformanceBondRequest?> GetByBidIdAsync(Guid bidId)
+    {
+        return await _dbSet
+            .Where(p => p.TenderBidId == bidId && !p.IsDeleted)
+            .Include(p => p.TenderAward)
+                .ThenInclude(a => a.Tender)
+            .Include(p => p.TenderBid)
+            .Include(p => p.BusinessPartner)
+            .Include(p => p.RequestedBy)
+            .Include(p => p.SubmittedBy)
+            .Include(p => p.ReviewedBy)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<IEnumerable<PerformanceBondRequest>> GetByBusinessPartnerIdAsync(Guid businessPartnerId)
+    {
+        return await _dbSet
+            .Where(p => p.BusinessPartnerId == businessPartnerId && !p.IsDeleted)
+            .Include(p => p.TenderAward)
+                .ThenInclude(a => a.Tender)
+            .Include(p => p.TenderBid)
+            .Include(p => p.BusinessPartner)
+            .Include(p => p.RequestedBy)
+            .OrderByDescending(p => p.RequestedDate)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<PerformanceBondRequest>> GetPendingRequestsAsync()
+    {
+        return await _dbSet
+            .Where(p => p.Status == "Pending" && !p.IsDeleted)
+            .Include(p => p.TenderAward)
+                .ThenInclude(a => a.Tender)
+            .Include(p => p.TenderBid)
+            .Include(p => p.BusinessPartner)
+            .Include(p => p.RequestedBy)
+            .OrderByDescending(p => p.RequestedDate)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<PerformanceBondRequest>> GetByStatusAsync(string status)
+    {
+        return await _dbSet
+            .Where(p => p.Status == status && !p.IsDeleted)
+            .Include(p => p.TenderAward)
+                .ThenInclude(a => a.Tender)
+            .Include(p => p.TenderBid)
+            .Include(p => p.BusinessPartner)
+            .Include(p => p.RequestedBy)
+            .OrderByDescending(p => p.RequestedDate)
+            .ToListAsync();
+    }
+
+    public async Task<PerformanceBondRequest> CreateAsync(PerformanceBondRequest request)
+    {
+        await _dbSet.AddAsync(request);
+        return request;
+    }
+
+    public Task<PerformanceBondRequest> UpdateAsync(PerformanceBondRequest request)
+    {
+        _dbSet.Update(request);
+        return Task.FromResult(request);
+    }
+
+    public async Task DeleteAsync(Guid id)
+    {
+        var request = await _dbSet.FindAsync(id);
+        if (request != null)
+        {
+            request.IsDeleted = true;
+            _dbSet.Update(request);
+        }
     }
 }
 

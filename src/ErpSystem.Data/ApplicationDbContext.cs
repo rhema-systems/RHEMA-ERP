@@ -6,6 +6,8 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data.Configuration;
+using ErpSystem.Data.Configuration.Maintenance;
+using ErpSystem.Data.Configuration.Procurement;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -139,6 +141,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<AssetDischarge> AssetDischarges { get; set; }
     public DbSet<AssetMaintenanceDowntime> AssetMaintenanceDowntimes { get; set; }
 
+    // Asset Condition Inspection entities (Pre-Inspection at admission / Post-Inspection at discharge)
+    public DbSet<PreInspectionChecklistTemplate> PreInspectionChecklistTemplates { get; set; }
+    public DbSet<PreInspectionChecklistItem> PreInspectionChecklistItems { get; set; }
+    public DbSet<AssetConditionRecord> AssetConditionRecords { get; set; }
+    public DbSet<AssetConditionItemResult> AssetConditionItemResults { get; set; }
+
     // Quality Control entities
     public DbSet<QualityControlChecklist> QualityControlChecklists { get; set; }
     public DbSet<WorkOrderQualityCheck> WorkOrderQualityChecks { get; set; }
@@ -253,10 +261,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     // Tender Management
     public DbSet<Tender> Tenders { get; set; }
+    public DbSet<TenderLot> TenderLots { get; set; }
     public DbSet<TenderItem> TenderItems { get; set; }
     public DbSet<TenderDocument> TenderDocuments { get; set; }
     public DbSet<TenderInvitation> TenderInvitations { get; set; }
     public DbSet<TenderBid> TenderBids { get; set; }
+    public DbSet<TenderBidLot> TenderBidLots { get; set; }
     public DbSet<TenderBidItem> TenderBidItems { get; set; }
     public DbSet<TenderBidDocument> TenderBidDocuments { get; set; }
     public DbSet<TenderFee> TenderFees { get; set; }
@@ -280,6 +290,23 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // Business Partner User Management
     public DbSet<BusinessPartnerUser> BusinessPartnerUsers { get; set; }
     public DbSet<TenderAssignment> TenderAssignments { get; set; }
+
+    // Award Verification
+    public DbSet<AwardVerificationChecklistTemplate> AwardVerificationChecklistTemplates { get; set; }
+    public DbSet<AwardVerificationChecklistItem> AwardVerificationChecklistItems { get; set; }
+    public DbSet<TenderAwardVerification> TenderAwardVerifications { get; set; }
+    public DbSet<TenderAwardVerificationBidder> TenderAwardVerificationBidders { get; set; }
+    public DbSet<TenderAwardVerificationItemResult> TenderAwardVerificationItemResults { get; set; }
+    public DbSet<TenderAwardVerificationItemDocument> TenderAwardVerificationItemDocuments { get; set; }
+
+    // Performance Bonds
+    public DbSet<PerformanceBondRequest> PerformanceBondRequests { get; set; }
+
+    // Contract Management
+    public DbSet<Contract> Contracts { get; set; }
+    public DbSet<ContractMilestone> ContractMilestones { get; set; }
+    public DbSet<ContractAmendment> ContractAmendments { get; set; }
+    public DbSet<ContractDocument> ContractDocuments { get; set; }
 
     // Procurement Planning
     public DbSet<ProcurementPlan> ProcurementPlans { get; set; }
@@ -326,12 +353,34 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new AssetTypeConfiguration());
         builder.ApplyConfiguration(new AssetTypeFieldConfiguration());
 
+        // Asset Condition Inspection configurations
+        builder.ApplyConfiguration(new PreInspectionChecklistTemplateConfiguration());
+        builder.ApplyConfiguration(new PreInspectionChecklistItemConfiguration());
+        builder.ApplyConfiguration(new AssetConditionRecordConfiguration());
+        builder.ApplyConfiguration(new AssetConditionItemResultConfiguration());
+
         // Tender configurations
         builder.ApplyConfiguration(new TenderConfiguration());
+        builder.ApplyConfiguration(new TenderLotConfiguration());
         builder.ApplyConfiguration(new TenderBidConfiguration());
+        builder.ApplyConfiguration(new TenderBidLotConfiguration());
         builder.ApplyConfiguration(new TenderAwardConfiguration());
         builder.ApplyConfiguration(new EvaluationTemplateConfiguration());
         builder.ApplyConfiguration(new EvaluationTemplateCriterionConfiguration());
+
+        // Award Verification configurations
+        builder.ApplyConfiguration(new AwardVerificationChecklistTemplateConfiguration());
+        builder.ApplyConfiguration(new AwardVerificationChecklistItemConfiguration());
+        builder.ApplyConfiguration(new TenderAwardVerificationConfiguration());
+        builder.ApplyConfiguration(new TenderAwardVerificationBidderConfiguration());
+        builder.ApplyConfiguration(new TenderAwardVerificationItemResultConfiguration());
+        builder.ApplyConfiguration(new TenderAwardVerificationItemDocumentConfiguration());
+
+        // Contract Management configurations
+        builder.ApplyConfiguration(new ContractConfiguration());
+        builder.ApplyConfiguration(new ContractMilestoneConfiguration());
+        builder.ApplyConfiguration(new ContractAmendmentConfiguration());
+        builder.ApplyConfiguration(new ContractDocumentConfiguration());
 
         // Configure Identity tables with custom names
         builder.Entity<ApplicationUser>(entity =>
@@ -2375,6 +2424,40 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasOne(pr => pr.AcknowledgedBy)
                 .WithMany()
                 .HasForeignKey(pr => pr.AcknowledgedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure PerformanceBondRequest entity
+        builder.Entity<PerformanceBondRequest>(entity =>
+        {
+            entity.HasIndex(pb => pb.TenderAwardId);
+            entity.HasIndex(pb => pb.TenderBidId);
+            entity.HasIndex(pb => pb.BusinessPartnerId);
+            entity.HasIndex(pb => pb.Status);
+
+            entity.HasOne(pb => pb.TenderAward)
+                .WithMany()
+                .HasForeignKey(pb => pb.TenderAwardId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(pb => pb.TenderBid)
+                .WithMany()
+                .HasForeignKey(pb => pb.TenderBidId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pb => pb.BusinessPartner)
+                .WithMany()
+                .HasForeignKey(pb => pb.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pb => pb.RequestedBy)
+                .WithMany()
+                .HasForeignKey(pb => pb.RequestedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pb => pb.ReviewedBy)
+                .WithMany()
+                .HasForeignKey(pb => pb.ReviewedById)
                 .OnDelete(DeleteBehavior.NoAction);
         });
     }

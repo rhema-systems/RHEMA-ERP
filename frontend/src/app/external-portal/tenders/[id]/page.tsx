@@ -332,34 +332,62 @@ export default function ExternalTenderDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Tender Lots</CardTitle>
-              <CardDescription>Lots available for bidding in this tender</CardDescription>
+              <CardDescription>{tender.lots?.length || 0} lot(s) available for bidding</CardDescription>
             </CardHeader>
             <CardContent>
-              {tender.items && tender.items.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Lot</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Quantity</TableHead>
-                      <TableHead>Unit</TableHead>
-                      <TableHead>Specifications</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {tender.items.map((item, index) => (
-                      <TableRow key={item.id}>
-                        <TableCell className="font-medium">Lot {index + 1}</TableCell>
-                        <TableCell>{item.description}</TableCell>
-                        <TableCell>{item.quantity}</TableCell>
-                        <TableCell>{item.unitOfMeasure || 'N/A'}</TableCell>
-                        <TableCell className="max-w-xs truncate">{item.specifications || 'N/A'}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+              {tender.lots && tender.lots.length > 0 ? (
+                <div className="space-y-4">
+                  {tender.lots.map((lot) => (
+                    <div key={lot.id} className="border rounded-lg overflow-hidden">
+                      {/* Lot Header */}
+                      <div className="bg-gray-50 px-4 py-3 border-b">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h4 className="font-medium">{lot.lotCode}: {lot.title}</h4>
+                            {lot.description && (
+                              <p className="text-sm text-gray-500 mt-1">{lot.description}</p>
+                            )}
+                          </div>
+                          <div className="text-right text-sm">
+                            {lot.estimatedValue && (
+                              <p className="font-medium">{lot.currency || 'USD'} {lot.estimatedValue.toLocaleString()}</p>
+                            )}
+                            <p className="text-gray-500">{lot.items?.length || 0} item(s)</p>
+                          </div>
+                        </div>
+                      </div>
+                      {/* Lot Items */}
+                      {lot.items && lot.items.length > 0 && (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-16">#</TableHead>
+                              <TableHead>Item Code</TableHead>
+                              <TableHead>Description</TableHead>
+                              <TableHead>Quantity</TableHead>
+                              <TableHead>Unit</TableHead>
+                              <TableHead>Specifications</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {lot.items.map((item) => (
+                              <TableRow key={item.id}>
+                                <TableCell>{item.lineNumber}</TableCell>
+                                <TableCell>{item.itemCode || '-'}</TableCell>
+                                <TableCell>{item.description}</TableCell>
+                                <TableCell>{item.quantity}</TableCell>
+                                <TableCell>{item.unitOfMeasure || '-'}</TableCell>
+                                <TableCell className="max-w-xs truncate">{item.specifications || '-'}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </div>
+                  ))}
+                </div>
               ) : (
-                <p className="text-center text-gray-500 py-8">No items specified</p>
+                <p className="text-center text-gray-500 py-8">No lots specified</p>
               )}
             </CardContent>
           </Card>

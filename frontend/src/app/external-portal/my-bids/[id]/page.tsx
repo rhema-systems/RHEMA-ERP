@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   ArrowLeft,
   FileText,
@@ -21,22 +23,35 @@ import {
   Award,
   Download,
   Trophy,
+  Shield,
+  Upload,
+  Loader2,
+  Bell,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as tenderBidService from '@/services/tenderBidService';
 import { type TenderBidDetailDto } from '@/services/tenderBidService';
 import { tenderService, type TenderDetailDto } from '@/services/tenderService';
+import * as performanceBondService from '@/services/performanceBondService';
+import { type PerformanceBondRequestDto } from '@/services/performanceBondService';
 import { format } from 'date-fns';
 
 export default function BidDetailPage() {
   const params = useParams();
   const router = useRouter();
   const bidId = params.id as string;
+  const performanceBondFileRef = useRef<HTMLInputElement>(null);
 
   const [bid, setBid] = useState<TenderBidDetailDto | null>(null);
   const [tender, setTender] = useState<TenderDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [withdrawing, setWithdrawing] = useState(false);
+
+  // Performance bond state
+  const [performanceBondRequest, setPerformanceBondRequest] = useState<PerformanceBondRequestDto | null>(null);
+  const [performanceBondFile, setPerformanceBondFile] = useState<File | null>(null);
+  const [uploadingBond, setUploadingBond] = useState(false);
+  const [activeTab, setActiveTab] = useState('items');
 
   useEffect(() => {
     if (bidId) {
@@ -60,11 +75,67 @@ export default function BidDetailPage() {
           // Don't show error - bid details are more important
         }
       }
+
+      // Check for performance bond request
+      if (data.status === 'Awarded') {
+        try {
+          const bondRequest = await performanceBondService.getPerformanceBondByBidId(bidId);
+          setPerformanceBondRequest(bondRequest);
+        } catch {
+          // No performance bond request yet, that's fine
+        }
+      }
     } catch (error) {
       console.error('Error loading bid:', error);
       toast.error('Failed to load bid details');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePerformanceBondFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 20 * 1024 * 1024) {
+        toast.error('File size must be less than 20MB');
+        return;
+      }
+      setPerformanceBondFile(file);
+    }
+  };
+
+  const handleUploadPerformanceBond = async () => {
+    if (!performanceBondFile || !performanceBondRequest) return;
+
+    try {
+      setUploadingBond(true);
+
+      const result = await performanceBondService.submitPerformanceBond(
+        performanceBondRequest.id,
+        performanceBondFile
+      );
+
+      setPerformanceBondRequest(result);
+      toast.success('Performance bond document submitted successfully!');
+      setPerformanceBondFile(null);
+    } catch (error: any) {
+      console.error('Error uploading performance bond:', error);
+      toast.error(error.message || 'Failed to upload performance bond document');
+    } finally {
+      setUploadingBond(false);
+    }
+  };
+
+  const handleDownloadTemplate = async () => {
+    if (!performanceBondRequest) return;
+
+    try {
+      toast.info('Downloading performance bond template...');
+      const blob = await performanceBondService.downloadPerformanceBondTemplate(performanceBondRequest.id);
+      performanceBondService.triggerFileDownload(blob, performanceBondRequest.templateFileName || 'performance-bond-template.pdf');
+    } catch (error: any) {
+      console.error('Error downloading template:', error);
+      toast.error(error.message || 'Failed to download template');
     }
   };
 
@@ -305,11 +376,11 @@ export default function BidDetailPage() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="items" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="items">
             <Package className="h-4 w-4 mr-2" />
-            Lots ({bid.items?.length || 0})
+            Lots ({new Set(bid.items?.map(item => item.lotCode).filter(Boolean)).size || 0})
           </TabsTrigger>
           <TabsTrigger value="proposals">
             <FileText className="h-4 w-4 mr-2" />
@@ -327,6 +398,19 @@ export default function BidDetailPage() {
             <Info className="h-4 w-4 mr-2" />
             Information
           </TabsTrigger>
+          {/* Performance Bond Tab - shown when awarded and there's a request */}
+          {performanceBondRequest && (
+            <TabsTrigger value="performance-bond" className="relative">
+              <Shield className="h-4 w-4 mr-2" />
+              Performance Bond
+              {performanceBondRequest.status === 'Pending' && (
+                <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                </span>
+              )}
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* Bid Lots Tab */}
@@ -339,48 +423,76 @@ export default function BidDetailPage() {
             <CardContent>
               {bid.items && bid.items.length > 0 ? (
                 <>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>#</TableHead>
-                        <TableHead>Description</TableHead>
-                        <TableHead>Quantity</TableHead>
-                        <TableHead>Unit Price</TableHead>
-                        <TableHead>Total</TableHead>
-                        <TableHead>Delivery</TableHead>
-                        <TableHead>Brand/Model</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {bid.items.map((item, index) => (
-                        <TableRow key={item.id}>
-                          <TableCell>{index + 1}</TableCell>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium">{item.tenderItemDescription}</p>
-                              {item.specifications && (
-                                <p className="text-sm text-gray-500 whitespace-pre-wrap">{item.specifications}</p>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {item.offeredQuantity}
-                            {item.unitOfMeasure && <span className="text-gray-500 text-sm ml-1">{item.unitOfMeasure}</span>}
-                          </TableCell>
-                          <TableCell>
-                            {bid.currency} {item.unitPrice.toLocaleString()}
-                          </TableCell>
-                          <TableCell className="font-bold text-green-600">
-                            {bid.currency} {calculateItemTotal(item).toLocaleString()}
-                          </TableCell>
-                          <TableCell>{item.deliveryDays ? `${item.deliveryDays} days` : 'N/A'}</TableCell>
-                          <TableCell>
-                            {item.brand || item.model ? `${item.brand || ''} ${item.model || ''}`.trim() : 'N/A'}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                  {/* Group items by lot */}
+                  {(() => {
+                    // Group items by lotCode
+                    const lotGroups = bid.items.reduce((acc, item) => {
+                      const lotCode = item.lotCode || 'Unassigned';
+                      if (!acc[lotCode]) {
+                        acc[lotCode] = [];
+                      }
+                      acc[lotCode].push(item);
+                      return acc;
+                    }, {} as Record<string, typeof bid.items>);
+
+                    return Object.entries(lotGroups).map(([lotCode, items]) => (
+                      <div key={lotCode} className="mb-6 border rounded-lg overflow-hidden">
+                        {/* Lot Header */}
+                        <div className="bg-gray-50 px-4 py-3 border-b flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="font-mono">{lotCode}</Badge>
+                            <span className="text-sm text-gray-600">{items.length} item(s)</span>
+                          </div>
+                          <div className="font-bold text-green-600">
+                            {bid.currency} {items.reduce((sum, item) => sum + calculateItemTotal(item), 0).toLocaleString()}
+                          </div>
+                        </div>
+                        {/* Lot Items */}
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>#</TableHead>
+                              <TableHead>Description</TableHead>
+                              <TableHead>Quantity</TableHead>
+                              <TableHead>Unit Price</TableHead>
+                              <TableHead>Total</TableHead>
+                              <TableHead>Delivery</TableHead>
+                              <TableHead>Brand/Model</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {items.map((item, index) => (
+                              <TableRow key={item.id}>
+                                <TableCell>{index + 1}</TableCell>
+                                <TableCell>
+                                  <div>
+                                    <p className="font-medium">{item.tenderItemDescription}</p>
+                                    {item.specifications && (
+                                      <p className="text-sm text-gray-500 whitespace-pre-wrap">{item.specifications}</p>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  {item.offeredQuantity}
+                                  {item.unitOfMeasure && <span className="text-gray-500 text-sm ml-1">{item.unitOfMeasure}</span>}
+                                </TableCell>
+                                <TableCell>
+                                  {bid.currency} {item.unitPrice.toLocaleString()}
+                                </TableCell>
+                                <TableCell className="font-bold text-green-600">
+                                  {bid.currency} {calculateItemTotal(item).toLocaleString()}
+                                </TableCell>
+                                <TableCell>{item.deliveryDays ? `${item.deliveryDays} days` : 'N/A'}</TableCell>
+                                <TableCell>
+                                  {item.brand || item.model ? `${item.brand || ''} ${item.model || ''}`.trim() : 'N/A'}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    ));
+                  })()}
 
                   <div className="mt-4 flex justify-end">
                     <div className="bg-green-50 border border-green-200 rounded-lg p-4 min-w-64 max-w-md">
@@ -819,6 +931,215 @@ export default function BidDetailPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Performance Bond Tab */}
+        {performanceBondRequest && (
+          <TabsContent value="performance-bond">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Shield className="h-5 w-5 text-purple-600" />
+                  Performance Bond
+                  {performanceBondRequest.status === 'Pending' && (
+                    <Badge className="bg-red-500 text-white animate-pulse">
+                      <Bell className="h-3 w-3 mr-1" />
+                      Action Required
+                    </Badge>
+                  )}
+                  {performanceBondRequest.status === 'Submitted' && (
+                    <Badge className="bg-blue-500 text-white">Under Review</Badge>
+                  )}
+                  {performanceBondRequest.status === 'Approved' && (
+                    <Badge className="bg-green-500 text-white">Approved</Badge>
+                  )}
+                  {performanceBondRequest.status === 'Rejected' && (
+                    <Badge className="bg-red-500 text-white">Rejected</Badge>
+                  )}
+                </CardTitle>
+                <CardDescription>
+                  {performanceBondRequest.status === 'Pending'
+                    ? 'Please download the template, complete it, and upload your performance bond document.'
+                    : performanceBondRequest.status === 'Submitted'
+                    ? 'Your performance bond document has been submitted and is under review.'
+                    : performanceBondRequest.status === 'Rejected'
+                    ? `Your performance bond was rejected. ${performanceBondRequest.rejectionReason || 'Please resubmit.'}`
+                    : 'Your performance bond has been approved.'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Status Timeline */}
+                <div className="flex items-center gap-2">
+                  <div className={`flex items-center justify-center w-8 h-8 rounded-full ${performanceBondRequest.status !== 'Pending' ? 'bg-green-500' : 'bg-purple-500'} text-white`}>
+                    1
+                  </div>
+                  <div className={`flex-1 h-1 ${performanceBondRequest.status !== 'Pending' ? 'bg-green-500' : 'bg-gray-300'}`} />
+                  <div className={`flex items-center justify-center w-8 h-8 rounded-full ${performanceBondRequest.status === 'Submitted' || performanceBondRequest.status === 'Approved' ? 'bg-green-500' : 'bg-gray-300'} text-white`}>
+                    2
+                  </div>
+                  <div className={`flex-1 h-1 ${performanceBondRequest.status === 'Approved' ? 'bg-green-500' : 'bg-gray-300'}`} />
+                  <div className={`flex items-center justify-center w-8 h-8 rounded-full ${performanceBondRequest.status === 'Approved' ? 'bg-green-500' : 'bg-gray-300'} text-white`}>
+                    3
+                  </div>
+                </div>
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>Requested</span>
+                  <span>Submitted</span>
+                  <span>Approved</span>
+                </div>
+
+                {/* Pending State - Download Template & Upload */}
+                {(performanceBondRequest.status === 'Pending' || performanceBondRequest.status === 'Rejected') && (
+                  <div className="space-y-6">
+                    {/* Alert */}
+                    <div className={`${performanceBondRequest.status === 'Rejected' ? 'bg-red-50 border-red-200' : 'bg-yellow-50 border-yellow-200'} border rounded-lg p-4`}>
+                      <div className="flex items-start gap-3">
+                        <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
+                        <div>
+                          <p className="font-medium text-yellow-800">Action Required</p>
+                          <p className="text-sm text-yellow-700 mt-1">
+                            You need to submit your performance bond document to proceed with the contract.
+                            Please download the template, complete it with your bank or insurance provider,
+                            and upload the completed document.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Step 1: Download Template */}
+                    <div className="border rounded-lg p-4">
+                      <h4 className="font-medium mb-3 flex items-center gap-2">
+                        <span className="bg-purple-100 text-purple-700 rounded-full w-6 h-6 flex items-center justify-center text-sm">1</span>
+                        Download Template
+                      </h4>
+                      <p className="text-sm text-gray-600 mb-3">
+                        Download the performance bond template and have it completed by your bank or insurance provider.
+                      </p>
+                      <Button onClick={handleDownloadTemplate} variant="outline">
+                        <Download className="h-4 w-4 mr-2" />
+                        Download Template
+                      </Button>
+                    </div>
+
+                    {/* Step 2: Upload Completed Document */}
+                    <div className="border rounded-lg p-4">
+                      <h4 className="font-medium mb-3 flex items-center gap-2">
+                        <span className="bg-purple-100 text-purple-700 rounded-full w-6 h-6 flex items-center justify-center text-sm">2</span>
+                        Upload Completed Document
+                      </h4>
+                      <p className="text-sm text-gray-600 mb-3">
+                        Upload your completed performance bond document.
+                      </p>
+
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                        {performanceBondFile ? (
+                          <div className="flex items-center justify-center gap-3">
+                            <FileText className="h-8 w-8 text-purple-500" />
+                            <div className="text-left">
+                              <p className="font-medium">{performanceBondFile.name}</p>
+                              <p className="text-sm text-gray-500">
+                                {(performanceBondFile.size / 1024 / 1024).toFixed(2)} MB
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setPerformanceBondFile(null)}
+                            >
+                              <XCircle className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <>
+                            <Upload className="h-8 w-8 mx-auto text-gray-400 mb-2" />
+                            <p className="text-sm text-gray-600 mb-2">
+                              Click to upload or drag and drop
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              PDF, DOC, DOCX (Max 20MB)
+                            </p>
+                          </>
+                        )}
+                        <Input
+                          ref={performanceBondFileRef}
+                          type="file"
+                          accept=".pdf,.doc,.docx"
+                          onChange={handlePerformanceBondFileChange}
+                          className={performanceBondFile ? 'hidden' : 'mt-4'}
+                        />
+                      </div>
+
+                      <Button
+                        onClick={handleUploadPerformanceBond}
+                        disabled={!performanceBondFile || uploadingBond}
+                        className="mt-4 w-full bg-purple-600 hover:bg-purple-700"
+                      >
+                        {uploadingBond ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Uploading...
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="h-4 w-4 mr-2" />
+                            Submit Performance Bond
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Submitted State */}
+                {performanceBondRequest.status === 'Submitted' && (
+                  <div className="space-y-4">
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <div className="flex items-start gap-3">
+                        <Clock className="h-5 w-5 text-blue-600 mt-0.5" />
+                        <div>
+                          <p className="font-medium text-blue-800">Under Review</p>
+                          <p className="text-sm text-blue-700 mt-1">
+                            Your performance bond document is being reviewed. You will be notified once it's approved.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border rounded-lg p-4">
+                      <h4 className="font-medium mb-2">Submitted Document</h4>
+                      <div className="flex items-center gap-3">
+                        <FileText className="h-6 w-6 text-blue-600" />
+                        <div>
+                          <p className="font-medium">{performanceBondRequest.submittedFileName}</p>
+                          <p className="text-sm text-gray-500">
+                            Submitted on {formatDate(performanceBondRequest.submittedDate)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Approved State */}
+                {performanceBondRequest.status === 'Approved' && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <div className="flex items-start gap-3">
+                      <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
+                      <div>
+                        <p className="font-medium text-green-800">Performance Bond Approved</p>
+                        <p className="text-sm text-green-700 mt-1">
+                          Your performance bond has been approved. You can now proceed with the contract.
+                        </p>
+                        <p className="text-sm text-green-600 mt-2">
+                          Approved on {formatDate(performanceBondRequest.reviewedDate)} by {performanceBondRequest.reviewedByName}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* Actions */}

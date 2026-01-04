@@ -66,6 +66,12 @@ public class TenderDetailDto
     public decimal ExperienceWeightage { get; set; }
     public string? EvaluationCriteriaJson { get; set; }
 
+    // QCBS Configuration
+    public bool UseQCBSEvaluation { get; set; }
+    public decimal MinimumTechnicalScore { get; set; } = 80;
+    public decimal TechnicalWeight { get; set; } = 60;
+    public decimal FinancialWeight { get; set; } = 40;
+
     // Metadata
     public string? Notes { get; set; }
     public string? TermsAndConditions { get; set; }
@@ -88,6 +94,7 @@ public class TenderDetailDto
     public DateTime UpdatedAt { get; set; }
 
     // Related Data
+    public List<TenderLotDto> Lots { get; set; } = new();
     public List<TenderItemDto> Items { get; set; } = new();
     public List<TenderDocumentDto> Documents { get; set; } = new();
     public List<TenderInvitationDto> Invitations { get; set; } = new();
@@ -100,6 +107,7 @@ public class TenderDetailDto
     // Statistics
     public int TotalViews { get; set; }
     public int TotalDownloads { get; set; }
+    public int LotCount { get; set; }
 }
 
 /// <summary>
@@ -148,6 +156,19 @@ public class CreateTenderDto
     public decimal ExperienceWeightage { get; set; } = 10;
 
     public string? EvaluationCriteriaJson { get; set; }
+
+    // QCBS Configuration
+    public bool UseQCBSEvaluation { get; set; } = false;
+
+    [Range(0, 100)]
+    public decimal MinimumTechnicalScore { get; set; } = 80;
+
+    [Range(0, 100)]
+    public decimal TechnicalWeight { get; set; } = 60;
+
+    [Range(0, 100)]
+    public decimal FinancialWeight { get; set; } = 40;
+
     public string? Notes { get; set; }
     public string? TermsAndConditions { get; set; }
     public string? RequiredDocuments { get; set; } // JSON array of required document types
@@ -205,6 +226,19 @@ public class UpdateTenderDto
     public decimal ExperienceWeightage { get; set; }
 
     public string? EvaluationCriteriaJson { get; set; }
+
+    // QCBS Configuration
+    public bool UseQCBSEvaluation { get; set; } = false;
+
+    [Range(0, 100)]
+    public decimal MinimumTechnicalScore { get; set; } = 80;
+
+    [Range(0, 100)]
+    public decimal TechnicalWeight { get; set; } = 60;
+
+    [Range(0, 100)]
+    public decimal FinancialWeight { get; set; } = 40;
+
     public string? Notes { get; set; }
     public string? TermsAndConditions { get; set; }
     public string? RequiredDocuments { get; set; } // JSON array of required document types
@@ -238,6 +272,9 @@ public class TenderItemDto
 {
     public Guid Id { get; set; }
     public Guid TenderId { get; set; }
+    public Guid? LotId { get; set; }
+    public string? LotCode { get; set; }
+    public string? LotTitle { get; set; }
     public int LineNumber { get; set; }
     public string? ItemCode { get; set; }
     public string Description { get; set; } = string.Empty;
@@ -253,6 +290,11 @@ public class TenderItemDto
 /// </summary>
 public class CreateTenderItemDto
 {
+    /// <summary>
+    /// Optional LOT ID to assign this item to
+    /// </summary>
+    public Guid? LotId { get; set; }
+
     public int LineNumber { get; set; }
 
     [MaxLength(200)]
@@ -530,3 +572,116 @@ public class TenderDocumentRequirementDto
 
     public string? AllowedFileTypes { get; set; } // e.g., "PDF,DOC,DOCX"
 }
+
+#region Tender LOT DTOs
+
+/// <summary>
+/// Tender LOT DTO - for display
+/// </summary>
+public class TenderLotDto
+{
+    public Guid Id { get; set; }
+    public Guid TenderId { get; set; }
+    public int LotNumber { get; set; }
+    public string LotCode { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public decimal? EstimatedValue { get; set; }
+    public string? Currency { get; set; }
+    public string Status { get; set; } = "Active";
+    public DateTime? RequiredDeliveryDate { get; set; }
+    public string? DeliveryLocation { get; set; }
+    public string? Specifications { get; set; }
+    public string? Notes { get; set; }
+    public int DisplayOrder { get; set; }
+    public int ItemCount { get; set; }
+    public int BidCount { get; set; }
+    public bool IsAwarded { get; set; }
+    public string? AwardedToPartnerName { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public List<TenderItemDto> Items { get; set; } = new();
+}
+
+/// <summary>
+/// Create tender LOT DTO
+/// </summary>
+public class CreateTenderLotDto
+{
+    public int LotNumber { get; set; }
+
+    [Required]
+    [MaxLength(100)]
+    public string LotCode { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(500)]
+    public string Title { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+
+    [Range(0, double.MaxValue)]
+    public decimal? EstimatedValue { get; set; }
+
+    [MaxLength(3)]
+    public string? Currency { get; set; } = "USD";
+
+    public DateTime? RequiredDeliveryDate { get; set; }
+
+    [MaxLength(200)]
+    public string? DeliveryLocation { get; set; }
+
+    public string? Specifications { get; set; }
+
+    public string? Notes { get; set; }
+
+    public int DisplayOrder { get; set; } = 0;
+
+    /// <summary>
+    /// Items to add to this LOT
+    /// </summary>
+    public List<CreateTenderItemDto> Items { get; set; } = new();
+}
+
+/// <summary>
+/// Update tender LOT DTO
+/// </summary>
+public class UpdateTenderLotDto
+{
+    [Required]
+    [MaxLength(100)]
+    public string LotCode { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(500)]
+    public string Title { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+
+    [Range(0, double.MaxValue)]
+    public decimal? EstimatedValue { get; set; }
+
+    [MaxLength(3)]
+    public string? Currency { get; set; }
+
+    public DateTime? RequiredDeliveryDate { get; set; }
+
+    [MaxLength(200)]
+    public string? DeliveryLocation { get; set; }
+
+    public string? Specifications { get; set; }
+
+    public string? Notes { get; set; }
+
+    public int DisplayOrder { get; set; }
+}
+
+/// <summary>
+/// DTO for assigning items to a LOT
+/// </summary>
+public class AssignItemsToLotDto
+{
+    [Required]
+    public List<Guid> ItemIds { get; set; } = new();
+}
+
+#endregion

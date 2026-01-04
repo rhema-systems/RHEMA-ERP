@@ -52,6 +52,12 @@ public class InventoryItem : TenantEntity
     [Column(TypeName = "decimal(18,4)")]
     public decimal SalePrice { get; set; } = 0;
 
+    /// <summary>
+    /// Daily rental rate for tools/fixed assets (ItemType = FixedAsset)
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal DailyRentalRate { get; set; } = 0;
+
     // Stock Management
     public decimal CurrentStock { get; set; } = 0;
     public decimal AvailableStock { get; set; } = 0; // Current - Allocated

@@ -223,6 +223,9 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IBusinessPartnerUserRepository, ErpSystem.Data.Repositories.Procurement.BusinessPartnerUserRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderAssignmentRepository, ErpSystem.Data.Repositories.Procurement.TenderAssignmentRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderDocumentTypeRepository, ErpSystem.Data.Repositories.Procurement.TenderDocumentTypeRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderLotRepository, ErpSystem.Data.Repositories.Procurement.TenderLotRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderBidLotRepository, ErpSystem.Data.Repositories.Procurement.TenderBidLotRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPerformanceBondRequestRepository, ErpSystem.Data.Repositories.Procurement.PerformanceBondRequestRepository>();
 
             // Procurement Planning repositories
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPlanRepository, ErpSystem.Data.Repositories.Procurement.ProcurementPlanRepository>();
@@ -238,6 +241,20 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IEmergencyProcurementPlanRepository, ErpSystem.Data.Repositories.Procurement.EmergencyProcurementPlanRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IEmergencyProcurementItemRepository, ErpSystem.Data.Repositories.Procurement.EmergencyProcurementItemRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IEmergencySupplierRepository, ErpSystem.Data.Repositories.Procurement.EmergencySupplierRepository>();
+
+            // Award Verification repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardVerificationChecklistTemplateRepository, ErpSystem.Data.Repositories.Procurement.AwardVerificationChecklistTemplateRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardVerificationChecklistItemRepository, ErpSystem.Data.Repositories.Procurement.AwardVerificationChecklistItemRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderAwardVerificationRepository, ErpSystem.Data.Repositories.Procurement.TenderAwardVerificationRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderAwardVerificationBidderRepository, ErpSystem.Data.Repositories.Procurement.TenderAwardVerificationBidderRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderAwardVerificationItemResultRepository, ErpSystem.Data.Repositories.Procurement.TenderAwardVerificationItemResultRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderAwardVerificationItemDocumentRepository, ErpSystem.Data.Repositories.Procurement.TenderAwardVerificationItemDocumentRepository>();
+
+            // Contract Management repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IContractRepository, ErpSystem.Data.Repositories.Procurement.ContractRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IContractMilestoneRepository, ErpSystem.Data.Repositories.Procurement.ContractMilestoneRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IContractAmendmentRepository, ErpSystem.Data.Repositories.Procurement.ContractAmendmentRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IContractDocumentRepository, ErpSystem.Data.Repositories.Procurement.ContractDocumentRepository>();
 
             // Maintenance repositories
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetRepository, ErpSystem.Data.Repositories.Maintenance.MaintenanceAssetRepository>();
@@ -433,12 +450,18 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetAdmissionService, ErpSystem.Core.Services.Maintenance.AssetAdmissionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetDischargeService, ErpSystem.Core.Services.Maintenance.AssetDischargeService>();
 
+            // Asset Condition services - checklist for admission/discharge inspections
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetConditionRepository, ErpSystem.Data.Repositories.Maintenance.AssetConditionRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetConditionService, ErpSystem.Core.Services.Maintenance.AssetConditionService>();
+
             // Tool Checkout Service - manages tool checkout/return operations
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IToolCheckoutService, ErpSystem.Core.Services.Maintenance.ToolCheckoutService>();
             // Work Order Tool Service - manages tool allocation and checkout for work orders
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderToolService, ErpSystem.Core.Services.Maintenance.WorkOrderToolService>();
             // Work Order Part Service - manages parts/consumables for work orders
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderPartService, ErpSystem.Core.Services.Maintenance.WorkOrderPartService>();
+            // Work Order Labor Service - manages labor/time tracking for work orders
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderLaborService, ErpSystem.Core.Services.Maintenance.WorkOrderLaborService>();
 
             // Staff Schedule and Expense services - off-site maintenance tracking
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceStaffScheduleService, ErpSystem.Core.Services.Maintenance.MaintenanceStaffScheduleService>();
@@ -454,9 +477,8 @@ namespace ErpSystem.Api.Extensions
             // Additional maintenance services - NOW ENABLED
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.ITechnicianSchedulingService, ErpSystem.Core.Services.Maintenance.TechnicianSchedulingService>();
 
-            // Asset type service - using core namespace
-            // NOTE: This service registration was temporarily commented out as IAssetTypeService might not be needed
-            // services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetTypeService, ErpSystem.Core.Services.Maintenance.AssetTypeService>();
+            // Asset type service - using Api namespace
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetTypeService, ErpSystem.Api.Services.Maintenance.AssetTypeService>();
 
             // New maintenance module services - NOW ENABLED
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceScheduleService, ErpSystem.Core.Services.Maintenance.MaintenanceScheduleService>();
@@ -547,6 +569,11 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderDocumentTypeService, ErpSystem.Core.Services.Procurement.TenderDocumentTypeService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IBusinessPartnerUserService, ErpSystem.Core.Services.Procurement.BusinessPartnerUserService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderAssignmentService, ErpSystem.Core.Services.Procurement.TenderAssignmentService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardVerificationService, ErpSystem.Core.Services.Procurement.AwardVerificationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPerformanceBondService, ErpSystem.Core.Services.Procurement.PerformanceBondService>();
+
+            // Contract Management Services
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IContractService, ErpSystem.Core.Services.Procurement.ContractService>();
 
             // Procurement Planning Services
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPlanService, ErpSystem.Core.Services.Procurement.ProcurementPlanService>();

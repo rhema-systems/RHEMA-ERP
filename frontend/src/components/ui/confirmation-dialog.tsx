@@ -15,7 +15,7 @@ export interface ConfirmationDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   title: string
-  description?: string
+  description?: React.ReactNode
   confirmText?: string
   cancelText?: string
   variant?: "default" | "destructive"
@@ -58,9 +58,17 @@ export function ConfirmationDialog({
             {title}
           </DialogTitle>
           {description && (
-            <DialogDescription>
-              {description}
-            </DialogDescription>
+            typeof description === 'string' ? (
+              <DialogDescription>
+                {description}
+              </DialogDescription>
+            ) : (
+              <DialogDescription asChild>
+                <div className="text-sm text-muted-foreground">
+                  {description}
+                </div>
+              </DialogDescription>
+            )
           )}
         </DialogHeader>
         {children && (

@@ -56,6 +56,15 @@ public interface ITenderService
     Task<int> GetTotalViewsAsync(Guid tenderId);
     Task<int> GetTotalDownloadsAsync(Guid tenderId);
     Task LogTenderViewAsync(Guid tenderId, Guid? businessPartnerId, string actionType);
+
+    // Tender LOTs
+    Task<TenderLotDto> AddTenderLotAsync(Guid tenderId, CreateTenderLotDto dto);
+    Task<TenderLotDto> UpdateTenderLotAsync(Guid lotId, UpdateTenderLotDto dto);
+    Task DeleteTenderLotAsync(Guid lotId);
+    Task<IEnumerable<TenderLotDto>> GetTenderLotsAsync(Guid tenderId);
+    Task<TenderLotDto?> GetTenderLotByIdAsync(Guid lotId);
+    Task AssignItemToLotAsync(Guid itemId, Guid lotId);
+    Task RemoveItemFromLotAsync(Guid itemId);
 }
 
 /// <summary>
@@ -98,6 +107,15 @@ public interface ITenderBidService
     Task<TenderInterviewDto> UpdateInterviewAsync(Guid interviewId, ScheduleInterviewDto dto);
     Task<IEnumerable<TenderInterviewDto>> GetBidInterviewsAsync(Guid bidId);
     Task<IEnumerable<TenderInterviewDto>> GetUpcomingInterviewsAsync();
+
+    // Bid LOTs
+    Task<TenderBidLotDto> AddBidLotAsync(Guid bidId, CreateTenderBidLotDto dto);
+    Task<TenderBidLotDto> UpdateBidLotAsync(Guid bidLotId, UpdateTenderBidLotDto dto);
+    Task DeleteBidLotAsync(Guid bidLotId);
+    Task<IEnumerable<TenderBidLotDto>> GetBidLotsAsync(Guid bidId);
+    Task<TenderBidLotDto?> GetBidLotByIdAsync(Guid bidLotId);
+    Task AssignBidItemToLotAsync(Guid bidItemId, Guid bidLotId);
+    Task RemoveBidItemFromLotAsync(Guid bidItemId);
 }
 
 /// <summary>
@@ -118,6 +136,19 @@ public interface ITenderEvaluationService
     Task<EvaluationScorecardDto> GetBidScorecardAsync(Guid bidId);
     Task<EvaluationReportDto> GetTenderEvaluationReportAsync(Guid tenderId);
     Task<IEnumerable<ConsolidatedEvaluationDto>> GetConsolidatedEvaluationsAsync(Guid tenderId);
+
+    // QCBS Evaluation
+    /// <summary>
+    /// Calculates QCBS (Quality and Cost Based Selection) scores for all bids in a tender.
+    /// This method applies the technical/financial weighting and ranks bids accordingly.
+    /// </summary>
+    Task<QCBSEvaluationResultDto> CalculateQCBSScoresAsync(Guid tenderId);
+
+    /// <summary>
+    /// Gets the stored QCBS evaluation results for a tender without recalculating.
+    /// Returns null if QCBS evaluation has not been run yet.
+    /// </summary>
+    Task<QCBSEvaluationResultDto?> GetQCBSEvaluationResultsAsync(Guid tenderId);
 }
 
 /// <summary>
@@ -164,3 +195,19 @@ public interface ITenderTemplateService
     Task<TenderDetailDto> CreateTenderFromTemplateAsync(Guid templateId, string title);
 }
 
+/// <summary>
+/// Performance bond service interface
+/// </summary>
+public interface IPerformanceBondService
+{
+    Task<PerformanceBondRequestDto?> GetByIdAsync(Guid id);
+    Task<PerformanceBondRequestDto?> GetByAwardIdAsync(Guid awardId);
+    Task<PerformanceBondRequestDto?> GetByBidIdAsync(Guid bidId);
+    Task<IEnumerable<PerformanceBondRequestDto>> GetByBusinessPartnerIdAsync(Guid businessPartnerId);
+    Task<IEnumerable<PerformanceBondRequestDto>> GetPendingRequestsAsync();
+    Task<IEnumerable<PerformanceBondRequestDto>> GetByStatusAsync(string status);
+
+    Task<PerformanceBondRequestDto> CreateRequestAsync(CreatePerformanceBondRequestDto dto, string? templateFilePath, string? templateFileName, string? templateFileType, long? templateFileSize);
+    Task<PerformanceBondRequestDto> SubmitBondAsync(Guid requestId, SubmitPerformanceBondDto dto, string filePath, string fileName, string? fileType, long? fileSize);
+    Task<PerformanceBondRequestDto> ReviewBondAsync(Guid requestId, ReviewPerformanceBondDto dto);
+}

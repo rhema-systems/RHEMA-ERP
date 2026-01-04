@@ -651,5 +651,164 @@ public class TendersController : ControllerBase
             return StatusCode(500, "An error occurred while answering the clarification");
         }
     }
+
+    #region Tender LOT Endpoints
+
+    /// <summary>
+    /// Get all LOTs for a tender
+    /// </summary>
+    [HttpGet("{tenderId}/lots")]
+    public async Task<ActionResult<IEnumerable<TenderLotDto>>> GetTenderLots(Guid tenderId)
+    {
+        try
+        {
+            var lots = await _tenderService.GetTenderLotsAsync(tenderId);
+            return Ok(lots);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting lots for tender {TenderId}", tenderId);
+            return StatusCode(500, "An error occurred while retrieving tender lots");
+        }
+    }
+
+    /// <summary>
+    /// Get a specific LOT by ID
+    /// </summary>
+    [HttpGet("lots/{lotId}")]
+    public async Task<ActionResult<TenderLotDto>> GetTenderLot(Guid lotId)
+    {
+        try
+        {
+            var lot = await _tenderService.GetTenderLotByIdAsync(lotId);
+            if (lot == null)
+            {
+                return NotFound($"Tender lot with ID {lotId} not found");
+            }
+            return Ok(lot);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting tender lot {LotId}", lotId);
+            return StatusCode(500, "An error occurred while retrieving the tender lot");
+        }
+    }
+
+    /// <summary>
+    /// Add a new LOT to a tender
+    /// </summary>
+    [HttpPost("{tenderId}/lots")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    public async Task<ActionResult<TenderLotDto>> AddTenderLot(Guid tenderId, [FromBody] CreateTenderLotDto dto)
+    {
+        try
+        {
+            var lot = await _tenderService.AddTenderLotAsync(tenderId, dto);
+            return CreatedAtAction(nameof(GetTenderLot), new { lotId = lot.Id }, lot);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding lot to tender {TenderId}", tenderId);
+            return StatusCode(500, "An error occurred while adding the tender lot");
+        }
+    }
+
+    /// <summary>
+    /// Update a tender LOT
+    /// </summary>
+    [HttpPut("lots/{lotId}")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    public async Task<ActionResult<TenderLotDto>> UpdateTenderLot(Guid lotId, [FromBody] UpdateTenderLotDto dto)
+    {
+        try
+        {
+            var lot = await _tenderService.UpdateTenderLotAsync(lotId, dto);
+            return Ok(lot);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating tender lot {LotId}", lotId);
+            return StatusCode(500, "An error occurred while updating the tender lot");
+        }
+    }
+
+    /// <summary>
+    /// Delete a tender LOT
+    /// </summary>
+    [HttpDelete("lots/{lotId}")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    public async Task<ActionResult> DeleteTenderLot(Guid lotId)
+    {
+        try
+        {
+            await _tenderService.DeleteTenderLotAsync(lotId);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting tender lot {LotId}", lotId);
+            return StatusCode(500, "An error occurred while deleting the tender lot");
+        }
+    }
+
+    /// <summary>
+    /// Assign an item to a LOT
+    /// </summary>
+    [HttpPost("items/{itemId}/assign-lot/{lotId}")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    public async Task<ActionResult> AssignItemToLot(Guid itemId, Guid lotId)
+    {
+        try
+        {
+            await _tenderService.AssignItemToLotAsync(itemId, lotId);
+            return Ok(new { message = "Item assigned to lot successfully" });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error assigning item {ItemId} to lot {LotId}", itemId, lotId);
+            return StatusCode(500, "An error occurred while assigning the item to the lot");
+        }
+    }
+
+    /// <summary>
+    /// Remove an item from its LOT
+    /// </summary>
+    [HttpPost("items/{itemId}/remove-from-lot")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    public async Task<ActionResult> RemoveItemFromLot(Guid itemId)
+    {
+        try
+        {
+            await _tenderService.RemoveItemFromLotAsync(itemId);
+            return Ok(new { message = "Item removed from lot successfully" });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error removing item {ItemId} from lot", itemId);
+            return StatusCode(500, "An error occurred while removing the item from the lot");
+        }
+    }
+
+    #endregion
 }
 

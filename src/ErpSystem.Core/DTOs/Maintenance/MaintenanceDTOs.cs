@@ -2692,6 +2692,7 @@ public class WorkOrderTaskDto
     public DateTime? CompletedAt { get; set; }
     public string? CompletionNotes { get; set; }
     public bool IsRequired { get; set; }
+    public string? PhotoPath { get; set; }
 
     public EmployeeDto? AssignedTechnician { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -2889,6 +2890,15 @@ public class UpdateWorkOrderLaborDto
 
     [StringLength(50)]
     public string LaborType { get; set; } = string.Empty;
+}
+
+public class EndLaborDto
+{
+    [Required]
+    public DateTime EndTime { get; set; }
+
+    [StringLength(1000)]
+    public string? Notes { get; set; }
 }
 
 // Work Order Comment DTOs

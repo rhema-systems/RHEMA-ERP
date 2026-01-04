@@ -8,11 +8,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Award, TrendingUp, CheckCircle2, AlertCircle, Trophy, FileText, DollarSign } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Award, TrendingUp, CheckCircle2, AlertCircle, Trophy, FileText, DollarSign, ClipboardCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import * as tenderAwardService from '@/services/tenderAwardService';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { AwardVerificationDialog } from './AwardVerificationDialog';
+import { TenderAwardVerification } from '@/services/awardVerificationService';
 
 interface TenderAwardProps {
   tenderId: string;
@@ -30,6 +33,10 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
   const [awardAmount, setAwardAmount] = useState<string>('');
   const [awardJustification, setAwardJustification] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Verification selection state
+  const [selectedBidsForVerification, setSelectedBidsForVerification] = useState<string[]>([]);
+  const [showVerificationDialog, setShowVerificationDialog] = useState(false);
 
   useEffect(() => {
     loadAwardData();
@@ -101,6 +108,45 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
     setSelectedBidId(bidId);
     setAwardAmount(amount.toString());
     setShowAwardDialog(true);
+  };
+
+  // Toggle bid selection for verification
+  const toggleBidForVerification = (bidId: string) => {
+    setSelectedBidsForVerification(prev =>
+      prev.includes(bidId)
+        ? prev.filter(id => id !== bidId)
+        : [...prev, bidId]
+    );
+  };
+
+  // Handle verification dialog open
+  const handleStartVerification = () => {
+    if (selectedBidsForVerification.length === 0) {
+      toast.error('Please select at least one bidder to verify');
+      return;
+    }
+    setShowVerificationDialog(true);
+  };
+
+  // Handle verification complete
+  const handleVerificationComplete = (verification: TenderAwardVerification) => {
+    toast.success('Verification completed! You can now proceed with awarding.');
+    // Optionally reload data to reflect verification status
+    loadAwardData();
+  };
+
+  // Get selected bidders info for the verification dialog
+  const getSelectedBiddersInfo = () => {
+    if (!recommendation) return [];
+    return recommendation.bidRecommendations
+      .filter(bid => selectedBidsForVerification.includes(bid.bidId))
+      .map(bid => ({
+        bidId: bid.bidId,
+        businessPartnerId: bid.businessPartnerId || '',
+        businessPartnerName: bid.businessPartnerName,
+        bidNumber: bid.bidNumber,
+        totalBidAmount: bid.totalBidAmount,
+      }));
   };
 
   if (loading) {
@@ -302,13 +348,35 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
         {/* Bid Comparison */}
         <Card>
           <CardHeader>
-            <CardTitle>Bid Comparison</CardTitle>
-            <CardDescription>Select a bid to award the tender</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Bid Comparison</CardTitle>
+                <CardDescription>Select bidders to verify before awarding the tender</CardDescription>
+              </div>
+              {selectedBidsForVerification.length > 0 && (
+                <Button onClick={handleStartVerification} variant="outline">
+                  <ClipboardCheck className="h-4 w-4 mr-2" />
+                  Verify Selected ({selectedBidsForVerification.length})
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-12">
+                    <Checkbox
+                      checked={selectedBidsForVerification.length === recommendation.bidRecommendations.length && recommendation.bidRecommendations.length > 0}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setSelectedBidsForVerification(recommendation.bidRecommendations.map(b => b.bidId));
+                        } else {
+                          setSelectedBidsForVerification([]);
+                        }
+                      }}
+                    />
+                  </TableHead>
                   <TableHead>Rank</TableHead>
                   <TableHead>Business Partner</TableHead>
                   <TableHead>Bid Number</TableHead>
@@ -324,6 +392,12 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
                   .sort((a, b) => b.averageScore - a.averageScore)
                   .map((bid, index) => (
                     <TableRow key={bid.bidId} className={bid.bidId === recommendation.recommendedBidId ? 'bg-green-50' : ''}>
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedBidsForVerification.includes(bid.bidId)}
+                          onCheckedChange={() => toggleBidForVerification(bid.bidId)}
+                        />
+                      </TableCell>
                       <TableCell>
                         {index === 0 && <Trophy className="h-5 w-5 text-yellow-600" />}
                         {index > 0 && <span className="text-gray-500">#{index + 1}</span>}
@@ -425,6 +499,15 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
           </div>
         </div>
       </ConfirmationDialog>
+
+      {/* Award Verification Dialog */}
+      <AwardVerificationDialog
+        open={showVerificationDialog}
+        onOpenChange={setShowVerificationDialog}
+        tenderId={tenderId}
+        bidders={getSelectedBiddersInfo()}
+        onVerificationComplete={handleVerificationComplete}
+      />
     </>
   );
 }

@@ -54,6 +54,12 @@ export interface TenderDetailDto extends TenderDto {
   acceptanceDeclarationDocumentName?: string;
   evaluationTemplateId?: string;
   evaluationTemplateName?: string;
+  // QCBS Evaluation fields
+  useQCBSEvaluation: boolean;
+  technicalWeight: number;
+  financialWeight: number;
+  minimumTechnicalScore: number;
+  lots: TenderLotDto[];
   items: TenderItemDto[];
   documents: TenderDocumentDto[];
   invitations: TenderInvitationDto[];
@@ -64,6 +70,7 @@ export interface TenderDetailDto extends TenderDto {
   revisions: TenderRevisionDto[];
   totalViews: number;
   totalDownloads: number;
+  lotCount: number;
 }
 
 export interface TenderDocumentRequirement {
@@ -96,6 +103,11 @@ export interface CreateTenderDto {
   requiredDocuments?: string; // JSON string of TenderDocumentRequirement[]
   requiresAcceptanceDeclaration?: boolean;
   evaluationTemplateId?: string;
+  // QCBS Evaluation fields
+  useQCBSEvaluation?: boolean;
+  technicalWeight?: number;
+  financialWeight?: number;
+  minimumTechnicalScore?: number;
   items?: CreateTenderItemDto[];
 }
 
@@ -119,6 +131,11 @@ export interface UpdateTenderDto {
   requiredDocuments?: string; // JSON string of TenderDocumentRequirement[]
   requiresAcceptanceDeclaration?: boolean;
   evaluationTemplateId?: string;
+  // QCBS Evaluation fields
+  useQCBSEvaluation?: boolean;
+  technicalWeight?: number;
+  financialWeight?: number;
+  minimumTechnicalScore?: number;
 }
 
 export interface PublishTenderDto {
@@ -128,9 +145,66 @@ export interface PublishTenderDto {
   sendNotifications?: boolean;
 }
 
+// ============================================================================
+// TENDER LOT INTERFACES
+// ============================================================================
+
+export interface TenderLotDto {
+  id: string;
+  tenderId: string;
+  lotNumber: number;
+  lotCode: string;
+  title: string;
+  description?: string;
+  estimatedValue?: number;
+  currency?: string;
+  status: string;
+  requiredDeliveryDate?: string;
+  deliveryLocation?: string;
+  specifications?: string;
+  notes?: string;
+  displayOrder: number;
+  itemCount: number;
+  bidCount: number;
+  isAwarded: boolean;
+  awardedToPartnerName?: string;
+  items: TenderItemDto[];
+  createdAt?: string;
+}
+
+export interface CreateTenderLotDto {
+  lotNumber?: number;
+  lotCode: string;
+  title: string;
+  description?: string;
+  estimatedValue?: number;
+  currency?: string;
+  requiredDeliveryDate?: string;
+  deliveryLocation?: string;
+  specifications?: string;
+  notes?: string;
+  displayOrder?: number;
+}
+
+export interface UpdateTenderLotDto {
+  lotCode: string;
+  title: string;
+  description?: string;
+  estimatedValue?: number;
+  currency?: string;
+  requiredDeliveryDate?: string;
+  deliveryLocation?: string;
+  specifications?: string;
+  notes?: string;
+  displayOrder?: number;
+}
+
 export interface TenderItemDto {
   id: string;
   tenderId: string;
+  lotId?: string;
+  lotCode?: string;
+  lotTitle?: string;
   lineNumber: number;
   itemCode?: string;
   description: string;
@@ -143,6 +217,7 @@ export interface TenderItemDto {
 
 export interface CreateTenderItemDto {
   lineNumber: number;
+  lotId?: string;
   itemCode?: string;
   description: string;
   quantity: number;
@@ -246,6 +321,12 @@ export interface TenderBidSummaryDto {
   status: string;
   totalBidAmount: number;
   currency?: string;
+  // QCBS Evaluation fields
+  technicalScore?: number;
+  financialScore?: number;
+  combinedScore?: number;
+  isQualifiedTechnically?: boolean;
+  disqualificationReason?: string;
 }
 
 export interface InviteTenderersDto {
@@ -302,6 +383,49 @@ export interface PagedResult<T> {
   page: number;
   pageSize: number;
   totalPages: number;
+}
+
+// ============================================================================
+// QCBS EVALUATION INTERFACES
+// ============================================================================
+
+export interface ConfigureQCBSDto {
+  useQCBSEvaluation: boolean;
+  technicalWeight: number;
+  financialWeight: number;
+  minimumTechnicalScore: number;
+}
+
+export interface QCBSBidScoreDto {
+  bidId: string;
+  bidNumber: string;
+  businessPartnerId: string;
+  businessPartnerName: string;
+  totalBidAmount: number;
+  currency: string;
+  technicalScore: number;
+  financialScore: number;
+  combinedScore: number;
+  isQualifiedTechnically: boolean;
+  disqualificationReason?: string;
+  rank: number;
+  isRecommendedForAward: boolean;
+}
+
+export interface QCBSEvaluationResultDto {
+  tenderId: string;
+  tenderNumber: string;
+  tenderTitle: string;
+  evaluationDate: string;
+  calculatedByName: string;
+  technicalWeight: number;
+  financialWeight: number;
+  minimumTechnicalScore: number;
+  lowestBidAmount: number;
+  totalBidsEvaluated: number;
+  qualifiedBidsCount: number;
+  disqualifiedBidsCount: number;
+  bidScores: QCBSBidScoreDto[];
 }
 
 // ============================================================================
@@ -497,6 +621,121 @@ class TenderService {
     if (!response.ok) {
       const error = await response.text();
       throw new Error(error || 'Failed to delete tender item');
+    }
+  }
+
+  // ============================================================================
+  // TENDER LOT METHODS
+  // ============================================================================
+
+  /**
+   * Get all LOTs for a tender
+   */
+  async getTenderLots(tenderId: string): Promise<TenderLotDto[]> {
+    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/lots`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch tender lots');
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Get a specific LOT by ID
+   */
+  async getTenderLot(lotId: string): Promise<TenderLotDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/lots/${lotId}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch tender lot');
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Add LOT to tender
+   */
+  async addTenderLot(tenderId: string, data: CreateTenderLotDto): Promise<TenderLotDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/lots`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add tender lot');
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Update tender LOT
+   */
+  async updateTenderLot(lotId: string, data: UpdateTenderLotDto): Promise<TenderLotDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/lots/${lotId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update tender lot');
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Delete tender LOT
+   */
+  async deleteTenderLot(lotId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/lots/${lotId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete tender lot');
+    }
+  }
+
+  /**
+   * Assign an item to a LOT
+   */
+  async assignItemToLot(itemId: string, lotId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/items/${itemId}/assign-lot/${lotId}`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to assign item to lot');
+    }
+  }
+
+  /**
+   * Remove an item from its LOT
+   */
+  async removeItemFromLot(itemId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/items/${itemId}/remove-from-lot`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to remove item from lot');
     }
   }
 
@@ -748,6 +987,64 @@ class TenderService {
 
     return response.json();
   }
+
+  // ============================================================================
+  // QCBS EVALUATION METHODS
+  // ============================================================================
+
+  /**
+   * Configure QCBS evaluation settings for a tender
+   */
+  async configureQCBS(tenderId: string, data: ConfigureQCBSDto): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/TenderEvaluation/${tenderId}/configure-qcbs`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to configure QCBS evaluation');
+    }
+  }
+
+  /**
+   * Run QCBS evaluation for a tender
+   */
+  async evaluateQCBS(tenderId: string): Promise<QCBSEvaluationResultDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/TenderEvaluations/qcbs/${tenderId}`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to run QCBS evaluation');
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Get QCBS evaluation results for a tender
+   */
+  async getQCBSEvaluationResults(tenderId: string): Promise<QCBSEvaluationResultDto | null> {
+    const response = await fetch(`${API_BASE_URL}/procurement/TenderEvaluations/qcbs/${tenderId}`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
+
+    if (response.status === 404) {
+      return null; // QCBS evaluation has not been run yet
+    }
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to get QCBS evaluation results');
+    }
+
+    return response.json();
+  }
 }
 
 export const tenderService = new TenderService();
@@ -764,6 +1061,14 @@ export const deleteTender = (id: string) => tenderService.deleteTender(id);
 export const addTenderItem = (tenderId: string, data: CreateTenderItemDto) => tenderService.addTenderItem(tenderId, data);
 export const updateTenderItem = (tenderId: string, itemId: string, data: CreateTenderItemDto) => tenderService.updateTenderItem(tenderId, itemId, data);
 export const deleteTenderItem = (tenderId: string, itemId: string) => tenderService.deleteTenderItem(tenderId, itemId);
+// LOT functions
+export const getTenderLots = (tenderId: string) => tenderService.getTenderLots(tenderId);
+export const getTenderLot = (lotId: string) => tenderService.getTenderLot(lotId);
+export const addTenderLot = (tenderId: string, data: CreateTenderLotDto) => tenderService.addTenderLot(tenderId, data);
+export const updateTenderLot = (lotId: string, data: UpdateTenderLotDto) => tenderService.updateTenderLot(lotId, data);
+export const deleteTenderLot = (lotId: string) => tenderService.deleteTenderLot(lotId);
+export const assignItemToLot = (itemId: string, lotId: string) => tenderService.assignItemToLot(itemId, lotId);
+export const removeItemFromLot = (itemId: string) => tenderService.removeItemFromLot(itemId);
 export const uploadTenderDocument = (tenderId: string, file: File, documentType: string, documentName?: string, isPublic?: boolean) => tenderService.uploadTenderDocument(tenderId, file, documentType, documentName, isPublic);
 export const deleteTenderDocument = (tenderId: string, documentId: string) => tenderService.deleteTenderDocument(tenderId, documentId);
 export const downloadTenderDocument = (tenderId: string, documentId: string, documentName: string) => tenderService.downloadTenderDocument(tenderId, documentId, documentName);
@@ -777,3 +1082,7 @@ export const removeEvaluator = (tenderId: string, evaluatorId: string) => tender
 export const getTenderClarifications = (tenderId: string, publicOnly?: boolean) => tenderService.getTenderClarifications(tenderId, publicOnly);
 export const createClarification = (tenderId: string, data: CreateClarificationDto) => tenderService.createClarification(tenderId, data);
 export const answerClarification = (tenderId: string, clarificationId: string, data: AnswerClarificationDto) => tenderService.answerClarification(tenderId, clarificationId, data);
+// QCBS Evaluation functions
+export const configureQCBS = (tenderId: string, data: ConfigureQCBSDto) => tenderService.configureQCBS(tenderId, data);
+export const evaluateQCBS = (tenderId: string) => tenderService.evaluateQCBS(tenderId);
+export const getQCBSEvaluationResults = (tenderId: string) => tenderService.getQCBSEvaluationResults(tenderId);

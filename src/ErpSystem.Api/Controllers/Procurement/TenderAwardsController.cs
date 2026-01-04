@@ -237,4 +237,36 @@ public class TenderAwardsController : ControllerBase
             return StatusCode(500, "An error occurred while generating the award notification");
         }
     }
+
+    /// <summary>
+    /// Send award notifications to supplier (email with PDF + in-app notification)
+    /// </summary>
+    [HttpPost("{id}/notify")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    public async Task<ActionResult> SendAwardNotification(Guid id, [FromBody] AwardNotificationDto dto)
+    {
+        try
+        {
+            // Get the award to find the tender ID
+            var award = await _awardService.GetAwardByIdAsync(id);
+            if (award == null)
+            {
+                return NotFound($"Award with ID {id} not found");
+            }
+
+            await _awardService.SendAwardNotificationsAsync(award.TenderId, dto);
+
+            _logger.LogInformation("Sent award notifications for award {AwardId}", id);
+            return Ok(new { message = "Award notifications sent successfully" });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending award notifications for award {AwardId}", id);
+            return StatusCode(500, "An error occurred while sending award notifications");
+        }
+    }
 }

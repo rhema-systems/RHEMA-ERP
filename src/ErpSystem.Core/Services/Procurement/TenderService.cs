@@ -20,6 +20,7 @@ public class TenderService : ITenderService
     private readonly ITenderClarificationRepository _clarificationRepository;
     private readonly ITenderRevisionRepository _revisionRepository;
     private readonly ITenderViewLogRepository _viewLogRepository;
+    private readonly ITenderLotRepository _lotRepository;
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
     private readonly ITenderNotificationService _notificationService;
     private readonly IUnitOfWork _unitOfWork;
@@ -37,6 +38,7 @@ public class TenderService : ITenderService
         ITenderClarificationRepository clarificationRepository,
         ITenderRevisionRepository revisionRepository,
         ITenderViewLogRepository viewLogRepository,
+        ITenderLotRepository lotRepository,
         IBusinessPartnerRepository businessPartnerRepository,
         ITenderNotificationService notificationService,
         IUnitOfWork unitOfWork,
@@ -53,6 +55,7 @@ public class TenderService : ITenderService
         _clarificationRepository = clarificationRepository;
         _revisionRepository = revisionRepository;
         _viewLogRepository = viewLogRepository;
+        _lotRepository = lotRepository;
         _businessPartnerRepository = businessPartnerRepository;
         _notificationService = notificationService;
         _unitOfWork = unitOfWork;
@@ -69,6 +72,7 @@ public class TenderService : ITenderService
             if (tender == null) return null;
 
             var items = await _itemRepository.GetByTenderIdAsync(id);
+            var lots = await _lotRepository.GetByTenderIdAsync(id);
             var documents = await _documentRepository.GetByTenderIdAsync(id);
             var fees = await _feeRepository.GetByTenderIdAsync(id);
             var invitations = await _invitationRepository.GetByTenderIdAsync(id);
@@ -77,7 +81,7 @@ public class TenderService : ITenderService
             var bidRepository = _unitOfWork.Repository<TenderBid>();
             var bids = await bidRepository.FindAsync(b => b.TenderId == id && !b.IsDeleted);
 
-            return MapToDetailDto(tender, items, documents, fees, invitations, clarifications, evaluators, bids);
+            return MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
         }
         catch (Exception ex)
         {
@@ -94,6 +98,7 @@ public class TenderService : ITenderService
             if (tender == null) return null;
 
             var items = await _itemRepository.GetByTenderIdAsync(tender.Id);
+            var lots = await _lotRepository.GetByTenderIdAsync(tender.Id);
             var documents = await _documentRepository.GetByTenderIdAsync(tender.Id);
             var fees = await _feeRepository.GetByTenderIdAsync(tender.Id);
             var invitations = await _invitationRepository.GetByTenderIdAsync(tender.Id);
@@ -102,7 +107,7 @@ public class TenderService : ITenderService
             var bidRepository = _unitOfWork.Repository<TenderBid>();
             var bids = await bidRepository.FindAsync(b => b.TenderId == tender.Id && !b.IsDeleted);
 
-            return MapToDetailDto(tender, items, documents, fees, invitations, clarifications, evaluators, bids);
+            return MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
         }
         catch (Exception ex)
         {
@@ -188,6 +193,11 @@ public class TenderService : ITenderService
                 DeliveryWeightage = dto.DeliveryWeightage,
                 ExperienceWeightage = dto.ExperienceWeightage,
                 EvaluationCriteriaJson = dto.EvaluationCriteriaJson,
+                // QCBS Configuration
+                UseQCBSEvaluation = dto.UseQCBSEvaluation,
+                MinimumTechnicalScore = dto.MinimumTechnicalScore,
+                TechnicalWeight = dto.TechnicalWeight,
+                FinancialWeight = dto.FinancialWeight,
                 TermsAndConditions = dto.TermsAndConditions,
                 RequiredDocuments = dto.RequiredDocuments,
                 RequiresAcceptanceDeclaration = dto.RequiresAcceptanceDeclaration,
@@ -229,7 +239,7 @@ public class TenderService : ITenderService
 
             _logger.LogInformation("Created tender {TenderId}", tender.Id);
 
-            return MapToDetailDto(tender, items, new List<TenderDocument>(), new List<TenderFee>(), new List<TenderInvitation>(), new List<TenderClarification>(), new List<TenderEvaluatorDto>(), new List<TenderBid>());
+            return MapToDetailDto(tender, new List<TenderLot>(), items, new List<TenderDocument>(), new List<TenderFee>(), new List<TenderInvitation>(), new List<TenderClarification>(), new List<TenderEvaluatorDto>(), new List<TenderBid>());
         }
         catch (Exception ex)
         {
@@ -264,6 +274,11 @@ public class TenderService : ITenderService
             tender.DeliveryWeightage = dto.DeliveryWeightage;
             tender.ExperienceWeightage = dto.ExperienceWeightage;
             tender.EvaluationCriteriaJson = dto.EvaluationCriteriaJson;
+            // QCBS Configuration
+            tender.UseQCBSEvaluation = dto.UseQCBSEvaluation;
+            tender.MinimumTechnicalScore = dto.MinimumTechnicalScore;
+            tender.TechnicalWeight = dto.TechnicalWeight;
+            tender.FinancialWeight = dto.FinancialWeight;
             tender.TermsAndConditions = dto.TermsAndConditions;
             tender.RequiredDocuments = dto.RequiredDocuments;
             tender.RequiresAcceptanceDeclaration = dto.RequiresAcceptanceDeclaration;
@@ -277,6 +292,7 @@ public class TenderService : ITenderService
             _logger.LogInformation("Updated tender {TenderId}", id);
 
             var items = await _itemRepository.GetByTenderIdAsync(id);
+            var lots = await _lotRepository.GetByTenderIdAsync(id);
             var documents = await _documentRepository.GetByTenderIdAsync(id);
             var fees = await _feeRepository.GetByTenderIdAsync(id);
             var invitations = await _invitationRepository.GetByTenderIdAsync(id);
@@ -285,7 +301,7 @@ public class TenderService : ITenderService
             var bidRepository = _unitOfWork.Repository<TenderBid>();
             var bids = await bidRepository.FindAsync(b => b.TenderId == id && !b.IsDeleted);
 
-            return MapToDetailDto(tender, items, documents, fees, invitations, clarifications, evaluators, bids);
+            return MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
         }
         catch (Exception ex)
         {
@@ -325,6 +341,7 @@ public class TenderService : ITenderService
             }
 
             var items = await _itemRepository.GetByTenderIdAsync(id);
+            var lots = await _lotRepository.GetByTenderIdAsync(id);
             var documents = await _documentRepository.GetByTenderIdAsync(id);
             var fees = await _feeRepository.GetByTenderIdAsync(id);
             var invitations = await _invitationRepository.GetByTenderIdAsync(id);
@@ -333,7 +350,7 @@ public class TenderService : ITenderService
             var bidRepository = _unitOfWork.Repository<TenderBid>();
             var bids = await bidRepository.FindAsync(b => b.TenderId == id && !b.IsDeleted);
 
-            return MapToDetailDto(tender, items, documents, fees, invitations, clarifications, evaluators, bids);
+            return MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
         }
         catch (Exception ex)
         {
@@ -379,6 +396,7 @@ public class TenderService : ITenderService
                 Id = Guid.NewGuid(),
                 TenantId = _currentUserProvider.TenantId,
                 TenderId = tenderId,
+                LotId = dto.LotId,
                 LineNumber = dto.LineNumber,
                 ItemCode = dto.ItemCode,
                 Description = dto.Description,
@@ -1075,7 +1093,7 @@ public class TenderService : ITenderService
         };
     }
 
-    private static TenderDetailDto MapToDetailDto(Tender tender, IEnumerable<TenderItem> items, IEnumerable<TenderDocument> documents, IEnumerable<TenderFee> fees, IEnumerable<TenderInvitation> invitations, IEnumerable<TenderClarification> clarifications, IEnumerable<TenderEvaluatorDto> evaluators, IEnumerable<TenderBid> bids)
+    private static TenderDetailDto MapToDetailDto(Tender tender, IEnumerable<TenderLot> lots, IEnumerable<TenderItem> items, IEnumerable<TenderDocument> documents, IEnumerable<TenderFee> fees, IEnumerable<TenderInvitation> invitations, IEnumerable<TenderClarification> clarifications, IEnumerable<TenderEvaluatorDto> evaluators, IEnumerable<TenderBid> bids)
     {
         return new TenderDetailDto
         {
@@ -1099,6 +1117,11 @@ public class TenderService : ITenderService
             DeliveryWeightage = tender.DeliveryWeightage,
             ExperienceWeightage = tender.ExperienceWeightage,
             EvaluationCriteriaJson = tender.EvaluationCriteriaJson,
+            // QCBS Configuration
+            UseQCBSEvaluation = tender.UseQCBSEvaluation,
+            MinimumTechnicalScore = tender.MinimumTechnicalScore,
+            TechnicalWeight = tender.TechnicalWeight,
+            FinancialWeight = tender.FinancialWeight,
             TermsAndConditions = tender.TermsAndConditions,
             RequiredDocuments = tender.RequiredDocuments,
             RequiresAcceptanceDeclaration = tender.RequiresAcceptanceDeclaration,
@@ -1108,6 +1131,7 @@ public class TenderService : ITenderService
             EvaluationTemplateName = tender.EvaluationTemplate?.TemplateName,
             Notes = tender.Notes,
             CreatedAt = tender.CreatedAt,
+            Lots = lots.Select(MapToLotDto).ToList(),
             Items = items.Select(MapItemToDto).ToList(),
             Documents = documents.Select(MapDocumentToDto).ToList(),
             Fees = fees.Select(MapFeeToDto).ToList(),
@@ -1246,8 +1270,243 @@ public class TenderService : ITenderService
             TotalScore = bid.TotalScore,
             Rank = bid.Rank,
             IsCompliant = bid.IsCompliant,
-            HasPaidFees = false // Payment info not available in this context
+            HasPaidFees = false, // Payment info not available in this context
+            // QCBS Scores
+            TechnicalScore = bid.TechnicalScore,
+            FinancialScore = bid.FinancialScore,
+            CombinedScore = bid.CombinedScore,
+            IsQualifiedTechnically = bid.IsQualifiedTechnically,
+            DisqualificationReason = bid.DisqualificationReason
         };
     }
+
+    #region Tender LOT Methods
+
+    public async Task<TenderLotDto> AddTenderLotAsync(Guid tenderId, CreateTenderLotDto dto)
+    {
+        try
+        {
+            var tender = await _tenderRepository.GetByIdAsync(tenderId);
+            if (tender == null)
+                throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+
+            var lotCode = await _lotRepository.GenerateLotCodeAsync(tenderId);
+
+            var lot = new TenderLot
+            {
+                Id = Guid.NewGuid(),
+                TenantId = _currentUserProvider.TenantId,
+                TenderId = tenderId,
+                LotNumber = dto.LotNumber,
+                LotCode = dto.LotCode ?? lotCode,
+                Title = dto.Title,
+                Description = dto.Description,
+                EstimatedValue = dto.EstimatedValue,
+                Currency = dto.Currency ?? tender.Currency,
+                RequiredDeliveryDate = dto.RequiredDeliveryDate,
+                DeliveryLocation = dto.DeliveryLocation,
+                Specifications = dto.Specifications,
+                Notes = dto.Notes,
+                DisplayOrder = dto.DisplayOrder,
+                Status = "Active"
+            };
+
+            await _lotRepository.CreateAsync(lot);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Created tender lot {LotCode} for tender {TenderId}", lot.LotCode, tenderId);
+
+            return MapToLotDto(lot);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating tender lot for tender {TenderId}", tenderId);
+            throw;
+        }
+    }
+
+    public async Task<TenderLotDto> UpdateTenderLotAsync(Guid lotId, UpdateTenderLotDto dto)
+    {
+        try
+        {
+            var lot = await _lotRepository.GetByIdAsync(lotId);
+            if (lot == null)
+                throw new InvalidOperationException($"Tender lot with ID {lotId} not found");
+
+            lot.LotCode = dto.LotCode ?? lot.LotCode;
+            lot.Title = dto.Title ?? lot.Title;
+            lot.Description = dto.Description ?? lot.Description;
+            lot.EstimatedValue = dto.EstimatedValue ?? lot.EstimatedValue;
+            lot.Currency = dto.Currency ?? lot.Currency;
+            lot.RequiredDeliveryDate = dto.RequiredDeliveryDate ?? lot.RequiredDeliveryDate;
+            lot.DeliveryLocation = dto.DeliveryLocation ?? lot.DeliveryLocation;
+            lot.Specifications = dto.Specifications ?? lot.Specifications;
+            lot.Notes = dto.Notes ?? lot.Notes;
+            lot.DisplayOrder = dto.DisplayOrder;
+
+            await _lotRepository.UpdateAsync(lot);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Updated tender lot {LotId}", lotId);
+
+            return MapToLotDto(lot);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating tender lot {LotId}", lotId);
+            throw;
+        }
+    }
+
+    public async Task DeleteTenderLotAsync(Guid lotId)
+    {
+        try
+        {
+            var lot = await _lotRepository.GetByIdWithItemsAsync(lotId);
+            if (lot == null)
+                throw new InvalidOperationException($"Tender lot with ID {lotId} not found");
+
+            // Remove lot assignment from items
+            if (lot.Items != null)
+            {
+                foreach (var item in lot.Items)
+                {
+                    item.LotId = null;
+                    await _itemRepository.UpdateAsync(item);
+                }
+            }
+
+            await _lotRepository.DeleteAsync(lotId);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Deleted tender lot {LotId}", lotId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting tender lot {LotId}", lotId);
+            throw;
+        }
+    }
+
+    public async Task<IEnumerable<TenderLotDto>> GetTenderLotsAsync(Guid tenderId)
+    {
+        try
+        {
+            var lots = await _lotRepository.GetByTenderIdAsync(tenderId);
+            return lots.Select(MapToLotDto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting tender lots for tender {TenderId}", tenderId);
+            throw;
+        }
+    }
+
+    public async Task<TenderLotDto?> GetTenderLotByIdAsync(Guid lotId)
+    {
+        try
+        {
+            var lot = await _lotRepository.GetByIdWithItemsAsync(lotId);
+            return lot != null ? MapToLotDto(lot) : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting tender lot {LotId}", lotId);
+            throw;
+        }
+    }
+
+    public async Task AssignItemToLotAsync(Guid itemId, Guid lotId)
+    {
+        try
+        {
+            var item = await _itemRepository.GetByIdAsync(itemId);
+            if (item == null)
+                throw new InvalidOperationException($"Tender item with ID {itemId} not found");
+
+            var lot = await _lotRepository.GetByIdAsync(lotId);
+            if (lot == null)
+                throw new InvalidOperationException($"Tender lot with ID {lotId} not found");
+
+            if (item.TenderId != lot.TenderId)
+                throw new InvalidOperationException("Item and lot must belong to the same tender");
+
+            item.LotId = lotId;
+            await _itemRepository.UpdateAsync(item);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Assigned item {ItemId} to lot {LotId}", itemId, lotId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error assigning item {ItemId} to lot {LotId}", itemId, lotId);
+            throw;
+        }
+    }
+
+    public async Task RemoveItemFromLotAsync(Guid itemId)
+    {
+        try
+        {
+            var item = await _itemRepository.GetByIdAsync(itemId);
+            if (item == null)
+                throw new InvalidOperationException($"Tender item with ID {itemId} not found");
+
+            item.LotId = null;
+            await _itemRepository.UpdateAsync(item);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Removed item {ItemId} from lot", itemId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error removing item {ItemId} from lot", itemId);
+            throw;
+        }
+    }
+
+    private static TenderLotDto MapToLotDto(TenderLot lot)
+    {
+        return new TenderLotDto
+        {
+            Id = lot.Id,
+            TenderId = lot.TenderId,
+            LotNumber = lot.LotNumber,
+            LotCode = lot.LotCode,
+            Title = lot.Title,
+            Description = lot.Description,
+            EstimatedValue = lot.EstimatedValue,
+            Currency = lot.Currency,
+            Status = lot.Status,
+            RequiredDeliveryDate = lot.RequiredDeliveryDate,
+            DeliveryLocation = lot.DeliveryLocation,
+            Specifications = lot.Specifications,
+            Notes = lot.Notes,
+            DisplayOrder = lot.DisplayOrder,
+            ItemCount = lot.Items?.Count ?? 0,
+            BidCount = lot.BidLots?.Count ?? 0,
+            IsAwarded = lot.Awards?.Any() ?? false,
+            AwardedToPartnerName = lot.Awards?.FirstOrDefault()?.BusinessPartner?.PartnerName,
+            Items = lot.Items?.Select(i => new TenderItemDto
+            {
+                Id = i.Id,
+                TenderId = i.TenderId,
+                LotId = i.LotId,
+                LotCode = lot.LotCode,
+                LotTitle = lot.Title,
+                LineNumber = i.LineNumber,
+                ItemCode = i.ItemCode,
+                Description = i.Description,
+                Quantity = i.Quantity,
+                UnitOfMeasure = i.UnitOfMeasure,
+                Specifications = i.Specifications,
+                RequiredDeliveryDate = i.RequiredDeliveryDate,
+                DeliveryLocation = i.DeliveryLocation
+            }).ToList() ?? new List<TenderItemDto>(),
+            CreatedAt = lot.CreatedAt
+        };
+    }
+
+    #endregion
 }
 

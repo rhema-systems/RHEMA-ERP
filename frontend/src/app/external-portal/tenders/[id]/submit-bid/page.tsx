@@ -77,7 +77,9 @@ export default function SubmitBidPage() {
   // Re-initialize items when selected lots change
   useEffect(() => {
     if (tender && selectedLotIds.length > 0) {
-      const itemsToInclude = tender.items?.filter(item => selectedLotIds.includes(item.id)) || [];
+      // Get all items from selected lots
+      const selectedLots = tender.lots?.filter(lot => selectedLotIds.includes(lot.id)) || [];
+      const itemsToInclude = selectedLots.flatMap(lot => lot.items || []);
 
       // Only initialize items that don't already exist in bidData
       const newItems: CreateTenderBidItemDto[] = [];
@@ -160,14 +162,22 @@ export default function SubmitBidPage() {
         });
 
         // Extract selected lot IDs from the draft bid items
-        const selectedLots = draftBid.items.map(item => item.tenderItemId);
-        setSelectedLotIds(selectedLots);
+        // Map bid items back to their lot IDs by finding the tender items
+        const selectedLotIdsFromDraft = new Set<string>();
+        draftBid.items.forEach(bidItem => {
+          // Find the tender item to get its lotId
+          const tenderItem = data.items?.find(ti => ti.id === bidItem.tenderItemId);
+          if (tenderItem?.lotId) {
+            selectedLotIdsFromDraft.add(tenderItem.lotId);
+          }
+        });
+        setSelectedLotIds(Array.from(selectedLotIdsFromDraft));
 
         // Determine which step to start on based on progress
         let startStep = 1;
 
         // If lots are selected, move to step 2
-        if (selectedLots.length > 0) {
+        if (selectedLotIdsFromDraft.size > 0) {
           startStep = 2;
         }
 
@@ -286,7 +296,8 @@ export default function SubmitBidPage() {
         setSubmitting(true);
 
         // Create initial bid items from selected lots
-        const itemsToInclude = tender?.items?.filter(item => selectedLotIds.includes(item.id)) || [];
+        const selectedLots = tender?.lots?.filter(lot => selectedLotIds.includes(lot.id)) || [];
+        const itemsToInclude = selectedLots.flatMap(lot => lot.items || []);
         const initialItems: CreateTenderBidItemDto[] = itemsToInclude.map(item => ({
           tenderItemId: item.id,
           offeredQuantity: item.quantity,
@@ -378,7 +389,8 @@ export default function SubmitBidPage() {
 
         if (!createdBidId) {
           // Create initial bid items from selected lots
-          const itemsToInclude = tender?.items?.filter(item => selectedLotIds.includes(item.id)) || [];
+          const selectedLots = tender?.lots?.filter(lot => selectedLotIds.includes(lot.id)) || [];
+          const itemsToInclude = selectedLots.flatMap(lot => lot.items || []);
           const initialItems: CreateTenderBidItemDto[] = itemsToInclude.map(item => ({
             tenderItemId: item.id,
             offeredQuantity: item.quantity,
@@ -624,65 +636,92 @@ export default function SubmitBidPage() {
           <Card>
             <CardHeader>
               <CardTitle>Select Lots to Bid For</CardTitle>
-              <CardDescription>Choose which lots you want to include in your bid</CardDescription>
+              <CardDescription>Choose which lots you want to include in your bid. Each lot contains one or more items.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {tender.items && tender.items.length > 0 ? (
+              {tender.lots && tender.lots.length > 0 ? (
                 <>
                   <Alert>
                     <Package className="h-4 w-4" />
                     <AlertDescription>
-                      Select the lots you want to bid for. You can select one or more lots.
+                      Select the lots you want to bid for. You must provide pricing for all items within each selected lot.
                     </AlertDescription>
                   </Alert>
 
-                  <div className="space-y-3">
-                    {tender.items.map((item) => (
+                  <div className="space-y-4">
+                    {tender.lots.map((lot) => (
                       <div
-                        key={item.id}
-                        className="flex items-start space-x-3 p-4 border rounded-lg hover:bg-accent cursor-pointer"
+                        key={lot.id}
+                        className={`border rounded-lg overflow-hidden cursor-pointer transition-colors ${
+                          selectedLotIds.includes(lot.id) ? 'border-primary bg-primary/5' : 'hover:bg-accent'
+                        }`}
                         onClick={() => {
                           setSelectedLotIds(prev => {
-                            if (prev.includes(item.id)) {
-                              return prev.filter(id => id !== item.id);
+                            if (prev.includes(lot.id)) {
+                              return prev.filter(id => id !== lot.id);
                             } else {
-                              return [...prev, item.id];
+                              return [...prev, lot.id];
                             }
                           });
                         }}
                       >
-                        <Checkbox
-                          id={item.id}
-                          checked={selectedLotIds.includes(item.id)}
-                          onCheckedChange={() => {
-                            setSelectedLotIds(prev => {
-                              if (prev.includes(item.id)) {
-                                return prev.filter(id => id !== item.id);
-                              } else {
-                                return [...prev, item.id];
-                              }
-                            });
-                          }}
-                        />
-                        <div className="flex-1">
-                          <Label htmlFor={item.id} className="cursor-pointer">
-                            <div className="font-medium text-base mb-1">
-                              {item.itemCode && <span className="text-blue-600 mr-2">[{item.itemCode}]</span>}
-                              {item.description}
-                            </div>
-                            <div className="text-sm text-muted-foreground space-y-1">
-                              <div>Quantity: {item.quantity} {item.unitOfMeasure || 'units'}</div>
-                              {item.specifications && (
-                                <div className="text-xs bg-muted p-2 rounded mt-2">
-                                  <strong>Specifications:</strong> {item.specifications}
-                                </div>
+                        {/* Lot Header */}
+                        <div className="flex items-start space-x-3 p-4 bg-gray-50">
+                          <Checkbox
+                            id={lot.id}
+                            checked={selectedLotIds.includes(lot.id)}
+                            onCheckedChange={() => {
+                              setSelectedLotIds(prev => {
+                                if (prev.includes(lot.id)) {
+                                  return prev.filter(id => id !== lot.id);
+                                } else {
+                                  return [...prev, lot.id];
+                                }
+                              });
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <div className="flex-1">
+                            <Label htmlFor={lot.id} className="cursor-pointer">
+                              <div className="font-medium text-base mb-1">
+                                <span className="text-blue-600 mr-2">[{lot.lotCode}]</span>
+                                {lot.title}
+                              </div>
+                              {lot.description && (
+                                <div className="text-sm text-muted-foreground">{lot.description}</div>
                               )}
-                            </div>
-                          </Label>
+                            </Label>
+                          </div>
+                          <div className="text-right">
+                            {lot.estimatedValue && (
+                              <div className="font-medium text-sm">{lot.currency || 'USD'} {lot.estimatedValue.toLocaleString()}</div>
+                            )}
+                            <Badge variant={selectedLotIds.includes(lot.id) ? 'default' : 'outline'}>
+                              {selectedLotIds.includes(lot.id) ? 'Selected' : 'Not Selected'}
+                            </Badge>
+                          </div>
                         </div>
-                        <Badge variant={selectedLotIds.includes(item.id) ? 'default' : 'outline'}>
-                          {selectedLotIds.includes(item.id) ? 'Selected' : 'Not Selected'}
-                        </Badge>
+                        {/* Lot Items */}
+                        {lot.items && lot.items.length > 0 && (
+                          <div className="px-4 py-3 border-t bg-white">
+                            <div className="text-xs font-medium text-muted-foreground mb-2">
+                              {lot.items.length} item(s) in this lot:
+                            </div>
+                            <div className="space-y-1">
+                              {lot.items.map((item, idx) => (
+                                <div key={item.id} className="text-sm flex justify-between items-center py-1 px-2 bg-muted/50 rounded">
+                                  <span>
+                                    <span className="text-muted-foreground mr-1">{idx + 1}.</span>
+                                    {item.description}
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    {item.quantity} {item.unitOfMeasure || 'units'}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -691,7 +730,11 @@ export default function SubmitBidPage() {
                     <Alert>
                       <CheckCircle className="h-4 w-4" />
                       <AlertDescription>
-                        {selectedLotIds.length} lot{selectedLotIds.length > 1 ? 's' : ''} selected
+                        {selectedLotIds.length} lot{selectedLotIds.length > 1 ? 's' : ''} selected with {
+                          tender.lots
+                            .filter(lot => selectedLotIds.includes(lot.id))
+                            .reduce((sum, lot) => sum + (lot.items?.length || 0), 0)
+                        } total item(s)
                       </AlertDescription>
                     </Alert>
                   )}
@@ -711,11 +754,11 @@ export default function SubmitBidPage() {
         {/* Step 2: Bid Items */}
         {currentStep === 2 && (
           <>
-            {selectedLotIds.length > 0 && selectedLotIds.length < (tender.items?.length || 0) && (
+            {selectedLotIds.length > 0 && selectedLotIds.length < (tender.lots?.length || 0) && (
               <Alert className="mb-4">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  You are bidding for {selectedLotIds.length} out of {tender.items?.length || 0} lots. Only the selected lots are shown below.
+                  You are bidding for {selectedLotIds.length} out of {tender.lots?.length || 0} lots. Only items from selected lots are shown below.
                 </AlertDescription>
               </Alert>
             )}

@@ -159,6 +159,7 @@ const navigationItems: NavItem[] = [
           { title: 'Bids', href: '/procurement/bids', icon: FileText },
           { title: 'Evaluations', href: '/procurement/evaluations', icon: Star },
           { title: 'Awards', href: '/procurement/awards', icon: Award },
+          { title: 'Contracts', href: '/procurement/contracts', icon: FileText },
         ],
       },
       {
@@ -318,6 +319,7 @@ const navigationItems: NavItem[] = [
           { title: 'Evaluation Criteria', href: '/administration/procurement/evaluation-criteria', icon: Star },
           { title: 'Evaluation Templates', href: '/administration/procurement/evaluation-templates', icon: FileText },
           { title: 'Document Types', href: '/administration/procurement/document-types', icon: FileText },
+          { title: 'Award Verification Checklists', href: '/administration/procurement/award-verification-checklists', icon: ClipboardCheck },
         ],
       },
       {
@@ -392,6 +394,7 @@ const navigationItems: NavItem[] = [
               { title: 'Priority Levels', href: '/administration/maintenance/priorities', icon: AlertTriangle },
               { title: 'Task Templates', href: '/administration/maintenance/task-templates', icon: FileText },
               { title: 'Quality Checklists', href: '/administration/maintenance/quality-checklists', icon: CheckSquare },
+              { title: 'Admission Checklists', href: '/administration/maintenance/admission-checklists', icon: ClipboardCheck },
               // The following advanced maintenance admin menus are temporarily hidden:
               // { title: 'Inspection Templates', href: '/administration/maintenance/inspection-templates', icon: ClipboardCheck },
               // { title: 'Inspectors', href: '/administration/maintenance/inspectors', icon: Users },

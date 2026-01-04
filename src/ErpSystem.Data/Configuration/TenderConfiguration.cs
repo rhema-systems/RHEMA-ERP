@@ -31,6 +31,11 @@ public class TenderConfiguration : IEntityTypeConfiguration<Tender>
             .HasForeignKey(t => t.TenantId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasMany(t => t.Lots)
+            .WithOne(l => l.Tender)
+            .HasForeignKey(l => l.TenderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         builder.HasMany(t => t.Items)
             .WithOne(i => i.Tender)
             .HasForeignKey(i => i.TenderId)
@@ -121,6 +126,11 @@ public class TenderBidConfiguration : IEntityTypeConfiguration<TenderBid>
             .HasForeignKey(b => b.BusinessPartnerId)
             .OnDelete(DeleteBehavior.Restrict); // Changed from Cascade to avoid cycles
 
+        builder.HasMany(b => b.BidLots)
+            .WithOne(bl => bl.TenderBid)
+            .HasForeignKey(bl => bl.TenderBidId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         builder.HasMany(b => b.Items)
             .WithOne(i => i.TenderBid)
             .HasForeignKey(i => i.TenderBidId)
@@ -153,6 +163,8 @@ public class TenderAwardConfiguration : IEntityTypeConfiguration<TenderAward>
 
         builder.HasIndex(a => a.TenderId);
         builder.HasIndex(a => a.TenderBidId);
+        builder.HasIndex(a => a.LotId);
+        builder.HasIndex(a => a.BidLotId);
         builder.HasIndex(a => a.BusinessPartnerId);
         builder.HasIndex(a => a.Status);
 
@@ -165,6 +177,16 @@ public class TenderAwardConfiguration : IEntityTypeConfiguration<TenderAward>
         builder.HasOne(a => a.Tender)
             .WithMany(t => t.Awards)
             .HasForeignKey(a => a.TenderId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(a => a.Lot)
+            .WithMany(l => l.Awards)
+            .HasForeignKey(a => a.LotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(a => a.BidLot)
+            .WithMany()
+            .HasForeignKey(a => a.BidLotId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(a => a.TenderBid)
@@ -258,3 +280,86 @@ public class EvaluationTemplateCriterionConfiguration : IEntityTypeConfiguration
     }
 }
 
+public class TenderLotConfiguration : IEntityTypeConfiguration<TenderLot>
+{
+    public void Configure(EntityTypeBuilder<TenderLot> builder)
+    {
+        builder.ToTable("TenderLots");
+
+        builder.HasKey(l => l.Id);
+
+        builder.Property(l => l.LotCode)
+            .IsRequired()
+            .HasMaxLength(50);
+
+        builder.Property(l => l.Title)
+            .IsRequired()
+            .HasMaxLength(200);
+
+        builder.HasIndex(l => new { l.TenderId, l.LotCode }).IsUnique();
+        builder.HasIndex(l => l.TenderId);
+        builder.HasIndex(l => l.Status);
+
+        // Relationships
+        builder.HasOne(l => l.Tenant)
+            .WithMany()
+            .HasForeignKey(l => l.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(l => l.Tender)
+            .WithMany(t => t.Lots)
+            .HasForeignKey(l => l.TenderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasMany(l => l.Items)
+            .WithOne(i => i.Lot)
+            .HasForeignKey(i => i.LotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasMany(l => l.BidLots)
+            .WithOne(bl => bl.Lot)
+            .HasForeignKey(bl => bl.LotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasMany(l => l.Awards)
+            .WithOne(a => a.Lot)
+            .HasForeignKey(a => a.LotId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class TenderBidLotConfiguration : IEntityTypeConfiguration<TenderBidLot>
+{
+    public void Configure(EntityTypeBuilder<TenderBidLot> builder)
+    {
+        builder.ToTable("TenderBidLots");
+
+        builder.HasKey(bl => bl.Id);
+
+        builder.HasIndex(bl => new { bl.TenderBidId, bl.LotId }).IsUnique();
+        builder.HasIndex(bl => bl.TenderBidId);
+        builder.HasIndex(bl => bl.LotId);
+        builder.HasIndex(bl => bl.Status);
+
+        // Relationships
+        builder.HasOne(bl => bl.Tenant)
+            .WithMany()
+            .HasForeignKey(bl => bl.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(bl => bl.TenderBid)
+            .WithMany(b => b.BidLots)
+            .HasForeignKey(bl => bl.TenderBidId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(bl => bl.Lot)
+            .WithMany(l => l.BidLots)
+            .HasForeignKey(bl => bl.LotId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasMany(bl => bl.Items)
+            .WithOne(i => i.BidLot)
+            .HasForeignKey(i => i.BidLotId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}

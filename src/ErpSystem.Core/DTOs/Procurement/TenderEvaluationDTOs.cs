@@ -9,6 +9,14 @@ public class TenderEvaluationDto
 {
     public Guid Id { get; set; }
     public Guid TenderBidId { get; set; }
+
+    /// <summary>
+    /// Optional LOT bid ID for per-LOT evaluations
+    /// </summary>
+    public Guid? BidLotId { get; set; }
+    public string? LotCode { get; set; }
+    public string? LotTitle { get; set; }
+
     public Guid TenderEvaluatorId { get; set; }
     public string EvaluatorName { get; set; } = string.Empty;
     public string EvaluatorRole { get; set; } = "Evaluator";
@@ -47,6 +55,11 @@ public class CreateEvaluationDto
 {
     [Required]
     public Guid TenderBidId { get; set; }
+
+    /// <summary>
+    /// Optional LOT bid ID for per-LOT evaluations
+    /// </summary>
+    public Guid? BidLotId { get; set; }
 
     [Range(0, 100)]
     public decimal? PriceScore { get; set; }
@@ -120,6 +133,14 @@ public class SubmitEvaluationDto
 public class EvaluationScorecardDto
 {
     public Guid TenderBidId { get; set; }
+
+    /// <summary>
+    /// Optional LOT bid ID for per-LOT scorecards
+    /// </summary>
+    public Guid? BidLotId { get; set; }
+    public string? LotCode { get; set; }
+    public string? LotTitle { get; set; }
+
     public string BidNumber { get; set; } = string.Empty;
     public string BusinessPartnerName { get; set; } = string.Empty;
     public decimal TotalBidAmount { get; set; }
@@ -145,6 +166,21 @@ public class EvaluationScorecardDto
 }
 
 /// <summary>
+/// LOT-level evaluation scorecard DTO
+/// </summary>
+public class LotEvaluationScorecardDto
+{
+    public Guid LotId { get; set; }
+    public string LotCode { get; set; } = string.Empty;
+    public string LotTitle { get; set; } = string.Empty;
+    public decimal EstimatedValue { get; set; }
+    public string? Currency { get; set; }
+    public int TotalBidLots { get; set; }
+    public int EvaluatedBidLots { get; set; }
+    public List<EvaluationScorecardDto> BidLotScorecards { get; set; } = new();
+}
+
+/// <summary>
 /// Consolidated evaluation DTO for all bids
 /// </summary>
 public class ConsolidatedEvaluationDto
@@ -152,7 +188,17 @@ public class ConsolidatedEvaluationDto
     public Guid TenderId { get; set; }
     public string TenderNumber { get; set; } = string.Empty;
     public string TenderTitle { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Tender-level bid scorecards (for non-LOT tenders or tender-level evaluation)
+    /// </summary>
     public List<EvaluationScorecardDto> BidScorecards { get; set; } = new();
+
+    /// <summary>
+    /// LOT-level scorecards (for LOT-based tenders)
+    /// </summary>
+    public List<LotEvaluationScorecardDto> LotScorecards { get; set; } = new();
+
     public DateTime GeneratedDate { get; set; }
     public string? GeneratedByName { get; set; }
 }
@@ -171,6 +217,17 @@ public class EvaluationReportDto
     public DateTime? PublishDate { get; set; }
     public DateTime? SubmissionDeadline { get; set; }
     public decimal? EstimatedValue { get; set; }
+    public string? Currency { get; set; }
+
+    // QCBS Configuration
+    public bool UseQCBSEvaluation { get; set; }
+    public decimal TechnicalWeight { get; set; }
+    public decimal FinancialWeight { get; set; }
+    public decimal MinimumTechnicalScore { get; set; }
+    public decimal? LowestBidAmount { get; set; }
+    public int? QualifiedBidsCount { get; set; }
+    public int? DisqualifiedBidsCount { get; set; }
+
 
     // Evaluation Criteria
     public decimal PriceWeightage { get; set; }
@@ -218,8 +275,128 @@ public class BidEvaluationSummaryDto
     public decimal? WeightedExperienceScore { get; set; }
     public decimal? FinalScore { get; set; }
 
+    // QCBS Scores
+    public decimal? TechnicalScore { get; set; }
+    public decimal? FinancialScore { get; set; }
+    public decimal? CombinedScore { get; set; }
+    public bool? IsQualifiedTechnically { get; set; }
+    public string? DisqualificationReason { get; set; }
+
+
     public int Rank { get; set; }
     public int RecommendationCount { get; set; }
     public bool IsRecommended { get; set; }
 }
 
+/// <summary>
+/// QCBS (Quality and Cost Based Selection) evaluation result for a single bid
+/// </summary>
+public class QCBSBidScoreDto
+{
+    public Guid BidId { get; set; }
+    public string BidNumber { get; set; } = string.Empty;
+    public Guid BusinessPartnerId { get; set; }
+    public string BusinessPartnerName { get; set; } = string.Empty;
+    public decimal TotalBidAmount { get; set; }
+    public string Currency { get; set; } = "USD";
+
+    /// <summary>
+    /// Technical score (0-100) based on evaluation criteria
+    /// </summary>
+    public decimal TechnicalScore { get; set; }
+
+    /// <summary>
+    /// Financial score (0-100) calculated using lowest price formula
+    /// </summary>
+    public decimal FinancialScore { get; set; }
+
+    /// <summary>
+    /// Combined QCBS score = (TechnicalWeight * TechnicalScore) + (FinancialWeight * FinancialScore)
+    /// </summary>
+    public decimal CombinedScore { get; set; }
+
+    /// <summary>
+    /// Whether the bid meets the minimum technical score threshold
+    /// </summary>
+    public bool IsQualifiedTechnically { get; set; }
+
+    /// <summary>
+    /// Reason for disqualification if not qualified
+    /// </summary>
+    public string? DisqualificationReason { get; set; }
+
+    /// <summary>
+    /// Rank based on combined score (1 = highest)
+    /// </summary>
+    public int Rank { get; set; }
+
+    /// <summary>
+    /// Whether this bid is recommended for award (rank 1 and qualified)
+    /// </summary>
+    public bool IsRecommendedForAward { get; set; }
+}
+
+/// <summary>
+/// QCBS evaluation result for a tender
+/// </summary>
+public class QCBSEvaluationResultDto
+{
+    public Guid TenderId { get; set; }
+    public string TenderNumber { get; set; } = string.Empty;
+    public string TenderTitle { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Technical weight percentage (e.g., 80 for 80%)
+    /// </summary>
+    public decimal TechnicalWeight { get; set; }
+
+    /// <summary>
+    /// Financial weight percentage (e.g., 20 for 20%)
+    /// </summary>
+    public decimal FinancialWeight { get; set; }
+
+    /// <summary>
+    /// Minimum technical score required to qualify for financial evaluation
+    /// </summary>
+    public decimal MinimumTechnicalScore { get; set; }
+
+    /// <summary>
+    /// Lowest bid amount among qualified bids (used for financial score calculation)
+    /// </summary>
+    public decimal? LowestBidAmount { get; set; }
+
+    /// <summary>
+    /// Total number of bids evaluated
+    /// </summary>
+    public int TotalBids { get; set; }
+
+    /// <summary>
+    /// Number of bids that met the minimum technical score
+    /// </summary>
+    public int QualifiedBids { get; set; }
+
+    /// <summary>
+    /// Number of bids that did not meet the minimum technical score
+    /// </summary>
+    public int DisqualifiedBids { get; set; }
+
+    /// <summary>
+    /// Ranked list of bid scores
+    /// </summary>
+    public List<QCBSBidScoreDto> BidScores { get; set; } = new();
+
+    /// <summary>
+    /// Recommended winning bid (highest combined score among qualified bids)
+    /// </summary>
+    public QCBSBidScoreDto? RecommendedBid { get; set; }
+
+    /// <summary>
+    /// Date when the QCBS evaluation was calculated
+    /// </summary>
+    public DateTime CalculatedAt { get; set; }
+
+    /// <summary>
+    /// Name of the user who triggered the calculation
+    /// </summary>
+    public string? CalculatedByName { get; set; }
+}

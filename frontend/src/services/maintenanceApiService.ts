@@ -77,6 +77,7 @@ export interface WorkOrderTask {
   actualHours: number;
   completedAt?: string;
   isRequired: boolean;
+  photoPath?: string;
 }
 
 export interface WorkOrderPart {
@@ -237,10 +238,17 @@ export interface MaintenanceExpense {
   expenseDate: string;
   mileageDriven?: number;
   mileageRate?: number;
-  vehicleUsed?: string;
-  receiptNumber?: string;
+  // Vehicle tracking - backend uses vehicleId/vehicleName
+  vehicleId?: string;
+  vehicleName?: string;
+  vehicleUsed?: string; // Kept for backward compatibility, maps to vehicleId
+  // Receipt and documentation - backend uses referenceNumber
+  referenceNumber?: string;
+  receiptNumber?: string; // Kept for backward compatibility, maps to referenceNumber
   receiptPath?: string;
-  vendor?: string;
+  // Vendor - backend uses vendorName
+  vendorName?: string;
+  vendor?: string; // Kept for backward compatibility, maps to vendorName
   paymentMethod?: string;
   category?: string;
   status: string;
@@ -248,7 +256,11 @@ export interface MaintenanceExpense {
   approvedById?: string;
   approvedDate?: string;
   approvalNotes?: string;
-  notes?: string;
+  // Location - backend uses location field
+  location?: string;
+  notes?: string; // Kept for backward compatibility, maps to location
+  isApproved?: boolean;
+  approvedByName?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -636,9 +648,10 @@ class MaintenanceApiService {
   }
 
   async getTotalExpensesByWorkOrder(workOrderId: string): Promise<number> {
-    return await apiService.request<number>(
+    const response = await apiService.request<{ workOrderId: string; totalAmount: number }>(
       `/maintenance/expenses/total-by-workorder/${workOrderId}`
     );
+    return response.totalAmount ?? 0;
   }
 
   async getExpenseById(id: string): Promise<MaintenanceExpense> {
@@ -684,6 +697,56 @@ class MaintenanceApiService {
         body: JSON.stringify({ approvalNotes })
       }
     );
+  }
+
+  async uploadExpenseReceipt(file: File): Promise<{ filePath: string; fileName: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const token = localStorage.getItem('authToken');
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+    const response = await fetch(`${baseUrl}/maintenance/expenses/upload-receipt`, {
+      method: 'POST',
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Upload failed' }));
+      throw new Error(error.message || 'Failed to upload receipt');
+    }
+
+    return await response.json();
+  }
+
+  async uploadTaskPhoto(taskId: string, file: File): Promise<{ filePath: string; fileName: string; task: WorkOrderTask }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const token = localStorage.getItem('authToken');
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+    const response = await fetch(`${baseUrl}/maintenance/work-orders/tasks/${taskId}/photo`, {
+      method: 'POST',
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Upload failed' }));
+      throw new Error(error.message || 'Failed to upload task photo');
+    }
+
+    return await response.json();
+  }
+
+  async deleteTaskPhoto(taskId: string): Promise<void> {
+    await apiService.request<void>(`/maintenance/work-orders/tasks/${taskId}/photo`, {
+      method: 'DELETE'
+    });
   }
 }
 

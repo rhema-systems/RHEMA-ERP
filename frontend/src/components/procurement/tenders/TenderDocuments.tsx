@@ -31,6 +31,7 @@ const COMMON_DOCUMENT_TYPES = [
   { value: 'Insurance', label: 'Insurance Certificates' },
   { value: 'TechnicalProposal', label: 'Technical Proposal' },
   { value: 'CommercialProposal', label: 'Commercial Proposal' },
+  { value: 'TenderSecurity', label: 'Tender Security / Bid Bond' },
   { value: 'Custom', label: 'Custom Document Type' },
 ];
 
@@ -49,6 +50,7 @@ const DOCUMENT_TEMPLATES = {
     { documentType: 'TechnicalProposal', documentName: 'Technical Proposal', isRequired: true, description: 'Detailed technical proposal', maxFileSizeMB: 30, allowedFileTypes: 'PDF,DOC,DOCX' },
     { documentType: 'References', documentName: 'References/Past Performance', isRequired: true, description: 'At least 3 references from similar projects', maxFileSizeMB: 15, allowedFileTypes: 'PDF,DOC,DOCX' },
     { documentType: 'QualityCertifications', documentName: 'Quality Certifications', isRequired: false, description: 'ISO or other quality certifications', maxFileSizeMB: 10, allowedFileTypes: 'PDF' },
+    { documentType: 'TenderSecurity', documentName: 'Tender Security / Bid Bond', isRequired: false, description: 'Tender security or bid bond if required', maxFileSizeMB: 10, allowedFileTypes: 'PDF' },
   ],
   ITB: [
     { documentType: 'CompanyRegistration', documentName: 'Company Registration Certificate', isRequired: true, description: 'Valid company registration certificate', maxFileSizeMB: 10, allowedFileTypes: 'PDF,JPG,PNG' },
@@ -56,6 +58,7 @@ const DOCUMENT_TEMPLATES = {
     { documentType: 'FinancialStatements', documentName: 'Audited Financial Statements', isRequired: true, description: 'Last 2 years audited financial statements', maxFileSizeMB: 20, allowedFileTypes: 'PDF' },
     { documentType: 'Insurance', documentName: 'Insurance Certificates', isRequired: true, description: 'Valid insurance certificates', maxFileSizeMB: 10, allowedFileTypes: 'PDF' },
     { documentType: 'References', documentName: 'References/Past Performance', isRequired: true, description: 'References from similar projects', maxFileSizeMB: 15, allowedFileTypes: 'PDF,DOC,DOCX' },
+    { documentType: 'TenderSecurity', documentName: 'Tender Security / Bid Bond', isRequired: true, description: 'Tender security or bid bond as per tender requirements', maxFileSizeMB: 10, allowedFileTypes: 'PDF' },
   ],
   EOI: [
     { documentType: 'CompanyRegistration', documentName: 'Company Registration Certificate', isRequired: true, description: 'Valid company registration certificate', maxFileSizeMB: 10, allowedFileTypes: 'PDF,JPG,PNG' },

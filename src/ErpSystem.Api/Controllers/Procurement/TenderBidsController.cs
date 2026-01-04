@@ -763,5 +763,159 @@ public class TenderBidsController : ControllerBase
             return StatusCode(500, "An error occurred while updating the interview");
         }
     }
+
+    #region Bid LOT Endpoints
+
+    /// <summary>
+    /// Get all LOTs for a bid
+    /// </summary>
+    [HttpGet("{bidId}/lots")]
+    public async Task<ActionResult<IEnumerable<TenderBidLotDto>>> GetBidLots(Guid bidId)
+    {
+        try
+        {
+            var lots = await _bidService.GetBidLotsAsync(bidId);
+            return Ok(lots);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting lots for bid {BidId}", bidId);
+            return StatusCode(500, "An error occurred while retrieving bid lots");
+        }
+    }
+
+    /// <summary>
+    /// Get a specific bid LOT by ID
+    /// </summary>
+    [HttpGet("lots/{bidLotId}")]
+    public async Task<ActionResult<TenderBidLotDto>> GetBidLot(Guid bidLotId)
+    {
+        try
+        {
+            var lot = await _bidService.GetBidLotByIdAsync(bidLotId);
+            if (lot == null)
+            {
+                return NotFound($"Bid lot with ID {bidLotId} not found");
+            }
+            return Ok(lot);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting bid lot {BidLotId}", bidLotId);
+            return StatusCode(500, "An error occurred while retrieving the bid lot");
+        }
+    }
+
+    /// <summary>
+    /// Add a new LOT to a bid
+    /// </summary>
+    [HttpPost("{bidId}/lots")]
+    public async Task<ActionResult<TenderBidLotDto>> AddBidLot(Guid bidId, [FromBody] CreateTenderBidLotDto dto)
+    {
+        try
+        {
+            var lot = await _bidService.AddBidLotAsync(bidId, dto);
+            return CreatedAtAction(nameof(GetBidLot), new { bidLotId = lot.Id }, lot);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding lot to bid {BidId}", bidId);
+            return StatusCode(500, "An error occurred while adding the bid lot");
+        }
+    }
+
+    /// <summary>
+    /// Update a bid LOT
+    /// </summary>
+    [HttpPut("lots/{bidLotId}")]
+    public async Task<ActionResult<TenderBidLotDto>> UpdateBidLot(Guid bidLotId, [FromBody] UpdateTenderBidLotDto dto)
+    {
+        try
+        {
+            var lot = await _bidService.UpdateBidLotAsync(bidLotId, dto);
+            return Ok(lot);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating bid lot {BidLotId}", bidLotId);
+            return StatusCode(500, "An error occurred while updating the bid lot");
+        }
+    }
+
+    /// <summary>
+    /// Delete a bid LOT
+    /// </summary>
+    [HttpDelete("lots/{bidLotId}")]
+    public async Task<ActionResult> DeleteBidLot(Guid bidLotId)
+    {
+        try
+        {
+            await _bidService.DeleteBidLotAsync(bidLotId);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting bid lot {BidLotId}", bidLotId);
+            return StatusCode(500, "An error occurred while deleting the bid lot");
+        }
+    }
+
+    /// <summary>
+    /// Assign a bid item to a LOT
+    /// </summary>
+    [HttpPost("items/{bidItemId}/assign-lot/{bidLotId}")]
+    public async Task<ActionResult> AssignBidItemToLot(Guid bidItemId, Guid bidLotId)
+    {
+        try
+        {
+            await _bidService.AssignBidItemToLotAsync(bidItemId, bidLotId);
+            return Ok(new { message = "Bid item assigned to lot successfully" });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error assigning bid item {BidItemId} to lot {BidLotId}", bidItemId, bidLotId);
+            return StatusCode(500, "An error occurred while assigning the bid item to the lot");
+        }
+    }
+
+    /// <summary>
+    /// Remove a bid item from its LOT
+    /// </summary>
+    [HttpPost("items/{bidItemId}/remove-from-lot")]
+    public async Task<ActionResult> RemoveBidItemFromLot(Guid bidItemId)
+    {
+        try
+        {
+            await _bidService.RemoveBidItemFromLotAsync(bidItemId);
+            return Ok(new { message = "Bid item removed from lot successfully" });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error removing bid item {BidItemId} from lot", bidItemId);
+            return StatusCode(500, "An error occurred while removing the bid item from the lot");
+        }
+    }
+
+    #endregion
 }
 

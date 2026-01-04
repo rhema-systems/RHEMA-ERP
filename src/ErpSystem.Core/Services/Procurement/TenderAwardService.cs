@@ -13,6 +13,7 @@ public class TenderAwardService : ITenderAwardService
     private readonly ITenderRepository _tenderRepository;
     private readonly ITenderBidRepository _bidRepository;
     private readonly ITenderEvaluationRepository _evaluationRepository;
+    private readonly ITenderEvaluatorRepository _evaluatorRepository;
     private readonly ITenderNotificationService _notificationService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -23,6 +24,7 @@ public class TenderAwardService : ITenderAwardService
         ITenderRepository tenderRepository,
         ITenderBidRepository bidRepository,
         ITenderEvaluationRepository evaluationRepository,
+        ITenderEvaluatorRepository evaluatorRepository,
         ITenderNotificationService notificationService,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
@@ -32,6 +34,7 @@ public class TenderAwardService : ITenderAwardService
         _tenderRepository = tenderRepository;
         _bidRepository = bidRepository;
         _evaluationRepository = evaluationRepository;
+        _evaluatorRepository = evaluatorRepository;
         _notificationService = notificationService;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
@@ -113,19 +116,32 @@ public class TenderAwardService : ITenderAwardService
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
 
             var bids = await _bidRepository.GetByTenderIdAsync(tenderId);
-            var evaluatedBids = bids.Where(b => b.Status == "Evaluated").ToList();
+
+            // Get all assigned evaluators for this tender
+            var evaluators = await _evaluatorRepository.GetByTenderIdAsync(tenderId);
+            var totalAssignedEvaluators = evaluators.Count();
 
             var bidRecommendations = new List<BidRecommendationDto>();
+            var evaluatedBidsCount = 0;
 
-            foreach (var bid in evaluatedBids)
+            // Consider all bids that are Opened, UnderEvaluation, or Evaluated
+            var eligibleBids = bids.Where(b => b.Status == "Opened" || b.Status == "UnderEvaluation" || b.Status == "Evaluated").ToList();
+
+            foreach (var bid in eligibleBids)
             {
                 var evaluations = await _evaluationRepository.GetByBidIdAsync(bid.Id);
                 var submittedEvaluations = evaluations.Where(e => e.Status == "Submitted").ToList();
-                var avgScore = submittedEvaluations.Any() ? (submittedEvaluations.Average(e => e.TotalScore) ?? 0) : 0;
+
+                // Only include bids that have at least one submitted evaluation
+                if (!submittedEvaluations.Any())
+                    continue;
+
+                evaluatedBidsCount++;
+                var avgScore = submittedEvaluations.Average(e => e.TotalScore) ?? 0;
 
                 // Count how many evaluators recommended this bid
                 var recommendationCount = submittedEvaluations.Count(e => e.IsRecommended);
-                var totalEvaluators = submittedEvaluations.Count;
+                var evaluatorCount = submittedEvaluations.Count;
 
                 bidRecommendations.Add(new BidRecommendationDto
                 {
@@ -135,9 +151,9 @@ public class TenderAwardService : ITenderAwardService
                     BusinessPartnerName = bid.BusinessPartner?.PartnerName ?? string.Empty,
                     TotalBidAmount = bid.TotalBidAmount,
                     AverageScore = avgScore,
-                    EvaluationCount = totalEvaluators,
+                    EvaluationCount = evaluatorCount,
                     RecommendationCount = recommendationCount,
-                    TotalEvaluators = totalEvaluators,
+                    TotalEvaluators = totalAssignedEvaluators,
                     Recommendation = avgScore >= 70 ? "Recommended" : "Not Recommended"
                 });
             }
@@ -152,7 +168,7 @@ public class TenderAwardService : ITenderAwardService
                 TenderNumber = tender.TenderNumber,
                 TenderTitle = tender.Title,
                 TotalBids = bids.Count(),
-                EvaluatedBids = evaluatedBids.Count,
+                EvaluatedBids = evaluatedBidsCount,
                 RecommendedBidId = topBid?.BidId,
                 RecommendedBidNumber = topBid?.BidNumber,
                 RecommendedBusinessPartner = topBid?.BusinessPartnerName,

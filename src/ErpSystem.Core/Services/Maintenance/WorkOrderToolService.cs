@@ -125,6 +125,16 @@ public class WorkOrderToolService : IWorkOrderToolService
             var tools = await _workOrderToolRepository.GetByWorkOrderIdAsync(workOrderId);
             var now = DateTime.UtcNow;
 
+            // Calculate total rental cost based on checkout duration and daily rate
+            decimal totalRentalCost = 0;
+            foreach (var tool in tools.Where(t => t.CheckoutId.HasValue && t.Tool != null))
+            {
+                var checkoutDate = tool.Checkout?.CheckoutDate ?? now;
+                var returnDate = tool.Checkout?.ActualReturnDate ?? now;
+                var days = Math.Max(1, (int)Math.Ceiling((returnDate - checkoutDate).TotalDays));
+                totalRentalCost += tool.Tool!.DailyRentalRate * days;
+            }
+
             return new WorkOrderToolSummaryDto
             {
                 TotalTools = tools.Count(),
@@ -135,7 +145,7 @@ public class WorkOrderToolService : IWorkOrderToolService
                 OverdueTools = tools.Count(t => t.CheckoutId.HasValue
                     && t.Checkout?.ActualReturnDate == null
                     && t.Checkout?.ExpectedReturnDate < now),
-                TotalRentalCost = 0 // InventoryItem doesn't have DailyRentalRate property
+                TotalRentalCost = totalRentalCost
             };
         }
         catch (Exception ex)
@@ -147,75 +157,79 @@ public class WorkOrderToolService : IWorkOrderToolService
 
     public async Task RemoveToolAllocationAsync(Guid workOrderId, Guid toolId)
     {
-        await _unitOfWork.BeginTransactionAsync();
-        try
+        // Use execution strategy to handle retries with transaction
+        await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
-            _logger.LogInformation("Removing tool {ToolId} allocation from work order {WorkOrderId}",
-                toolId, workOrderId);
-
-            var workOrderTool = await _workOrderToolRepository.GetByWorkOrderAndToolIdAsync(workOrderId, toolId) ?? throw new ArgumentException("Tool allocation not found");
-
-            // Cannot remove if tool is checked out
-            if (workOrderTool.CheckoutId.HasValue && workOrderTool.Checkout?.ActualReturnDate == null)
+            await _unitOfWork.BeginTransactionAsync();
+            try
             {
-                throw new InvalidOperationException("Cannot remove tool allocation while tool is checked out");
-            }
+                _logger.LogInformation("Removing tool {ToolId} allocation from work order {WorkOrderId}",
+                    toolId, workOrderId);
 
-            // Cannot remove if tool has been returned (has checkout history)
-            if (workOrderTool.CheckoutId.HasValue && workOrderTool.Checkout?.ActualReturnDate != null)
-            {
-                _logger.LogWarning("Cannot remove tool {ToolId} allocation - it has checkout history", toolId);
-                throw new InvalidOperationException("Cannot remove tool allocations with checkout history. This data is needed for work order records.");
-            }
+                var workOrderTool = await _workOrderToolRepository.GetByWorkOrderAndToolIdAsync(workOrderId, toolId) ?? throw new ArgumentException("Tool allocation not found");
 
-            // Release inventory allocation if exists
-            if (workOrderTool.AllocationId.HasValue)
-            {
-                var allocationRepo = _unitOfWork.Repository<ErpSystem.Core.Entities.Inventory.InventoryAllocation>();
-                var allocation = await allocationRepo.GetByIdAsync(workOrderTool.AllocationId.Value);
-
-                if (allocation != null)
+                // Cannot remove if tool is checked out
+                if (workOrderTool.CheckoutId.HasValue && workOrderTool.Checkout?.ActualReturnDate == null)
                 {
-                    // Get warehouse quantity
-                    var warehouseQuantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(
-                        allocation.WarehouseId, toolId);
-
-                    if (warehouseQuantity != null)
-                    {
-                        // Release 1 unit back to available stock
-                        warehouseQuantity.AvailableStock += 1;
-                        warehouseQuantity.AllocatedStock -= 1;
-                        warehouseQuantity.LastMovementDate = DateTime.UtcNow;
-                        warehouseQuantity.UpdatedAt = DateTime.UtcNow;
-
-                        await _warehouseQuantityRepository.UpdateAsync(warehouseQuantity);
-
-                        _logger.LogInformation(
-                            "Released tool {ItemCode} allocation back to warehouse",
-                            allocation.InventoryItem.ItemCode);
-                    }
-
-                    // Update allocation status
-                    allocation.Status = "Cancelled";
-                    allocation.UpdatedAt = DateTime.UtcNow;
-                    await allocationRepo.UpdateAsync(allocation);
+                    throw new InvalidOperationException("Cannot remove tool allocation while tool is checked out");
                 }
+
+                // Cannot remove if tool has been returned (has checkout history)
+                if (workOrderTool.CheckoutId.HasValue && workOrderTool.Checkout?.ActualReturnDate != null)
+                {
+                    _logger.LogWarning("Cannot remove tool {ToolId} allocation - it has checkout history", toolId);
+                    throw new InvalidOperationException("Cannot remove tool allocations with checkout history. This data is needed for work order records.");
+                }
+
+                // Release inventory allocation if exists
+                if (workOrderTool.AllocationId.HasValue)
+                {
+                    var allocationRepo = _unitOfWork.Repository<ErpSystem.Core.Entities.Inventory.InventoryAllocation>();
+                    var allocation = await allocationRepo.GetByIdAsync(workOrderTool.AllocationId.Value);
+
+                    if (allocation != null)
+                    {
+                        // Get warehouse quantity
+                        var warehouseQuantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(
+                            allocation.WarehouseId, toolId);
+
+                        if (warehouseQuantity != null)
+                        {
+                            // Release 1 unit back to available stock
+                            warehouseQuantity.AvailableStock += 1;
+                            warehouseQuantity.AllocatedStock -= 1;
+                            warehouseQuantity.LastMovementDate = DateTime.UtcNow;
+                            warehouseQuantity.UpdatedAt = DateTime.UtcNow;
+
+                            await _warehouseQuantityRepository.UpdateAsync(warehouseQuantity);
+
+                            _logger.LogInformation(
+                                "Released tool {ItemCode} allocation back to warehouse",
+                                allocation.InventoryItem.ItemCode);
+                        }
+
+                        // Update allocation status
+                        allocation.Status = "Cancelled";
+                        allocation.UpdatedAt = DateTime.UtcNow;
+                        await allocationRepo.UpdateAsync(allocation);
+                    }
+                }
+
+                // Hard delete - permanently remove from database
+                await _workOrderToolRepository.HardDeleteAsync(workOrderTool);
+                await _unitOfWork.CommitAsync();
+
+                _logger.LogInformation("Successfully removed tool {ToolId} from work order {WorkOrderId}",
+                    toolId, workOrderId);
             }
-
-            // Hard delete - permanently remove from database
-            await _workOrderToolRepository.HardDeleteAsync(workOrderTool);
-            await _unitOfWork.CommitAsync();
-
-            _logger.LogInformation("Successfully removed tool {ToolId} from work order {WorkOrderId}",
-                toolId, workOrderId);
-        }
-        catch (Exception ex)
-        {
-            await _unitOfWork.RollbackAsync();
-            _logger.LogError(ex, "Error removing tool {ToolId} from work order {WorkOrderId}",
-                toolId, workOrderId);
-            throw;
-        }
+            catch (Exception ex)
+            {
+                // ExecuteInStrategyAsync handles rollback automatically
+                _logger.LogError(ex, "Error removing tool {ToolId} from work order {WorkOrderId}",
+                    toolId, workOrderId);
+                throw;
+            }
+        });
     }
 
     public async Task<WorkOrderToolDto> CheckoutToolAsync(CheckoutWorkOrderToolDto checkoutDto)
@@ -422,9 +436,19 @@ public class WorkOrderToolService : IWorkOrderToolService
         try
         {
             var tools = await _workOrderToolRepository.GetByWorkOrderIdAsync(workOrderId);
+            var now = DateTime.UtcNow;
 
-            // InventoryItem doesn't have DailyRentalRate property
-            return 0;
+            // Calculate total rental cost based on checkout duration and daily rate
+            decimal totalCost = 0;
+            foreach (var tool in tools.Where(t => t.CheckoutId.HasValue && t.Tool != null))
+            {
+                var checkoutDate = tool.Checkout?.CheckoutDate ?? now;
+                var returnDate = tool.Checkout?.ActualReturnDate ?? now;
+                var days = Math.Max(1, (int)Math.Ceiling((returnDate - checkoutDate).TotalDays));
+                totalCost += tool.Tool!.DailyRentalRate * days;
+            }
+
+            return totalCost;
         }
         catch (Exception ex)
         {
@@ -663,11 +687,11 @@ public class WorkOrderToolService : IWorkOrderToolService
             Id = workOrderTool.Id,
             WorkOrderId = workOrderTool.WorkOrderId,
             ToolId = workOrderTool.ToolId,
-            ToolCode = workOrderTool.Tool?.ItemCode ?? string.Empty,  // InventoryItem uses ItemCode
+            ToolCode = workOrderTool.Tool?.ItemCode ?? string.Empty,
             ToolName = workOrderTool.Tool?.Name ?? string.Empty,
             Description = workOrderTool.Tool?.Description,
-            Category = workOrderTool.Tool?.Category?.Name ?? string.Empty,  // InventoryItem.Category is navigation prop
-            CurrentLocation = null,  // InventoryItem doesn't track current location
+            Category = workOrderTool.Tool?.Category?.Name ?? string.Empty,
+            CurrentLocation = null,
             IsRequired = workOrderTool.IsRequired,
             IsAllocated = workOrderTool.IsAllocated,
             AllocationDate = workOrderTool.AllocationDate,
@@ -679,10 +703,10 @@ public class WorkOrderToolService : IWorkOrderToolService
             CheckoutStatus = workOrderTool.Checkout?.Status,
             CheckedOutById = workOrderTool.Checkout?.CheckedOutById,
             CheckedOutByName = checkedOutByName,
-            DailyRentalRate = 0,  // InventoryItem doesn't have DailyRentalRate
-            RequiresCertification = false,  // InventoryItem doesn't have RequiresCertification
-            RequiresTraining = false,  // InventoryItem doesn't have RequiresTraining
-            SafetyNotes = null,  // InventoryItem doesn't have SafetyNotes
+            DailyRentalRate = workOrderTool.Tool?.DailyRentalRate ?? 0,
+            RequiresCertification = false,
+            RequiresTraining = false,
+            SafetyNotes = null,
             Notes = workOrderTool.Notes,
             CreatedAt = workOrderTool.CreatedAt,
             UpdatedAt = workOrderTool.UpdatedAt

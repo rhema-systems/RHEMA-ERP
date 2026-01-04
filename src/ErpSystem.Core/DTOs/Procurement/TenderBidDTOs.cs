@@ -23,6 +23,13 @@ public class TenderBidSummaryDto
     public bool IsCompliant { get; set; }
     public bool HasPaidFees { get; set; }
     public string? PaymentStatus { get; set; }
+
+    // QCBS Scores
+    public decimal? TechnicalScore { get; set; }
+    public decimal? FinancialScore { get; set; }
+    public decimal? CombinedScore { get; set; }
+    public bool IsQualifiedTechnically { get; set; } = true;
+    public string? DisqualificationReason { get; set; }
 }
 
 /// <summary>
@@ -67,6 +74,13 @@ public class TenderBidDetailDto
     public decimal? TotalScore { get; set; }
     public int? Rank { get; set; }
 
+    // QCBS Scores
+    public decimal? TechnicalScore { get; set; }
+    public decimal? FinancialScore { get; set; }
+    public decimal? CombinedScore { get; set; }
+    public bool IsQualifiedTechnically { get; set; } = true;
+    public string? DisqualificationReason { get; set; }
+
     // Metadata
     public DateTime? OpenedDate { get; set; }
     public string? OpenedByName { get; set; }
@@ -78,10 +92,12 @@ public class TenderBidDetailDto
     public DateTime UpdatedAt { get; set; }
 
     // Related Data
+    public List<TenderBidLotDto> BidLots { get; set; } = new();
     public List<TenderBidItemDto> Items { get; set; } = new();
     public List<TenderBidDocumentDto> Documents { get; set; } = new();
     public List<TenderEvaluationDto> Evaluations { get; set; } = new();
     public List<TenderInterviewDto> Interviews { get; set; } = new();
+    public int BidLotCount { get; set; }
 }
 
 /// <summary>
@@ -179,6 +195,8 @@ public class TenderBidItemDto
 {
     public Guid Id { get; set; }
     public Guid TenderBidId { get; set; }
+    public Guid? BidLotId { get; set; }
+    public string? LotCode { get; set; }
     public Guid TenderItemId { get; set; }
     public string TenderItemDescription { get; set; } = string.Empty;
     public decimal RequestedQuantity { get; set; }
@@ -476,3 +494,95 @@ public class SupplierBidListItemDto
     public decimal TotalBidAmount { get; set; }
     public string? Currency { get; set; }
 }
+
+#region Tender Bid LOT DTOs
+
+/// <summary>
+/// Tender bid LOT DTO - represents a bid on a specific LOT
+/// </summary>
+public class TenderBidLotDto
+{
+    public Guid Id { get; set; }
+    public Guid TenderBidId { get; set; }
+    public Guid LotId { get; set; }
+    public string LotCode { get; set; } = string.Empty;
+    public string LotTitle { get; set; } = string.Empty;
+    public decimal TotalLotAmount { get; set; }
+    public string? Currency { get; set; }
+    public int? DeliveryDays { get; set; }
+    public string? PaymentTerms { get; set; }
+    public string? WarrantyTerms { get; set; }
+    public string? TechnicalProposal { get; set; }
+    public string? CommercialProposal { get; set; }
+    public string Status { get; set; } = "Draft";
+    public decimal? PriceScore { get; set; }
+    public decimal? QualityScore { get; set; }
+    public decimal? DeliveryScore { get; set; }
+    public decimal? TotalScore { get; set; }
+    public int? Rank { get; set; }
+    public string? EvaluationNotes { get; set; }
+    public string? Notes { get; set; }
+    public int ItemCount { get; set; }
+    public List<TenderBidItemDto> Items { get; set; } = new();
+}
+
+/// <summary>
+/// Create tender bid LOT DTO
+/// </summary>
+public class CreateTenderBidLotDto
+{
+    [Required]
+    public Guid LotId { get; set; }
+
+    public int? DeliveryDays { get; set; }
+
+    [MaxLength(500)]
+    public string? PaymentTerms { get; set; }
+
+    [MaxLength(500)]
+    public string? WarrantyTerms { get; set; }
+
+    public string? TechnicalProposal { get; set; }
+    public string? CommercialProposal { get; set; }
+    public string? Notes { get; set; }
+
+    /// <summary>
+    /// All items in this LOT must be bid on
+    /// </summary>
+    [Required]
+    public List<CreateTenderBidItemDto> Items { get; set; } = new();
+}
+
+/// <summary>
+/// Update tender bid LOT DTO
+/// </summary>
+public class UpdateTenderBidLotDto
+{
+    public int? DeliveryDays { get; set; }
+
+    [MaxLength(500)]
+    public string? PaymentTerms { get; set; }
+
+    [MaxLength(500)]
+    public string? WarrantyTerms { get; set; }
+
+    public string? TechnicalProposal { get; set; }
+    public string? CommercialProposal { get; set; }
+    public string? Notes { get; set; }
+
+    public List<UpdateTenderBidItemDto>? Items { get; set; }
+}
+
+/// <summary>
+/// Submit bid for specific LOTs
+/// </summary>
+public class SubmitBidLotsDto
+{
+    [Required]
+    public List<Guid> LotIds { get; set; } = new();
+
+    [Required]
+    public bool ConfirmSubmission { get; set; }
+}
+
+#endregion

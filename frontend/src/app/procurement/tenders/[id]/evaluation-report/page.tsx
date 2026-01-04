@@ -156,27 +156,60 @@ export default function EvaluationReportPage() {
       <Card>
         <CardHeader>
           <CardTitle>Evaluation Criteria & Weightages</CardTitle>
-          <CardDescription>Criteria used for bid evaluation</CardDescription>
+          <CardDescription>
+            {report.useQCBSEvaluation
+              ? 'Quality and Cost-Based Selection (QCBS) evaluation method'
+              : 'Criteria used for bid evaluation'}
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="text-center p-4 bg-blue-50 rounded-lg">
-              <p className="text-sm text-gray-600">Price</p>
-              <p className="text-2xl font-bold text-blue-600">{report.priceWeightage}%</p>
+          {report.useQCBSEvaluation ? (
+            /* QCBS Evaluation Criteria */
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 mb-4">
+                <Badge className="bg-blue-600">QCBS Evaluation</Badge>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="text-center p-4 bg-blue-50 rounded-lg">
+                  <p className="text-sm text-gray-600">Technical Weight</p>
+                  <p className="text-2xl font-bold text-blue-600">{report.technicalWeight}%</p>
+                </div>
+                <div className="text-center p-4 bg-green-50 rounded-lg">
+                  <p className="text-sm text-gray-600">Financial Weight</p>
+                  <p className="text-2xl font-bold text-green-600">{report.financialWeight}%</p>
+                </div>
+                <div className="text-center p-4 bg-orange-50 rounded-lg">
+                  <p className="text-sm text-gray-600">Min. Technical Score</p>
+                  <p className="text-2xl font-bold text-orange-600">{report.minimumTechnicalScore}%</p>
+                </div>
+              </div>
+              {report.lowestBidAmount && (
+                <div className="mt-4 p-3 bg-gray-50 rounded-lg text-sm">
+                  <strong>Lowest Bid Amount:</strong> {report.currency} {report.lowestBidAmount.toLocaleString()}
+                </div>
+              )}
             </div>
-            <div className="text-center p-4 bg-green-50 rounded-lg">
-              <p className="text-sm text-gray-600">Quality</p>
-              <p className="text-2xl font-bold text-green-600">{report.qualityWeightage}%</p>
+          ) : (
+            /* Standard Evaluation Criteria */
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center p-4 bg-blue-50 rounded-lg">
+                <p className="text-sm text-gray-600">Price</p>
+                <p className="text-2xl font-bold text-blue-600">{report.priceWeightage}%</p>
+              </div>
+              <div className="text-center p-4 bg-green-50 rounded-lg">
+                <p className="text-sm text-gray-600">Quality</p>
+                <p className="text-2xl font-bold text-green-600">{report.qualityWeightage}%</p>
+              </div>
+              <div className="text-center p-4 bg-orange-50 rounded-lg">
+                <p className="text-sm text-gray-600">Delivery</p>
+                <p className="text-2xl font-bold text-orange-600">{report.deliveryWeightage}%</p>
+              </div>
+              <div className="text-center p-4 bg-purple-50 rounded-lg">
+                <p className="text-sm text-gray-600">Experience</p>
+                <p className="text-2xl font-bold text-purple-600">{report.experienceWeightage}%</p>
+              </div>
             </div>
-            <div className="text-center p-4 bg-orange-50 rounded-lg">
-              <p className="text-sm text-gray-600">Delivery</p>
-              <p className="text-2xl font-bold text-orange-600">{report.deliveryWeightage}%</p>
-            </div>
-            <div className="text-center p-4 bg-purple-50 rounded-lg">
-              <p className="text-sm text-gray-600">Experience</p>
-              <p className="text-2xl font-bold text-purple-600">{report.experienceWeightage}%</p>
-            </div>
-          </div>
+          )}
         </CardContent>
       </Card>
 
@@ -274,104 +307,191 @@ export default function EvaluationReportPage() {
             <Trophy className="h-5 w-5 text-yellow-500" />
             Consolidated Bid Rankings
           </CardTitle>
-          <CardDescription>All bids ranked by weighted average scores</CardDescription>
+          <CardDescription>
+            {report.useQCBSEvaluation
+              ? 'All bids ranked by QCBS combined scores (Technical + Financial)'
+              : 'All bids ranked by weighted average scores'}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {report.bidEvaluations && report.bidEvaluations.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-gray-50">
-                  <TableHead className="w-16 text-center">Rank</TableHead>
-                  <TableHead>Business Partner</TableHead>
-                  <TableHead>Bid Number</TableHead>
-                  <TableHead className="text-right">Bid Amount</TableHead>
-                  <TableHead className="text-center">Status</TableHead>
-                  <TableHead className="text-center">Compliant</TableHead>
-                  <TableHead className="text-center">Price</TableHead>
-                  <TableHead className="text-center">Quality</TableHead>
-                  <TableHead className="text-center">Delivery</TableHead>
-                  <TableHead className="text-center">Experience</TableHead>
-                  <TableHead className="text-center font-bold">Final Score</TableHead>
-                  <TableHead className="text-center">Recommendations</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {report.bidEvaluations
-                  .sort((a, b) => (a.rank || 999) - (b.rank || 999))
-                  .map((bid, index) => (
-                    <TableRow
-                      key={bid.bidId}
-                      className={`
-                        ${bid.isRecommended ? 'bg-green-50 hover:bg-green-100' : 'hover:bg-gray-50'}
-                        ${index === 0 ? 'border-l-4 border-l-yellow-400' : ''}
-                      `}
-                    >
-                      <TableCell className="text-center">
-                        {getRankBadge(bid.rank)}
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {bid.businessPartnerName || 'Unknown'}
-                        {bid.isRecommended && (
-                          <Badge className="ml-2 bg-green-600 text-xs">
-                            <Award className="h-3 w-3 mr-1" />
-                            Recommended
+            report.useQCBSEvaluation ? (
+              /* QCBS Rankings Table */
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gray-50">
+                    <TableHead className="w-16 text-center">Rank</TableHead>
+                    <TableHead>Business Partner</TableHead>
+                    <TableHead>Bid Number</TableHead>
+                    <TableHead className="text-right">Bid Amount</TableHead>
+                    <TableHead className="text-center">Tech Qualified</TableHead>
+                    <TableHead className="text-center">Technical Score</TableHead>
+                    <TableHead className="text-center">Financial Score</TableHead>
+                    <TableHead className="text-center font-bold">Combined Score</TableHead>
+                    <TableHead className="text-center">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {report.bidEvaluations
+                    .sort((a, b) => (a.rank || 999) - (b.rank || 999))
+                    .map((bid, index) => (
+                      <TableRow
+                        key={bid.bidId}
+                        className={`
+                          ${bid.isRecommended ? 'bg-green-50 hover:bg-green-100' : 'hover:bg-gray-50'}
+                          ${index === 0 && bid.isQualifiedTechnically ? 'border-l-4 border-l-yellow-400' : ''}
+                          ${!bid.isQualifiedTechnically ? 'opacity-60' : ''}
+                        `}
+                      >
+                        <TableCell className="text-center">
+                          {bid.isQualifiedTechnically ? getRankBadge(bid.rank) : '-'}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {bid.businessPartnerName || 'Unknown'}
+                          {bid.isRecommended && (
+                            <Badge className="ml-2 bg-green-600 text-xs">
+                              <Award className="h-3 w-3 mr-1" />
+                              Recommended
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">{bid.bidNumber}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          {report.currency} {bid.totalBidAmount.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {bid.isQualifiedTechnically ? (
+                            <CheckCircle2 className="h-5 w-5 text-green-500 mx-auto" />
+                          ) : (
+                            <div className="flex flex-col items-center">
+                              <AlertCircle className="h-5 w-5 text-red-500" />
+                              <span className="text-xs text-red-500 mt-1">
+                                {bid.disqualificationReason || 'Below minimum'}
+                              </span>
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant={bid.technicalScore && bid.technicalScore >= report.minimumTechnicalScore ? 'default' : 'destructive'}>
+                            {bid.technicalScore?.toFixed(1) || '-'}%
                           </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="font-mono text-sm">{bid.bidNumber}</TableCell>
-                      <TableCell className="text-right font-medium">
-                        {report.currency} {bid.totalBidAmount.toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Badge variant={bid.bidStatus === 'Evaluated' ? 'default' : 'outline'}>
-                          {bid.bidStatus || 'N/A'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {bid.isCompliant ? (
-                          <CheckCircle2 className="h-5 w-5 text-green-500 mx-auto" />
-                        ) : (
-                          <AlertCircle className="h-5 w-5 text-red-500 mx-auto" />
-                        )}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="text-blue-600 font-medium">
-                          {bid.weightedPriceScore?.toFixed(1) || '-'}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="text-green-600 font-medium">
-                          {bid.weightedQualityScore?.toFixed(1) || '-'}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="text-orange-600 font-medium">
-                          {bid.weightedDeliveryScore?.toFixed(1) || '-'}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="text-purple-600 font-medium">
-                          {bid.weightedExperienceScore?.toFixed(1) || '-'}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="text-xl font-bold text-gray-800">
-                          {bid.finalScore?.toFixed(1) || '-'}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {bid.recommendationCount > 0 ? (
-                          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300">
-                            {bid.recommendationCount} evaluator{bid.recommendationCount > 1 ? 's' : ''}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-green-600 font-medium">
+                            {bid.financialScore?.toFixed(1) || '-'}%
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-xl font-bold text-gray-800">
+                            {bid.combinedScore?.toFixed(2) || '-'}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant={bid.bidStatus === 'Evaluated' ? 'default' : 'outline'}>
+                            {bid.bidStatus || 'N/A'}
                           </Badge>
-                        ) : (
-                          <span className="text-gray-400">-</span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            ) : (
+              /* Standard Rankings Table */
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gray-50">
+                    <TableHead className="w-16 text-center">Rank</TableHead>
+                    <TableHead>Business Partner</TableHead>
+                    <TableHead>Bid Number</TableHead>
+                    <TableHead className="text-right">Bid Amount</TableHead>
+                    <TableHead className="text-center">Status</TableHead>
+                    <TableHead className="text-center">Compliant</TableHead>
+                    <TableHead className="text-center">Price</TableHead>
+                    <TableHead className="text-center">Quality</TableHead>
+                    <TableHead className="text-center">Delivery</TableHead>
+                    <TableHead className="text-center">Experience</TableHead>
+                    <TableHead className="text-center font-bold">Final Score</TableHead>
+                    <TableHead className="text-center">Recommendations</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {report.bidEvaluations
+                    .sort((a, b) => (a.rank || 999) - (b.rank || 999))
+                    .map((bid, index) => (
+                      <TableRow
+                        key={bid.bidId}
+                        className={`
+                          ${bid.isRecommended ? 'bg-green-50 hover:bg-green-100' : 'hover:bg-gray-50'}
+                          ${index === 0 ? 'border-l-4 border-l-yellow-400' : ''}
+                        `}
+                      >
+                        <TableCell className="text-center">
+                          {getRankBadge(bid.rank)}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {bid.businessPartnerName || 'Unknown'}
+                          {bid.isRecommended && (
+                            <Badge className="ml-2 bg-green-600 text-xs">
+                              <Award className="h-3 w-3 mr-1" />
+                              Recommended
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">{bid.bidNumber}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          {report.currency} {bid.totalBidAmount.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant={bid.bidStatus === 'Evaluated' ? 'default' : 'outline'}>
+                            {bid.bidStatus || 'N/A'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {bid.isCompliant ? (
+                            <CheckCircle2 className="h-5 w-5 text-green-500 mx-auto" />
+                          ) : (
+                            <AlertCircle className="h-5 w-5 text-red-500 mx-auto" />
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-blue-600 font-medium">
+                            {bid.weightedPriceScore?.toFixed(1) || '-'}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-green-600 font-medium">
+                            {bid.weightedQualityScore?.toFixed(1) || '-'}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-orange-600 font-medium">
+                            {bid.weightedDeliveryScore?.toFixed(1) || '-'}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-purple-600 font-medium">
+                            {bid.weightedExperienceScore?.toFixed(1) || '-'}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-xl font-bold text-gray-800">
+                            {bid.finalScore?.toFixed(1) || '-'}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {bid.recommendationCount > 0 ? (
+                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300">
+                              {bid.recommendationCount} evaluator{bid.recommendationCount > 1 ? 's' : ''}
+                            </Badge>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            )
           ) : (
             <div className="text-center py-8">
               <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
@@ -380,6 +500,40 @@ export default function EvaluationReportPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* QCBS Disqualified Bids Warning */}
+      {report.useQCBSEvaluation && report.disqualifiedBidsCount && report.disqualifiedBidsCount > 0 && (
+        <Card className="border-red-200 bg-red-50">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-red-800 text-lg">
+              <AlertCircle className="h-5 w-5" />
+              Technically Disqualified Bids ({report.disqualifiedBidsCount})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-red-600 mb-3">
+              These bids did not meet the minimum technical score of {report.minimumTechnicalScore}% and are not eligible for financial evaluation.
+            </p>
+            <div className="space-y-2">
+              {report.bidEvaluations
+                .filter(bid => !bid.isQualifiedTechnically)
+                .map(bid => (
+                  <div key={bid.bidId} className="flex items-start gap-3 p-2 bg-white rounded border border-red-200">
+                    <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-medium text-red-800">
+                        {bid.businessPartnerName} ({bid.bidNumber})
+                      </p>
+                      <p className="text-sm text-red-600">
+                        Technical Score: {bid.technicalScore?.toFixed(1)}% (Required: {report.minimumTechnicalScore}%)
+                      </p>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Non-Compliant Bids Warning */}
       {report.nonCompliantBids > 0 && (

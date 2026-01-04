@@ -19,7 +19,7 @@ interface AssignEvaluatorsDialogProps {
 
 export default function AssignEvaluatorsDialog({ tenderId, onClose, onAssign }: AssignEvaluatorsDialogProps) {
   const [evaluators, setEvaluators] = useState<EvaluatorAssignmentDto[]>([
-    { userId: '', role: 'Evaluator', weightagePercentage: undefined }
+    { userId: '', role: 'Evaluator', weightagePercentage: 100 }
   ]);
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -71,7 +71,7 @@ export default function AssignEvaluatorsDialog({ tenderId, onClose, onAssign }: 
   };
 
   const handleAddEvaluator = () => {
-    setEvaluators([...evaluators, { userId: '', role: 'Evaluator', weightagePercentage: undefined }]);
+    setEvaluators([...evaluators, { userId: '', role: 'Evaluator', weightagePercentage: 100 }]);
   };
 
   const handleRemoveEvaluator = (index: number) => {
@@ -151,11 +151,9 @@ export default function AssignEvaluatorsDialog({ tenderId, onClose, onAssign }: 
                       <Input
                         id={`weightage-${index}`}
                         type="number"
-                        min="0"
-                        max="100"
-                        value={evaluator.weightagePercentage || ''}
-                        onChange={(e) => handleEvaluatorChange(index, 'weightagePercentage', e.target.value ? parseFloat(e.target.value) : undefined)}
-                        placeholder="0-100"
+                        value={100}
+                        readOnly
+                        className="bg-gray-100 cursor-not-allowed"
                       />
                     </div>
                     {evaluators.length > 1 && (

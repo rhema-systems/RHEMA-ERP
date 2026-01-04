@@ -342,6 +342,7 @@ public interface IWorkOrderService
 
     // Task management
     Task<ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto?> UpdateTaskStatusAsync(Guid taskId, string status, double? actualHours = null, string? completionNotes = null);
+    Task<ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto?> UpdateTaskPhotoAsync(Guid taskId, string? photoPath);
 }
 
 public interface IWorkOrderTaskService

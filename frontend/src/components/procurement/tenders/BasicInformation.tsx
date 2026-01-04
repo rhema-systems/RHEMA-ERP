@@ -41,7 +41,7 @@ export default function BasicInformation({ formData, updateFormData }: BasicInfo
     loadTemplates();
   }, []);
 
-  // Load template details when selection changes
+  // Load template details when selection changes and auto-populate QCBS settings
   useEffect(() => {
     const loadTemplateDetails = async () => {
       if (!formData.evaluationTemplateId) {
@@ -52,6 +52,16 @@ export default function BasicInformation({ formData, updateFormData }: BasicInfo
         setLoadingDetails(true);
         const details = await evaluationTemplateService.getById(formData.evaluationTemplateId);
         setSelectedTemplateDetails(details);
+
+        // Auto-populate QCBS settings if template uses QCBS scoring method
+        if (details.scoringMethod === 'QCBS') {
+          updateFormData({
+            useQCBSEvaluation: true,
+            technicalWeight: details.technicalWeight,
+            financialWeight: details.financialWeight,
+            minimumTechnicalScore: details.minimumTechnicalScore
+          });
+        }
       } catch (error) {
         console.error('Failed to load template details:', error);
         setSelectedTemplateDetails(null);
@@ -296,6 +306,23 @@ export default function BasicInformation({ formData, updateFormData }: BasicInfo
                   </div>
                 </div>
 
+                {selectedTemplateDetails.scoringMethod === 'QCBS' && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                    <h5 className="font-medium text-sm text-blue-800 mb-2">QCBS Configuration (Auto-applied)</h5>
+                    <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <span className="text-blue-700">Technical Weight:</span> {selectedTemplateDetails.technicalWeight}%
+                      </div>
+                      <div>
+                        <span className="text-blue-700">Financial Weight:</span> {selectedTemplateDetails.financialWeight}%
+                      </div>
+                      <div>
+                        <span className="text-blue-700">Min Technical Score:</span> {selectedTemplateDetails.minimumTechnicalScore}%
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <h5 className="font-medium text-sm">Evaluation Criteria ({selectedTemplateDetails.criteriaCount})</h5>
                   <div className="grid gap-2">
@@ -329,6 +356,114 @@ export default function BasicInformation({ formData, updateFormData }: BasicInfo
                 ⚠ Please select an evaluation template. This defines how bids will be scored and evaluated.
               </p>
             </div>
+          )}
+        </div>
+      </div>
+
+      {/* QCBS Evaluation Settings */}
+      <div>
+        <h3 className="text-lg font-semibold mb-4">QCBS Evaluation Settings</h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          Quality and Cost-Based Selection (QCBS) evaluates bids based on both technical merit and financial proposal.
+        </p>
+
+        <div className="space-y-4">
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="useQCBSEvaluation"
+              checked={formData.useQCBSEvaluation}
+              onCheckedChange={(checked) => updateFormData({ useQCBSEvaluation: checked as boolean })}
+            />
+            <Label htmlFor="useQCBSEvaluation" className="cursor-pointer font-medium">
+              Use QCBS Evaluation Method
+            </Label>
+          </div>
+
+          {formData.useQCBSEvaluation && (
+            <Card className="bg-blue-50/50 border-blue-200">
+              <CardContent className="pt-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Technical Weight */}
+                  <div className="space-y-2">
+                    <Label htmlFor="technicalWeight">Technical Weight (%)</Label>
+                    <Input
+                      id="technicalWeight"
+                      type="number"
+                      value={formData.technicalWeight}
+                      onChange={(e) => {
+                        const techWeight = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
+                        updateFormData({
+                          technicalWeight: techWeight,
+                          financialWeight: 100 - techWeight
+                        });
+                      }}
+                      min="0"
+                      max="100"
+                      step="5"
+                    />
+                    <p className="text-xs text-muted-foreground">Weight for technical score (0-100)</p>
+                  </div>
+
+                  {/* Financial Weight */}
+                  <div className="space-y-2">
+                    <Label htmlFor="financialWeight">Financial Weight (%)</Label>
+                    <Input
+                      id="financialWeight"
+                      type="number"
+                      value={formData.financialWeight}
+                      onChange={(e) => {
+                        const finWeight = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
+                        updateFormData({
+                          financialWeight: finWeight,
+                          technicalWeight: 100 - finWeight
+                        });
+                      }}
+                      min="0"
+                      max="100"
+                      step="5"
+                    />
+                    <p className="text-xs text-muted-foreground">Weight for financial score (0-100)</p>
+                  </div>
+
+                  {/* Minimum Technical Score */}
+                  <div className="space-y-2">
+                    <Label htmlFor="minimumTechnicalScore">Minimum Technical Score (%)</Label>
+                    <Input
+                      id="minimumTechnicalScore"
+                      type="number"
+                      value={formData.minimumTechnicalScore}
+                      onChange={(e) => updateFormData({ minimumTechnicalScore: parseInt(e.target.value) || 0 })}
+                      min="0"
+                      max="100"
+                      step="5"
+                    />
+                    <p className="text-xs text-muted-foreground">Bids below this score are disqualified</p>
+                  </div>
+                </div>
+
+                {/* Summary */}
+                <div className="mt-4 p-3 bg-white rounded-lg border">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Weight Distribution:</span>
+                    <span className="text-sm">
+                      Technical: <strong>{formData.technicalWeight}%</strong> | Financial: <strong>{formData.financialWeight}%</strong>
+                    </span>
+                  </div>
+                  {formData.technicalWeight + formData.financialWeight !== 100 && (
+                    <p className="text-xs text-red-600 mt-1">
+                      ⚠ Weights must total 100% (currently {formData.technicalWeight + formData.financialWeight}%)
+                    </p>
+                  )}
+                </div>
+
+                {/* QCBS Formula Info */}
+                <div className="mt-4 p-3 bg-gray-50 rounded-lg text-xs text-muted-foreground">
+                  <strong>QCBS Formula:</strong> Combined Score = (Technical Score × {formData.technicalWeight}%) + (Financial Score × {formData.financialWeight}%)
+                  <br />
+                  Financial Score is calculated as: (Lowest Bid / Bidder&apos;s Price) × 100
+                </div>
+              </CardContent>
+            </Card>
           )}
         </div>
       </div>

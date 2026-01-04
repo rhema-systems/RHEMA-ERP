@@ -65,6 +65,33 @@ public class Tender : TenantEntity
     /// </summary>
     public Guid? EvaluationTemplateId { get; set; }
 
+    // QCBS (Quality and Cost Based Selection) Configuration
+    /// <summary>
+    /// Enable QCBS evaluation methodology
+    /// </summary>
+    public bool UseQCBSEvaluation { get; set; } = false;
+
+    /// <summary>
+    /// Minimum technical score required to qualify for financial evaluation (default: 80)
+    /// Bids below this threshold are disqualified
+    /// </summary>
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal MinimumTechnicalScore { get; set; } = 80;
+
+    /// <summary>
+    /// Technical weight percentage for QCBS combined score (default: 60%)
+    /// Formula: S = (St × TechnicalWeight%) + (Sf × FinancialWeight%)
+    /// </summary>
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal TechnicalWeight { get; set; } = 60;
+
+    /// <summary>
+    /// Financial/Price weight percentage for QCBS combined score (default: 40%)
+    /// TechnicalWeight + FinancialWeight should equal 100
+    /// </summary>
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal FinancialWeight { get; set; } = 40;
+
     public string? RequiredDocuments { get; set; } // JSON array of required document types
 
     // Acceptance Declaration (Optional per tender)
@@ -89,6 +116,7 @@ public class Tender : TenantEntity
     public virtual ApplicationUser? PublishedBy { get; set; }
     public virtual ApplicationUser? AwardedBy { get; set; }
     public virtual EvaluationTemplate? EvaluationTemplate { get; set; }
+    public virtual ICollection<TenderLot> Lots { get; set; } = new List<TenderLot>();
     public virtual ICollection<TenderItem> Items { get; set; } = new List<TenderItem>();
     public virtual ICollection<TenderInvitation> Invitations { get; set; } = new List<TenderInvitation>();
     public virtual ICollection<TenderBid> Bids { get; set; } = new List<TenderBid>();
@@ -103,12 +131,72 @@ public class Tender : TenantEntity
 }
 
 /// <summary>
-/// Tender line items
+/// Tender LOT - Groups related items that must be bid together
+/// A tender can have multiple LOTs, and vendors must bid on all items within a LOT
+/// </summary>
+public class TenderLot : TenantEntity
+{
+    [Required]
+    public Guid TenderId { get; set; }
+
+    public int LotNumber { get; set; }
+
+    [Required]
+    [MaxLength(100)]
+    public string LotCode { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(500)]
+    public string Title { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? EstimatedValue { get; set; }
+
+    [MaxLength(3)]
+    public string? Currency { get; set; } = "USD";
+
+    /// <summary>
+    /// LOT Status: Active, Cancelled, Awarded
+    /// </summary>
+    [MaxLength(50)]
+    public string Status { get; set; } = "Active";
+
+    public DateTime? RequiredDeliveryDate { get; set; }
+
+    [MaxLength(200)]
+    public string? DeliveryLocation { get; set; }
+
+    public string? Specifications { get; set; }
+
+    public string? Notes { get; set; }
+
+    /// <summary>
+    /// Display order within the tender
+    /// </summary>
+    public int DisplayOrder { get; set; } = 0;
+
+    // Navigation Properties
+    public virtual Tender Tender { get; set; } = null!;
+    public virtual ICollection<TenderItem> Items { get; set; } = new List<TenderItem>();
+    public virtual ICollection<TenderBidLot> BidLots { get; set; } = new List<TenderBidLot>();
+    public virtual ICollection<TenderAward> Awards { get; set; } = new List<TenderAward>();
+}
+
+/// <summary>
+/// Tender line items - now belongs to a LOT
 /// </summary>
 public class TenderItem : TenantEntity
 {
     [Required]
     public Guid TenderId { get; set; }
+
+    /// <summary>
+    /// Reference to the LOT this item belongs to.
+    /// If null, item is not assigned to any LOT (for backward compatibility)
+    /// </summary>
+    public Guid? LotId { get; set; }
 
     public int LineNumber { get; set; }
 
@@ -134,6 +222,7 @@ public class TenderItem : TenantEntity
 
     // Navigation Properties
     public virtual Tender Tender { get; set; } = null!;
+    public virtual TenderLot? Lot { get; set; }
     public virtual ICollection<TenderBidItem> BidItems { get; set; } = new List<TenderBidItem>();
 }
 
@@ -235,6 +324,40 @@ public class TenderBid : TenantEntity
 
     public int? Rank { get; set; }
 
+    // QCBS (Quality and Cost Based Selection) Scores
+    /// <summary>
+    /// Technical score from evaluators (St) - average of all evaluator scores
+    /// This is the raw technical evaluation score out of 100
+    /// </summary>
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal? TechnicalScore { get; set; }
+
+    /// <summary>
+    /// Calculated financial score (Sf) using formula: Sf = 100 × (Fm / F)
+    /// Where Fm = lowest bid price, F = this bid's price
+    /// </summary>
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal? FinancialScore { get; set; }
+
+    /// <summary>
+    /// Combined QCBS score: S = (St × T%) + (Sf × P%)
+    /// Where T = Technical weight, P = Financial weight
+    /// </summary>
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal? CombinedScore { get; set; }
+
+    /// <summary>
+    /// Whether this bid passed the minimum technical score threshold
+    /// Bids that don't pass are disqualified from financial evaluation
+    /// </summary>
+    public bool IsQualifiedTechnically { get; set; } = true;
+
+    /// <summary>
+    /// Reason for technical disqualification if IsQualifiedTechnically = false
+    /// </summary>
+    [MaxLength(500)]
+    public string? DisqualificationReason { get; set; }
+
     // Metadata
     public Guid? EvaluatedById { get; set; }
     public DateTime? EvaluatedDate { get; set; }
@@ -247,10 +370,71 @@ public class TenderBid : TenantEntity
     public virtual BusinessPartner BusinessPartner { get; set; } = null!;
     public virtual ApplicationUser? EvaluatedBy { get; set; }
     public virtual ApplicationUser? OpenedBy { get; set; }
+    public virtual ICollection<TenderBidLot> BidLots { get; set; } = new List<TenderBidLot>();
     public virtual ICollection<TenderBidItem> Items { get; set; } = new List<TenderBidItem>();
     public virtual ICollection<TenderBidDocument> Documents { get; set; } = new List<TenderBidDocument>();
     public virtual ICollection<TenderEvaluation> Evaluations { get; set; } = new List<TenderEvaluation>();
     public virtual ICollection<TenderInterview> Interviews { get; set; } = new List<TenderInterview>();
+}
+
+/// <summary>
+/// Bid for a specific LOT - represents a vendor's bid on a complete LOT
+/// When bidding on a LOT, vendor must provide pricing for ALL items in that LOT
+/// </summary>
+public class TenderBidLot : TenantEntity
+{
+    [Required]
+    public Guid TenderBidId { get; set; }
+
+    [Required]
+    public Guid LotId { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal TotalLotAmount { get; set; }
+
+    [MaxLength(3)]
+    public string? Currency { get; set; } = "USD";
+
+    public int? DeliveryDays { get; set; }
+
+    [MaxLength(500)]
+    public string? PaymentTerms { get; set; }
+
+    [MaxLength(500)]
+    public string? WarrantyTerms { get; set; }
+
+    public string? TechnicalProposal { get; set; }
+    public string? CommercialProposal { get; set; }
+
+    /// <summary>
+    /// Status of this LOT bid: Draft, Submitted, Accepted, Rejected
+    /// </summary>
+    [MaxLength(50)]
+    public string Status { get; set; } = "Draft";
+
+    // Evaluation Scores for this LOT
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal? PriceScore { get; set; }
+
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal? QualityScore { get; set; }
+
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal? DeliveryScore { get; set; }
+
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal? TotalScore { get; set; }
+
+    public int? Rank { get; set; }
+
+    public string? EvaluationNotes { get; set; }
+
+    public string? Notes { get; set; }
+
+    // Navigation Properties
+    public virtual TenderBid TenderBid { get; set; } = null!;
+    public virtual TenderLot Lot { get; set; } = null!;
+    public virtual ICollection<TenderBidItem> Items { get; set; } = new List<TenderBidItem>();
 }
 
 /// <summary>
@@ -260,6 +444,12 @@ public class TenderBidItem : TenantEntity
 {
     [Required]
     public Guid TenderBidId { get; set; }
+
+    /// <summary>
+    /// Reference to the LOT bid this item belongs to.
+    /// If null, item is a direct bid item (for backward compatibility)
+    /// </summary>
+    public Guid? BidLotId { get; set; }
 
     [Required]
     public Guid TenderItemId { get; set; }
@@ -288,6 +478,7 @@ public class TenderBidItem : TenantEntity
 
     // Navigation Properties
     public virtual TenderBid TenderBid { get; set; } = null!;
+    public virtual TenderBidLot? BidLot { get; set; }
     public virtual TenderItem TenderItem { get; set; } = null!;
 }
 
@@ -362,12 +553,24 @@ public class TenderDocument : TenantEntity
 }
 
 /// <summary>
-/// Tender award decisions
+/// Tender award decisions - can be at tender level or per-LOT
 /// </summary>
 public class TenderAward : TenantEntity
 {
     [Required]
     public Guid TenderId { get; set; }
+
+    /// <summary>
+    /// Reference to the LOT being awarded.
+    /// If null, this is a tender-level award (for backward compatibility or non-LOT tenders)
+    /// </summary>
+    public Guid? LotId { get; set; }
+
+    /// <summary>
+    /// Reference to the LOT bid being awarded.
+    /// If null, this is a tender-level award
+    /// </summary>
+    public Guid? BidLotId { get; set; }
 
     [Required]
     public Guid TenderBidId { get; set; }
@@ -396,9 +599,80 @@ public class TenderAward : TenantEntity
 
     // Navigation Properties
     public virtual Tender Tender { get; set; } = null!;
+    public virtual TenderLot? Lot { get; set; }
+    public virtual TenderBidLot? BidLot { get; set; }
     public virtual TenderBid TenderBid { get; set; } = null!;
     public virtual BusinessPartner BusinessPartner { get; set; } = null!;
     public virtual ApplicationUser? AwardedBy { get; set; }
+}
+
+/// <summary>
+/// Performance bond request for awarded bids
+/// </summary>
+public class PerformanceBondRequest : TenantEntity
+{
+    [Required]
+    public Guid TenderAwardId { get; set; }
+
+    [Required]
+    public Guid TenderBidId { get; set; }
+
+    [Required]
+    public Guid BusinessPartnerId { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string Status { get; set; } = "Pending"; // Pending, Submitted, Approved, Rejected
+
+    // Template uploaded by internal user
+    [MaxLength(500)]
+    public string? TemplateFilePath { get; set; }
+
+    [MaxLength(200)]
+    public string? TemplateFileName { get; set; }
+
+    [MaxLength(100)]
+    public string? TemplateFileType { get; set; }
+
+    public long? TemplateFileSize { get; set; }
+
+    public DateTime RequestedDate { get; set; } = DateTime.UtcNow;
+
+    public Guid? RequestedById { get; set; }
+
+    // Document submitted by external user (business partner)
+    [MaxLength(500)]
+    public string? SubmittedFilePath { get; set; }
+
+    [MaxLength(200)]
+    public string? SubmittedFileName { get; set; }
+
+    [MaxLength(100)]
+    public string? SubmittedFileType { get; set; }
+
+    public long? SubmittedFileSize { get; set; }
+
+    public DateTime? SubmittedDate { get; set; }
+
+    public Guid? SubmittedById { get; set; }
+
+    // Review information
+    public DateTime? ReviewedDate { get; set; }
+
+    public Guid? ReviewedById { get; set; }
+
+    [MaxLength(1000)]
+    public string? RejectionReason { get; set; }
+
+    public string? Notes { get; set; }
+
+    // Navigation Properties
+    public virtual TenderAward TenderAward { get; set; } = null!;
+    public virtual TenderBid TenderBid { get; set; } = null!;
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
+    public virtual ApplicationUser? RequestedBy { get; set; }
+    public virtual ApplicationUser? SubmittedBy { get; set; }
+    public virtual ApplicationUser? ReviewedBy { get; set; }
 }
 
 /// <summary>
@@ -872,13 +1146,37 @@ public class EvaluationTemplate : TenantEntity
     public decimal PassingScore { get; set; } = 70;
 
     /// <summary>
-    /// Evaluation method: SimpleAverage, WeightedAverage, PassFail
+    /// Evaluation method: SimpleAverage, WeightedAverage, PassFail, QCBS
     /// </summary>
     [Required]
     [MaxLength(50)]
     public string ScoringMethod { get; set; } = "WeightedAverage";
 
     public int DisplayOrder { get; set; } = 0;
+
+    // QCBS Configuration (used when ScoringMethod = "QCBS")
+    /// <summary>
+    /// Weight percentage for technical score in QCBS evaluation (0-100)
+    /// </summary>
+    [Range(0, 100)]
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal TechnicalWeight { get; set; } = 80;
+
+    /// <summary>
+    /// Weight percentage for financial score in QCBS evaluation (0-100)
+    /// TechnicalWeight + FinancialWeight should equal 100
+    /// </summary>
+    [Range(0, 100)]
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal FinancialWeight { get; set; } = 20;
+
+    /// <summary>
+    /// Minimum technical score required to qualify for financial evaluation (0-100)
+    /// Bids scoring below this are disqualified
+    /// </summary>
+    [Range(0, 100)]
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal MinimumTechnicalScore { get; set; } = 70;
 
     public Guid? CreatedById { get; set; }
 

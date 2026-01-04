@@ -27,6 +27,10 @@ export interface EvaluationTemplate {
   passingScore: number;
   scoringMethod: string;
   displayOrder: number;
+  // QCBS Configuration (used when scoringMethod = "QCBS")
+  technicalWeight: number;
+  financialWeight: number;
+  minimumTechnicalScore: number;
   createdAt: string;
   createdByName?: string;
   criteriaCount: number;
@@ -64,6 +68,10 @@ export interface CreateEvaluationTemplateDto {
   passingScore: number;
   scoringMethod: string;
   displayOrder: number;
+  // QCBS Configuration (used when scoringMethod = "QCBS")
+  technicalWeight: number;
+  financialWeight: number;
+  minimumTechnicalScore: number;
   criteria: CreateEvaluationTemplateCriterionDto[];
 }
 
@@ -77,6 +85,10 @@ export interface UpdateEvaluationTemplateDto {
   passingScore: number;
   scoringMethod: string;
   displayOrder: number;
+  // QCBS Configuration (used when scoringMethod = "QCBS")
+  technicalWeight: number;
+  financialWeight: number;
+  minimumTechnicalScore: number;
   criteria: CreateEvaluationTemplateCriterionDto[];
 }
 

@@ -107,6 +107,12 @@ public class EvaluationTemplateService : IEvaluationTemplateService
             }
         }
 
+        // Validate QCBS weights if scoring method is QCBS
+        if (dto.ScoringMethod == "QCBS" && Math.Abs(dto.TechnicalWeight + dto.FinancialWeight - 100) > 0.01m)
+        {
+            throw new InvalidOperationException("QCBS Technical Weight and Financial Weight must sum to 100");
+        }
+
         var template = new EvaluationTemplate
         {
             Id = Guid.NewGuid(),
@@ -121,6 +127,9 @@ public class EvaluationTemplateService : IEvaluationTemplateService
             PassingScore = dto.PassingScore,
             ScoringMethod = dto.ScoringMethod,
             DisplayOrder = dto.DisplayOrder,
+            TechnicalWeight = dto.TechnicalWeight,
+            FinancialWeight = dto.FinancialWeight,
+            MinimumTechnicalScore = dto.MinimumTechnicalScore,
             CreatedById = _currentUserProvider.UserId,
             CreatedAt = DateTime.UtcNow
         };
@@ -181,6 +190,12 @@ public class EvaluationTemplateService : IEvaluationTemplateService
             }
         }
 
+        // Validate QCBS weights if scoring method is QCBS
+        if (dto.ScoringMethod == "QCBS" && Math.Abs(dto.TechnicalWeight + dto.FinancialWeight - 100) > 0.01m)
+        {
+            throw new InvalidOperationException("QCBS Technical Weight and Financial Weight must sum to 100");
+        }
+
         template.TemplateName = dto.TemplateName;
         template.Description = dto.Description;
         template.Category = dto.Category;
@@ -190,6 +205,9 @@ public class EvaluationTemplateService : IEvaluationTemplateService
         template.PassingScore = dto.PassingScore;
         template.ScoringMethod = dto.ScoringMethod;
         template.DisplayOrder = dto.DisplayOrder;
+        template.TechnicalWeight = dto.TechnicalWeight;
+        template.FinancialWeight = dto.FinancialWeight;
+        template.MinimumTechnicalScore = dto.MinimumTechnicalScore;
         template.UpdatedAt = DateTime.UtcNow;
 
         // If setting as default, unset other defaults for same category/tender type
@@ -282,6 +300,9 @@ public class EvaluationTemplateService : IEvaluationTemplateService
             PassingScore = template.PassingScore,
             ScoringMethod = template.ScoringMethod,
             DisplayOrder = template.DisplayOrder,
+            TechnicalWeight = template.TechnicalWeight,
+            FinancialWeight = template.FinancialWeight,
+            MinimumTechnicalScore = template.MinimumTechnicalScore,
             CreatedAt = template.CreatedAt,
             CreatedByName = template.CreatedBy?.FullName,
             CriteriaCount = criteria.Count,

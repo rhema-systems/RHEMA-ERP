@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Services.Maintenance;
 using Microsoft.AspNetCore.Authorization;
@@ -20,6 +21,7 @@ public class WorkOrdersController : ControllerBase
     private readonly IWorkOrderPartService _workOrderPartService;
     private readonly IMaintenanceNotificationService _notificationService;
     private readonly IQualityControlService _qualityControlService;
+    private readonly IFileStorageService _storageService;
     private readonly ILogger<WorkOrdersController> _logger;
 
     public WorkOrdersController(
@@ -27,12 +29,14 @@ public class WorkOrdersController : ControllerBase
         IWorkOrderPartService workOrderPartService,
         IMaintenanceNotificationService notificationService,
         IQualityControlService qualityControlService,
+        IFileStorageService storageService,
         ILogger<WorkOrdersController> logger)
     {
         _workOrderService = workOrderService;
         _workOrderPartService = workOrderPartService;
         _notificationService = notificationService;
         _qualityControlService = qualityControlService;
+        _storageService = storageService;
         _logger = logger;
     }
 
@@ -522,6 +526,88 @@ public class WorkOrdersController : ControllerBase
         {
             _logger.LogError(ex, "Error deleting parts in bulk");
             return StatusCode(500, "An error occurred while deleting parts");
+        }
+    }
+
+    #endregion
+
+    #region Task Photos
+
+    /// <summary>
+    /// Upload a photo for a work order task
+    /// </summary>
+    [HttpPost("tasks/{taskId:guid}/photo")]
+    [RequestSizeLimit(10_000_000)] // 10MB
+    public async Task<IActionResult> UploadTaskPhoto(Guid taskId, IFormFile file)
+    {
+        try
+        {
+            if (file == null || file.Length == 0)
+            {
+                return BadRequest(new { message = "No file uploaded" });
+            }
+
+            // Validate file extension (images only)
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (!allowedExtensions.Contains(extension))
+            {
+                return BadRequest(new { message = $"File type {extension} is not allowed. Allowed types: {string.Join(", ", allowedExtensions)}" });
+            }
+
+            // Generate unique file path
+            var fileName = $"{Guid.NewGuid()}{extension}";
+            var filePath = $"work-orders/tasks/{taskId}/{fileName}";
+
+            // Upload file
+            using var stream = file.OpenReadStream();
+            var uploadedPath = await _storageService.UploadFileAsync(stream, file.FileName, filePath);
+
+            if (string.IsNullOrEmpty(uploadedPath))
+            {
+                return StatusCode(500, new { message = "Failed to upload file" });
+            }
+
+            // Update task with photo path
+            var updatedTask = await _workOrderService.UpdateTaskPhotoAsync(taskId, uploadedPath);
+            if (updatedTask == null)
+            {
+                return NotFound(new { message = $"Task with ID {taskId} not found" });
+            }
+
+            _logger.LogInformation("Uploaded task photo for task {TaskId}: {FilePath}", taskId, uploadedPath);
+
+            return Ok(new { filePath = uploadedPath, fileName = file.FileName, task = updatedTask });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error uploading task photo for task {TaskId}", taskId);
+            return StatusCode(500, new { message = "Failed to upload task photo", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Delete a photo from a work order task
+    /// </summary>
+    [HttpDelete("tasks/{taskId:guid}/photo")]
+    public async Task<IActionResult> DeleteTaskPhoto(Guid taskId)
+    {
+        try
+        {
+            var updatedTask = await _workOrderService.UpdateTaskPhotoAsync(taskId, null);
+            if (updatedTask == null)
+            {
+                return NotFound(new { message = $"Task with ID {taskId} not found" });
+            }
+
+            _logger.LogInformation("Deleted task photo for task {TaskId}", taskId);
+
+            return Ok(new { message = "Photo deleted successfully", task = updatedTask });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting task photo for task {TaskId}", taskId);
+            return StatusCode(500, new { message = "Failed to delete task photo", error = ex.Message });
         }
     }
 

@@ -231,7 +231,7 @@ export default function BidDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="items">
             <Package className="h-4 w-4 mr-2" />
-            Lots ({bid.items?.length || 0})
+            Lots ({new Set(bid.items?.map(item => item.lotCode).filter(Boolean)).size || 0})
           </TabsTrigger>
           <TabsTrigger value="proposals">
             <FileText className="h-4 w-4 mr-2" />
@@ -294,6 +294,15 @@ export default function BidDetailPage() {
                 ) : (
                   <Badge variant="destructive">Non-Compliant</Badge>
                 )}
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Lots Bidded</p>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {[...new Set(bid.items?.map(item => item.lotCode).filter(Boolean))].map((lotCode) => (
+                    <Badge key={lotCode} variant="outline" className="font-mono">{lotCode}</Badge>
+                  ))}
+                  {(!bid.items || bid.items.length === 0) && <span className="text-gray-500">None</span>}
+                </div>
               </div>
               {bid.paymentTerms && (
                 <div className="md:col-span-2">
@@ -482,56 +491,87 @@ export default function BidDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Bid Lots</CardTitle>
-              <CardDescription>{bid.items?.length || 0} lot(s)</CardDescription>
+              <CardDescription>
+                {new Set(bid.items?.map(item => item.lotCode).filter(Boolean)).size || 0} lot(s), {bid.items?.length || 0} item(s)
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {!bid.items || bid.items.length === 0 ? (
                 <p className="text-center py-8 text-gray-500">No lots in this bid</p>
               ) : (
                 <>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Lot Description</TableHead>
-                        <TableHead>Requested Qty</TableHead>
-                        <TableHead>Offered Qty</TableHead>
-                        <TableHead>Unit Price</TableHead>
-                        <TableHead>Total Price</TableHead>
-                        <TableHead>Brand/Model</TableHead>
-                        <TableHead>Delivery Days</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {bid.items.map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium">{item.tenderItemDescription}</p>
-                              {item.specifications && (
-                                <p className="text-sm text-gray-500 whitespace-pre-wrap">{item.specifications}</p>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {item.requestedQuantity}
-                            {item.unitOfMeasure && <span className="text-gray-500 text-sm ml-1">{item.unitOfMeasure}</span>}
-                          </TableCell>
-                          <TableCell className="font-semibold">
-                            {item.offeredQuantity}
-                            {item.unitOfMeasure && <span className="text-gray-500 text-sm ml-1">{item.unitOfMeasure}</span>}
-                          </TableCell>
-                          <TableCell>{formatCurrency(item.unitPrice, bid.currency)}</TableCell>
-                          <TableCell className="font-semibold">{formatCurrency(item.totalPrice, bid.currency)}</TableCell>
-                          <TableCell>
-                            {item.brand || item.model ? `${item.brand || ''} ${item.model || ''}`.trim() : '-'}
-                          </TableCell>
-                          <TableCell>{item.deliveryDays ? `${item.deliveryDays} days` : '-'}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                  {/* Group items by lot */}
+                  {(() => {
+                    const lotGroups = bid.items.reduce((acc, item) => {
+                      const lotCode = item.lotCode || 'Unassigned';
+                      if (!acc[lotCode]) {
+                        acc[lotCode] = [];
+                      }
+                      acc[lotCode].push(item);
+                      return acc;
+                    }, {} as Record<string, typeof bid.items>);
 
-                  <div className="mt-4 flex justify-end">
+                    return Object.entries(lotGroups).map(([lotCode, items]) => (
+                      <div key={lotCode} className="mb-6 border rounded-lg overflow-hidden">
+                        {/* Lot Header */}
+                        <div className="bg-gray-50 px-4 py-3 border-b flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="font-mono">{lotCode}</Badge>
+                            <span className="text-sm text-gray-600">{items.length} item(s)</span>
+                          </div>
+                          <div className="font-bold text-green-600">
+                            {formatCurrency(items.reduce((sum, item) => sum + item.totalPrice, 0), bid.currency)}
+                          </div>
+                        </div>
+                        {/* Lot Items */}
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>#</TableHead>
+                              <TableHead>Item Description</TableHead>
+                              <TableHead>Requested Qty</TableHead>
+                              <TableHead>Offered Qty</TableHead>
+                              <TableHead>Unit Price</TableHead>
+                              <TableHead>Total Price</TableHead>
+                              <TableHead>Brand/Model</TableHead>
+                              <TableHead>Delivery Days</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {items.map((item, index) => (
+                              <TableRow key={item.id}>
+                                <TableCell>{index + 1}</TableCell>
+                                <TableCell>
+                                  <div>
+                                    <p className="font-medium">{item.tenderItemDescription}</p>
+                                    {item.specifications && (
+                                      <p className="text-sm text-gray-500 whitespace-pre-wrap">{item.specifications}</p>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  {item.requestedQuantity}
+                                  {item.unitOfMeasure && <span className="text-gray-500 text-sm ml-1">{item.unitOfMeasure}</span>}
+                                </TableCell>
+                                <TableCell className="font-semibold">
+                                  {item.offeredQuantity}
+                                  {item.unitOfMeasure && <span className="text-gray-500 text-sm ml-1">{item.unitOfMeasure}</span>}
+                                </TableCell>
+                                <TableCell>{formatCurrency(item.unitPrice, bid.currency)}</TableCell>
+                                <TableCell className="font-semibold">{formatCurrency(item.totalPrice, bid.currency)}</TableCell>
+                                <TableCell>
+                                  {item.brand || item.model ? `${item.brand || ''} ${item.model || ''}`.trim() : '-'}
+                                </TableCell>
+                                <TableCell>{item.deliveryDays ? `${item.deliveryDays} days` : '-'}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    ));
+                  })()}
+
+                  <div className="flex justify-end">
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 min-w-64 max-w-md">
                       <div className="flex items-center justify-between gap-4">
                         <span className="text-lg font-medium whitespace-nowrap">Total Bid Amount:</span>

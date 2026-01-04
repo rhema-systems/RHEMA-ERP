@@ -308,3 +308,51 @@ public interface IEvaluationTemplateCriterionRepository
     Task DeleteAsync(Guid id);
     Task DeleteByTemplateIdAsync(Guid templateId);
 }
+
+/// <summary>
+/// Tender lot repository interface for managing LOTs within a tender
+/// </summary>
+public interface ITenderLotRepository
+{
+    Task<TenderLot?> GetByIdAsync(Guid id);
+    Task<TenderLot?> GetByIdWithItemsAsync(Guid id);
+    Task<IEnumerable<TenderLot>> GetByTenderIdAsync(Guid tenderId);
+    Task<TenderLot?> GetByTenderAndLotCodeAsync(Guid tenderId, string lotCode);
+    Task<TenderLot> CreateAsync(TenderLot lot);
+    Task<TenderLot> UpdateAsync(TenderLot lot);
+    Task DeleteAsync(Guid id);
+    Task DeleteByTenderIdAsync(Guid tenderId);
+    Task<string> GenerateLotCodeAsync(Guid tenderId);
+}
+
+/// <summary>
+/// Tender bid lot repository interface for managing LOT-level bids
+/// </summary>
+public interface ITenderBidLotRepository
+{
+    Task<TenderBidLot?> GetByIdAsync(Guid id);
+    Task<TenderBidLot?> GetByIdWithItemsAsync(Guid id);
+    Task<IEnumerable<TenderBidLot>> GetByBidIdAsync(Guid bidId);
+    Task<IEnumerable<TenderBidLot>> GetByLotIdAsync(Guid lotId);
+    Task<TenderBidLot?> GetByBidAndLotAsync(Guid bidId, Guid lotId);
+    Task<TenderBidLot> CreateAsync(TenderBidLot bidLot);
+    Task<TenderBidLot> UpdateAsync(TenderBidLot bidLot);
+    Task DeleteAsync(Guid id);
+    Task DeleteByBidIdAsync(Guid bidId);
+}
+
+/// <summary>
+/// Performance bond request repository interface
+/// </summary>
+public interface IPerformanceBondRequestRepository
+{
+    Task<PerformanceBondRequest?> GetByIdAsync(Guid id);
+    Task<PerformanceBondRequest?> GetByAwardIdAsync(Guid awardId);
+    Task<PerformanceBondRequest?> GetByBidIdAsync(Guid bidId);
+    Task<IEnumerable<PerformanceBondRequest>> GetByBusinessPartnerIdAsync(Guid businessPartnerId);
+    Task<IEnumerable<PerformanceBondRequest>> GetPendingRequestsAsync();
+    Task<IEnumerable<PerformanceBondRequest>> GetByStatusAsync(string status);
+    Task<PerformanceBondRequest> CreateAsync(PerformanceBondRequest request);
+    Task<PerformanceBondRequest> UpdateAsync(PerformanceBondRequest request);
+    Task DeleteAsync(Guid id);
+}

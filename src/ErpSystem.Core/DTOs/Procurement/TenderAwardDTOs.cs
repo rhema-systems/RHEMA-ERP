@@ -11,6 +11,19 @@ public class TenderAwardDto
     public Guid TenderId { get; set; }
     public string TenderNumber { get; set; } = string.Empty;
     public string TenderTitle { get; set; } = string.Empty;
+
+    /// <summary>
+    /// LOT that was awarded (null for tender-level awards)
+    /// </summary>
+    public Guid? LotId { get; set; }
+    public string? LotCode { get; set; }
+    public string? LotTitle { get; set; }
+
+    /// <summary>
+    /// The LOT bid that won (null for tender-level awards)
+    /// </summary>
+    public Guid? BidLotId { get; set; }
+
     public Guid TenderBidId { get; set; }
     public string BidNumber { get; set; } = string.Empty;
     public Guid BusinessPartnerId { get; set; }
@@ -36,6 +49,16 @@ public class CreateAwardDto
     [Required]
     public Guid TenderId { get; set; }
 
+    /// <summary>
+    /// Optional LOT ID for per-LOT awards
+    /// </summary>
+    public Guid? LotId { get; set; }
+
+    /// <summary>
+    /// Optional LOT bid ID (if awarding a specific LOT bid)
+    /// </summary>
+    public Guid? BidLotId { get; set; }
+
     [Required]
     public Guid TenderBidId { get; set; }
 
@@ -59,16 +82,63 @@ public class AwardRecommendationDto
     public Guid TenderId { get; set; }
     public string TenderNumber { get; set; } = string.Empty;
     public string TenderTitle { get; set; } = string.Empty;
+
+    /// <summary>
+    /// LOT ID if this is a per-LOT recommendation
+    /// </summary>
+    public Guid? LotId { get; set; }
+    public string? LotCode { get; set; }
+    public string? LotTitle { get; set; }
+
     public int TotalBids { get; set; }
     public int EvaluatedBids { get; set; }
     public Guid? RecommendedBidId { get; set; }
+    public Guid? RecommendedBidLotId { get; set; }
     public string? RecommendedBidNumber { get; set; }
     public string? RecommendedBusinessPartner { get; set; }
     public decimal RecommendedAmount { get; set; }
     public decimal RecommendedScore { get; set; }
     public List<BidRecommendationDto> BidRecommendations { get; set; } = new();
+    public List<LotRecommendationDto> LotRecommendations { get; set; } = new();
     public DateTime GeneratedAt { get; set; }
     public Guid? GeneratedById { get; set; }
+}
+
+/// <summary>
+/// LOT-level recommendation DTO
+/// </summary>
+public class LotRecommendationDto
+{
+    public Guid LotId { get; set; }
+    public string LotCode { get; set; } = string.Empty;
+    public string LotTitle { get; set; } = string.Empty;
+    public int TotalBidLots { get; set; }
+    public int EvaluatedBidLots { get; set; }
+    public Guid? RecommendedBidLotId { get; set; }
+    public Guid? RecommendedBidId { get; set; }
+    public string? RecommendedBidNumber { get; set; }
+    public string? RecommendedBusinessPartner { get; set; }
+    public decimal RecommendedAmount { get; set; }
+    public decimal RecommendedScore { get; set; }
+    public List<BidLotRecommendationDto> BidLotRecommendations { get; set; } = new();
+}
+
+/// <summary>
+/// Bid LOT recommendation DTO
+/// </summary>
+public class BidLotRecommendationDto
+{
+    public Guid BidLotId { get; set; }
+    public Guid BidId { get; set; }
+    public string BidNumber { get; set; } = string.Empty;
+    public Guid BusinessPartnerId { get; set; }
+    public string BusinessPartnerName { get; set; } = string.Empty;
+    public decimal TotalLotAmount { get; set; }
+    public decimal AverageScore { get; set; }
+    public int EvaluationCount { get; set; }
+    public int RecommendationCount { get; set; }
+    public int TotalEvaluators { get; set; }
+    public string? Recommendation { get; set; }
 }
 
 /// <summary>

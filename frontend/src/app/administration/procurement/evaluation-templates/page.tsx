@@ -16,7 +16,7 @@ import { evaluationCriteriaService, EvaluationCriterion } from '@/services/evalu
 
 const CATEGORIES = ['General', 'Construction', 'IT', 'Services', 'Goods', 'Consultancy'];
 const TENDER_TYPES = ['RFQ', 'RFP', 'ITB', 'EOI'];
-const SCORING_METHODS = ['WeightedAverage', 'SimpleAverage', 'PassFail'];
+const SCORING_METHODS = ['WeightedAverage', 'SimpleAverage', 'PassFail', 'QCBS'];
 
 interface TemplateCriterionForm {
   evaluationCriterionId: string;
@@ -50,6 +50,9 @@ export default function EvaluationTemplatesPage() {
     passingScore: number;
     scoringMethod: string;
     displayOrder: number;
+    technicalWeight: number;
+    financialWeight: number;
+    minimumTechnicalScore: number;
     criteria: TemplateCriterionForm[];
   }>({
     templateName: '',
@@ -62,6 +65,9 @@ export default function EvaluationTemplatesPage() {
     passingScore: 70,
     scoringMethod: 'WeightedAverage',
     displayOrder: 0,
+    technicalWeight: 80,
+    financialWeight: 20,
+    minimumTechnicalScore: 70,
     criteria: [],
   });
 
@@ -127,6 +133,11 @@ export default function EvaluationTemplatesPage() {
       toast.error('Criteria weights must sum to 100%');
       return;
     }
+    // Validate QCBS weights
+    if (formData.scoringMethod === 'QCBS' && Math.abs(formData.technicalWeight + formData.financialWeight - 100) > 0.01) {
+      toast.error('Technical Weight and Financial Weight must sum to 100%');
+      return;
+    }
     try {
       const dto: CreateEvaluationTemplateDto = {
         ...formData,
@@ -155,6 +166,11 @@ export default function EvaluationTemplatesPage() {
       toast.error('Criteria weights must sum to 100%');
       return;
     }
+    // Validate QCBS weights
+    if (formData.scoringMethod === 'QCBS' && Math.abs(formData.technicalWeight + formData.financialWeight - 100) > 0.01) {
+      toast.error('Technical Weight and Financial Weight must sum to 100%');
+      return;
+    }
     try {
       const dto: UpdateEvaluationTemplateDto = {
         templateName: formData.templateName,
@@ -166,6 +182,9 @@ export default function EvaluationTemplatesPage() {
         passingScore: formData.passingScore,
         scoringMethod: formData.scoringMethod,
         displayOrder: formData.displayOrder,
+        technicalWeight: formData.technicalWeight,
+        financialWeight: formData.financialWeight,
+        minimumTechnicalScore: formData.minimumTechnicalScore,
         criteria: formData.criteria.map((c, i) => ({
           evaluationCriterionId: c.evaluationCriterionId,
           weight: c.weight,
@@ -212,6 +231,9 @@ export default function EvaluationTemplatesPage() {
         passingScore: fullTemplate.passingScore,
         scoringMethod: fullTemplate.scoringMethod,
         displayOrder: fullTemplate.displayOrder,
+        technicalWeight: fullTemplate.technicalWeight,
+        financialWeight: fullTemplate.financialWeight,
+        minimumTechnicalScore: fullTemplate.minimumTechnicalScore,
         criteria: fullTemplate.criteria.map(c => ({
           evaluationCriterionId: c.evaluationCriterionId,
           criterionName: c.criterionName,
@@ -240,6 +262,9 @@ export default function EvaluationTemplatesPage() {
       passingScore: 70,
       scoringMethod: 'WeightedAverage',
       displayOrder: 0,
+      technicalWeight: 80,
+      financialWeight: 20,
+      minimumTechnicalScore: 70,
       criteria: [],
     });
   };
@@ -252,16 +277,95 @@ export default function EvaluationTemplatesPage() {
     return matchesSearch && matchesCategory && matchesTenderType;
   });
 
+  const renderQcbsConfiguration = () => {
+    if (formData.scoringMethod !== 'QCBS') return null;
+    const qcbsWeightSum = formData.technicalWeight + formData.financialWeight;
+    const isQcbsValid = Math.abs(qcbsWeightSum - 100) < 0.01;
+    return (
+      <div className="border rounded-lg p-4 bg-blue-50 space-y-4">
+        <div className="flex items-center justify-between">
+          <Label className="text-lg font-semibold text-blue-800">QCBS Configuration</Label>
+          {isQcbsValid ? (
+            <Badge className="bg-green-100 text-green-800"><CheckCircle className="h-3 w-3 mr-1" />Valid</Badge>
+          ) : (
+            <Badge className="bg-red-100 text-red-800"><AlertCircle className="h-3 w-3 mr-1" />Weights must equal 100%</Badge>
+          )}
+        </div>
+        <p className="text-sm text-blue-700">
+          Quality and Cost Based Selection (QCBS) combines technical and financial scores with configurable weights.
+        </p>
+        <div className="bg-blue-100 border border-blue-300 rounded-lg p-3 text-sm text-blue-800">
+          <p className="font-medium mb-1">📋 How QCBS Works:</p>
+          <ul className="list-disc list-inside space-y-1 text-blue-700">
+            <li><strong>Technical Score:</strong> Calculated from the evaluation criteria below (must sum to 100%)</li>
+            <li><strong>Financial Score:</strong> Automatically calculated based on bid prices (lowest qualified bid = 100)</li>
+            <li><strong>Combined Score:</strong> Technical Score × Technical Weight + Financial Score × Financial Weight</li>
+          </ul>
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="grid gap-2">
+            <Label>Technical Weight (%)</Label>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={formData.technicalWeight}
+              onChange={(e) => {
+                const techWeight = parseFloat(e.target.value) || 0;
+                setFormData({ ...formData, technicalWeight: techWeight, financialWeight: 100 - techWeight });
+              }}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label>Financial Weight (%)</Label>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={formData.financialWeight}
+              onChange={(e) => {
+                const finWeight = parseFloat(e.target.value) || 0;
+                setFormData({ ...formData, financialWeight: finWeight, technicalWeight: 100 - finWeight });
+              }}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label>Minimum Technical Score (%)</Label>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={formData.minimumTechnicalScore}
+              onChange={(e) => setFormData({ ...formData, minimumTechnicalScore: parseFloat(e.target.value) || 0 })}
+            />
+            <p className="text-xs text-blue-600">Bids scoring below this are disqualified</p>
+          </div>
+        </div>
+        <p className="text-xs text-blue-600">
+          Combined Score = (Technical Score × {formData.technicalWeight}%) + (Financial Score × {formData.financialWeight}%)
+        </p>
+      </div>
+    );
+  };
+
   const renderCriteriaForm = () => (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <Label>Criteria (Total Weight: {getTotalWeight()}%)</Label>
+        <Label>
+          {formData.scoringMethod === 'QCBS' ? 'Technical Evaluation Criteria' : 'Criteria'} (Total Weight: {getTotalWeight()}%)
+        </Label>
         {getTotalWeight() === 100 ? (
           <Badge className="bg-green-100 text-green-800"><CheckCircle className="h-3 w-3 mr-1" />Valid</Badge>
         ) : (
           <Badge className="bg-red-100 text-red-800"><AlertCircle className="h-3 w-3 mr-1" />Must equal 100%</Badge>
         )}
       </div>
+      {formData.scoringMethod === 'QCBS' && (
+        <p className="text-sm text-muted-foreground bg-gray-50 p-2 rounded border">
+          💡 These criteria are used to calculate the <strong>Technical Score</strong> in QCBS evaluation.
+          The weights must sum to 100% as they represent the relative importance of each criterion in the technical assessment.
+        </p>
+      )}
       <Select onValueChange={handleAddCriterion}>
         <SelectTrigger>
           <SelectValue placeholder="Add criterion..." />
@@ -393,11 +497,12 @@ export default function EvaluationTemplatesPage() {
                   <Label>Default for Category/Type</Label>
                 </div>
               </div>
+              {renderQcbsConfiguration()}
               {renderCriteriaForm()}
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => { setIsCreateDialogOpen(false); resetForm(); }}>Cancel</Button>
-              <Button onClick={handleCreate} disabled={getTotalWeight() !== 100}>Create Template</Button>
+              <Button onClick={handleCreate} disabled={getTotalWeight() !== 100 || (formData.scoringMethod === 'QCBS' && Math.abs(formData.technicalWeight + formData.financialWeight - 100) > 0.01)}>Create Template</Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -537,11 +642,12 @@ export default function EvaluationTemplatesPage() {
                 <Label>Default for Category/Type</Label>
               </div>
             </div>
+            {renderQcbsConfiguration()}
             {renderCriteriaForm()}
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => { setIsEditDialogOpen(false); setSelectedTemplate(null); resetForm(); }}>Cancel</Button>
-            <Button onClick={handleUpdate} disabled={getTotalWeight() !== 100}>Update Template</Button>
+            <Button onClick={handleUpdate} disabled={getTotalWeight() !== 100 || (formData.scoringMethod === 'QCBS' && Math.abs(formData.technicalWeight + formData.financialWeight - 100) > 0.01)}>Update Template</Button>
           </div>
         </DialogContent>
       </Dialog>

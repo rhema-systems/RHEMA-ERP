@@ -117,6 +117,13 @@ export interface BidEvaluationSummaryDto {
   weightedExperienceScore?: number;
   finalScore?: number;
 
+  // QCBS Scores
+  technicalScore?: number;
+  financialScore?: number;
+  combinedScore?: number;
+  isQualifiedTechnically?: boolean;
+  disqualificationReason?: string;
+
   rank: number;
   recommendationCount: number;
   isRecommended: boolean;
@@ -137,6 +144,15 @@ export interface EvaluationReportDto {
   qualityWeightage: number;
   deliveryWeightage: number;
   experienceWeightage: number;
+
+  // QCBS Configuration
+  useQCBSEvaluation: boolean;
+  technicalWeight: number;
+  financialWeight: number;
+  minimumTechnicalScore: number;
+  lowestBidAmount?: number;
+  qualifiedBidsCount?: number;
+  disqualifiedBidsCount?: number;
 
   // Statistics
   totalBidsReceived: number;
