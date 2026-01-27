@@ -1,9 +1,9 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
+using System.Text.Json;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -60,7 +60,7 @@ public class QualityChecklistController : ControllerBase
             }
 
             var checklistsData = await query.ToListAsync();
-            
+
             var checklists = checklistsData.Select(c => new
             {
                 id = c.Id.ToString(),
@@ -168,7 +168,7 @@ public class QualityChecklistController : ControllerBase
             var now = DateTime.UtcNow;
 
             // Convert items to JSON
-            var itemsJson = JsonSerializer.Serialize(request.Items.Select((item, index) => new 
+            var itemsJson = JsonSerializer.Serialize(request.Items.Select((item, index) => new
             {
                 item = item.Text,
                 description = item.Description,
@@ -256,7 +256,7 @@ public class QualityChecklistController : ControllerBase
             var now = DateTime.UtcNow;
 
             // Convert items to JSON
-            var itemsJson = JsonSerializer.Serialize(request.Items.Select((item, index) => new 
+            var itemsJson = JsonSerializer.Serialize(request.Items.Select((item, index) => new
             {
                 item = item.Text,
                 description = item.Description,
@@ -343,7 +343,7 @@ public class QualityChecklistController : ControllerBase
                 existingChecklist.IsActive = false;
                 existingChecklist.LastModifiedDate = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
-                
+
                 return Ok(new { message = "Quality checklist has been deactivated due to existing usage in quality checks" });
             }
             else
@@ -351,7 +351,7 @@ public class QualityChecklistController : ControllerBase
                 // Hard delete if no quality checks are associated
                 _context.QualityControlChecklists.Remove(existingChecklist);
                 await _context.SaveChangesAsync();
-                
+
                 return NoContent();
             }
         }
@@ -489,14 +489,16 @@ public class QualityChecklistController : ControllerBase
             return StatusCode(500, "An error occurred while retrieving checklist statistics");
         }
     }
-    
+
     private object[] ParseChecklistItems(string checklistItemsJson)
     {
         try
         {
             if (string.IsNullOrEmpty(checklistItemsJson))
+            {
                 return Array.Empty<object>();
-                
+            }
+
             var items = System.Text.Json.JsonSerializer.Deserialize<ChecklistItemDto[]>(checklistItemsJson);
             return items?.Select((item, index) => new
             {
@@ -516,7 +518,7 @@ public class QualityChecklistController : ControllerBase
             return Array.Empty<object>();
         }
     }
-    
+
     private class ChecklistItemDto
     {
         public string? item { get; set; }

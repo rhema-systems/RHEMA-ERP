@@ -1,10 +1,10 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Services;
-using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -75,7 +75,7 @@ public class AssetTypesController : ControllerBase
     /// </summary>
     [HttpGet("category/{category}")]
     public async Task<ActionResult<List<AssetTypeDto>>> GetAssetTypesByCategory(
-        string category, 
+        string category,
         [FromQuery] bool includeInactive = false)
     {
         try

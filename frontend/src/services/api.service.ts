@@ -39,6 +39,7 @@ export interface UserInfo {
   createdAt?: string;
   lastLoginAt?: string;
   tenantId?: string;
+  authenticationProvider?: 'Local' | 'LDAP';
 }
 
 export interface UserTenantInfo {
@@ -550,6 +551,11 @@ class ApiService {
   // Standard HTTP methods
   public async get<T>(endpoint: string): Promise<T> {
     return this.privateRequest<T>(endpoint, { method: 'GET' });
+  }
+
+  // Silent GET method - doesn't log errors to console (useful for expected 404s)
+  public async silentGet<T>(endpoint: string): Promise<T> {
+    return this.privateRequest<T>(endpoint, { method: 'GET' }, true, true);
   }
 
   public async post<T>(endpoint: string, data?: any): Promise<T> {

@@ -75,15 +75,16 @@ export default function TechniciansPage() {
     const fetchTechniciansFromHR = async () => {
       setIsLoading(true);
       try {
-        const token = localStorage.getItem('token');
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+        const token = localStorage.getItem('authToken');
         const [techniciansResponse, assignmentsResponse] = await Promise.all([
-          fetch('http://localhost:5000/api/maintenance/technicians', {
+          fetch(`${API_URL}/maintenance/technicians`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'
             }
           }),
-          fetch('http://localhost:5000/api/maintenance/assignments', {
+          fetch(`${API_URL}/maintenance/assignments`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'

@@ -1,10 +1,10 @@
-using Microsoft.EntityFrameworkCore;
-using ErpSystem.Data;
 using ErpSystem.Core.Services;
+using ErpSystem.Data;
 using ErpSystem.Web.Configuration;
-using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Caching.Memory;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 
 namespace ErpSystem.Web.Services
 {
@@ -20,7 +20,7 @@ namespace ErpSystem.Web.Services
         private readonly ApplicationOptions _applicationOptions;
 
         public ApplicationWarmupService(
-            IServiceProvider serviceProvider, 
+            IServiceProvider serviceProvider,
             ILogger<ApplicationWarmupService> logger,
             IOptions<ApplicationOptions> applicationOptions)
         {
@@ -32,7 +32,7 @@ namespace ErpSystem.Web.Services
         public async Task WarmupAsync(CancellationToken cancellationToken = default)
         {
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            _logger.LogInformation("Starting application warmup for {ApplicationName} v{Version}", 
+            _logger.LogInformation("Starting application warmup for {ApplicationName} v{Version}",
                 _applicationOptions.ApplicationName, _applicationOptions.Version);
 
             try
@@ -78,7 +78,7 @@ namespace ErpSystem.Web.Services
 
                 // Preload frequently accessed data
                 var tenantCount = await dbContext.Tenants.CountAsync(cancellationToken);
-                
+
                 _logger.LogDebug("Database warmup completed. Found {TenantCount} tenants", tenantCount);
             }
             catch (Exception ex)
@@ -93,7 +93,7 @@ namespace ErpSystem.Web.Services
             try
             {
                 using var scope = _serviceProvider.CreateScope();
-                
+
                 // Test memory cache
                 var memoryCache = scope.ServiceProvider.GetService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
                 if (memoryCache != null)
@@ -163,11 +163,11 @@ namespace ErpSystem.Web.Services
             {
                 // For Blazor Server, we can warm up SignalR hub connections
                 using var scope = _serviceProvider.CreateScope();
-                
+
                 // This is a placeholder for view/component precompilation
                 // In a real scenario, you might want to trigger compilation of critical Razor components
                 await Task.Delay(10, cancellationToken); // Simulate work
-                
+
                 _logger.LogDebug("Views precompilation completed");
             }
             catch (Exception ex)
@@ -186,14 +186,41 @@ namespace ErpSystem.Web.Services
                 if (moduleOptions != null)
                 {
                     var enabledModules = new List<string>();
-                    
-                    if (moduleOptions.Finance.Enabled) enabledModules.Add("Finance");
-                    if (moduleOptions.HR.Enabled) enabledModules.Add("HR");
-                    if (moduleOptions.Sales.Enabled) enabledModules.Add("Sales");
-                    if (moduleOptions.Procurement.Enabled) enabledModules.Add("Procurement");
-                    if (moduleOptions.Inventory.Enabled) enabledModules.Add("Inventory");
-                    if (moduleOptions.Marketing.Enabled) enabledModules.Add("Marketing");
-                    if (moduleOptions.WorkflowEngine.Enabled) enabledModules.Add("WorkflowEngine");
+
+                    if (moduleOptions.Finance.Enabled)
+                    {
+                        enabledModules.Add("Finance");
+                    }
+
+                    if (moduleOptions.HR.Enabled)
+                    {
+                        enabledModules.Add("HR");
+                    }
+
+                    if (moduleOptions.Sales.Enabled)
+                    {
+                        enabledModules.Add("Sales");
+                    }
+
+                    if (moduleOptions.Procurement.Enabled)
+                    {
+                        enabledModules.Add("Procurement");
+                    }
+
+                    if (moduleOptions.Inventory.Enabled)
+                    {
+                        enabledModules.Add("Inventory");
+                    }
+
+                    if (moduleOptions.Marketing.Enabled)
+                    {
+                        enabledModules.Add("Marketing");
+                    }
+
+                    if (moduleOptions.WorkflowEngine.Enabled)
+                    {
+                        enabledModules.Add("WorkflowEngine");
+                    }
 
                     _logger.LogInformation("Initialized modules: {Modules}", string.Join(", ", enabledModules));
                 }

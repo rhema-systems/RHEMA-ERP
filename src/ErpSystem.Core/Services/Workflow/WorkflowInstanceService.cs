@@ -1,9 +1,9 @@
-using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using ErpSystem.Core.Entities.Workflow;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Services;
-using ErpSystem.Core.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Workflow;
 
@@ -40,12 +40,7 @@ public class WorkflowInstanceService : IWorkflowInstanceService
         _logger.LogInformation("Starting workflow instance for definition {DefinitionId}, entity {EntityId}", definitionId, entityId);
 
         // Get workflow definition
-        var definition = await _workflowDefinitionRepository.GetWithDetailsAsync(definitionId, cancellationToken);
-        if (definition == null)
-        {
-            throw new InvalidOperationException($"Workflow definition with ID {definitionId} not found");
-        }
-
+        var definition = await _workflowDefinitionRepository.GetWithDetailsAsync(definitionId, cancellationToken) ?? throw new InvalidOperationException($"Workflow definition with ID {definitionId} not found");
         if (!definition.IsActive)
         {
             throw new InvalidOperationException($"Workflow definition '{definition.Name}' is not active");
@@ -58,11 +53,7 @@ public class WorkflowInstanceService : IWorkflowInstanceService
         }
 
         // Get start step
-        var startStep = await _workflowStepRepository.GetStartStepAsync(definitionId, cancellationToken);
-        if (startStep == null)
-        {
-            throw new InvalidOperationException($"No start step found for workflow definition '{definition.Name}'");
-        }
+        var startStep = await _workflowStepRepository.GetStartStepAsync(definitionId, cancellationToken) ?? throw new InvalidOperationException($"No start step found for workflow definition '{definition.Name}'");
 
         // Create workflow instance
         var workflowInstance = new WorkflowInstance
@@ -70,9 +61,9 @@ public class WorkflowInstanceService : IWorkflowInstanceService
             Id = Guid.NewGuid(),
             WorkflowDefinitionId = definitionId,
             EntityTypeId = entityTypeId,
-        EntityId = Guid.Parse(entityId),
+            EntityId = Guid.Parse(entityId),
             Status = WorkflowInstanceStatus.InProgress,
-        InitiatedById = startedById,
+            InitiatedById = startedById,
             StartedDate = DateTime.UtcNow,
             Priority = WorkflowPriority.Normal,
             Data = initialData != null ? JsonSerializer.Serialize(initialData) : null,
@@ -142,12 +133,7 @@ public class WorkflowInstanceService : IWorkflowInstanceService
     {
         _logger.LogInformation("Cancelling workflow instance {InstanceId}", instanceId);
 
-        var instance = await _workflowInstanceRepository.GetWithDetailsAsync(instanceId, cancellationToken);
-        if (instance == null)
-        {
-            throw new InvalidOperationException($"Workflow instance with ID {instanceId} not found");
-        }
-
+        var instance = await _workflowInstanceRepository.GetWithDetailsAsync(instanceId, cancellationToken) ?? throw new InvalidOperationException($"Workflow instance with ID {instanceId} not found");
         if (instance.Status == WorkflowInstanceStatus.Completed)
         {
             throw new InvalidOperationException("Cannot cancel a completed workflow");
@@ -159,8 +145,8 @@ public class WorkflowInstanceService : IWorkflowInstanceService
         }
 
         // Cancel current step instances
-        var activeStepInstances = instance.StepInstances?.Where(si => 
-            si.Status == WorkflowStepInstanceStatus.Pending || 
+        var activeStepInstances = instance.StepInstances?.Where(si =>
+            si.Status == WorkflowStepInstanceStatus.Pending ||
             si.Status == WorkflowStepInstanceStatus.InProgress).ToList();
 
         if (activeStepInstances?.Any() == true)
@@ -198,12 +184,7 @@ public class WorkflowInstanceService : IWorkflowInstanceService
     {
         _logger.LogInformation("Restarting workflow instance {InstanceId}", instanceId);
 
-        var instance = await _workflowInstanceRepository.GetWithDetailsAsync(instanceId, cancellationToken);
-        if (instance == null)
-        {
-            throw new InvalidOperationException($"Workflow instance with ID {instanceId} not found");
-        }
-
+        var instance = await _workflowInstanceRepository.GetWithDetailsAsync(instanceId, cancellationToken) ?? throw new InvalidOperationException($"Workflow instance with ID {instanceId} not found");
         if (instance.Status == WorkflowInstanceStatus.InProgress)
         {
             throw new InvalidOperationException("Cannot restart a workflow that is still in progress");
@@ -228,12 +209,7 @@ public class WorkflowInstanceService : IWorkflowInstanceService
         }
 
         // Get start step and create new step instance
-        var startStep = await _workflowStepRepository.GetStartStepAsync(instance.WorkflowDefinitionId, cancellationToken);
-        if (startStep == null)
-        {
-            throw new InvalidOperationException("No start step found for workflow definition");
-        }
-
+        var startStep = await _workflowStepRepository.GetStartStepAsync(instance.WorkflowDefinitionId, cancellationToken) ?? throw new InvalidOperationException("No start step found for workflow definition");
         var newStepInstance = new WorkflowStepInstance
         {
             Id = Guid.NewGuid(),
@@ -275,12 +251,7 @@ public class WorkflowInstanceService : IWorkflowInstanceService
     {
         _logger.LogInformation("Updating workflow instance data {InstanceId}", instanceId);
 
-        var instance = await _workflowInstanceRepository.GetByIdAsync(instanceId);
-        if (instance == null)
-        {
-            throw new InvalidOperationException($"Workflow instance with ID {instanceId} not found");
-        }
-
+        var instance = await _workflowInstanceRepository.GetByIdAsync(instanceId) ?? throw new InvalidOperationException($"Workflow instance with ID {instanceId} not found");
         instance.Data = JsonSerializer.Serialize(data);
         instance.UpdatedAt = DateTime.UtcNow;
 
@@ -305,7 +276,7 @@ public class WorkflowInstanceService : IWorkflowInstanceService
         return await _workflowInstanceRepository.GetOverdueInstancesAsync(tenantId, cancellationToken);
     }
 
-    private Guid? DetermineStepAssignee(WorkflowStep step, Guid defaultUserId)
+    private static Guid? DetermineStepAssignee(WorkflowStep step, Guid defaultUserId)
     {
         // Simple assignment logic - can be enhanced with more sophisticated rules
         switch (step.AssignmentType ?? "User")
@@ -314,19 +285,19 @@ public class WorkflowInstanceService : IWorkflowInstanceService
                 return !string.IsNullOrEmpty(step.AssignmentConfiguration) && Guid.TryParse(step.AssignmentConfiguration, out var userId)
                     ? userId
                     : defaultUserId;
-            
+
             case "RequestorManager":
             case "PreviousStepUser":
             case "Dynamic":
                 // These would require additional logic to determine the actual user
                 // For now, fall back to default user
                 return defaultUserId;
-            
+
             case "Role":
                 // Would need to resolve role to specific user
                 // For now, fall back to default user
                 return defaultUserId;
-            
+
             default:
                 return defaultUserId;
         }

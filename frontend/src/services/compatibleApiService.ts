@@ -14,6 +14,11 @@ class CompatibleApiService {
     }
   }
 
+  // Silent GET method - doesn't log errors to console (useful for expected 404s)
+  async silentGet<T>(endpoint: string): Promise<T> {
+    return await apiService.silentGet<T>(endpoint);
+  }
+
   async post<T>(endpoint: string, data?: any): Promise<T> {
     try {
       return await apiService.post<T>(endpoint, data);

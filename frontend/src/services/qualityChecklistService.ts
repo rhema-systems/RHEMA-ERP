@@ -394,8 +394,16 @@ class QualityChecklistService {
   }
 
   async getAssetCategories(): Promise<string[]> {
-    // This could also call backend for dynamic asset categories
-    return ['Vehicle', 'HVAC', 'Electrical', 'Fire Safety', 'Elevator', 'Plumbing', 'General Equipment'];
+    try {
+      console.log('Fetching asset categories from backend API...');
+      const response = await apiService.get('/maintenance/asset-categories');
+      console.log('Asset categories fetched successfully:', response);
+      // Extract names from MaintenanceAssetCategoryDto objects
+      return response.map((category: any) => category.name);
+    } catch (error: any) {
+      console.error('Backend API not available for asset categories, using fallback data:', error.message);
+      return ['Vehicle', 'HVAC', 'Electrical', 'Fire Safety', 'Elevator', 'Plumbing', 'General Equipment'];
+    }
   }
 
   async getMaintenanceTypes(): Promise<string[]> {

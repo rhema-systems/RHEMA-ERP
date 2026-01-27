@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { 
+import {
   Plus,
   Search,
   Edit,
@@ -26,6 +26,7 @@ import {
   Zap
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { apiService } from '@/services/api.service';
 
 // Priority level interface
 interface PriorityLevel {
@@ -77,26 +78,14 @@ export default function PriorityLevelsPage() {
     smsTemplate: ''
   });
 
-  // Load priorities from API
+  // Load priorities from API using shared apiService
   useEffect(() => {
     const loadPriorities = async () => {
       try {
         setLoading(true);
-        const token = localStorage.getItem('token');
-        const response = await fetch('http://localhost:5000/api/maintenance/priority-levels?pageSize=1000', {
-          headers: {
-            'Authorization': token ? `Bearer ${token}` : '',
-            'Content-Type': 'application/json'
-          }
-        });
-        if (response.ok) {
-          const result = await response.json();
-          console.log('Priority Levels API Response:', result);
-          setPriorities(result.data || result.items || result || []);
-        } else {
-          console.error('Failed to fetch priorities:', response.status, response.statusText);
-          setPriorities([]);
-        }
+        const result = await apiService.request<any>('/maintenance/priority-levels?pageSize=1000');
+        console.log('Priority Levels API Response:', result);
+        setPriorities(result.data || result.items || result || []);
       } catch (error) {
         console.error('Failed to load priorities:', error);
         setPriorities([]);
@@ -138,8 +127,6 @@ export default function PriorityLevelsPage() {
 
   const handleCreate = async () => {
     try {
-      const token = localStorage.getItem('token');
-      // Map form data to CreatePriorityLevelDto structure
       const createDto = {
         name: formData.name,
         code: formData.code,
@@ -158,29 +145,17 @@ export default function PriorityLevelsPage() {
 
       console.log('Sending create request:', createDto);
 
-      const response = await fetch('http://localhost:5000/api/maintenance/priority-levels', {
-        method: 'POST',
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(createDto)
-      });
-
-      if (response.ok) {
-        const newPriority = await response.json();
-        setPriorities(prev => [...prev, newPriority]);
-        setIsCreateDialogOpen(false);
-        resetForm();
-        console.log('Priority level created successfully');
-      } else {
-        const error = await response.text();
-        console.error('Failed to create priority level:', error);
-      }
+      const newPriority = await apiService.post<any>('/maintenance/priority-levels', createDto);
+      setPriorities(prev => [...prev, newPriority]);
+      setIsCreateDialogOpen(false);
+      resetForm();
+      console.log('Priority level created successfully');
     } catch (error) {
       console.error('Error creating priority level:', error);
+      setError(error instanceof Error ? error.message : 'Failed to create priority level');
     }
   };
+
 
   const handleEdit = (priority: PriorityLevel) => {
     setSelectedPriority(priority);
@@ -208,8 +183,6 @@ export default function PriorityLevelsPage() {
     if (!selectedPriority?.id) return;
 
     try {
-      const token = localStorage.getItem('token');
-      // Map form data to UpdatePriorityLevelDto structure
       const updateDto = {
         name: formData.name,
         code: formData.code,
@@ -228,29 +201,16 @@ export default function PriorityLevelsPage() {
 
       console.log('Sending update request:', updateDto);
 
-      const response = await fetch(`http://localhost:5000/api/maintenance/priority-levels/${selectedPriority.id}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(updateDto)
-      });
-
-      if (response.ok) {
-        const updatedPriority = await response.json();
-        setPriorities(prev => 
-          prev.map(item => item.id === selectedPriority.id ? updatedPriority : item)
-        );
-        setIsEditDialogOpen(false);
-        resetForm();
-        console.log('Priority level updated successfully');
-      } else {
-        const error = await response.text();
-        console.error('Failed to update priority level:', error);
-      }
+      const updatedPriority = await apiService.put<any>(`/maintenance/priority-levels/${selectedPriority.id}`, updateDto);
+      setPriorities(prev =>
+        prev.map(item => (item.id === selectedPriority.id ? updatedPriority : item))
+      );
+      setIsEditDialogOpen(false);
+      resetForm();
+      console.log('Priority level updated successfully');
     } catch (error) {
       console.error('Error updating priority level:', error);
+      setError(error instanceof Error ? error.message : 'Failed to update priority level');
     }
   };
 
@@ -260,26 +220,15 @@ export default function PriorityLevelsPage() {
     }
 
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:5000/api/maintenance/priority-levels/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        setPriorities(prev => prev.filter(item => item.id !== id));
-        console.log('Priority level deleted successfully');
-      } else {
-        const error = await response.text();
-        console.error('Failed to delete priority level:', error);
-      }
+      await apiService.delete(`/maintenance/priority-levels/${id}`);
+      setPriorities(prev => prev.filter(item => item.id !== id));
+      console.log('Priority level deleted successfully');
     } catch (error) {
       console.error('Error deleting priority level:', error);
+      setError(error instanceof Error ? error.message : 'Failed to delete priority level');
     }
   };
+
 
   const resetForm = () => {
     setFormData({

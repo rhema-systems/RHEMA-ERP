@@ -14,10 +14,19 @@ export default function Home() {
 
   useEffect(() => {
     if (!isClient) return;
-    
+
     // Check if user is authenticated (only on client side)
     if (authService.isAuthenticated()) {
-      router.push('/dashboard');
+      // Route based on authentication provider
+      const user = authService.getStoredUser();
+
+      if (user?.authenticationProvider === 'Local') {
+        // External users go to external portal
+        router.push('/external-portal');
+      } else {
+        // Internal users (LDAP) go to dashboard
+        router.push('/dashboard');
+      }
     } else {
       router.push('/login');
     }

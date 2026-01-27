@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useMutation } from '@tanstack/react-query';
 import { z } from 'zod';
 import { Building2, Mail, ArrowLeft, CheckCircle, Loader2, Shield } from 'lucide-react';
 
@@ -11,6 +12,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
+import { authService } from '../../services/auth';
 
 const forgotPasswordSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -20,7 +22,6 @@ type ForgotPasswordForm = z.infer<typeof forgotPasswordSchema>;
 
 export default function ForgotPasswordPage() {
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
 
   const {
     register,
@@ -31,14 +32,20 @@ export default function ForgotPasswordPage() {
     resolver: zodResolver(forgotPasswordSchema),
   });
 
-  const onSubmit = async (data: ForgotPasswordForm) => {
-    setIsLoading(true);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setIsLoading(false);
-    setIsSubmitted(true);
+  const forgotPasswordMutation = useMutation({
+    mutationFn: (email: string) => authService.forgotPassword({ email }),
+    onSuccess: () => {
+      setIsSubmitted(true);
+    },
+    onError: (error: any) => {
+      const message = error.message || 'Failed to request password reset. Please try again.';
+      console.error('Forgot password error:', message);
+      alert(message);
+    },
+  });
+
+  const onSubmit = (data: ForgotPasswordForm) => {
+    forgotPasswordMutation.mutate(data.email);
   };
 
   if (isSubmitted) {
@@ -172,9 +179,9 @@ export default function ForgotPasswordPage() {
               <Button
                 type="submit"
                 className="w-full h-12 text-base font-semibold"
-                disabled={isLoading}
+                disabled={forgotPasswordMutation.isPending}
               >
-                {isLoading ? (
+                {forgotPasswordMutation.isPending ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Sending Reset Link...
@@ -198,17 +205,6 @@ export default function ForgotPasswordPage() {
                 </Link>
               </div>
             </form>
-
-            {/* Demo Notice */}
-            <div className="mt-8 p-4 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
-              <h4 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">
-                Demo Mode
-              </h4>
-              <p className="text-xs text-amber-700 dark:text-amber-400">
-                This is a demo. In production, this would send a real email with a password reset link. 
-                For testing, you can use the demo credentials on the login page.
-              </p>
-            </div>
           </CardContent>
         </Card>
 

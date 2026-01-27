@@ -1,10 +1,10 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
-using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.DTOs.Inventory;
-using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -101,7 +101,9 @@ public class ResourceAllocationController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var schedule = await _schedulingService.ScheduleWorkOrderAsync(request.WorkOrderId, request.TechnicianId, request.StartTime);
             return Ok(schedule);
@@ -176,7 +178,9 @@ public class ResourceAllocationController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             await _schedulingService.SetTechnicianAvailabilityAsync(request.TechnicianId, request.StartDate, request.EndDate, request.AvailabilityType, request.Reason);
             return Ok(new { Message = "Technician availability updated successfully" });
@@ -220,7 +224,9 @@ public class ResourceAllocationController : ControllerBase
         {
             var itemDetail = await _inventoryService.GetInventoryItemDetailAsync(itemId);
             if (itemDetail == null)
+            {
                 return NotFound($"Inventory item with ID {itemId} not found");
+            }
 
             return Ok(itemDetail);
         }
@@ -260,7 +266,9 @@ public class ResourceAllocationController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var allocation = await _inventoryService.AllocateForWorkOrderAsync(request);
             return Ok(allocation);
@@ -291,7 +299,9 @@ public class ResourceAllocationController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var success = await _inventoryService.ConsumeAllocatedInventoryAsync(allocationId, request.Quantity, request.UserId);
             return Ok(new { Success = success, Message = "Inventory consumed successfully" });
@@ -320,7 +330,9 @@ public class ResourceAllocationController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var success = await _inventoryService.ReleaseAllocationAsync(allocationId, request.UserId);
             return Ok(new { Success = success, Message = "Allocation released successfully" });
@@ -371,11 +383,15 @@ public class ResourceAllocationController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var workOrder = await _workOrderService.GetWorkOrderByIdAsync(request.WorkOrderId);
             if (workOrder == null)
+            {
                 return NotFound($"Work order with ID {request.WorkOrderId} not found");
+            }
 
             // Get technician recommendation
             var technicianRecommendation = await _schedulingService.FindBestTechnicianAsync(
@@ -422,7 +438,9 @@ public class ResourceAllocationController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var results = new ResourcePlanExecutionResultDto
             {
@@ -568,12 +586,14 @@ public class ResourceAllocationController : ControllerBase
 
     #region Helper Methods
 
-    private List<string> GetBlockingIssues(bool technicianAvailable, bool allPartsAvailable, List<StockAvailabilityDto> inventoryChecks)
+    private static List<string> GetBlockingIssues(bool technicianAvailable, bool allPartsAvailable, List<StockAvailabilityDto> inventoryChecks)
     {
         var issues = new List<string>();
 
         if (!technicianAvailable)
+        {
             issues.Add("No available technician found for the requested time period");
+        }
 
         if (!allPartsAvailable)
         {
@@ -587,7 +607,7 @@ public class ResourceAllocationController : ControllerBase
         return issues;
     }
 
-    private List<string> GetNextSteps(bool technicianAvailable, bool allPartsAvailable, List<StockAvailabilityDto> inventoryChecks)
+    private static List<string> GetNextSteps(bool technicianAvailable, bool allPartsAvailable, List<StockAvailabilityDto> inventoryChecks)
     {
         var steps = new List<string>();
 
@@ -599,7 +619,9 @@ public class ResourceAllocationController : ControllerBase
         else
         {
             if (!technicianAvailable)
+            {
                 steps.Add("Find alternative technician or reschedule work order");
+            }
 
             if (!allPartsAvailable)
             {

@@ -1,10 +1,10 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using ErpSystem.Data.Services;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
-using ErpSystem.Core.Entities;
+using ErpSystem.Data.Services;
 using ErpSystem.Shared;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using IPermissionService = ErpSystem.Data.Services.IPermissionService;
 
 namespace ErpSystem.Api.Controllers;
@@ -173,8 +173,9 @@ public class PermissionController : ControllerBase
                     "Permission",
                     createdPermission.Id.ToString(),
                     null,
-                    new { 
-                        Name = request.Name, 
+                    new
+                    {
+                        Name = request.Name,
                         DisplayName = request.DisplayName,
                         Category = request.Category
                     },

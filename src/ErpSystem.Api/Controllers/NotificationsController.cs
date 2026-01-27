@@ -1,8 +1,7 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.Interfaces;
-using ErpSystem.Core.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -11,12 +10,12 @@ namespace ErpSystem.Api.Controllers
     [Authorize]
     public class NotificationsController : ControllerBase
     {
-        private readonly ErpSystem.Core.Services.INotificationService _notificationService;
+        private readonly INotificationService _notificationService;
         private readonly ICurrentUserService _currentUserService;
         private readonly ILogger<NotificationsController> _logger;
 
         public NotificationsController(
-            ErpSystem.Core.Services.INotificationService notificationService,
+            INotificationService notificationService,
             ICurrentUserService currentUserService,
             ILogger<NotificationsController> logger)
         {
@@ -40,12 +39,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -53,7 +52,7 @@ namespace ErpSystem.Api.Controllers
 
                 var notifications = await _notificationService.GetNotificationsAsync(
                     userId.Value, tenantId.Value, page, pageSize, unreadOnly, type, severity);
-                
+
                 return Ok(notifications);
             }
             catch (Exception ex)
@@ -74,12 +73,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -87,7 +86,7 @@ namespace ErpSystem.Api.Controllers
 
                 var notifications = await _notificationService.GetNotificationsAsync(
                     userId.Value, tenantId.Value, 1, limit, unreadOnly: true);
-                
+
                 return Ok(notifications.Items);
             }
             catch (Exception ex)
@@ -107,12 +106,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -138,12 +137,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -174,12 +173,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -205,12 +204,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -241,12 +240,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -254,7 +253,7 @@ namespace ErpSystem.Api.Controllers
 
                 var notification = await _notificationService.CreateNotificationAsync(
                     createNotificationDto, userId.Value, tenantId.Value);
-                
+
                 return CreatedAtAction(nameof(GetNotification), new { notificationId = notification.Id }, notification);
             }
             catch (Exception ex)
@@ -274,12 +273,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -311,12 +310,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -345,7 +344,7 @@ namespace ErpSystem.Api.Controllers
                 {
                     return BadRequest("UserId not found in token");
                 }
-                
+
                 var preferences = await _notificationService.GetPreferencesAsync(userId.Value);
                 return Ok(preferences);
             }
@@ -369,7 +368,7 @@ namespace ErpSystem.Api.Controllers
                 {
                     return BadRequest("UserId not found in token");
                 }
-                
+
                 var preferences = await _notificationService.UpdatePreferencesAsync(userId.Value, preferencesDto);
                 return Ok(preferences);
             }
@@ -393,7 +392,7 @@ namespace ErpSystem.Api.Controllers
                 {
                     return BadRequest("UserId not found in token");
                 }
-                
+
                 await _notificationService.SubscribeToPushNotificationsAsync(userId.Value, subscriptionDto);
                 return Ok(new { message = "Successfully subscribed to push notifications" });
             }
@@ -417,7 +416,7 @@ namespace ErpSystem.Api.Controllers
                 {
                     return BadRequest("UserId not found in token");
                 }
-                
+
                 await _notificationService.UnsubscribeFromPushNotificationsAsync(userId.Value, subscriptionDto);
                 return Ok(new { message = "Successfully unsubscribed from push notifications" });
             }
@@ -439,7 +438,7 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var tenantId = _currentUserService.TenantId;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -447,7 +446,7 @@ namespace ErpSystem.Api.Controllers
 
                 var isSuperAdmin = User.IsInRole("SuperAdmin");
                 var statistics = await _notificationService.GetStatisticsAsync(tenantId.Value, period, isSuperAdmin);
-                
+
                 return Ok(statistics);
             }
             catch (Exception ex)
@@ -468,12 +467,12 @@ namespace ErpSystem.Api.Controllers
             {
                 var tenantId = _currentUserService.TenantId;
                 var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
                 }
-                
+
                 if (!userId.HasValue)
                 {
                     return BadRequest("UserId not found in token");
@@ -499,7 +498,7 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var tenantId = _currentUserService.TenantId;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -531,7 +530,7 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var tenantId = _currentUserService.TenantId;
-                
+
                 if (!tenantId.HasValue)
                 {
                     return BadRequest("TenantId not found in token");
@@ -544,6 +543,93 @@ namespace ErpSystem.Api.Controllers
             {
                 _logger.LogError(ex, "Error retrieving email campaigns");
                 return StatusCode(500, "An error occurred while retrieving email campaigns");
+            }
+        }
+
+        /// <summary>
+        /// Create test notifications (Development only)
+        /// </summary>
+        [HttpPost("dev/create-test-notifications")]
+        public async Task<ActionResult> CreateTestNotifications()
+        {
+            try
+            {
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
+
+                if (!tenantId.HasValue)
+                {
+                    return BadRequest("TenantId not found in token");
+                }
+
+                if (!userId.HasValue)
+                {
+                    return BadRequest("UserId not found in token");
+                }
+
+                // Create sample notifications (ActionUrl is optional - will be auto-derived on frontend from ENTITY_CONFIG)
+                var testNotifications = new List<CreateNotificationDto>
+                {
+                    new CreateNotificationDto
+                    {
+                        RecipientId = userId.Value,
+                        Type = "InApp",
+                        Title = "Test Notification - Critical",
+                        Message = "This is a test critical priority notification to verify the notification system is working.",
+                        Priority = "Critical",
+                        EntityType = "JobCard",
+                        EntityId = Guid.Parse("11111111-1111-1111-1111-111111111111")
+                        // ActionUrl is optional - frontend will auto-derive: /maintenance/job-cards/{id}
+                    },
+                    new CreateNotificationDto
+                    {
+                        RecipientId = userId.Value,
+                        Type = "InApp",
+                        Title = "Test Notification - High",
+                        Message = "This is a test high priority notification from a WorkOrder.",
+                        Priority = "High",
+                        EntityType = "WorkOrder",
+                        EntityId = Guid.Parse("22222222-2222-2222-2222-222222222222")
+                        // ActionUrl is optional - frontend will auto-derive: /maintenance/work-orders/{id}
+                    },
+                    new CreateNotificationDto
+                    {
+                        RecipientId = userId.Value,
+                        Type = "InApp",
+                        Title = "Test Notification - Normal",
+                        Message = "This is a test normal priority notification.",
+                        Priority = "Normal",
+                        EntityType = "Quality",
+                        EntityId = Guid.Parse("33333333-3333-3333-3333-333333333333")
+                        // ActionUrl is optional - frontend will auto-derive: /maintenance/quality-control/{id}
+                    },
+                    new CreateNotificationDto
+                    {
+                        RecipientId = userId.Value,
+                        Type = "InApp",
+                        Title = "Test Notification - Low",
+                        Message = "This is a test low priority notification.",
+                        Priority = "Low",
+                        EntityType = "Asset",
+                        EntityId = Guid.Parse("44444444-4444-4444-4444-444444444444")
+                        // ActionUrl is optional - frontend will auto-derive: /maintenance/assets/{id}
+                    }
+                };
+
+                var created = new List<NotificationDto>();
+                foreach (var notificationDto in testNotifications)
+                {
+                    var result = await _notificationService.CreateNotificationAsync(notificationDto, userId.Value, tenantId.Value);
+                    created.Add(result);
+                }
+
+                _logger.LogInformation("Created {Count} test notifications for user {UserId}", created.Count, userId.Value);
+                return Ok(new { message = $"Created {created.Count} test notifications", notifications = created });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating test notifications");
+                return StatusCode(500, "An error occurred while creating test notifications");
             }
         }
     }

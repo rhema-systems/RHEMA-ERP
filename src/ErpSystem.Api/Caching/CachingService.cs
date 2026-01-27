@@ -14,18 +14,18 @@ public interface ICachingService
     Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default);
     T? Get<T>(string key);
     Task<T> GetOrCreateAsync<T>(string key, Func<Task<T>> factory, TimeSpan? expiry = null, CancellationToken cancellationToken = default);
-    
+
     // Set operations
     Task SetAsync<T>(string key, T value, TimeSpan? expiry = null, CancellationToken cancellationToken = default);
     void Set<T>(string key, T value, TimeSpan? expiry = null);
     Task SetManyAsync<T>(Dictionary<string, T> items, TimeSpan? expiry = null, CancellationToken cancellationToken = default);
-    
+
     // Remove operations
     Task RemoveAsync(string key, CancellationToken cancellationToken = default);
     void Remove(string key);
     Task RemovePatternAsync(string pattern, CancellationToken cancellationToken = default);
     Task ClearAsync(CancellationToken cancellationToken = default);
-    
+
     // Utilities
     Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default);
     Task<TimeSpan?> GetTtlAsync(string key, CancellationToken cancellationToken = default);
@@ -43,7 +43,7 @@ public class CachingService : ICachingService
 
     // L1 Cache (Memory) configuration
     private readonly MemoryCacheEntryOptions _l1DefaultOptions;
-    
+
     public CachingService(
         IMemoryCache memoryCache,
         IDistributedCache distributedCache,
@@ -84,10 +84,10 @@ public class CachingService : ICachingService
             if (!string.IsNullOrEmpty(serializedValue))
             {
                 var value = JsonSerializer.Deserialize<T>(serializedValue);
-                
+
                 // Store in L1 cache for faster future access
                 _memoryCache.Set(key, value, _l1DefaultOptions);
-                
+
                 _logger.LogDebug("Cache hit (L2) for key: {Key}", key);
                 return value;
             }
@@ -122,9 +122,9 @@ public class CachingService : ICachingService
     }
 
     public async Task<T> GetOrCreateAsync<T>(
-        string key, 
-        Func<Task<T>> factory, 
-        TimeSpan? expiry = null, 
+        string key,
+        Func<Task<T>> factory,
+        TimeSpan? expiry = null,
         CancellationToken cancellationToken = default)
     {
         var cached = await GetAsync<T>(key, cancellationToken);
@@ -135,10 +135,10 @@ public class CachingService : ICachingService
 
         // Generate value
         var value = await factory();
-        
+
         // Cache the result
         await SetAsync(key, value, expiry, cancellationToken);
-        
+
         return value;
     }
 
@@ -147,21 +147,21 @@ public class CachingService : ICachingService
     #region Set Operations
 
     public async Task SetAsync<T>(
-        string key, 
-        T value, 
-        TimeSpan? expiry = null, 
+        string key,
+        T value,
+        TimeSpan? expiry = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
             var actualExpiry = expiry ?? _options.DefaultExpiry;
-            
+
             // Set in L1 cache (Memory)
             var l1Options = new MemoryCacheEntryOptions
             {
                 AbsoluteExpirationRelativeToNow = actualExpiry,
-                SlidingExpiration = actualExpiry > TimeSpan.FromMinutes(10) 
-                    ? TimeSpan.FromMinutes(5) 
+                SlidingExpiration = actualExpiry > TimeSpan.FromMinutes(10)
+                    ? TimeSpan.FromMinutes(5)
                     : actualExpiry / 2,
                 Priority = CacheItemPriority.Normal
             };
@@ -173,9 +173,9 @@ public class CachingService : ICachingService
             {
                 AbsoluteExpirationRelativeToNow = actualExpiry
             };
-            
+
             await _distributedCache.SetStringAsync(key, serializedValue, distributedOptions, cancellationToken);
-            
+
             _logger.LogDebug("Set cache for key: {Key}, expiry: {Expiry}", key, actualExpiry);
         }
         catch (Exception ex)
@@ -189,13 +189,13 @@ public class CachingService : ICachingService
         try
         {
             var actualExpiry = expiry ?? _options.DefaultExpiry;
-            
+
             var l1Options = new MemoryCacheEntryOptions
             {
                 AbsoluteExpirationRelativeToNow = actualExpiry,
                 Priority = CacheItemPriority.Normal
             };
-            
+
             _memoryCache.Set(key, value, l1Options);
         }
         catch (Exception ex)
@@ -205,8 +205,8 @@ public class CachingService : ICachingService
     }
 
     public async Task SetManyAsync<T>(
-        Dictionary<string, T> items, 
-        TimeSpan? expiry = null, 
+        Dictionary<string, T> items,
+        TimeSpan? expiry = null,
         CancellationToken cancellationToken = default)
     {
         var tasks = items.Select(item => SetAsync(item.Key, item.Value, expiry, cancellationToken));
@@ -223,10 +223,10 @@ public class CachingService : ICachingService
         {
             // Remove from L1 cache
             _memoryCache.Remove(key);
-            
+
             // Remove from L2 cache
             await _distributedCache.RemoveAsync(key, cancellationToken);
-            
+
             _logger.LogDebug("Removed cache for key: {Key}", key);
         }
         catch (Exception ex)
@@ -253,7 +253,7 @@ public class CachingService : ICachingService
         {
             var server = _redis.GetServer(_redis.GetEndPoints()[0]);
             var keys = server.Keys(pattern: pattern);
-            
+
             foreach (var key in keys)
             {
                 await RemoveAsync(key, cancellationToken);
@@ -274,11 +274,11 @@ public class CachingService : ICachingService
             {
                 mc.Clear();
             }
-            
+
             // Clear L2 cache (Redis) - Use with caution in production!
             var server = _redis.GetServer(_redis.GetEndPoints()[0]);
             await server.FlushDatabaseAsync();
-            
+
             _logger.LogWarning("Cache cleared completely");
         }
         catch (Exception ex)
@@ -297,7 +297,9 @@ public class CachingService : ICachingService
         {
             // Check L1 first
             if (_memoryCache.TryGetValue(key, out _))
+            {
                 return true;
+            }
 
             // Check L2
             return await _redisDb.KeyExistsAsync(key);
@@ -389,7 +391,7 @@ public static class CacheKeys
     public const string TENANT_PREFIX = "tenant:";
     public const string AUDIT_PREFIX = "audit:";
     public const string SETTINGS_PREFIX = "settings:";
-    
+
     public static string User(Guid userId) => $"{USER_PREFIX}{userId}";
     public static string UserTenants(Guid userId) => $"{USER_PREFIX}{userId}:tenants";
     public static string Tenant(Guid tenantId) => $"{TENANT_PREFIX}{tenantId}";

@@ -1,6 +1,6 @@
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.Maintenance;
 
@@ -25,10 +25,10 @@ public class TechnicianCertificationRepository : GenericRepository<TechnicianCer
     public async Task<IEnumerable<TechnicianCertification>> GetExpiredCertificationsAsync()
     {
         var today = DateTime.UtcNow.Date;
-        
+
         return await _context.TechnicianCertifications
-            .Where(tc => tc.ExpirationDate.HasValue && 
-                        tc.ExpirationDate.Value < today && 
+            .Where(tc => tc.ExpirationDate.HasValue &&
+                        tc.ExpirationDate.Value < today &&
                         !tc.IsDeleted)
             .Include(tc => tc.Technician)
             .OrderBy(tc => tc.ExpirationDate)
@@ -39,7 +39,7 @@ public class TechnicianCertificationRepository : GenericRepository<TechnicianCer
     {
         var today = DateTime.UtcNow.Date;
         var futureDate = today.AddDays(daysAhead);
-        
+
         return await _context.TechnicianCertifications
             .Where(tc => tc.ExpirationDate.HasValue &&
                         tc.ExpirationDate.Value >= today &&
@@ -89,12 +89,12 @@ public class TechnicianCertificationRepository : GenericRepository<TechnicianCer
     {
         var query = _context.TechnicianCertifications
             .Where(tc => tc.CertificationNumber == certificationNumber && !tc.IsDeleted);
-            
+
         if (excludeId.HasValue)
         {
             query = query.Where(tc => tc.Id != excludeId.Value);
         }
-        
+
         return !await query.AnyAsync();
     }
 
@@ -119,8 +119,8 @@ public class TechnicianCertificationRepository : GenericRepository<TechnicianCer
     public async Task<IEnumerable<TechnicianCertification>> GetByDateRangeAsync(DateTime startDate, DateTime endDate)
     {
         return await _context.TechnicianCertifications
-            .Where(tc => tc.IssueDate >= startDate.Date && 
-                        tc.IssueDate <= endDate.Date && 
+            .Where(tc => tc.IssueDate >= startDate.Date &&
+                        tc.IssueDate <= endDate.Date &&
                         !tc.IsDeleted)
             .Include(tc => tc.Technician)
             .OrderBy(tc => tc.IssueDate)
@@ -137,7 +137,7 @@ public class TechnicianCertificationRepository : GenericRepository<TechnicianCer
     public async Task<int> GetExpiredCountByTechnicianAsync(Guid technicianId)
     {
         var today = DateTime.UtcNow.Date;
-        
+
         return await _context.TechnicianCertifications
             .Where(tc => tc.TechnicianId == technicianId &&
                         tc.ExpirationDate.HasValue &&

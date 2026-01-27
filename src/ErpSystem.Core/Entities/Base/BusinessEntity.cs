@@ -49,8 +49,8 @@ public abstract class BusinessEntity : BaseEntity
     /// <summary>
     /// Check if entity is currently active based on status and dates
     /// </summary>
-    public bool IsActive => 
-        Status == "Active" && 
+    public bool IsActive =>
+        Status == "Active" &&
         (EffectiveDate == null || EffectiveDate <= DateTime.UtcNow) &&
         (ExpirationDate == null || ExpirationDate > DateTime.UtcNow);
 }

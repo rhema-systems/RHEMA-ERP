@@ -11,12 +11,12 @@ public interface IInventoryManagementService
     // Item Management
     Task<IEnumerable<InventoryItemDto>> GetMaintenancePartsAsync(string? searchTerm = null);
     Task<InventoryItemDetailDto?> GetInventoryItemDetailAsync(Guid itemId);
-    
+
     // Stock Allocation
     Task<InventoryAllocationDto> AllocateForWorkOrderAsync(AllocateInventoryDto request);
     Task<bool> ConsumeAllocatedInventoryAsync(Guid allocationId, decimal quantity, Guid userId);
     Task<bool> ReleaseAllocationAsync(Guid allocationId, Guid userId);
-    
+
     // Stock Availability
     Task<StockAvailabilityDto> CheckStockAvailabilityAsync(Guid inventoryItemId, decimal requiredQuantity);
     Task<IEnumerable<ReorderRequiredDto>> GetItemsRequiringReorderAsync();

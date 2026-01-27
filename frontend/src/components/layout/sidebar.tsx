@@ -35,6 +35,16 @@ import {
   AlertTriangle,
   Clock,
   CheckSquare,
+  Activity,
+  FolderTree,
+  FileCheck,
+  Gavel,
+  Award,
+  Star,
+  Target,
+  DollarSign,
+  TrendingUp,
+  AlertCircle,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -80,14 +90,93 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
+    title: 'Development',
+    href: '/development',
+    icon: Building,
+    children: [
+      {
+        title: 'Project Mngt',
+        href: '/development/project-management',
+        icon: Briefcase,
+        children: [
+          { title: 'Projects', href: '/development/projects', icon: Briefcase },
+          { title: 'Tasks', href: '/development/tasks', icon: FileText },
+          { title: 'Resources', href: '/development/resources', icon: Users },
+          { title: 'Timeline', href: '/development/timeline', icon: BarChart3 },
+        ],
+      },
+      {
+        title: 'Maintenance Mngt',
+        href: '/maintenance',
+        icon: Wrench,
+        children: [
+          { title: 'Dashboard', href: '/maintenance/dashboard', icon: LayoutDashboard },
+          { title: 'Job Cards', href: '/maintenance/job-cards', icon: FileText },
+          { title: 'Work Orders', href: '/maintenance/work-orders', icon: FileText },
+          { title: 'Assets', href: '/maintenance/assets', icon: Package },
+          { title: 'Technicians', href: '/maintenance/technicians', icon: Users },
+          { title: 'Quality Control', href: '/maintenance/quality-control', icon: ClipboardCheck },
+          { title: 'Scheduled Maintenance', href: '/maintenance/scheduled', icon: Calendar },
+          { title: 'Condition Monitoring', href: '/maintenance/condition-monitoring', icon: Activity },
+          // Emergency Maintenance temporarily hidden
+          // { title: 'Emergency Maintenance', href: '/maintenance/emergency', icon: AlertTriangle },
+          // Inspections temporarily hidden
+          // { title: 'Inspections', href: '/maintenance/inspections', icon: ClipboardCheck },
+          { title: 'Maintenance History', href: '/maintenance/history', icon: Clock },
+          { title: 'Tool Management', href: '/maintenance/tools', icon: Wrench },
+          // Reports temporarily hidden
+          // { title: 'Reports', href: '/maintenance/reports', icon: BarChart3 },
+          // Asset Analytics temporarily hidden
+          // { title: 'Asset Analytics', href: '/maintenance/analytics', icon: BarChart3 },
+        ],
+      },
+    ],
+  },
+  {
     title: 'Procurement',
     href: '/procurement',
     icon: Briefcase,
     children: [
-      { title: 'Suppliers', href: '/procurement/suppliers', icon: Briefcase },
-      { title: 'Purchase Orders', href: '/procurement/purchase-orders', icon: ShoppingCart },
-      { title: 'Purchase Requests', href: '/procurement/requests', icon: FileText },
-      { title: 'Vendor Management', href: '/procurement/vendors', icon: Users },
+      { title: 'Registrations', href: '/administration/procurement/registrations', icon: FileText },
+      { title: 'Business Partners', href: '/procurement/business-partners', icon: Users },
+      {
+        title: 'Purchasing',
+        href: '/procurement/purchasing',
+        icon: ShoppingCart,
+        children: [
+          { title: 'Purchase Requests', href: '/procurement/requests', icon: FileText },
+          { title: 'Purchase Orders', href: '/procurement/purchase-orders', icon: ShoppingCart },
+          { title: 'Supplier Comparison', href: '/procurement/supplier-comparison', icon: BarChart3 },
+        ],
+      },
+      {
+        title: 'Tendering',
+        href: '/procurement/tendering',
+        icon: Gavel,
+        children: [
+          { title: 'Tenders', href: '/procurement/tenders', icon: Gavel },
+          { title: 'My Assigned Tenders', href: '/procurement/my-assigned-tenders', icon: FileText },
+          { title: 'Bids', href: '/procurement/bids', icon: FileText },
+          { title: 'Evaluations', href: '/procurement/evaluations', icon: Star },
+          { title: 'Awards', href: '/procurement/awards', icon: Award },
+          { title: 'Contracts', href: '/procurement/contracts', icon: FileText },
+        ],
+      },
+      {
+        title: 'Planning',
+        href: '/procurement/planning',
+        icon: Target,
+        children: [
+          { title: 'Procurement Plans', href: '/procurement/planning/plans', icon: Target },
+          { title: 'Budgets', href: '/procurement/planning/budgets', icon: DollarSign },
+          { title: 'Schedules', href: '/procurement/planning/schedules', icon: Calendar },
+          { title: 'Market Analysis', href: '/procurement/planning/market-analysis', icon: TrendingUp },
+          { title: 'Supplier Consolidation', href: '/procurement/planning/supplier-consolidation', icon: Users },
+          { title: 'Emergency Plans', href: '/procurement/planning/emergency-plans', icon: AlertCircle },
+        ],
+      },
+      // { title: 'Suppliers', href: '/procurement/suppliers', icon: Briefcase },
+      // { title: 'Vendor Management', href: '/procurement/vendors', icon: Users },
     ],
   },
   {
@@ -134,43 +223,6 @@ const navigationItems: NavItem[] = [
       { title: 'Leases', href: '/estate/leases', icon: FileText },
       { title: 'Maintenance', href: '/estate/maintenance', icon: Wrench },
       { title: 'Rent Collection', href: '/estate/rent-collection', icon: CreditCard },
-    ],
-  },
-  {
-    title: 'Development',
-    href: '/development',
-    icon: Building,
-    children: [
-      {
-        title: 'Project Mngt',
-        href: '/development/project-management',
-        icon: Briefcase,
-        children: [
-          { title: 'Projects', href: '/development/projects', icon: Briefcase },
-          { title: 'Tasks', href: '/development/tasks', icon: FileText },
-          { title: 'Resources', href: '/development/resources', icon: Users },
-          { title: 'Timeline', href: '/development/timeline', icon: BarChart3 },
-        ],
-      },
-      {
-        title: 'Maintenance Mngt',
-        href: '/maintenance',
-        icon: Wrench,
-        children: [
-          { title: 'Dashboard', href: '/maintenance/dashboard', icon: LayoutDashboard },
-          { title: 'Job Cards', href: '/maintenance/job-cards', icon: FileText },
-          { title: 'Work Orders', href: '/maintenance/work-orders', icon: FileText },
-          { title: 'Assets', href: '/maintenance/assets', icon: Package },
-          { title: 'Technicians', href: '/maintenance/technicians', icon: Users },
-          { title: 'Quality Control', href: '/maintenance/quality-control', icon: ClipboardCheck },
-          { title: 'Scheduled Maintenance', href: '/maintenance/scheduled', icon: Calendar },
-          { title: 'Emergency Maintenance', href: '/maintenance/emergency', icon: AlertTriangle },
-          { title: 'Inspections', href: '/maintenance/inspections', icon: ClipboardCheck },
-          { title: 'Maintenance History', href: '/maintenance/history', icon: Clock },
-          { title: 'Reports', href: '/maintenance/reports', icon: BarChart3 },
-          { title: 'Asset Analytics', href: '/maintenance/analytics', icon: BarChart3 },
-        ],
-      },
     ],
   },
   {
@@ -256,10 +308,18 @@ const navigationItems: NavItem[] = [
         href: '/administration/procurement',
         icon: Briefcase,
         children: [
-          { title: 'Supplier Categories', href: '/administration/procurement/supplier-categories', icon: Briefcase },
-          { title: 'Purchase Categories', href: '/administration/procurement/purchase-categories', icon: Package },
-          { title: 'Approval Workflows', href: '/administration/procurement/workflows', icon: Workflow },
-          { title: 'Terms & Conditions', href: '/administration/procurement/terms', icon: FileText },
+          { title: 'Partner Categories', href: '/administration/procurement/partner-categories', icon: FolderTree },
+          { title: 'Contractor Specializations', href: '/administration/procurement/contractor-specializations', icon: Wrench },
+          { title: 'License Types', href: '/administration/procurement/license-types', icon: FileCheck },
+          { title: 'Approval Workflows', href: '/administration/procurement/approval-workflows', icon: Workflow },
+          // { title: 'Supplier Categories', href: '/administration/procurement/supplier-categories', icon: Briefcase },
+          // { title: 'Purchase Categories', href: '/administration/procurement/purchase-categories', icon: Package },
+          // { title: 'Terms & Conditions', href: '/administration/procurement/terms', icon: FileText },
+          // { title: 'Tender Templates', href: '/administration/procurement/tender-templates', icon: Gavel },
+          { title: 'Evaluation Criteria', href: '/administration/procurement/evaluation-criteria', icon: Star },
+          { title: 'Evaluation Templates', href: '/administration/procurement/evaluation-templates', icon: FileText },
+          { title: 'Document Types', href: '/administration/procurement/document-types', icon: FileText },
+          { title: 'Award Verification Checklists', href: '/administration/procurement/award-verification-checklists', icon: ClipboardCheck },
         ],
       },
       {
@@ -334,11 +394,13 @@ const navigationItems: NavItem[] = [
               { title: 'Priority Levels', href: '/administration/maintenance/priorities', icon: AlertTriangle },
               { title: 'Task Templates', href: '/administration/maintenance/task-templates', icon: FileText },
               { title: 'Quality Checklists', href: '/administration/maintenance/quality-checklists', icon: CheckSquare },
-              { title: 'Inspection Templates', href: '/administration/maintenance/inspection-templates', icon: ClipboardCheck },
-              { title: 'Inspectors', href: '/administration/maintenance/inspectors', icon: Users },
-              { title: 'Maintenance Schedules', href: '/administration/maintenance/schedules', icon: Calendar },
-              { title: 'Technician Skills', href: '/administration/maintenance/skills', icon: Users },
-              { title: 'Safety Protocols', href: '/administration/maintenance/safety', icon: Shield },
+              { title: 'Admission Checklists', href: '/administration/maintenance/admission-checklists', icon: ClipboardCheck },
+              // The following advanced maintenance admin menus are temporarily hidden:
+              // { title: 'Inspection Templates', href: '/administration/maintenance/inspection-templates', icon: ClipboardCheck },
+              // { title: 'Inspectors', href: '/administration/maintenance/inspectors', icon: Users },
+              // { title: 'Maintenance Schedules', href: '/administration/maintenance/schedules', icon: Calendar },
+              // { title: 'Technician Skills', href: '/administration/maintenance/skills', icon: Users },
+              // { title: 'Safety Protocols', href: '/administration/maintenance/safety', icon: Shield },
             ],
           },
         ],
@@ -578,10 +640,10 @@ export function Sidebar({ className }: SidebarProps) {
         setIsMovingToChild(true);
         // Give more time when moving toward child
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        timeoutRef.current = setTimeout(() => {
-          if (!mouseInMenu) clearMenus();
-          setIsMovingToChild(false);
-        }, 800);
+    timeoutRef.current = setTimeout(() => {
+      if (!mouseInMenu) clearMenus();
+      setIsMovingToChild(false);
+    }, 1200);
         return;
       }
     }
@@ -611,7 +673,7 @@ export function Sidebar({ className }: SidebarProps) {
     }
     timeoutRef.current = setTimeout(() => {
       clearMenus();
-    }, 400);
+    }, 900);
   };
 
   const handleSidebarMouseLeave = () => {
@@ -621,7 +683,7 @@ export function Sidebar({ className }: SidebarProps) {
     }
     timeoutRef.current = setTimeout(() => {
       clearMenus();
-    }, 500);
+    }, 1000);
   };
 
   const toggleSection = (title: string) => {
@@ -741,9 +803,9 @@ export function Sidebar({ className }: SidebarProps) {
           className="fixed z-40"
           style={{
             left: Math.min(collapsed ? 64 : 288, menuPositions[hoveredItem].x),
-            top: menuPositions[hoveredItem].y,
-            width: Math.abs(menuPositions[hoveredItem].x - (collapsed ? 64 : 288)) + 8,
-            height: 40,
+            top: menuPositions[hoveredItem].y - 20,
+            width: Math.abs(menuPositions[hoveredItem].x - (collapsed ? 64 : 288)) + 16,
+            height: 120,
             pointerEvents: 'auto',
             backgroundColor: 'transparent'
           }}
@@ -809,9 +871,9 @@ export function Sidebar({ className }: SidebarProps) {
           className="fixed z-40"
           style={{
             left: Math.min(menuPositions[hoveredItem].x + 224, menuPositions[`${hoveredItem}-${hoveredChild}`].x),
-            top: menuPositions[`${hoveredItem}-${hoveredChild}`].y,
-            width: Math.abs(menuPositions[`${hoveredItem}-${hoveredChild}`].x - (menuPositions[hoveredItem].x + 224)) + 8,
-            height: 40,
+            top: menuPositions[`${hoveredItem}-${hoveredChild}`].y - 20,
+            width: Math.abs(menuPositions[`${hoveredItem}-${hoveredChild}`].x - (menuPositions[hoveredItem].x + 224)) + 16,
+            height: 120,
             pointerEvents: 'auto',
             backgroundColor: 'transparent'
           }}
@@ -878,9 +940,9 @@ export function Sidebar({ className }: SidebarProps) {
           className="fixed z-40"
           style={{
             left: Math.min(menuPositions[`${hoveredItem}-${hoveredChild}`].x + 224, menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].x),
-            top: menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].y,
-            width: Math.abs(menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].x - (menuPositions[`${hoveredItem}-${hoveredChild}`].x + 224)) + 8,
-            height: 40,
+            top: menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].y - 20,
+            width: Math.abs(menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].x - (menuPositions[`${hoveredItem}-${hoveredChild}`].x + 224)) + 16,
+            height: 120,
             pointerEvents: 'auto',
             backgroundColor: 'transparent'
           }}

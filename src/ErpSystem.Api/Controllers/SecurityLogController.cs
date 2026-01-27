@@ -1,8 +1,8 @@
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Services;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using ErpSystem.Core.Services;
-using ErpSystem.Core.Entities;
-using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers;
 
@@ -26,13 +26,16 @@ public class SecurityLogController : ControllerBase
     [HttpGet]
     [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
     public async Task<ActionResult<IEnumerable<SecurityLogDto>>> GetSecurityLogs(
-        [FromQuery] int pageNumber = 1, 
+        [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 100)
     {
         try
         {
-            if (pageSize > 500) pageSize = 500; // Limit page size for performance
-            
+            if (pageSize > 500)
+            {
+                pageSize = 500; // Limit page size for performance
+            }
+
             var securityLogs = await _securityLogService.GetSecurityLogsAsync(pageNumber, pageSize);
             var securityLogDtos = securityLogs.Select(MapToDto).ToList();
 
@@ -52,13 +55,16 @@ public class SecurityLogController : ControllerBase
     [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
     public async Task<ActionResult<IEnumerable<SecurityLogDto>>> GetSecurityLogsByUser(
         Guid userId,
-        [FromQuery] int pageNumber = 1, 
+        [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 100)
     {
         try
         {
-            if (pageSize > 500) pageSize = 500;
-            
+            if (pageSize > 500)
+            {
+                pageSize = 500;
+            }
+
             var securityLogs = await _securityLogService.GetSecurityLogsByUserAsync(userId, pageNumber, pageSize);
             var securityLogDtos = securityLogs.Select(MapToDto).ToList();
 
@@ -78,13 +84,16 @@ public class SecurityLogController : ControllerBase
     [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
     public async Task<ActionResult<IEnumerable<SecurityLogDto>>> GetSecurityLogsByAction(
         string action,
-        [FromQuery] int pageNumber = 1, 
+        [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 100)
     {
         try
         {
-            if (pageSize > 500) pageSize = 500;
-            
+            if (pageSize > 500)
+            {
+                pageSize = 500;
+            }
+
             var securityLogs = await _securityLogService.GetSecurityLogsByActionAsync(action, pageNumber, pageSize);
             var securityLogDtos = securityLogs.Select(MapToDto).ToList();
 
@@ -105,13 +114,16 @@ public class SecurityLogController : ControllerBase
     public async Task<ActionResult<IEnumerable<SecurityLogDto>>> GetSecurityLogsByDateRange(
         [FromQuery] DateTime from,
         [FromQuery] DateTime to,
-        [FromQuery] int pageNumber = 1, 
+        [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 100)
     {
         try
         {
-            if (pageSize > 500) pageSize = 500;
-            
+            if (pageSize > 500)
+            {
+                pageSize = 500;
+            }
+
             var securityLogs = await _securityLogService.GetSecurityLogsByDateRangeAsync(from, to, pageNumber, pageSize);
             var securityLogDtos = securityLogs.Select(MapToDto).ToList();
 

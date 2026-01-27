@@ -1,11 +1,11 @@
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
-using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Services;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -25,6 +25,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
     private readonly ILogger<MaintenanceScheduleService> _logger;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private static readonly char[] separator = new[] { ',', ';' };
 
     public MaintenanceScheduleService(
         IMaintenanceScheduleRepository scheduleRepository,
@@ -62,17 +63,13 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
 
             // Validate code uniqueness
             if (!await _scheduleRepository.IsCodeUniqueAsync(createDto.Code))
+            {
                 throw new ArgumentException($"Schedule code '{createDto.Code}' already exists");
+            }
 
             // Validate asset and maintenance type exist
-            var asset = await _assetService.GetAssetByIdAsync(createDto.AssetId);
-            if (asset == null)
-                throw new ArgumentException($"Asset with ID {createDto.AssetId} not found");
-
-            var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(createDto.MaintenanceTypeId);
-            if (maintenanceType == null)
-                throw new ArgumentException($"Maintenance type with ID {createDto.MaintenanceTypeId} not found");
-
+            var asset = await _assetService.GetAssetByIdAsync(createDto.AssetId) ?? throw new ArgumentException($"Asset with ID {createDto.AssetId} not found");
+            var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(createDto.MaintenanceTypeId) ?? throw new ArgumentException($"Maintenance type with ID {createDto.MaintenanceTypeId} not found");
             var schedule = new MaintenanceSchedule
             {
                 Id = Guid.NewGuid(),
@@ -99,15 +96,23 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
                 AdvanceNotificationDays = createDto.AdvanceNotificationDays,
                 NotificationRecipients = createDto.NotificationRecipients,
                 IsActive = createDto.IsActive,
+                // Trigger fields
+                PrimaryTriggerType = createDto.PrimaryTriggerType,
+                SecondaryTriggerType = createDto.SecondaryTriggerType,
+                TriggerLogic = createDto.TriggerLogic,
+                MileageTrigger = createDto.MileageTrigger,
+                OperatingHoursTrigger = createDto.OperatingHoursTrigger,
+                CycleTrigger = createDto.CycleTrigger,
+                ConditionCriteria = createDto.ConditionCriteria,
                 CreatedById = _currentUserProvider.UserId,
                 TenantId = _currentUserProvider.TenantId
             };
 
             await _scheduleRepository.AddAsync(schedule);
             await _unitOfWork.SaveChangesAsync(); // Commit to database
-            
+
             _logger.LogInformation("Created maintenance schedule {ScheduleId} successfully", schedule.Id);
-            
+
             return await MapToDto(schedule);
         }
         catch (Exception ex)
@@ -123,9 +128,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
         {
             _logger.LogInformation("Updating maintenance schedule: {ScheduleId}", id);
 
-            var schedule = await _scheduleRepository.GetByIdAsync(id);
-            if (schedule == null)
-                throw new ArgumentException($"Schedule with ID {id} not found");
+            var schedule = await _scheduleRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Schedule with ID {id} not found");
 
             // Update properties
             schedule.Name = updateDto.Name;
@@ -150,13 +153,21 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             schedule.AdvanceNotificationDays = updateDto.AdvanceNotificationDays;
             schedule.NotificationRecipients = updateDto.NotificationRecipients;
             schedule.IsActive = updateDto.IsActive;
+            // Trigger fields
+            schedule.PrimaryTriggerType = updateDto.PrimaryTriggerType;
+            schedule.SecondaryTriggerType = updateDto.SecondaryTriggerType;
+            schedule.TriggerLogic = updateDto.TriggerLogic;
+            schedule.MileageTrigger = updateDto.MileageTrigger;
+            schedule.OperatingHoursTrigger = updateDto.OperatingHoursTrigger;
+            schedule.CycleTrigger = updateDto.CycleTrigger;
+            schedule.ConditionCriteria = updateDto.ConditionCriteria;
             schedule.LastModifiedById = _currentUserProvider.UserId;
 
             await _scheduleRepository.UpdateAsync(schedule);
             await _unitOfWork.SaveChangesAsync();
-            
+
             _logger.LogInformation("Updated maintenance schedule {ScheduleId} successfully", id);
-            
+
             return await MapToDto(schedule);
         }
         catch (Exception ex)
@@ -172,13 +183,10 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
         {
             _logger.LogInformation("Deleting maintenance schedule: {ScheduleId}", id);
 
-            var schedule = await _scheduleRepository.GetByIdAsync(id);
-            if (schedule == null)
-                throw new ArgumentException($"Schedule with ID {id} not found");
-
+            var schedule = await _scheduleRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Schedule with ID {id} not found");
             await _scheduleRepository.DeleteAsync(id);
             await _unitOfWork.SaveChangesAsync();
-            
+
             _logger.LogInformation("Deleted maintenance schedule {ScheduleId} successfully", id);
         }
         catch (Exception ex)
@@ -198,12 +206,12 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
     {
         var schedules = await _scheduleRepository.GetAllAsync();
         var result = new List<MaintenanceScheduleDto>();
-        
+
         foreach (var schedule in schedules)
         {
             result.Add(await MapToDto(schedule));
         }
-        
+
         return result;
     }
 
@@ -222,22 +230,34 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
         }
 
         if (filter.AssetId.HasValue)
+        {
             filtered = filtered.Where(s => s.AssetId == filter.AssetId.Value);
+        }
 
         if (filter.MaintenanceTypeId.HasValue)
+        {
             filtered = filtered.Where(s => s.MaintenanceTypeId == filter.MaintenanceTypeId.Value);
+        }
 
         if (!string.IsNullOrEmpty(filter.Frequency))
+        {
             filtered = filtered.Where(s => s.Frequency == filter.Frequency);
+        }
 
         if (!string.IsNullOrEmpty(filter.Priority))
+        {
             filtered = filtered.Where(s => s.Priority == filter.Priority);
+        }
 
         if (filter.IsActive.HasValue)
+        {
             filtered = filtered.Where(s => s.IsActive == filter.IsActive.Value);
+        }
 
         if (filter.IsOverdue.HasValue)
+        {
             filtered = filtered.Where(s => s.IsOverdue == filter.IsOverdue.Value);
+        }
 
         var totalCount = filtered.Count();
         var schedulesPage = filtered
@@ -268,12 +288,12 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
     {
         var schedules = await _scheduleRepository.GetByAssetIdAsync(assetId);
         var result = new List<MaintenanceScheduleDto>();
-        
+
         foreach (var schedule in schedules)
         {
             result.Add(await MapToDto(schedule));
         }
-        
+
         return result;
     }
 
@@ -281,12 +301,12 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
     {
         var schedules = await _scheduleRepository.GetActiveSchedulesAsync();
         var result = new List<MaintenanceScheduleDto>();
-        
+
         foreach (var schedule in schedules)
         {
             result.Add(await MapToDto(schedule));
         }
-        
+
         return result;
     }
 
@@ -294,12 +314,12 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
     {
         var schedules = await _scheduleRepository.GetSchedulesDueInDaysAsync(days);
         var result = new List<MaintenanceScheduleDto>();
-        
+
         foreach (var schedule in schedules)
         {
             result.Add(await MapToDto(schedule));
         }
-        
+
         return result;
     }
 
@@ -307,12 +327,12 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
     {
         var schedules = await _scheduleRepository.GetSchedulesDueInDaysAsync(-1);
         var result = new List<MaintenanceScheduleDto>();
-        
+
         foreach (var schedule in schedules.Where(s => s.IsOverdue))
         {
             result.Add(await MapToDto(schedule));
         }
-        
+
         return result;
     }
 
@@ -321,12 +341,12 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
         var allSchedules = await _scheduleRepository.GetAllAsync();
         var technicianSchedules = allSchedules.Where(s => s.AssignedTechnicianId == technicianId);
         var result = new List<MaintenanceScheduleDto>();
-        
+
         foreach (var schedule in technicianSchedules)
         {
             result.Add(await MapToDto(schedule));
         }
-        
+
         return result;
     }
 
@@ -335,12 +355,12 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
         var allSchedules = await _scheduleRepository.GetAllAsync();
         var teamSchedules = allSchedules.Where(s => s.AssignedTeamId == teamId);
         var result = new List<MaintenanceScheduleDto>();
-        
+
         foreach (var schedule in teamSchedules)
         {
             result.Add(await MapToDto(schedule));
         }
-        
+
         return result;
     }
 
@@ -348,27 +368,24 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
     {
         var schedules = await _scheduleRepository.GetByMaintenanceTypeAsync(maintenanceTypeId);
         var result = new List<MaintenanceScheduleDto>();
-        
+
         foreach (var schedule in schedules)
         {
             result.Add(await MapToDto(schedule));
         }
-        
+
         return result;
     }
 
     public async Task<MaintenanceScheduleDto> ToggleScheduleStatusAsync(Guid id)
     {
-        var schedule = await _scheduleRepository.GetByIdAsync(id);
-        if (schedule == null)
-            throw new ArgumentException($"Schedule with ID {id} not found");
-
+        var schedule = await _scheduleRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Schedule with ID {id} not found");
         schedule.IsActive = !schedule.IsActive;
         schedule.LastModifiedById = _currentUserProvider.UserId;
-        
+
         await _scheduleRepository.UpdateAsync(schedule);
         await _unitOfWork.SaveChangesAsync();
-        
+
         return await MapToDto(schedule);
     }
 
@@ -415,9 +432,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
 
     public async Task<WorkOrderDto> GenerateWorkOrderFromScheduleAsync(Guid scheduleId)
     {
-        var schedule = await _scheduleRepository.GetByIdAsync(scheduleId);
-        if (schedule == null)
-            throw new ArgumentException($"Schedule with ID {scheduleId} not found");
+        var schedule = await _scheduleRepository.GetByIdAsync(scheduleId) ?? throw new ArgumentException($"Schedule with ID {scheduleId} not found");
 
         // Get or create a default "Scheduled" work order type
         var workOrderTypes = await _workOrderTypeRepository.GetAllAsync();
@@ -432,11 +447,24 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             ?? priorityLevels.FirstOrDefault(p => p.IsActive)
             ?? throw new InvalidOperationException("No active priority levels found");
 
-        // Create work order from schedule
+        // Deserialize required skills from JSON and convert to comma-separated string
+        string requiredSkillsStr = string.Empty;
+
+        try
+        {
+            var skillsList = JsonSerializer.Deserialize<List<string>>(schedule.RequiredSkills) ?? new List<string>();
+            requiredSkillsStr = string.Join(", ", skillsList);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to deserialize required skills for schedule {ScheduleId}", scheduleId);
+        }
+
+        // Create work order from schedule with ALL details
         var createWorkOrder = new CreateWorkOrderDto
         {
             Title = $"{schedule.Name} - Scheduled Maintenance",
-            Description = schedule.Description,
+            Description = $"{schedule.Description}\n\n[Auto-generated from maintenance schedule: {schedule.Name} ({schedule.Code}). Next due date was: {schedule.NextDueDate:yyyy-MM-dd}]",
             AssetId = schedule.AssetId,
             WorkOrderTypeId = scheduledWorkOrderType.Id,
             MaintenanceTypeId = schedule.MaintenanceTypeId,
@@ -447,16 +475,60 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             AssignedTeamId = schedule.AssignedTeamId,
             Instructions = schedule.Instructions,
             SafetyNotes = schedule.SafetyNotes,
+            RequiredSkills = requiredSkillsStr,
             RequestedStartDate = schedule.NextDueDate,
+            ScheduledStartDate = schedule.NextDueDate,
+            ScheduledEndDate = schedule.NextDueDate.AddHours((double)schedule.EstimatedHours),
             Status = "Open",
-            WorkOrderType = "Scheduled"
+            WorkOrderType = "Scheduled",
+            // JobCard is optional - work order will save without it
+            JobCardId = null,
+            // Link back to the schedule
+            MaintenanceScheduleId = scheduleId
         };
 
         var workOrder = await _workOrderService.CreateWorkOrderAsync(createWorkOrder);
-        
+
+        // If technician is assigned, create technician schedule entry
+        if (schedule.AssignedTechnicianId.HasValue)
+        {
+            try
+            {
+                var technicianSchedule = new TechnicianSchedule
+                {
+                    Id = Guid.NewGuid(),
+                    TechnicianId = schedule.AssignedTechnicianId.Value,
+                    WorkOrderId = workOrder.Id,
+                    StartDate = schedule.NextDueDate,
+                    EndDate = schedule.NextDueDate.AddHours((double)schedule.EstimatedHours),
+                    ScheduleType = "WorkOrder",
+                    Title = $"{schedule.Name} - Scheduled Maintenance",
+                    Description = schedule.Description,
+                    Status = "Scheduled",
+                    Priority = schedule.Priority,
+                    EstimatedHours = (double)schedule.EstimatedHours,
+                    Notes = $"Scheduled maintenance: {schedule.Name}",
+                    CreatedById = _currentUserProvider.IsAuthenticated ? _currentUserProvider.UserId : Guid.Empty,
+                    TenantId = _currentUserProvider.IsAuthenticated ? _currentUserProvider.TenantId : schedule.TenantId,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                await _unitOfWork.Repository<TechnicianSchedule>().AddAsync(technicianSchedule);
+                await _unitOfWork.SaveChangesAsync();
+
+                _logger.LogInformation("Created technician schedule entry for technician {TechnicianId} on work order {WorkOrderId}",
+                    schedule.AssignedTechnicianId.Value, workOrder.Id);
+            }
+            catch (Exception schedEx)
+            {
+                _logger.LogWarning(schedEx, "Failed to create technician schedule for work order {WorkOrderId}", workOrder.Id);
+                // Don't fail the whole operation if schedule creation fails
+            }
+        }
+
         // Update the schedule's next due date based on frequency
         await UpdateNextDueDateAsync(scheduleId);
-        
+
         // Update tracking fields to record that work order was generated
         var updatedSchedule = await _scheduleRepository.GetByIdAsync(scheduleId);
         if (updatedSchedule != null)
@@ -466,20 +538,22 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             await _scheduleRepository.UpdateAsync(updatedSchedule);
             await _unitOfWork.SaveChangesAsync();
         }
-        
+
         // Create maintenance schedule history record
-        try 
+        try
         {
             var scheduleHistory = new MaintenanceScheduleHistory
             {
                 Id = Guid.NewGuid(),
                 ScheduleId = scheduleId,
                 ChangeType = "WorkOrderGenerated",
-                PreviousValues = JsonSerializer.Serialize(new { 
-                    NextDueDate = schedule.NextDueDate, 
-                    LastGeneratedDate = schedule.LastGeneratedDate 
+                PreviousValues = JsonSerializer.Serialize(new
+                {
+                    NextDueDate = schedule.NextDueDate,
+                    LastGeneratedDate = schedule.LastGeneratedDate
                 }),
-                NewValues = JsonSerializer.Serialize(new { 
+                NewValues = JsonSerializer.Serialize(new
+                {
                     WorkOrderId = workOrder.Id,
                     WorkOrderTitle = workOrder.Title,
                     NextDueDate = updatedSchedule?.NextDueDate,
@@ -490,7 +564,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
                 TenantId = _currentUserProvider.IsAuthenticated ? _currentUserProvider.TenantId : Guid.Empty,
                 CreatedAt = DateTime.UtcNow
             };
-            
+
             await _unitOfWork.Repository<MaintenanceScheduleHistory>().AddAsync(scheduleHistory);
             await _unitOfWork.SaveChangesAsync();
         }
@@ -498,9 +572,9 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
         {
             _logger.LogWarning(historyEx, "Failed to create schedule history record for work order generation from schedule {ScheduleId}", scheduleId);
         }
-        
+
         // Create audit log entry
-        try 
+        try
         {
             await _auditLogService.LogUserActionAsync(
                 userId: _currentUserProvider.IsAuthenticated ? _currentUserProvider.UserId : Guid.Empty,
@@ -509,7 +583,8 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
                 resource: "Maintenance Schedule",
                 resourceId: scheduleId.ToString(),
                 oldValues: new { NextDueDate = schedule.NextDueDate, LastGeneratedDate = schedule.LastGeneratedDate },
-                newValues: new { 
+                newValues: new
+                {
                     WorkOrderId = workOrder.Id,
                     WorkOrderTitle = workOrder.Title,
                     NextDueDate = updatedSchedule?.NextDueDate,
@@ -521,8 +596,8 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
         {
             _logger.LogWarning(auditEx, "Failed to create audit log for work order generation from schedule {ScheduleId}", scheduleId);
         }
-        
-        _logger.LogInformation("Generated work order {WorkOrderId} from schedule {ScheduleId} and updated next due date", 
+
+        _logger.LogInformation("Generated work order {WorkOrderId} from schedule {ScheduleId} and updated next due date",
             workOrder.Id, scheduleId);
 
         return workOrder;
@@ -530,10 +605,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
 
     public async Task UpdateNextDueDateAsync(Guid scheduleId)
     {
-        var schedule = await _scheduleRepository.GetByIdAsync(scheduleId);
-        if (schedule == null)
-            throw new ArgumentException($"Schedule with ID {scheduleId} not found");
-
+        var schedule = await _scheduleRepository.GetByIdAsync(scheduleId) ?? throw new ArgumentException($"Schedule with ID {scheduleId} not found");
         var nextDueDate = await CalculateNextDueDateAsync(await MapToDto(schedule));
         await _scheduleRepository.UpdateNextDueDateAsync(scheduleId, nextDueDate);
         await _unitOfWork.SaveChangesAsync();
@@ -564,25 +636,25 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
     {
         var schedules = await _scheduleRepository.GetSchedulesDueForGenerationAsync();
         var result = new List<MaintenanceScheduleDto>();
-        
+
         foreach (var schedule in schedules)
         {
             result.Add(await MapToDto(schedule));
         }
-        
+
         return result;
     }
 
     public async Task<IEnumerable<WorkOrderDto>> CreateWorkOrdersFromScheduleAsync(Guid scheduleId, int count = 1)
     {
         var workOrders = new List<WorkOrderDto>();
-        
+
         for (int i = 0; i < count; i++)
         {
             var workOrder = await GenerateWorkOrderFromScheduleAsync(scheduleId);
             workOrders.Add(workOrder);
         }
-        
+
         return workOrders;
     }
 
@@ -593,7 +665,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
     public async Task<ScheduleComplianceReportDto> GetScheduleComplianceReportAsync(DateTime startDate, DateTime endDate)
     {
         var schedules = await _scheduleRepository.GetAllAsync();
-        
+
         return new ScheduleComplianceReportDto
         {
             TotalSchedules = schedules.Count(),
@@ -622,11 +694,11 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
         // Resolve maintenance type name
         var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(schedule.MaintenanceTypeId);
         var maintenanceTypeName = maintenanceType?.Name ?? "Unknown Type";
-        
+
         // Resolve asset name
         var asset = await _assetService.GetAssetByIdAsync(schedule.AssetId);
         var assetName = asset?.Name ?? "Unknown Asset";
-        
+
         // Resolve technician name if assigned
         var technicianName = "Unassigned";
         if (schedule.AssignedTechnicianId.HasValue)
@@ -653,7 +725,7 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
                 technicianName = "Unknown Technician";
             }
         }
-        
+
         return new MaintenanceScheduleDto
         {
             Id = schedule.Id,
@@ -694,8 +766,591 @@ public class MaintenanceScheduleService : IMaintenanceScheduleService
             CompliancePercentage = 95.0m, // Would be calculated
             NextScheduledDate = schedule.NextDueDate,
             IsOverdue = schedule.IsOverdue,
-            DaysUntilDue = schedule.DaysUntilDue
+            DaysUntilDue = schedule.DaysUntilDue,
+            // Trigger fields
+            PrimaryTriggerType = schedule.PrimaryTriggerType,
+            SecondaryTriggerType = schedule.SecondaryTriggerType,
+            TriggerLogic = schedule.TriggerLogic,
+            MileageTrigger = schedule.MileageTrigger,
+            OperatingHoursTrigger = schedule.OperatingHoursTrigger,
+            CycleTrigger = schedule.CycleTrigger,
+            ConditionCriteria = schedule.ConditionCriteria
         };
+    }
+
+    #endregion
+
+    #region History Methods
+
+    public async Task<IEnumerable<MaintenanceScheduleHistoryDto>> GetScheduleHistoryAsync(Guid scheduleId)
+    {
+        try
+        {
+            _logger.LogInformation("Getting history for schedule {ScheduleId}", scheduleId);
+
+            var schedule = await _scheduleRepository.GetByIdAsync(scheduleId) ?? throw new ArgumentException($"Schedule with ID {scheduleId} not found");
+
+            // Get history records filtered by schedule ID
+            var historyRecords = await _unitOfWork.Repository<MaintenanceScheduleHistory>()
+                .FindAsync(h => h.ScheduleId == scheduleId);
+
+            // Order by CreatedAt descending (newest first)
+            var orderedHistory = historyRecords.OrderByDescending(h => h.CreatedAt).ToList();
+
+            var historyDtos = new List<MaintenanceScheduleHistoryDto>();
+            foreach (var history in orderedHistory)
+            {
+                var changedByName = "System";
+                if (history.ChangedById != Guid.Empty)
+                {
+                    try
+                    {
+                        var employee = await _employeeService.GetByIdAsync(history.ChangedById);
+                        if (employee != null)
+                        {
+                            changedByName = $"{employee.FirstName} {employee.LastName}".Trim();
+                            if (string.IsNullOrWhiteSpace(changedByName))
+                            {
+                                changedByName = employee.EmployeeNumber ?? "Unknown";
+                            }
+                        }
+                        else
+                        {
+                            changedByName = "Unknown";
+                        }
+                    }
+                    catch
+                    {
+                        changedByName = "Unknown";
+                    }
+                }
+
+                historyDtos.Add(new MaintenanceScheduleHistoryDto
+                {
+                    Id = history.Id,
+                    ScheduleId = history.ScheduleId,
+                    ChangeType = history.ChangeType,
+                    PreviousValues = history.PreviousValues,
+                    NewValues = history.NewValues,
+                    ChangeReason = history.ChangeReason,
+                    ChangedById = history.ChangedById,
+                    ChangedByName = changedByName,
+                    CreatedAt = history.CreatedAt
+                });
+            }
+
+            return historyDtos;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting history for schedule {ScheduleId}", scheduleId);
+            throw;
+        }
+    }
+
+    #endregion
+
+    #region Notification and Reminder Methods
+
+    public async Task SendScheduleReminderAsync(Guid scheduleId, bool force = false)
+    {
+        try
+        {
+            _logger.LogInformation("Sending schedule reminder for schedule {ScheduleId}, force={Force}", scheduleId, force);
+
+            var schedule = await _scheduleRepository.GetByIdAsync(scheduleId);
+            if (schedule == null)
+            {
+                _logger.LogWarning("Schedule {ScheduleId} not found", scheduleId);
+                return;
+            }
+
+            // Check if reminder already sent today (unless forced)
+            if (!force && schedule.LastReminderSentDate.HasValue &&
+                schedule.LastReminderSentDate.Value.Date == DateTime.UtcNow.Date)
+            {
+                _logger.LogInformation("Reminder already sent today for schedule {ScheduleId}", scheduleId);
+                return;
+            }
+
+            // Get asset and maintenance type info
+            var asset = await _assetService.GetAssetByIdAsync(schedule.AssetId);
+            if (asset == null)
+            {
+                _logger.LogWarning("Asset not found for schedule {ScheduleId}", scheduleId);
+                return;
+            }
+
+            var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(schedule.MaintenanceTypeId);
+
+            // Parse recipients
+            var recipients = ParseRecipients(schedule.NotificationRecipients);
+            if (!recipients.Any())
+            {
+                _logger.LogWarning("No recipients configured for schedule {ScheduleId}", scheduleId);
+                return;
+            }
+
+            // Format due date
+            var dueDateFormatted = schedule.NextDueDate.ToString("MMMM dd, yyyy");
+            var daysUntilDue = (int)(schedule.NextDueDate.Date - DateTime.UtcNow.Date).TotalDays;
+
+            // Create notification record
+            var notification = new MaintenanceScheduleNotificationHistory
+            {
+                Id = Guid.NewGuid(),
+                ScheduleId = scheduleId,
+                NotificationType = "Reminder",
+                Status = "Pending",
+                ScheduledFor = DateTime.UtcNow,
+                Recipients = JsonSerializer.Serialize(recipients),
+                Subject = $"Maintenance Reminder: {schedule.Name}",
+                Message = $"Maintenance '{schedule.Name}' is due for asset '{asset.Name}' on {dueDateFormatted} ({daysUntilDue} days from now). Priority: {schedule.Priority}. Type: {maintenanceType?.Name ?? "N/A"}.",
+                CreatedById = _currentUserProvider.IsAuthenticated ? _currentUserProvider.UserId : Guid.Empty,
+                TenantId = _currentUserProvider.IsAuthenticated ? _currentUserProvider.TenantId : schedule.TenantId,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            await _unitOfWork.Repository<MaintenanceScheduleNotificationHistory>().AddAsync(notification);
+
+            // TODO: Send email to recipients using IEmailService
+            // Would need to inject IEmailService into constructor for proper implementation
+            _logger.LogInformation("Would send email to {Count} recipients for schedule {ScheduleId}", recipients.Count, scheduleId);
+
+            // Update notification status
+            notification.Status = "Sent";
+            notification.SentAt = DateTime.UtcNow;
+
+            // Update schedule's last reminder date
+            await _scheduleRepository.UpdateLastReminderSentDateAsync(scheduleId, DateTime.UtcNow);
+
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Schedule reminder sent successfully for schedule {ScheduleId}", scheduleId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending schedule reminder for schedule {ScheduleId}", scheduleId);
+            throw;
+        }
+    }
+
+    public async Task<IEnumerable<MaintenanceScheduleDto>> GetSchedulesDueForRemindersAsync()
+    {
+        try
+        {
+            // Get active schedules with advance notification configured
+            var allSchedules = await _scheduleRepository.GetActiveSchedulesAsync();
+            var dueForReminders = new List<MaintenanceSchedule>();
+
+            foreach (var schedule in allSchedules)
+            {
+                if (!schedule.AdvanceNotificationDays.HasValue ||
+                    string.IsNullOrEmpty(schedule.NotificationRecipients))
+                {
+                    continue;
+                }
+
+                var daysUntilDue = (int)(schedule.NextDueDate.Date - DateTime.UtcNow.Date).TotalDays;
+
+                // Check if we should send reminder
+                if (daysUntilDue == schedule.AdvanceNotificationDays.Value)
+                {
+                    // Check if reminder not already sent today
+                    if (!schedule.LastReminderSentDate.HasValue ||
+                        schedule.LastReminderSentDate.Value.Date < DateTime.UtcNow.Date)
+                    {
+                        dueForReminders.Add(schedule);
+                    }
+                }
+            }
+
+            var result = new List<MaintenanceScheduleDto>();
+            foreach (var schedule in dueForReminders)
+            {
+                result.Add(await MapToDto(schedule));
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting schedules due for reminders");
+            throw;
+        }
+    }
+
+    public async Task<int> SendAdvanceRemindersAsync()
+    {
+        try
+        {
+            _logger.LogInformation("Processing advance reminders");
+
+            var schedulesDue = await GetSchedulesDueForRemindersAsync();
+            var sentCount = 0;
+
+            foreach (var schedule in schedulesDue)
+            {
+                try
+                {
+                    await SendScheduleReminderAsync(schedule.Id);
+                    sentCount++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error sending reminder for schedule {ScheduleId}", schedule.Id);
+                }
+            }
+
+            _logger.LogInformation("Sent {Count} advance reminders", sentCount);
+            return sentCount;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing advance reminders");
+            throw;
+        }
+    }
+
+    #endregion
+
+    #region Usage-Based Trigger Evaluation
+
+    public async Task<bool> EvaluateUsageTriggersAsync(Guid scheduleId)
+    {
+        try
+        {
+            var schedule = await _scheduleRepository.GetByIdAsync(scheduleId);
+            if (schedule == null)
+            {
+                return false;
+            }
+
+            // Only evaluate if usage trigger is configured
+            if (schedule.PrimaryTriggerType != "Usage" &&
+                schedule.PrimaryTriggerType != "Combined" &&
+                schedule.SecondaryTriggerType != "Usage")
+            {
+                return false;
+            }
+
+            // Get current asset usage
+            var asset = await _assetService.GetAssetByIdAsync(schedule.AssetId);
+            if (asset == null)
+            {
+                return false;
+            }
+
+            bool triggerMet = false;
+
+            // Check mileage trigger
+            if (schedule.MileageTrigger.HasValue && asset.Mileage.HasValue)
+            {
+                var mileageSinceLastCheck = asset.Mileage.Value - (double)(schedule.LastUsageValue ?? 0);
+                if (mileageSinceLastCheck >= (double)schedule.MileageTrigger.Value)
+                {
+                    _logger.LogInformation("Mileage trigger met for schedule {ScheduleId}: {Current} >= {Trigger}",
+                        scheduleId, asset.Mileage.Value, schedule.MileageTrigger.Value);
+                    triggerMet = true;
+                }
+            }
+
+            // Check operating hours trigger
+            if (schedule.OperatingHoursTrigger.HasValue && asset.OperatingHours.HasValue)
+            {
+                var hoursSinceLastCheck = asset.OperatingHours.Value - (double)(schedule.LastUsageValue ?? 0);
+                if (hoursSinceLastCheck >= (double)schedule.OperatingHoursTrigger.Value)
+                {
+                    _logger.LogInformation("Operating hours trigger met for schedule {ScheduleId}: {Current} >= {Trigger}",
+                        scheduleId, asset.OperatingHours.Value, schedule.OperatingHoursTrigger.Value);
+                    triggerMet = true;
+                }
+            }
+
+            // Update last check date
+            await _scheduleRepository.UpdateLastUsageCheckDateAsync(scheduleId, DateTime.UtcNow);
+            await _unitOfWork.SaveChangesAsync();
+
+            return triggerMet;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error evaluating usage triggers for schedule {ScheduleId}", scheduleId);
+            return false;
+        }
+    }
+
+    public async Task<IEnumerable<MaintenanceScheduleDto>> GetSchedulesDueByUsageAsync()
+    {
+        try
+        {
+            var usageSchedules = await _scheduleRepository.GetSchedulesByUsageTriggersAsync();
+            var dueSchedules = new List<MaintenanceSchedule>();
+
+            foreach (var schedule in usageSchedules)
+            {
+                if (await EvaluateUsageTriggersAsync(schedule.Id))
+                {
+                    dueSchedules.Add(schedule);
+                }
+            }
+
+            var result = new List<MaintenanceScheduleDto>();
+            foreach (var schedule in dueSchedules)
+            {
+                result.Add(await MapToDto(schedule));
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting schedules due by usage");
+            throw;
+        }
+    }
+
+    public async Task UpdateAssetUsageAsync(Guid assetId, double? mileage, double? operatingHours)
+    {
+        try
+        {
+            _logger.LogInformation("Updating asset usage for asset {AssetId}", assetId);
+
+            var asset = await _assetService.GetAssetByIdAsync(assetId) ?? throw new ArgumentException($"Asset with ID {assetId} not found");
+
+            // This would require modifying the asset service to support usage updates
+            // For now, log the intent
+            _logger.LogInformation("Asset usage update requested: Mileage={Mileage}, Hours={Hours}",
+                mileage, operatingHours);
+
+            // TODO: Implement asset usage update in IMaintenanceAssetService
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating asset usage for asset {AssetId}", assetId);
+            throw;
+        }
+    }
+
+    #endregion
+
+    #region Condition-Based Trigger Evaluation
+
+    public async Task<bool> EvaluateConditionTriggersAsync(Guid scheduleId)
+    {
+        try
+        {
+            var schedule = await _scheduleRepository.GetByIdAsync(scheduleId);
+            if (schedule == null)
+            {
+                return false;
+            }
+
+            // Only evaluate if condition trigger is configured
+            if (schedule.PrimaryTriggerType != "Condition" &&
+                schedule.PrimaryTriggerType != "Combined" &&
+                schedule.SecondaryTriggerType != "Condition")
+            {
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(schedule.ConditionCriteria))
+            {
+                return false;
+            }
+
+            // This is a placeholder - actual condition evaluation would require
+            // integration with IoT sensors or other data sources
+            _logger.LogWarning("Condition evaluation not fully implemented for schedule {ScheduleId}", scheduleId);
+
+            // Update last check date
+            await _scheduleRepository.UpdateLastConditionCheckDateAsync(scheduleId, DateTime.UtcNow);
+            await _unitOfWork.SaveChangesAsync();
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error evaluating condition triggers for schedule {ScheduleId}", scheduleId);
+            return false;
+        }
+    }
+
+    public async Task<IEnumerable<MaintenanceScheduleDto>> GetSchedulesDueByConditionAsync()
+    {
+        try
+        {
+            var conditionSchedules = await _scheduleRepository.GetSchedulesByConditionTriggersAsync();
+            var dueSchedules = new List<MaintenanceSchedule>();
+
+            foreach (var schedule in conditionSchedules)
+            {
+                if (await EvaluateConditionTriggersAsync(schedule.Id))
+                {
+                    dueSchedules.Add(schedule);
+                }
+            }
+
+            var result = new List<MaintenanceScheduleDto>();
+            foreach (var schedule in dueSchedules)
+            {
+                result.Add(await MapToDto(schedule));
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting schedules due by condition");
+            throw;
+        }
+    }
+
+    #endregion
+
+    #region Multi-Criteria Evaluation
+
+    public async Task<bool> ShouldGenerateWorkOrderAsync(Guid scheduleId)
+    {
+        try
+        {
+            var schedule = await _scheduleRepository.GetByIdAsync(scheduleId);
+            if (schedule == null || !schedule.IsActive)
+            {
+                return false;
+            }
+
+            bool primaryTriggerMet = false;
+            bool secondaryTriggerMet = false;
+
+            // Evaluate primary trigger
+            primaryTriggerMet = schedule.PrimaryTriggerType switch
+            {
+                "Time" => schedule.NextDueDate.Date <= DateTime.UtcNow.Date,
+                "Usage" => await EvaluateUsageTriggersAsync(scheduleId),
+                "Condition" => await EvaluateConditionTriggersAsync(scheduleId),
+                _ => false
+            };
+
+            // If not combined, return primary result
+            if (schedule.PrimaryTriggerType != "Combined")
+            {
+                return primaryTriggerMet;
+            }
+
+            // Evaluate secondary trigger for combined schedules
+            if (!string.IsNullOrEmpty(schedule.SecondaryTriggerType))
+            {
+                secondaryTriggerMet = schedule.SecondaryTriggerType switch
+                {
+                    "Time" => schedule.NextDueDate.Date <= DateTime.UtcNow.Date,
+                    "Usage" => await EvaluateUsageTriggersAsync(scheduleId),
+                    "Condition" => await EvaluateConditionTriggersAsync(scheduleId),
+                    _ => false
+                };
+            }
+
+            // Apply trigger logic (AND/OR)
+            var shouldGenerate = schedule.TriggerLogic?.ToUpper() == "AND"
+                ? primaryTriggerMet && secondaryTriggerMet
+                : primaryTriggerMet || secondaryTriggerMet;
+
+            _logger.LogInformation("Schedule {ScheduleId} trigger evaluation: Primary={Primary}, Secondary={Secondary}, Logic={Logic}, Result={Result}",
+                scheduleId, primaryTriggerMet, secondaryTriggerMet, schedule.TriggerLogic, shouldGenerate);
+
+            return shouldGenerate;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error evaluating if work order should be generated for schedule {ScheduleId}", scheduleId);
+            return false;
+        }
+    }
+
+    public async Task ProcessUsageBasedSchedulesAsync()
+    {
+        try
+        {
+            _logger.LogInformation("Processing usage-based schedules");
+
+            var usageSchedules = await _scheduleRepository.GetSchedulesByUsageTriggersAsync();
+            var generatedCount = 0;
+
+            foreach (var schedule in usageSchedules.Where(s => s.AutoGenerateWorkOrders))
+            {
+                try
+                {
+                    if (await ShouldGenerateWorkOrderAsync(schedule.Id))
+                    {
+                        await GenerateWorkOrderFromScheduleAsync(schedule.Id);
+                        generatedCount++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing usage-based schedule {ScheduleId}", schedule.Id);
+                }
+            }
+
+            _logger.LogInformation("Generated {Count} work orders from usage-based schedules", generatedCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing usage-based schedules");
+            throw;
+        }
+    }
+
+    public async Task ProcessConditionBasedSchedulesAsync()
+    {
+        try
+        {
+            _logger.LogInformation("Processing condition-based schedules");
+
+            var conditionSchedules = await _scheduleRepository.GetSchedulesByConditionTriggersAsync();
+            var generatedCount = 0;
+
+            foreach (var schedule in conditionSchedules.Where(s => s.AutoGenerateWorkOrders))
+            {
+                try
+                {
+                    if (await ShouldGenerateWorkOrderAsync(schedule.Id))
+                    {
+                        await GenerateWorkOrderFromScheduleAsync(schedule.Id);
+                        generatedCount++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing condition-based schedule {ScheduleId}", schedule.Id);
+                }
+            }
+
+            _logger.LogInformation("Generated {Count} work orders from condition-based schedules", generatedCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing condition-based schedules");
+            throw;
+        }
+    }
+
+    #endregion
+
+    #region Helper Methods
+
+    private static List<string> ParseRecipients(string? notificationRecipients)
+    {
+        if (string.IsNullOrWhiteSpace(notificationRecipients))
+        {
+            return new List<string>();
+        }
+
+        return notificationRecipients
+            .Split(separator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(r => r.Trim())
+            .Where(r => !string.IsNullOrEmpty(r))
+            .ToList();
     }
 
     #endregion

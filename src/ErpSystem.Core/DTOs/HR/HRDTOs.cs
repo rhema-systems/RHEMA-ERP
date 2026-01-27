@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
-using ErpSystem.Core.Enums;
 using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.HR;
 

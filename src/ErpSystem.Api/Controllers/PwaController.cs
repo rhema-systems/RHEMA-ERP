@@ -1,8 +1,8 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
-using ErpSystem.Core.DTOs.Notifications;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -56,14 +56,14 @@ namespace ErpSystem.Api.Controllers
                 {
                     return BadRequest("UserId not found in token");
                 }
-                
+
                 var success = await _pushNotificationService.SaveSubscriptionAsync(userId.Value, subscription);
-                
+
                 if (success)
                 {
                     return Ok(new { message = "Successfully subscribed to push notifications" });
                 }
-                
+
                 return BadRequest("Failed to subscribe to push notifications");
             }
             catch (Exception ex)
@@ -86,14 +86,14 @@ namespace ErpSystem.Api.Controllers
                 {
                     return BadRequest("UserId not found in token");
                 }
-                
+
                 var success = await _pushNotificationService.RemoveSubscriptionAsync(userId.Value, subscription.Endpoint);
-                
+
                 if (success)
                 {
                     return Ok(new { message = "Successfully unsubscribed from push notifications" });
                 }
-                
+
                 return BadRequest("Failed to unsubscribe from push notifications");
             }
             catch (Exception ex)
@@ -116,14 +116,14 @@ namespace ErpSystem.Api.Controllers
                 {
                     return BadRequest("UserId not found in token");
                 }
-                
+
                 var success = await _pushNotificationService.TestPushNotificationAsync(userId.Value, testDto.Message);
-                
+
                 if (success)
                 {
                     return Ok(new { message = "Test notification sent successfully" });
                 }
-                
+
                 return BadRequest("Failed to send test notification");
             }
             catch (Exception ex)
@@ -164,7 +164,7 @@ namespace ErpSystem.Api.Controllers
                 {
                     return BadRequest("UserId not found in token");
                 }
-                
+
                 var subscriptions = await _pushNotificationService.GetUserSubscriptionsAsync(userId.Value);
                 return Ok(subscriptions);
             }

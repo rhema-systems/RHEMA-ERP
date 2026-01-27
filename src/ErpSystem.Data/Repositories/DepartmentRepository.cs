@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.Entities.HR;
-using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.HR;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories
 {
@@ -97,14 +97,18 @@ namespace ErpSystem.Data.Repositories
                 .AnyAsync(e => e.DepartmentId == departmentId && !e.IsDeleted);
 
             if (hasEmployees)
+            {
                 return false;
+            }
 
             // Check if department has sub-departments
             var hasSubDepartments = await _dbSet
                 .AnyAsync(d => d.ParentDepartmentId == departmentId && !d.IsDeleted);
 
             if (hasSubDepartments)
+            {
                 return false;
+            }
 
             // Check if department has sections
             var hasSections = await _context.Set<Section>()

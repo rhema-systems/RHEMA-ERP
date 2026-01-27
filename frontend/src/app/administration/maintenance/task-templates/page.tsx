@@ -308,7 +308,7 @@ export default function TaskTemplatesPage() {
       }
 
       let endpoint = '';
-      let createDto: any = {
+      const createDto: any = {
         taskName: formData.taskName,
         description: formData.description,
         sequence: formData.sequence,
@@ -391,7 +391,7 @@ export default function TaskTemplatesPage() {
       }
 
       let endpoint = '';
-      let updateDto: any = {
+      const updateDto: any = {
         taskName: formData.taskName,
         description: formData.description,
         sequence: formData.sequence,

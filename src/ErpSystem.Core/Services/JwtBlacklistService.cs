@@ -1,6 +1,6 @@
-using Microsoft.Extensions.Logging;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services;
 
@@ -49,7 +49,7 @@ public class JwtBlacklistService : IJwtBlacklistService
             await _unitOfWork.Repository<BlacklistedToken>().AddAsync(blacklistedToken);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Blacklisted JWT token with JTI {Jti} for user {UserId} (reason: {Reason})", 
+            _logger.LogInformation("Blacklisted JWT token with JTI {Jti} for user {UserId} (reason: {Reason})",
                 jti, userId, blacklistedToken.Reason);
         }
         catch (Exception ex)
@@ -70,17 +70,17 @@ public class JwtBlacklistService : IJwtBlacklistService
             }
 
             _logger.LogInformation("🔍 Blacklist Service: Checking JTI: {Jti}", jti);
-            
+
             var blacklistedToken = await _unitOfWork.Repository<BlacklistedToken>()
                 .FirstOrDefaultAsync(bt => bt.Jti == jti && !bt.IsDeleted);
 
             var isBlacklisted = blacklistedToken != null;
-            _logger.LogInformation("🔍 Blacklist Service: JTI {Jti} result: {IsBlacklisted} (Token found: {TokenFound})", 
+            _logger.LogInformation("🔍 Blacklist Service: JTI {Jti} result: {IsBlacklisted} (Token found: {TokenFound})",
                 jti, isBlacklisted, blacklistedToken != null ? "YES" : "NO");
-            
+
             if (blacklistedToken != null)
             {
-                _logger.LogDebug("Blacklisted token details - Reason: {Reason}, BlacklistedAt: {BlacklistedAt}, ExpiresAt: {ExpiresAt}", 
+                _logger.LogDebug("Blacklisted token details - Reason: {Reason}, BlacklistedAt: {BlacklistedAt}, ExpiresAt: {ExpiresAt}",
                     blacklistedToken.Reason, blacklistedToken.BlacklistedAt, blacklistedToken.ExpiresAt);
             }
 
@@ -101,16 +101,16 @@ public class JwtBlacklistService : IJwtBlacklistService
             // This is a complex operation because we need to find all currently valid JWT tokens
             // for a user. Since we don't store JWTs in the database, we can't directly blacklist them.
             // However, we can revoke all refresh tokens and rely on JWT expiration.
-            
+
             // For now, we'll log this operation but not implement it fully
             // A proper implementation would require either:
             // 1. Storing JWT IDs when tokens are issued
             // 2. Using a different approach like changing the user's security stamp
-            
+
             _logger.LogInformation("BlacklistAllUserTokensAsync called for user {UserId} (reason: {Reason}). " +
-                                 "This operation is not fully implemented - refresh tokens should be revoked instead.", 
+                                 "This operation is not fully implemented - refresh tokens should be revoked instead.",
                                  userId, reason);
-            
+
             return 0;
         }
         catch (Exception ex)

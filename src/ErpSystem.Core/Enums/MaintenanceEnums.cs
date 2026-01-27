@@ -87,7 +87,8 @@ public enum AssetStatus
     Maintenance = 2,
     OutOfService = 3,
     Retired = 4,
-    Disposed = 5
+    Disposed = 5,
+    InUse = 6  // Vehicle/asset is currently being used for travel or work order execution
 }
 
 /// <summary>

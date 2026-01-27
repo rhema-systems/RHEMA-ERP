@@ -1,7 +1,7 @@
-using Microsoft.EntityFrameworkCore;
-using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories;
 
@@ -35,9 +35,9 @@ public class WorkflowInstanceRepository : GenericRepository<WorkflowInstance>, I
         return await _dbSet
             .Include(wi => wi.WorkflowDefinition)
             .Include(wi => wi.StepInstances)
-            .Where(wi => wi.TenantId == tenantId && 
+            .Where(wi => wi.TenantId == tenantId &&
                         wi.Status == WorkflowInstanceStatus.InProgress &&
-                        wi.StepInstances.Any(si => si.AssignedToId == userId && 
+                        wi.StepInstances.Any(si => si.AssignedToId == userId &&
                                                   si.Status == WorkflowStepInstanceStatus.Pending) &&
                         !wi.IsDeleted)
             .OrderByDescending(wi => wi.UpdatedAt)
@@ -79,7 +79,7 @@ public class WorkflowInstanceRepository : GenericRepository<WorkflowInstance>, I
         return await _dbSet
             .Include(wi => wi.WorkflowDefinition)
             .Include(wi => wi.StepInstances)
-            .Where(wi => wi.TenantId == tenantId && 
+            .Where(wi => wi.TenantId == tenantId &&
                         wi.Status == WorkflowInstanceStatus.InProgress &&
                         !wi.IsDeleted)
             .OrderBy(wi => wi.CreatedAt)

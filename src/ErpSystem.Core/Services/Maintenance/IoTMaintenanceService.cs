@@ -1,8 +1,8 @@
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -37,7 +37,7 @@ public class IoTMaintenanceService : IIoTMaintenanceService
     {
         try
         {
-            _logger.LogInformation("Processing sensor data for asset {AssetId}, sensor {SensorId}", 
+            _logger.LogInformation("Processing sensor data for asset {AssetId}, sensor {SensorId}",
                 sensorData.AssetId, sensorData.SensorId);
 
             // Validate sensor data
@@ -99,13 +99,11 @@ public class IoTMaintenanceService : IIoTMaintenanceService
         {
             _logger.LogInformation("Performing predictive analysis for asset {AssetId}", assetId);
 
-            var asset = await _assetService.GetAssetByIdAsync(assetId);
-            if (asset == null)
-                throw new ArgumentException($"Asset with ID {assetId} not found");
+            var asset = await _assetService.GetAssetByIdAsync(assetId) ?? throw new ArgumentException($"Asset with ID {assetId} not found");
 
             // Get historical sensor data
             var historicalData = await GetHistoricalSensorDataAsync(assetId, startDate, endDate);
-            
+
             // Run predictive algorithms
             var failurePrediction = await PredictFailureProbabilityAsync(assetId, historicalData);
             var maintenanceRecommendations = await GenerateMaintenanceRecommendationsAsync(assetId, historicalData);
@@ -123,7 +121,7 @@ public class IoTMaintenanceService : IIoTMaintenanceService
                 AlertLevel = DetermineAlertLevel(healthScore, failurePrediction)
             };
 
-            _logger.LogInformation("Predictive analysis completed for asset {AssetId} - Health Score: {HealthScore}", 
+            _logger.LogInformation("Predictive analysis completed for asset {AssetId} - Health Score: {HealthScore}",
                 assetId, healthScore);
 
             return result;
@@ -149,7 +147,7 @@ public class IoTMaintenanceService : IIoTMaintenanceService
             {
                 var avgTemp = temperatureData.Average(s => s.Value);
                 var maxTemp = temperatureData.Max(s => s.Value);
-                
+
                 if (avgTemp > 75) // Example threshold
                 {
                     recommendations.Add(new MaintenanceRecommendationDto
@@ -171,7 +169,7 @@ public class IoTMaintenanceService : IIoTMaintenanceService
             {
                 var avgVibration = vibrationData.Average(s => s.Value);
                 var recentVibration = vibrationData.TakeLast(10).Average(s => s.Value);
-                
+
                 if (recentVibration > avgVibration * 1.5)
                 {
                     recommendations.Add(new MaintenanceRecommendationDto
@@ -192,7 +190,7 @@ public class IoTMaintenanceService : IIoTMaintenanceService
             if (pressureData.Any())
             {
                 var pressureVariance = CalculateVariance(pressureData.Select(s => s.Value));
-                
+
                 if (pressureVariance > 10) // Example threshold
                 {
                     recommendations.Add(new MaintenanceRecommendationDto
@@ -208,7 +206,7 @@ public class IoTMaintenanceService : IIoTMaintenanceService
                 }
             }
 
-            _logger.LogInformation("Generated {Count} maintenance recommendations for asset {AssetId}", 
+            _logger.LogInformation("Generated {Count} maintenance recommendations for asset {AssetId}",
                 recommendations.Count, assetId);
 
             return recommendations;
@@ -230,13 +228,11 @@ public class IoTMaintenanceService : IIoTMaintenanceService
         {
             _logger.LogInformation("Getting asset health for asset {AssetId}", assetId);
 
-            var asset = await _assetService.GetAssetByIdAsync(assetId);
-            if (asset == null)
-                throw new ArgumentException($"Asset with ID {assetId} not found");
+            var asset = await _assetService.GetAssetByIdAsync(assetId) ?? throw new ArgumentException($"Asset with ID {assetId} not found");
 
             // Get latest sensor readings
             var latestSensorData = await GetLatestSensorDataAsync(assetId);
-            
+
             // Calculate health metrics
             var healthScore = await CalculateAssetHealthScoreAsync(assetId, latestSensorData);
             var operationalStatus = DetermineOperationalStatus(latestSensorData);
@@ -256,7 +252,7 @@ public class IoTMaintenanceService : IIoTMaintenanceService
                 Alerts = await GetActiveAlertsAsync(assetId)
             };
 
-            _logger.LogInformation("Asset health retrieved for asset {AssetId} - Score: {HealthScore}, Status: {Status}", 
+            _logger.LogInformation("Asset health retrieved for asset {AssetId} - Score: {HealthScore}, Status: {Status}",
                 assetId, healthScore, operationalStatus);
 
             return assetHealth;
@@ -299,7 +295,7 @@ public class IoTMaintenanceService : IIoTMaintenanceService
         {
             // Get historical data for comparison
             var historicalData = await GetRecentSensorDataAsync(sensorData.AssetId, sensorData.SensorType, 100);
-            
+
             if (!historicalData.Any())
             {
                 return new SensorAnalysisResultDto { HasAnomalies = false };
@@ -308,11 +304,11 @@ public class IoTMaintenanceService : IIoTMaintenanceService
             var values = historicalData.Select(s => s.Value).ToList();
             var mean = values.Average();
             var standardDeviation = CalculateStandardDeviation(values);
-            
+
             // Detect anomalies using statistical methods
             var zScore = Math.Abs((sensorData.Value - mean) / standardDeviation);
             var isAnomaly = zScore > 3; // 3-sigma rule
-            
+
             // Additional pattern-based anomaly detection
             var isRapidChange = await DetectRapidChangeAsync(sensorData, historicalData.TakeLast(5));
             var isOutOfRange = await CheckOperatingRangeAsync(sensorData);
@@ -339,15 +335,15 @@ public class IoTMaintenanceService : IIoTMaintenanceService
     {
         try
         {
-            _logger.LogWarning("Sensor anomaly detected for asset {AssetId}, sensor {SensorType}: {Severity}", 
+            _logger.LogWarning("Sensor anomaly detected for asset {AssetId}, sensor {SensorType}: {Severity}",
                 sensorData.AssetId, sensorData.SensorType, analysisResults.Severity);
 
             // Create alert based on severity
             if (analysisResults.Severity == "Critical")
             {
-                await _notificationService.SendAssetCriticalAlertAsync(sensorData.AssetId, 
+                await _notificationService.SendAssetCriticalAlertAsync(sensorData.AssetId,
                     $"Critical {sensorData.SensorType} sensor anomaly detected (Value: {sensorData.Value})");
-                
+
                 // Auto-create emergency work order for critical anomalies
                 await CreateEmergencyWorkOrderAsync(sensorData, analysisResults);
             }
@@ -374,7 +370,9 @@ public class IoTMaintenanceService : IIoTMaintenanceService
     {
         // Basic validation
         if (sensorData.AssetId == Guid.Empty || string.IsNullOrEmpty(sensorData.SensorType))
+        {
             return false;
+        }
 
         // Check if asset exists
         var asset = await _assetService.GetAssetByIdAsync(sensorData.AssetId);
@@ -384,7 +382,7 @@ public class IoTMaintenanceService : IIoTMaintenanceService
     private async Task StoreSensorDataAsync(SensorDataDto sensorData)
     {
         // Mock implementation - would store in time-series database
-        _logger.LogDebug("Storing sensor data for asset {AssetId}: {SensorType}={Value}", 
+        _logger.LogDebug("Storing sensor data for asset {AssetId}: {SensorType}={Value}",
             sensorData.AssetId, sensorData.SensorType, sensorData.Value);
     }
 
@@ -395,7 +393,7 @@ public class IoTMaintenanceService : IIoTMaintenanceService
         return await Task.FromResult(mockData);
     }
 
-    private async Task<IEnumerable<SensorDataDto>> GetLatestSensorDataAsync(Guid assetId)
+    private static async Task<IEnumerable<SensorDataDto>> GetLatestSensorDataAsync(Guid assetId)
     {
         // Mock implementation - would get latest readings from each sensor
         var mockData = new List<SensorDataDto>
@@ -422,17 +420,21 @@ public class IoTMaintenanceService : IIoTMaintenanceService
         return await Task.FromResult(mockData);
     }
 
-    private async Task<FailurePredictionDto> PredictFailureProbabilityAsync(Guid assetId, IEnumerable<SensorDataDto> historicalData)
+    private static async Task<FailurePredictionDto> PredictFailureProbabilityAsync(Guid assetId, IEnumerable<SensorDataDto> historicalData)
     {
         // Mock predictive algorithm - would use ML models in reality
         var random = new Random();
         var riskFactors = new List<string>();
-        
+
         if (historicalData.Where(s => s.SensorType == "Temperature").Average(s => s.Value) > 75)
+        {
             riskFactors.Add("High operating temperature");
-            
+        }
+
         if (historicalData.Where(s => s.SensorType == "Vibration").Average(s => s.Value) > 3.0)
+        {
             riskFactors.Add("Elevated vibration levels");
+        }
 
         var failureProbability = Math.Min(95, riskFactors.Count * 15 + random.Next(0, 20));
 
@@ -446,10 +448,12 @@ public class IoTMaintenanceService : IIoTMaintenanceService
         });
     }
 
-    private async Task<double> CalculateAssetHealthScoreAsync(Guid assetId, IEnumerable<SensorDataDto> sensorData)
+    private static async Task<double> CalculateAssetHealthScoreAsync(Guid assetId, IEnumerable<SensorDataDto> sensorData)
     {
         if (!sensorData.Any())
+        {
             return 75; // Default score when no data
+        }
 
         var scores = new List<double>();
 
@@ -489,7 +493,7 @@ public class IoTMaintenanceService : IIoTMaintenanceService
         _logger.LogDebug("Updating health metrics for asset {AssetId}", sensorData.AssetId);
     }
 
-    private List<SensorDataDto> GenerateMockSensorData(Guid assetId, DateTime startDate, DateTime endDate)
+    private static List<SensorDataDto> GenerateMockSensorData(Guid assetId, DateTime startDate, DateTime endDate)
     {
         var data = new List<SensorDataDto>();
         var current = startDate;
@@ -527,7 +531,7 @@ public class IoTMaintenanceService : IIoTMaintenanceService
         return data;
     }
 
-    private double GetMockSensorValue(string sensorType)
+    private static double GetMockSensorValue(string sensorType)
     {
         return sensorType switch
         {
@@ -538,7 +542,7 @@ public class IoTMaintenanceService : IIoTMaintenanceService
         };
     }
 
-    private double CalculateVariance(IEnumerable<double> values)
+    private static double CalculateVariance(IEnumerable<double> values)
     {
         var mean = values.Average();
         return values.Select(v => Math.Pow(v - mean, 2)).Average();
@@ -549,17 +553,20 @@ public class IoTMaintenanceService : IIoTMaintenanceService
         return Math.Sqrt(CalculateVariance(values));
     }
 
-    private async Task<bool> DetectRapidChangeAsync(SensorDataDto current, IEnumerable<SensorDataDto> recent)
+    private static async Task<bool> DetectRapidChangeAsync(SensorDataDto current, IEnumerable<SensorDataDto> recent)
     {
-        if (!recent.Any()) return false;
-        
+        if (!recent.Any())
+        {
+            return false;
+        }
+
         var avgRecent = recent.Average(s => s.Value);
         var changePercent = Math.Abs((current.Value - avgRecent) / avgRecent) * 100;
-        
+
         return changePercent > 20; // 20% change threshold
     }
 
-    private async Task<bool> CheckOperatingRangeAsync(SensorDataDto sensorData)
+    private static async Task<bool> CheckOperatingRangeAsync(SensorDataDto sensorData)
     {
         // Mock operating ranges - would be configured per sensor type and asset
         var ranges = new Dictionary<string, (double Min, double Max)>
@@ -577,15 +584,27 @@ public class IoTMaintenanceService : IIoTMaintenanceService
         return false;
     }
 
-    private string DetermineAnomalySeverity(double zScore, bool isRapidChange, bool isOutOfRange)
+    private static string DetermineAnomalySeverity(double zScore, bool isRapidChange, bool isOutOfRange)
     {
-        if (zScore > 4 || isOutOfRange) return "Critical";
-        if (zScore > 3 || isRapidChange) return "High";
-        if (zScore > 2) return "Medium";
+        if (zScore > 4 || isOutOfRange)
+        {
+            return "Critical";
+        }
+
+        if (zScore > 3 || isRapidChange)
+        {
+            return "High";
+        }
+
+        if (zScore > 2)
+        {
+            return "Medium";
+        }
+
         return "Low";
     }
 
-    private double CalculateConfidence(int dataPoints, double standardDeviation)
+    private static double CalculateConfidence(int dataPoints, double standardDeviation)
     {
         // Mock confidence calculation
         var baseConfidence = Math.Min(95, dataPoints * 0.5 + 50);
@@ -595,10 +614,13 @@ public class IoTMaintenanceService : IIoTMaintenanceService
 
     private string DetermineOperationalStatus(IEnumerable<SensorDataDto> sensorData)
     {
-        if (!sensorData.Any()) return "Unknown";
-        
+        if (!sensorData.Any())
+        {
+            return "Unknown";
+        }
+
         var healthScore = CalculateAssetHealthScoreAsync(Guid.Empty, sensorData).Result;
-        
+
         return healthScore switch
         {
             >= 80 => "Excellent",
@@ -609,7 +631,7 @@ public class IoTMaintenanceService : IIoTMaintenanceService
         };
     }
 
-    private string AssessRiskLevel(double healthScore, IEnumerable<SensorDataDto> sensorData)
+    private static string AssessRiskLevel(double healthScore, IEnumerable<SensorDataDto> sensorData)
     {
         return healthScore switch
         {
@@ -620,34 +642,46 @@ public class IoTMaintenanceService : IIoTMaintenanceService
         };
     }
 
-    private async Task<string> CalculateHealthTrendAsync(Guid assetId)
+    private static async Task<string> CalculateHealthTrendAsync(Guid assetId)
     {
         // Mock trend calculation - would analyze historical health scores
         var trends = new[] { "Improving", "Stable", "Declining" };
         return trends[Random.Shared.Next(trends.Length)];
     }
 
-    private async Task<DateTime?> GetNextMaintenanceDueDateAsync(Guid assetId)
+    private static async Task<DateTime?> GetNextMaintenanceDueDateAsync(Guid assetId)
     {
         // Mock implementation - would query maintenance schedules
         return DateTime.UtcNow.AddDays(Random.Shared.Next(1, 30));
     }
 
-    private async Task<List<string>> GetActiveAlertsAsync(Guid assetId)
+    private static async Task<List<string>> GetActiveAlertsAsync(Guid assetId)
     {
         // Mock implementation - would query active alerts
         return new List<string>();
     }
 
-    private string DetermineAlertLevel(double healthScore, FailurePredictionDto failurePrediction)
+    private static string DetermineAlertLevel(double healthScore, FailurePredictionDto failurePrediction)
     {
-        if (healthScore < 40 || failurePrediction.FailureProbability > 70) return "Critical";
-        if (healthScore < 60 || failurePrediction.FailureProbability > 40) return "High";
-        if (healthScore < 80 || failurePrediction.FailureProbability > 20) return "Medium";
+        if (healthScore < 40 || failurePrediction.FailureProbability > 70)
+        {
+            return "Critical";
+        }
+
+        if (healthScore < 60 || failurePrediction.FailureProbability > 40)
+        {
+            return "High";
+        }
+
+        if (healthScore < 80 || failurePrediction.FailureProbability > 20)
+        {
+            return "Medium";
+        }
+
         return "Low";
     }
 
-    private async Task<TrendAnalysisDto> PerformTrendAnalysisAsync(Guid assetId, IEnumerable<SensorDataDto> historicalData)
+    private static async Task<TrendAnalysisDto> PerformTrendAnalysisAsync(Guid assetId, IEnumerable<SensorDataDto> historicalData)
     {
         // Mock trend analysis
         return new TrendAnalysisDto

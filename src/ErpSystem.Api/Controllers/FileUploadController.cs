@@ -1,8 +1,8 @@
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
-using ErpSystem.Core.Interfaces;
-using ErpSystem.Core.Models;
 
 namespace ErpSystem.Api.Controllers;
 
@@ -26,9 +26,10 @@ public class FileUploadController : ControllerBase
     private static readonly string[] AllowedMimeTypes = new[]
     {
         "image/jpeg", "image/png", "image/gif", "image/bmp", "image/svg+xml", "image/webp", "image/x-icon", "image/vnd.microsoft.icon",
-        "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
+        "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "text/plain", "application/rtf"
     };
+    private static readonly char[] second = new[] { ' ', '.', ',', ';' };
 
     public FileUploadController(
         ILogger<FileUploadController> logger,
@@ -51,7 +52,7 @@ public class FileUploadController : ControllerBase
     /// <returns>File upload result</returns>
     [HttpPost("single")]
     public async Task<ActionResult<FileUploadResult>> UploadSingleFile(
-        IFormFile file, 
+        IFormFile file,
         [FromForm] string category = "general",
         [FromForm] string? tenantId = null)
     {
@@ -89,15 +90,15 @@ public class FileUploadController : ControllerBase
 
             // Upload using storage service
             var result = await _storageService.UploadFileAsync(uploadRequest);
-            
+
             if (!result.Success)
             {
                 return BadRequest(new { message = result.ErrorMessage ?? "Upload failed" });
             }
-            
-            _logger.LogInformation("File uploaded successfully using {StorageProvider}: {FileName} -> {FilePath}", 
+
+            _logger.LogInformation("File uploaded successfully using {StorageProvider}: {FileName} -> {FilePath}",
                 result.StorageProvider, file.FileName, result.FilePath);
-            
+
             // Convert to legacy format for backward compatibility
             return Ok(new FileUploadResult
             {
@@ -190,15 +191,15 @@ public class FileUploadController : ControllerBase
 
             // Use storage service to delete file
             var deleted = await _storageService.DeleteFileAsync(filePath);
-            
+
             if (!deleted)
             {
                 return NotFound(new { message = "File not found or could not be deleted" });
             }
-            
-            _logger.LogInformation("File deleted successfully using {StorageProvider}: {FilePath}", 
+
+            _logger.LogInformation("File deleted successfully using {StorageProvider}: {FilePath}",
                 _storageService.ProviderName, filePath);
-            
+
             return Ok(new { message = "File deleted successfully", filePath });
         }
         catch (Exception ex)
@@ -208,14 +209,14 @@ public class FileUploadController : ControllerBase
         }
     }
 
-    private bool IsAllowedFileType(string extension, string contentType)
+    private static bool IsAllowedFileType(string extension, string contentType)
     {
         // Check extension
         var isExtensionAllowed = AllowedFileTypes.Values.Any(extensions => extensions.Contains(extension));
-        
+
         // Check MIME type
         var isMimeTypeAllowed = AllowedMimeTypes.Contains(contentType);
-        
+
         return isExtensionAllowed && isMimeTypeAllowed;
     }
 
@@ -226,30 +227,30 @@ public class FileUploadController : ControllerBase
         var sanitizedFileName = SanitizeFileName(fileNameWithoutExtension);
         var uniqueId = Guid.NewGuid().ToString("N")[..8]; // Use first 8 characters of GUID
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-        
+
         return $"{sanitizedFileName}_{timestamp}_{uniqueId}{extension}";
     }
 
-    private string SanitizeFileName(string fileName)
+    private static string SanitizeFileName(string fileName)
     {
         // Remove invalid characters and limit length
         var invalidChars = Path.GetInvalidFileNameChars();
         var sanitized = new string(fileName.Where(c => !invalidChars.Contains(c)).ToArray());
         sanitized = sanitized.Replace(" ", "_").ToLowerInvariant();
-        
+
         // Limit length
         if (sanitized.Length > 50)
         {
             sanitized = sanitized[..50];
         }
-        
+
         return string.IsNullOrEmpty(sanitized) ? "file" : sanitized;
     }
 
-    private string SanitizeCategory(string category)
+    private static string SanitizeCategory(string category)
     {
         // Sanitize category for use in file path
-        var invalidChars = Path.GetInvalidPathChars().Union(new[] { ' ', '.', ',', ';' });
+        var invalidChars = Path.GetInvalidPathChars().Union(second);
         var sanitized = new string(category.Where(c => !invalidChars.Contains(c)).ToArray());
         return sanitized.ToLowerInvariant();
     }
@@ -259,7 +260,7 @@ public class FileUploadController : ControllerBase
 public class FileUploadOptions
 {
     public const string SectionName = "FileUpload";
-    
+
     public long MaxFileSizeBytes { get; set; } = 10 * 1024 * 1024; // 10MB default
     public string UploadPath { get; set; } = "uploads";
     public bool EnableImageOptimization { get; set; } = false;

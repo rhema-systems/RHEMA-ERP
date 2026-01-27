@@ -1,9 +1,9 @@
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Web.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Interfaces;
-using ErpSystem.Web.Services;
 
 namespace ErpSystem.Api.Services.Maintenance;
 
@@ -40,30 +40,49 @@ public class MaintenanceBackgroundService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error occurred during maintenance processing");
-                
+
                 // Wait shorter time on error to retry sooner
-                await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogInformation("Maintenance background service is stopping during error recovery");
+                    break;
+                }
             }
         }
+
+        _logger.LogInformation("Maintenance background service has stopped");
     }
 
     private async Task ProcessMaintenanceTasks(CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
-        
+
         var workOrderService = scope.ServiceProvider.GetRequiredService<IWorkOrderService>();
         var scheduleService = scope.ServiceProvider.GetRequiredService<IMaintenanceScheduleService>();
         var emailService = scope.ServiceProvider.GetRequiredService<IEmailService>();
-        
+
         _logger.LogDebug("Processing maintenance tasks...");
 
         // Process overdue work orders
         await ProcessOverdueWorkOrders(workOrderService, emailService, cancellationToken);
 
-        // Create work orders from schedules
+        // Create work orders from schedules (time-based)
         await CreateScheduledWorkOrders(scheduleService, cancellationToken);
 
-        // Send maintenance reminders
+        // Process usage-based schedules
+        await ProcessUsageBasedSchedules(scheduleService, cancellationToken);
+
+        // Process condition-based schedules
+        await ProcessConditionBasedSchedules(scheduleService, cancellationToken);
+
+        // Send advance reminders for upcoming maintenance
+        await SendAdvanceReminders(scheduleService, cancellationToken);
+
+        // Send maintenance reminders (existing)
         await SendMaintenanceReminders(workOrderService, emailService, cancellationToken);
 
         _logger.LogDebug("Completed maintenance task processing");
@@ -77,11 +96,11 @@ public class MaintenanceBackgroundService : BackgroundService
         try
         {
             var overdueWorkOrders = await workOrderService.GetOverdueWorkOrdersAsync();
-            
+
             if (overdueWorkOrders.Any())
             {
                 _logger.LogInformation("Found {Count} overdue work orders", overdueWorkOrders.Count());
-                
+
                 // Group by assigned technician for batch notifications
                 var groupedByTechnician = overdueWorkOrders
                     .Where(wo => wo.AssignedTechnicianId.HasValue)
@@ -90,8 +109,8 @@ public class MaintenanceBackgroundService : BackgroundService
                 foreach (var technicianGroup in groupedByTechnician)
                 {
                     await SendOverdueNotification(
-                        emailService, 
-                        technicianGroup.Key, 
+                        emailService,
+                        technicianGroup.Key,
                         technicianGroup.ToList().Cast<dynamic>().ToList(),
                         cancellationToken);
                 }
@@ -121,16 +140,16 @@ public class MaintenanceBackgroundService : BackgroundService
         try
         {
             var dueSchedules = await scheduleService.GetSchedulesDueForCreationAsync();
-            
+
             foreach (var schedule in dueSchedules)
             {
                 try
                 {
                     var createdWorkOrders = await scheduleService.CreateWorkOrdersFromScheduleAsync(schedule.Id);
-                    
+
                     if (createdWorkOrders.Any())
                     {
-                        _logger.LogInformation("Created {Count} work orders from schedule {ScheduleId}", 
+                        _logger.LogInformation("Created {Count} work orders from schedule {ScheduleId}",
                             createdWorkOrders.Count(), schedule.Id);
                     }
                 }
@@ -155,7 +174,7 @@ public class MaintenanceBackgroundService : BackgroundService
         {
             // Get work orders due within next 24 hours (1 day)
             var upcomingWorkOrders = await workOrderService.GetWorkOrdersDueSoonAsync(1);
-            
+
             if (upcomingWorkOrders.Any())
             {
                 var groupedByTechnician = upcomingWorkOrders
@@ -191,7 +210,7 @@ public class MaintenanceBackgroundService : BackgroundService
                 <h2>Overdue Work Orders</h2>
                 <p>You have {overdueWorkOrders.Count} overdue work order(s):</p>
                 <ul>
-                {string.Join("", overdueWorkOrders.Select(wo => 
+                {string.Join("", overdueWorkOrders.Select(wo =>
                     $"<li>WO-{wo.WorkOrderNumber}: {wo.Title} (Due: {wo.ScheduledEndDate:yyyy-MM-dd})</li>"))}
                 </ul>
                 <p>Please review and update these work orders as soon as possible.</p>";
@@ -199,9 +218,9 @@ public class MaintenanceBackgroundService : BackgroundService
             // Note: In a real implementation, you would need to get the technician's email
             // from the user service or technician service
             var technicianEmail = $"technician-{technicianId}@company.com"; // Placeholder
-            
+
             await emailService.SendEmailAsync(technicianEmail, subject, body);
-            
+
             _logger.LogDebug("Sent overdue notification to technician {TechnicianId}", technicianId);
         }
         catch (Exception ex)
@@ -222,16 +241,16 @@ public class MaintenanceBackgroundService : BackgroundService
                 <h2>Unassigned Overdue Work Orders</h2>
                 <p>There are {unassignedOverdue.Count} unassigned overdue work order(s):</p>
                 <ul>
-                {string.Join("", unassignedOverdue.Select(wo => 
+                {string.Join("", unassignedOverdue.Select(wo =>
                     $"<li>WO-{wo.WorkOrderNumber}: {wo.Title} (Due: {wo.ScheduledEndDate:yyyy-MM-dd})</li>"))}
                 </ul>
                 <p>These work orders require immediate attention and technician assignment.</p>";
 
             // Send to maintenance manager or admin
             var managerEmail = "maintenance.manager@company.com"; // Should come from configuration
-            
+
             await emailService.SendEmailAsync(managerEmail, subject, body);
-            
+
             _logger.LogDebug("Sent unassigned overdue notification to manager");
         }
         catch (Exception ex)
@@ -253,21 +272,69 @@ public class MaintenanceBackgroundService : BackgroundService
                 <h2>Upcoming Work Orders</h2>
                 <p>You have {upcomingWorkOrders.Count} work order(s) scheduled for the next 24 hours:</p>
                 <ul>
-                {string.Join("", upcomingWorkOrders.Select(wo => 
+                {string.Join("", upcomingWorkOrders.Select(wo =>
                     $"<li>WO-{wo.WorkOrderNumber}: {wo.Title} (Scheduled: {wo.ScheduledStartDate:yyyy-MM-dd HH:mm})</li>"))}
                 </ul>
                 <p>Please ensure you have the necessary tools and materials ready.</p>";
 
             // Note: In a real implementation, you would get the technician's email
             var technicianEmail = $"technician-{technicianId}@company.com"; // Placeholder
-            
+
             await emailService.SendEmailAsync(technicianEmail, subject, body);
-            
+
             _logger.LogDebug("Sent upcoming work order reminder to technician {TechnicianId}", technicianId);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error sending upcoming work order reminder to technician {TechnicianId}", technicianId);
+        }
+    }
+
+    private async Task ProcessUsageBasedSchedules(
+        IMaintenanceScheduleService scheduleService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Processing usage-based schedules...");
+            await scheduleService.ProcessUsageBasedSchedulesAsync();
+            _logger.LogInformation("Usage-based schedules processed successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing usage-based schedules");
+        }
+    }
+
+    private async Task ProcessConditionBasedSchedules(
+        IMaintenanceScheduleService scheduleService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Processing condition-based schedules...");
+            await scheduleService.ProcessConditionBasedSchedulesAsync();
+            _logger.LogInformation("Condition-based schedules processed successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing condition-based schedules");
+        }
+    }
+
+    private async Task SendAdvanceReminders(
+        IMaintenanceScheduleService scheduleService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Sending advance reminders...");
+            var sentCount = await scheduleService.SendAdvanceRemindersAsync();
+            _logger.LogInformation("Sent {Count} advance reminders", sentCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending advance reminders");
         }
     }
 }

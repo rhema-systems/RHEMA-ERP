@@ -1,6 +1,6 @@
+using ErpSystem.Core.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using ErpSystem.Core.Entities;
 
 namespace ErpSystem.Data.Services;
 
@@ -83,7 +83,7 @@ public class PermissionService : IPermissionService
             _context.Permissions.Add(permission);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Created permission {PermissionName} with ID {PermissionId}", 
+            _logger.LogInformation("Created permission {PermissionName} with ID {PermissionId}",
                 permission.Name, permission.Id);
             return permission;
         }
@@ -102,7 +102,7 @@ public class PermissionService : IPermissionService
             _context.Permissions.Update(permission);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Updated permission {PermissionName} with ID {PermissionId}", 
+            _logger.LogInformation("Updated permission {PermissionName} with ID {PermissionId}",
                 permission.Name, permission.Id);
             return permission;
         }
@@ -143,7 +143,7 @@ public class PermissionService : IPermissionService
             _context.Permissions.Remove(permission);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Deleted permission {PermissionName} with ID {PermissionId}", 
+            _logger.LogInformation("Deleted permission {PermissionName} with ID {PermissionId}",
                 permission.Name, permissionId);
             return true;
         }
@@ -254,7 +254,7 @@ public class PermissionService : IPermissionService
 
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Updated permissions for role {RoleId}: removed {RemovedCount}, added {AddedCount}", 
+            _logger.LogInformation("Updated permissions for role {RoleId}: removed {RemovedCount}, added {AddedCount}",
                 roleId, permissionsToRemove.Count, permissionsToAdd.Count);
             return true;
         }

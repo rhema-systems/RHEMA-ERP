@@ -157,42 +157,41 @@ class MaintenanceDataService {
     }
   }
 
-  // Fetch technicians (employees available for maintenance assignments)
+  // Fetch technicians (users available for maintenance assignments)
   async getTechnicians(): Promise<Employee[]> {
     try {
-      console.log('🔧 Fetching maintenance technicians from /api/employees/maintenance-available...');
+      console.log('🔧 Fetching technicians from /user endpoint (ApplicationUser)...');
       
-      // Try the specific maintenance technician endpoint first
       try {
-        const response = await apiService.get('/employees/maintenance-available');
-        console.log('🔧 SUCCESS! Maintenance technicians response:', response);
+        const response = await apiService.get('/user');
+        console.log('🔧 SUCCESS! Users response:', response);
         
-        const technicians = Array.isArray(response) ? response : [];
+        const users = Array.isArray(response) ? response : [];
         
-        if (technicians.length > 0) {
-          const mappedTechnicians = technicians.map((emp: any) => ({
-            id: emp.id,
-            firstName: emp.firstName,
-            lastName: emp.lastName,
-            email: emp.emailAddress,
-            department: emp.departmentName,
-            position: emp.positionTitle,
-            isActive: emp.isActive
+        if (users.length > 0) {
+          const mappedTechnicians = users.map((user: any) => ({
+            id: user.id, // This is the UserId (ApplicationUser ID)
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            department: user.department || '',
+            position: user.position || '',
+            isActive: user.isActive
           }));
           
-          console.log(`✅ Successfully loaded ${mappedTechnicians.length} maintenance technicians`);
+          console.log(`✅ Successfully loaded ${mappedTechnicians.length} users from /user endpoint`);
           return mappedTechnicians;
         }
-      } catch (maintenanceError) {
-        console.warn('⚠️ Maintenance-available endpoint failed, falling back to all employees:', maintenanceError);
+      } catch (userError) {
+        console.warn('⚠️ /user endpoint failed:', userError);
       }
       
-      // Fallback to all employees and filter active ones
-      console.log('🔧 Falling back to all employees...');
+      // Fallback to all employees if users endpoint fails
+      console.log('🔧 Falling back to employees endpoint...');
       const employees = await this.getEmployees();
       const activeTechnicians = employees.filter(emp => emp.isActive);
       
-      console.log(`🔧 Using ${activeTechnicians.length} active employees as technicians`);
+      console.log(`🔧 Using ${activeTechnicians.length} active employees as fallback technicians`);
       return activeTechnicians;
       
     } catch (error) {
@@ -345,6 +344,45 @@ class MaintenanceDataService {
   // Keep the old method name for backward compatibility, but redirect to assetType
   async getMaintenanceTypeForAsset(assetId: string): Promise<string | null> {
     return this.getAssetTypeForAsset(assetId);
+  }
+
+  // Get the maintenance schedule configuration from the asset's category
+  // so that UIs like /maintenance/scheduled can pre-populate default triggers.
+  async getAssetCategorySchedule(assetId: string): Promise<{
+    maintenanceScheduleType: string;
+    maintenanceType: string;
+    maintenanceFrequency?: string | null;
+    maintenanceValue?: number | null;
+    maintenanceUnit?: string | null;
+    secondaryMaintenanceType?: string | null;
+    secondaryMaintenanceFrequency?: string | null;
+    secondaryMaintenanceValue?: number | null;
+    secondaryMaintenanceUnit?: string | null;
+  } | null> {
+    try {
+      const response = await apiService.get(`/maintenance/assets/${assetId}`);
+      const asset = response;
+      const category = asset?.assetCategory;
+
+      if (!category) {
+        return null;
+      }
+
+      return {
+        maintenanceScheduleType: category.maintenanceScheduleType || 'single',
+        maintenanceType: category.maintenanceType || 'Time',
+        maintenanceFrequency: category.maintenanceFrequency ?? null,
+        maintenanceValue: typeof category.maintenanceValue === 'number' ? category.maintenanceValue : null,
+        maintenanceUnit: category.maintenanceUnit ?? null,
+        secondaryMaintenanceType: category.secondaryMaintenanceType ?? null,
+        secondaryMaintenanceFrequency: category.secondaryMaintenanceFrequency ?? null,
+        secondaryMaintenanceValue: typeof category.secondaryMaintenanceValue === 'number' ? category.secondaryMaintenanceValue : null,
+        secondaryMaintenanceUnit: category.secondaryMaintenanceUnit ?? null,
+      };
+    } catch (error) {
+      console.error('Error fetching asset category schedule for asset', assetId, error);
+      return null;
+    }
   }
 
 }

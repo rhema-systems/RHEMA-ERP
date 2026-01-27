@@ -87,9 +87,13 @@ public class JobCardRepository : IJobCardRepository
             if (filter.HasWorkOrder.HasValue)
             {
                 if (filter.HasWorkOrder.Value)
+                {
                     query = query.Where(j => j.GeneratedWorkOrderId != null);
+                }
                 else
+                {
                     query = query.Where(j => j.GeneratedWorkOrderId == null);
+                }
             }
         }
 
@@ -149,7 +153,62 @@ public class JobCardRepository : IJobCardRepository
     public async Task<JobCardDto?> GetByIdWithDetailsAsync(Guid id)
     {
         var jobCard = await _context.JobCards.FindAsync(id);
-        if (jobCard == null) return null;
+        if (jobCard == null)
+        {
+            return null;
+        }
+
+        // Manually load related entities
+        var asset = await _context.MaintenanceAssets
+            .Include(a => a.AssetCategory)
+            .FirstOrDefaultAsync(a => a.Id == jobCard.AssetId);
+
+        var maintenanceType = await _context.MaintenanceTypes
+            .FirstOrDefaultAsync(m => m.Id == jobCard.MaintenanceTypeId);
+
+        var priorityLevel = await _context.PriorityLevels
+            .FirstOrDefaultAsync(p => p.Id == jobCard.PriorityLevelId);
+
+        var requestedBy = await _context.Employees
+            .FirstOrDefaultAsync(e => e.Id == jobCard.RequestedById);
+
+        var approvedBy = jobCard.ApprovedById.HasValue
+            ? await _context.Employees.FirstOrDefaultAsync(e => e.Id == jobCard.ApprovedById.Value)
+            : null;
+
+        var preferredTechnician = jobCard.PreferredTechnicianId.HasValue
+            ? await _context.Employees.FirstOrDefaultAsync(e => e.Id == jobCard.PreferredTechnicianId.Value)
+            : null;
+
+        var assignedTechnician = jobCard.AssignedTechnicianId.HasValue
+            ? await _context.Employees.FirstOrDefaultAsync(e => e.Id == jobCard.AssignedTechnicianId.Value)
+            : null;
+
+        var qualityCheckedBy = jobCard.QualityCheckedById.HasValue
+            ? await _context.Employees.FirstOrDefaultAsync(e => e.Id == jobCard.QualityCheckedById.Value)
+            : null;
+
+        var documents = await _context.JobCardDocuments
+            .Where(d => d.JobCardId == id)
+            .Include(d => d.UploadedBy)
+            .ToListAsync();
+
+        var comments = await _context.JobCardComments
+            .Where(c => c.JobCardId == id)
+            .Include(c => c.CommentBy)
+            .OrderBy(c => c.CommentDate)
+            .ToListAsync();
+
+        var approvalSteps = await _context.JobCardApprovalSteps
+            .Where(a => a.JobCardId == id)
+            .Include(a => a.Approver)
+            .OrderBy(a => a.StepOrder)
+            .ToListAsync();
+
+        // Load work order if exists
+        var workOrder = jobCard.GeneratedWorkOrderId.HasValue
+            ? await _context.WorkOrders.FirstOrDefaultAsync(w => w.Id == jobCard.GeneratedWorkOrderId.Value)
+            : null;
 
         return new JobCardDto
         {
@@ -158,17 +217,123 @@ public class JobCardRepository : IJobCardRepository
             Title = jobCard.Title,
             Description = jobCard.Description,
             ProblemDescription = jobCard.ProblemDescription,
+
+            // Asset Information
             AssetId = jobCard.AssetId,
+            AssetName = asset?.Name ?? "Unknown",
+            AssetCode = asset?.AssetNumber ?? "N/A",
+            AssetType = asset?.AssetCategory?.Name ?? asset?.AssetCategory?.AssetType ?? "N/A",
+            AssetLocation = asset?.Location ?? "N/A",
+
+            // Maintenance Details
             MaintenanceTypeId = jobCard.MaintenanceTypeId,
+            MaintenanceType = maintenanceType?.Name ?? "Unknown",
+            MaintenanceCategory = maintenanceType?.Category ?? "N/A",
             PriorityLevelId = jobCard.PriorityLevelId,
-            JobCardStatus = jobCard.JobCardStatus,
-            ApprovalStatus = jobCard.ApprovalStatus,
+            Priority = priorityLevel?.Name ?? "Medium",
+            PriorityColor = priorityLevel?.Color ?? "#FFA500",
+            PriorityLevel = priorityLevel?.Level ?? 2,
+
+            MaintenanceLocation = jobCard.MaintenanceLocation ?? "Internal",
+
+            // Request Information
+            RequestedById = jobCard.RequestedById,
+            RequestedBy = requestedBy?.FullName ?? "Unknown",
+            RequestedDate = jobCard.RequestedDate,
+            RequiredCompletionDate = jobCard.RequiredCompletionDate,
+
+            // Estimates
             EstimatedHours = jobCard.EstimatedHours,
             EstimatedCost = jobCard.EstimatedCost,
+
+            // Assignment
+            PreferredTechnicianId = jobCard.PreferredTechnicianId,
+            PreferredTechnician = preferredTechnician?.FullName,
+            PreferredTeamId = jobCard.PreferredTeamId,
+            PreferredTeam = null, // Would need to load TechnicianTeam
+            ContractorId = jobCard.ContractorId,
+
+            // Requirements
+            RequiresSpecialTools = jobCard.RequiresSpecialTools,
+            RequiresShutdown = jobCard.RequiresShutdown,
+            RequiresSafetyPermit = jobCard.RequiresSafetyPermit,
+            SpecialInstructions = jobCard.SpecialInstructions,
+            SafetyRequirements = jobCard.SafetyRequirements,
+
+            // Status Information
+            JobCardStatus = jobCard.JobCardStatus,
+            ApprovalStatus = jobCard.ApprovalStatus,
+            SubmittedAt = jobCard.SubmittedDate,
+            ApprovedAt = jobCard.ApprovedDate,
+            ApprovedById = jobCard.ApprovedById,
+            ApprovedBy = approvedBy?.FullName,
+
+            // Planning
+            PlannedStartDate = jobCard.PlannedStartDate,
+            PlannedEndDate = jobCard.PlannedEndDate,
+            AssignedTechnicianId = jobCard.AssignedTechnicianId,
+            AssignedTechnician = assignedTechnician?.FullName,
+            AssignedTeamId = jobCard.AssignedTeamId,
+            AssignedTeam = null, // Would need to load TechnicianTeam
+
+            // Work Order Generation
+            GeneratedWorkOrderId = jobCard.GeneratedWorkOrderId,
+            GeneratedWorkOrderNumber = workOrder?.WorkOrderNumber,
+            WorkOrderGeneratedAt = jobCard.WorkOrderGeneratedAt,
+
+            // Completion
+            CompletedDate = jobCard.CompletedDate,
+            CompletionNotes = jobCard.CompletionNotes,
+            WorkCompletedSummary = jobCard.WorkCompletedSummary,
+
+            // Quality Control
+            QualityCheckPassed = jobCard.QualityCheckPassed,
+            QualityCheckedBy = qualityCheckedBy?.FullName,
+            QualityCheckDate = jobCard.QualityCheckDate,
+
+            // Certificate
+            CertificateGenerated = jobCard.CertificateGenerated,
+            CertificateGeneratedDate = jobCard.CertificateGeneratedDate,
+
+            // Documents, Comments, Approval Steps
+            Documents = documents.Select(d => new JobCardDocumentDto
+            {
+                Id = d.Id,
+                FileName = d.FileName,
+                FilePath = d.FilePath,
+                ContentType = d.ContentType,
+                FileSize = d.FileSize,
+                DocumentType = d.DocumentType,
+                UploadedAt = d.UploadedDate,
+                UploadedBy = d.UploadedBy?.FullName ?? "Unknown"
+            }).ToList(),
+
+            Comments = comments.Select(c => new JobCardCommentDto
+            {
+                Id = c.Id,
+                Comment = c.Comment,
+                CommentType = c.CommentType,
+                IsInternal = c.IsInternal,
+                CommentDate = c.CommentDate,
+                CommentBy = c.CommentBy?.FullName ?? "Unknown"
+            }).ToList(),
+
+            ApprovalSteps = approvalSteps.Select(a => new JobCardApprovalStepDto
+            {
+                Id = a.Id,
+                StepOrder = a.StepOrder,
+                StepName = a.StepName,
+                ApproverId = a.ApproverId,
+                ApproverName = a.Approver?.FullName ?? "Unknown",
+                Status = a.Status,
+                ActionDate = a.ActionDate,
+                Comments = a.Comments,
+                IsRequired = a.IsRequired
+            }).ToList(),
+
+            // Metadata
             CreatedAt = jobCard.CreatedAt,
-            AssetName = "Asset", // Would need proper mapping
-            Priority = "Medium", // Would need proper mapping
-            RequestedBy = "User" // Would need proper mapping
+            UpdatedAt = jobCard.UpdatedAt
         };
     }
 
@@ -195,7 +360,7 @@ public class JobCardRepository : IJobCardRepository
     {
         // Explicitly mark entity as modified and ensure all properties are tracked
         var entry = _context.Entry(jobCard);
-        
+
         // If entity is not being tracked, attach and mark as modified
         if (entry.State == Microsoft.EntityFrameworkCore.EntityState.Detached)
         {
@@ -207,7 +372,7 @@ public class JobCardRepository : IJobCardRepository
             entry.Property(j => j.ProblemDescription).IsModified = true;
             entry.State = Microsoft.EntityFrameworkCore.EntityState.Modified;
         }
-        
+
         // Note: JobCardService handles SaveChanges via Unit of Work
         return Task.CompletedTask;
     }
@@ -241,20 +406,26 @@ public class JobCardRepository : IJobCardRepository
             .Where(j => j.JobCardNumber.StartsWith(prefix))
             .Select(j => j.JobCardNumber)
             .ToListAsync();
-        
+
         if (!jobCardsInYear.Any())
+        {
             return 1;
-        
+        }
+
         // Parse sequence numbers and find the maximum
         var maxSequence = jobCardsInYear
-            .Select(jcn => {
+            .Select(jcn =>
+            {
                 var parts = jcn.Split('-');
                 if (parts.Length == 3 && int.TryParse(parts[2], out int seq))
+                {
                     return seq;
+                }
+
                 return 0;
             })
             .Max();
-        
+
         return maxSequence + 1;
     }
 
@@ -268,17 +439,20 @@ public class JobCardRepository : IJobCardRepository
     public Task<List<JobCardCommentDto>> GetCommentsAsync(Guid jobCardId) => Task.FromResult(new List<JobCardCommentDto>());
     public Task<List<JobCardApprovalStepDto>> GetApprovalHistoryAsync(Guid jobCardId) => Task.FromResult(new List<JobCardApprovalStepDto>());
     public async Task AddDocumentAsync(JobCardDocument document) => await _context.JobCardDocuments.AddAsync(document);
-    
+
     public async Task DeleteDocumentAsync(Guid documentId)
     {
         var document = await _context.JobCardDocuments.FindAsync(documentId);
-        if (document != null) _context.JobCardDocuments.Remove(document);
+        if (document != null)
+        {
+            _context.JobCardDocuments.Remove(document);
+        }
     }
 
     public Task<List<JobCardDocumentDto>> GetDocumentsAsync(Guid jobCardId) => Task.FromResult(new List<JobCardDocumentDto>());
-    
+
     public async Task AddCertificateAsync(JobCardCertificate certificate) => await _context.JobCardCertificates.AddAsync(certificate);
-    
+
     public async Task<List<JobCardCertificateDto>> GetCertificatesAsync(Guid jobCardId)
     {
         return await _context.JobCardCertificates

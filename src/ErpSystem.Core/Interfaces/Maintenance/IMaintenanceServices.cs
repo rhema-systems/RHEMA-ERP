@@ -1,5 +1,5 @@
-using ErpSystem.Core.Entities;
 using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Maintenance;
 
 namespace ErpSystem.Core.Interfaces.Maintenance;
@@ -13,6 +13,7 @@ public interface IMaintenanceAssetService
     Task<MaintenanceAssetDto> UpdateAssetAsync(Guid id, UpdateMaintenanceAssetDto updateDto);
     Task DeleteAssetAsync(Guid id);
     Task<MaintenanceAssetDto?> GetAssetByIdAsync(Guid id);
+    Task<IEnumerable<MaintenanceAssetDto>> GetAssetsByIdsAsync(List<Guid> ids);
     Task<IEnumerable<MaintenanceAssetDto>> GetAllAssetsAsync();
     Task<PagedResult<MaintenanceAssetListDto>> GetAssetsPagedAsync(int page, int pageSize, string? searchTerm = null, Guid? categoryId = null);
 
@@ -27,6 +28,7 @@ public interface IMaintenanceAssetService
     Task UpdateAssetOperatingHoursAsync(Guid assetId, double operatingHours);
     Task UpdateAssetMileageAsync(Guid assetId, double mileage);
     Task<string> GenerateAssetNumberAsync(Guid categoryId);
+    Task<IEnumerable<MaintenanceAssetDto>> GetAvailableVehiclesAsync();
 }
 
 public interface IMaintenanceAssetCategoryService
@@ -52,7 +54,7 @@ public interface IAssetTypeService
     Task<AssetTypeDto?> GetAssetTypeByIdAsync(Guid id, Guid tenantId);
     Task<IEnumerable<AssetTypeDto>> GetAssetTypesAsync(Guid tenantId, bool includeInactive = false);
     Task<IEnumerable<AssetTypeDto>> GetAssetTypesByCategoryAsync(string category, Guid tenantId, bool includeInactive = false);
-    
+
     // Business logic
     Task<bool> IsAssetTypeNameUniqueAsync(string name, Guid tenantId, Guid? excludeId = null);
     Task<bool> IsAssetTypeCodeUniqueAsync(string code, Guid tenantId, Guid? excludeId = null);
@@ -69,21 +71,21 @@ public interface ITaskTemplateService
 {
     // Get task templates for work order generation
     Task<IEnumerable<WorkOrderTaskDto>> GetTaskTemplatesForWorkOrderAsync(Guid assetId, Guid maintenanceTypeId);
-    
+
     // Manage asset-specific task templates
     Task<IEnumerable<AssetTaskTemplateDto>> GetAssetTaskTemplatesAsync(Guid assetId);
     Task<IEnumerable<AssetTaskTemplateDto>> GetAllAssetTaskTemplatesAsync();
     Task<AssetTaskTemplateDto> CreateAssetTaskTemplateAsync(CreateAssetTaskTemplateDto createDto);
     Task<AssetTaskTemplateDto> UpdateAssetTaskTemplateAsync(Guid id, UpdateAssetTaskTemplateDto updateDto);
     Task DeleteAssetTaskTemplateAsync(Guid id);
-    
+
     // Manage asset type task templates
     Task<IEnumerable<AssetTypeTaskTemplateDto>> GetAssetTypeTaskTemplatesAsync(Guid assetTypeId);
     Task<IEnumerable<AssetTypeTaskTemplateDto>> GetAllAssetTypeTaskTemplatesAsync();
     Task<AssetTypeTaskTemplateDto> CreateAssetTypeTaskTemplateAsync(CreateAssetTypeTaskTemplateDto createDto);
     Task<AssetTypeTaskTemplateDto> UpdateAssetTypeTaskTemplateAsync(Guid id, UpdateAssetTypeTaskTemplateDto updateDto);
     Task DeleteAssetTypeTaskTemplateAsync(Guid id);
-    
+
     // Manage maintenance type task templates (system defaults)
     Task<IEnumerable<MaintenanceTaskTemplateDto>> GetMaintenanceTaskTemplatesAsync(Guid maintenanceTypeId);
     Task<IEnumerable<MaintenanceTaskTemplateDto>> GetAllMaintenanceTaskTemplatesAsync();
@@ -326,7 +328,7 @@ public interface IWorkOrderService
     Task<IEnumerable<WorkOrderListDto>> GetWorkOrdersScheduledTodayAsync();
     Task<WorkOrderMetricsDto> GetWorkOrderMetricsAsync(DateTime? startDate = null, DateTime? endDate = null);
     Task<string> GenerateWorkOrderNumberAsync();
-    
+
     // Additional operations
     Task<WorkOrderDto> AssignTechnicianAsync(Guid workOrderId, Guid technicianId);
     Task<WorkOrderDto> CancelWorkOrderAsync(Guid workOrderId, string reason);
@@ -337,9 +339,10 @@ public interface IWorkOrderService
     // Child work orders
     Task<WorkOrderDto> CreateChildWorkOrderAsync(Guid parentId, CreateWorkOrderDto createDto);
     Task<IEnumerable<WorkOrderListDto>> GetChildWorkOrdersAsync(Guid parentId);
-    
+
     // Task management
     Task<ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto?> UpdateTaskStatusAsync(Guid taskId, string status, double? actualHours = null, string? completionNotes = null);
+    Task<ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto?> UpdateTaskPhotoAsync(Guid taskId, string? photoPath);
 }
 
 public interface IWorkOrderTaskService
@@ -357,13 +360,41 @@ public interface IWorkOrderTaskService
 
 public interface IWorkOrderPartService
 {
+    // Single operations
     Task<WorkOrderPartDto> AddPartAsync(CreateWorkOrderPartDto createDto);
     Task<WorkOrderPartDto> UpdatePartAsync(Guid id, UpdateWorkOrderPartDto updateDto);
     Task DeletePartAsync(Guid id);
     Task<IEnumerable<WorkOrderPartDto>> GetPartsByWorkOrderAsync(Guid workOrderId);
     Task<WorkOrderPartDto> UpdatePartStatusAsync(Guid id, string status, int? quantityUsed = null);
+    Task<WorkOrderPartDto> ReturnUnusedPartsAsync(Guid partId);
     Task<decimal> GetTotalPartsCostAsync(Guid workOrderId);
     Task<IEnumerable<WorkOrderPartDto>> GetPartsRequiringOrderAsync();
+
+    // Bulk operations
+    Task<IEnumerable<WorkOrderPartDto>> AddPartsBulkAsync(IEnumerable<CreateWorkOrderPartDto> createDtos);
+    Task DeletePartsBulkAsync(IEnumerable<Guid> ids);
+}
+
+public interface IWorkOrderToolService
+{
+    // Tool allocation
+    Task<WorkOrderToolDto> AllocateToolAsync(AllocateWorkOrderToolDto allocateDto);
+    Task<IEnumerable<WorkOrderToolDto>> GetToolsByWorkOrderAsync(Guid workOrderId);
+    Task<WorkOrderToolSummaryDto> GetWorkOrderToolSummaryAsync(Guid workOrderId);
+    Task RemoveToolAllocationAsync(Guid workOrderId, Guid toolId);
+
+    // Bulk operations
+    Task<IEnumerable<WorkOrderToolDto>> AllocateToolsBulkAsync(IEnumerable<AllocateWorkOrderToolDto> allocateDtos);
+    Task RemoveToolAllocationsBulkAsync(IEnumerable<Guid> toolIds, Guid workOrderId);
+
+    // Tool checkout/return for work orders
+    Task<WorkOrderToolDto> CheckoutToolAsync(CheckoutWorkOrderToolDto checkoutDto);
+    Task<WorkOrderToolDto> ReturnToolAsync(Guid workOrderId, Guid toolId, ReturnWorkOrderToolDto returnDto);
+
+    // Query operations
+    Task<IEnumerable<WorkOrderToolDto>> GetCheckedOutToolsForWorkOrderAsync(Guid workOrderId);
+    Task<IEnumerable<WorkOrderToolDto>> GetOverdueToolsForWorkOrderAsync(Guid workOrderId);
+    Task<decimal> GetTotalToolCostAsync(Guid workOrderId);
 }
 
 public interface IWorkOrderLaborService
@@ -402,11 +433,33 @@ public interface IMaintenanceScheduleService
 
     // Analytics
     Task<ScheduleComplianceReportDto> GetScheduleComplianceReportAsync(DateTime startDate, DateTime endDate);
-    
+
     // Additional methods needed by controllers
     Task<PagedResult<MaintenanceScheduleDto>> GetSchedulesPagedAsync(MaintenanceScheduleFilterDto filter);
     Task<IEnumerable<MaintenanceScheduleDto>> GetOverdueSchedulesAsync();
     Task<MaintenanceScheduleDto> ToggleScheduleStatusAsync(Guid id);
+
+    // Notification and reminder methods
+    Task SendScheduleReminderAsync(Guid scheduleId, bool force = false);
+    Task<IEnumerable<MaintenanceScheduleDto>> GetSchedulesDueForRemindersAsync();
+    Task<int> SendAdvanceRemindersAsync();
+
+    // History methods
+    Task<IEnumerable<MaintenanceScheduleHistoryDto>> GetScheduleHistoryAsync(Guid scheduleId);
+
+    // Usage-based trigger evaluation
+    Task<bool> EvaluateUsageTriggersAsync(Guid scheduleId);
+    Task<IEnumerable<MaintenanceScheduleDto>> GetSchedulesDueByUsageAsync();
+    Task UpdateAssetUsageAsync(Guid assetId, double? mileage, double? operatingHours);
+
+    // Condition-based trigger evaluation
+    Task<bool> EvaluateConditionTriggersAsync(Guid scheduleId);
+    Task<IEnumerable<MaintenanceScheduleDto>> GetSchedulesDueByConditionAsync();
+
+    // Multi-criteria evaluation
+    Task<bool> ShouldGenerateWorkOrderAsync(Guid scheduleId);
+    Task ProcessUsageBasedSchedulesAsync();
+    Task ProcessConditionBasedSchedulesAsync();
 }
 
 #endregion
@@ -516,6 +569,35 @@ public interface IAssetDowntimeService
 
 #endregion
 
+#region Asset Admission & Discharge Services
+
+public interface ILegacyAssetAdmissionService
+{
+    Task<PagedResult<AssetAdmissionDto>> GetAdmissionsAsync(AdmissionQueryParameters query);
+    Task<AssetAdmissionDto?> GetAdmissionByIdAsync(Guid id);
+    Task<AssetAdmissionDto> CreateAdmissionAsync(CreateAssetAdmissionDto dto);
+    Task<AssetAdmissionDto> UpdateAdmissionAsync(Guid id, UpdateAssetAdmissionDto dto);
+    Task CancelAdmissionAsync(Guid id, string? reason = null);
+    Task<IEnumerable<AssetAdmissionDto>> GetActiveAdmissionsAsync();
+    Task<IEnumerable<AssetAdmissionDto>> GetAdmissionsByAssetAsync(Guid assetId);
+    Task<IEnumerable<AssetAdmissionDto>> GetAdmissionsByWorkOrderAsync(Guid workOrderId);
+    Task<AdmissionStatsDto> GetAdmissionStatsAsync(AdmissionStatsQuery query);
+    Task<DowntimeSummaryDto> GetAdmissionDowntimeReportAsync(DowntimeReportQuery query);
+}
+
+public interface ILegacyAssetDischargeService
+{
+    Task<PagedResult<AssetDischargeDto>> GetDischargesAsync(DischargeQueryParameters query);
+    Task<AssetDischargeDto?> GetDischargeByIdAsync(Guid id);
+    Task<IEnumerable<AssetDischargeDto>> GetDischargesByAdmissionAsync(Guid admissionId);
+    Task<AssetDischargeDto> CreateDischargeAsync(CreateAssetDischargeDto dto);
+    Task<AssetDischargeDto> UpdateDischargeAsync(Guid id, UpdateAssetDischargeDto dto);
+    Task<MaintenanceCertificateDto> GenerateCompletionCertificateAsync(Guid dischargeId);
+}
+
+#endregion
+
+
 #region Technician Services
 
 public interface ITechnicianService
@@ -555,7 +637,7 @@ public interface ITechnicalSkillService
     Task<bool> IsSkillNameUniqueAsync(string name, Guid? excludeId = null);
     Task<SkillGapAnalysisDto> GetSkillGapAnalysisAsync();
     Task<IEnumerable<TechnicalSkillDto>> GetRecommendedSkillsAsync(Guid technicianId);
-    
+
     // Additional methods needed by controllers
     Task<IEnumerable<TechnicalSkillDto>> SyncSkillsFromHRAsync();
     Task<IEnumerable<TechnicianDto>> GetTechniciansWithSkillAsync(Guid skillId);
@@ -578,29 +660,59 @@ public interface ISafetyProtocolService
     Task<IEnumerable<SafetyProtocolDto>> GetProtocolsByRegulatoryStandardAsync(string standard);
     Task<IEnumerable<SafetyProtocolDto>> GetProtocolsDueForReviewAsync();
     Task<IEnumerable<SafetyProtocolDto>> GetOverdueProtocolsAsync();
-    
+
     // Approval workflow
     Task SubmitForApprovalAsync(Guid protocolId);
     Task ApproveProtocolAsync(Guid protocolId, ApprovalRequestDto approvalRequest);
     Task RejectProtocolAsync(Guid protocolId, ApprovalRequestDto approvalRequest);
     Task RequestChangesAsync(Guid protocolId, ApprovalRequestDto approvalRequest);
-    
+
     // Compliance tracking
     Task RecordAdherenceAsync(CreateProtocolAdherenceDto createDto);
     Task RecordViolationAsync(CreateProtocolViolationDto createDto);
     Task<IEnumerable<ProtocolAdherenceDto>> GetAdherenceHistoryAsync(Guid protocolId);
     Task<IEnumerable<ProtocolViolationDto>> GetViolationHistoryAsync(Guid protocolId);
-    
+
     // Training tracking
     Task RecordTrainingAsync(CreateProtocolTrainingDto createDto);
     Task<IEnumerable<ProtocolTrainingDto>> GetProtocolTrainingHistoryAsync(Guid protocolId);
     Task<IEnumerable<ProtocolTrainingDto>> GetTechnicianTrainingHistoryAsync(Guid technicianId);
-    
+
     // Reporting
     Task<ComplianceReportDto> GetComplianceReportAsync(DateTime startDate, DateTime endDate);
     Task<IEnumerable<SafetyProtocolComplianceDto>> GetProtocolComplianceAsync(DateTime startDate, DateTime endDate);
     Task<IEnumerable<CategoryComplianceDto>> GetCategoryComplianceAsync();
     Task<SafetyAnalyticsDto> GetSafetyAnalyticsAsync(DateTime startDate, DateTime endDate);
+}
+
+#endregion
+
+#region Usage Tracking Service
+
+public interface IAssetUsageTrackingService
+{
+    // CRUD operations
+    Task<AssetUsageTrackingDto> CreateUsageRecordAsync(CreateAssetUsageTrackingDto createDto);
+    Task<IEnumerable<AssetUsageTrackingDto>> BulkCreateUsageRecordsAsync(BulkUsageImportDto bulkDto);
+    Task<AssetUsageTrackingDto?> GetUsageRecordByIdAsync(Guid id);
+    Task<IEnumerable<AssetUsageTrackingDto>> GetUsageRecordsAsync(Guid assetId, DateTime? startDate = null, DateTime? endDate = null);
+    Task<PagedResult<AssetUsageTrackingDto>> GetUsageRecordsPagedAsync(Guid assetId, int page, int pageSize, DateTime? startDate = null, DateTime? endDate = null);
+    Task DeleteUsageRecordAsync(Guid id);
+
+    // Usage analytics
+    Task<AssetUsageSummaryDto> GetAssetUsageSummaryAsync(Guid assetId);
+    Task<AssetUsageSummaryDto> GetAssetUsageSummaryAsync(Guid assetId, Guid? tenantId);
+    Task<IEnumerable<AssetUsageSummaryDto>> GetAllAssetUsageSummariesAsync();
+    Task<decimal?> GetCurrentMileageAsync(Guid assetId);
+    Task<decimal?> GetCurrentOperatingHoursAsync(Guid assetId);
+    Task<int?> GetCurrentCyclesAsync(Guid assetId);
+    Task<decimal?> GetAverageDailyMileageAsync(Guid assetId, int days = 30);
+    Task<decimal?> GetAverageDailyHoursAsync(Guid assetId, int days = 30);
+
+    // Integration helpers
+    Task<bool> ImportUsageDataFromSourceAsync(string dataSource, string externalData);
+    Task<IEnumerable<AssetUsageTrackingDto>> GetUnvalidatedRecordsAsync();
+    Task ValidateUsageRecordAsync(Guid id);
 }
 
 #endregion
@@ -640,26 +752,26 @@ public interface IMaintenanceAttachmentService
     Task<MaintenanceAttachmentDto> UpdateAttachmentAsync(Guid id, UpdateMaintenanceAttachmentDto updateDto);
     Task DeleteAttachmentAsync(Guid id);
     Task<MaintenanceAttachmentDto?> GetAttachmentByIdAsync(Guid id);
-    
+
     // Query operations
     Task<IEnumerable<MaintenanceAttachmentDto>> GetAttachmentsByEntityAsync(string entityType, Guid entityId, string? category = null, string? attachmentType = null);
     Task<IEnumerable<MaintenanceAttachmentDto>> GetAttachmentsByTypeAsync(string attachmentType);
     Task<IEnumerable<MaintenanceAttachmentDto>> GetRecentAttachmentsAsync(int count = 10);
-    
+
     // File operations
     Task<byte[]> GetAttachmentFileAsync(Guid id);
     Task<string> GetAttachmentUrlAsync(Guid id);
     Task<string> GetThumbnailUrlAsync(Guid id);
     Task<bool> SetMainImageAsync(Guid attachmentId, Guid entityId);
-    
+
     // Storage statistics
     Task<long> GetTotalStorageUsedAsync();
-    
+
     // Tag management
     Task AddAttachmentTagsAsync(Guid attachmentId, List<AttachmentTagDto> tags);
     Task RemoveTagAsync(Guid attachmentId, string tagName);
     Task<IEnumerable<MaintenanceAttachmentDto>> GetAttachmentsByTagAsync(string tagName, string? tagValue = null);
-    
+
     // Access tracking
     Task LogAttachmentAccessAsync(Guid attachmentId, Guid userId, string accessType);
     Task<IEnumerable<AttachmentAccessLogDto>> GetAttachmentAccessLogsAsync(Guid attachmentId);
@@ -727,25 +839,25 @@ public interface ITechnicianDataService
     Task<TechnicianDto?> GetTechnicianByIdAsync(Guid id);
     Task<IEnumerable<TechnicianDto>> GetAllTechniciansAsync();
     Task<PagedResult<TechnicianListDto>> GetTechniciansPagedAsync(TechnicianFilterDto filter);
-    
+
     // HR Module synchronization
     Task<IEnumerable<TechnicianDto>> SyncTechniciansFromHRAsync();
     Task<TechnicianDto?> GetTechnicianFromHRAsync(Guid hrEmployeeId);
     Task UpdateTechnicianFromHRAsync(TechnicianDto hrTechnician);
-    
+
     // Availability and workload
     Task<IEnumerable<TechnicianDto>> GetAvailableTechniciansAsync();
     Task<IEnumerable<TechnicianDto>> GetTechniciansByLocationAsync(string location);
     Task<IEnumerable<TechnicianDto>> GetTechniciansByDepartmentAsync(string department);
     Task<IEnumerable<TechnicianDto>> GetTechniciansBySkillAsync(Guid skillId);
     Task<IEnumerable<TechnicianDto>> GetTechniciansByExperienceLevelAsync(string experienceLevel);
-    
+
     // Workload and performance
     Task<TechnicianWorkloadDto> GetTechnicianWorkloadAsync(Guid technicianId);
     Task<IEnumerable<TechnicianWorkloadDto>> GetTeamWorkloadAsync();
     Task<TechnicianPerformanceDto> GetTechnicianPerformanceAsync(Guid technicianId, DateTime startDate, DateTime endDate);
     Task<TechnicianAvailabilityDto> GetTechnicianAvailabilityAsync(Guid technicianId);
-    
+
     // Statistics and analytics
     Task<TechnicianStatsDto> GetTechnicianStatsAsync();
     Task<IEnumerable<TechnicianDto>> GetTechniciansWithExpiringCertificationsAsync(int days = 30);

@@ -1,6 +1,6 @@
+using System.Linq.Expressions;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
-using System.Linq.Expressions;
 using ErpSystem.Core.Entities.Maintenance;
 
 namespace ErpSystem.Core.Interfaces.Maintenance;
@@ -146,6 +146,18 @@ public interface IMaintenanceScheduleRepository : IGenericRepository<Maintenance
     Task UpdateNextDueDateAsync(Guid scheduleId, DateTime nextDueDate);
     Task UpdateLastGeneratedDateAsync(Guid scheduleId, DateTime lastGeneratedDate);
     Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null);
+
+    // Notification and reminder tracking
+    Task<IEnumerable<MaintenanceSchedule>> GetSchedulesDueForRemindersAsync(int advanceDays);
+    Task UpdateLastReminderSentDateAsync(Guid scheduleId, DateTime date);
+
+    // Usage-based trigger methods
+    Task<IEnumerable<MaintenanceSchedule>> GetSchedulesByUsageTriggersAsync();
+    Task UpdateLastUsageCheckDateAsync(Guid scheduleId, DateTime date);
+
+    // Condition-based trigger methods
+    Task<IEnumerable<MaintenanceSchedule>> GetSchedulesByConditionTriggersAsync();
+    Task UpdateLastConditionCheckDateAsync(Guid scheduleId, DateTime date);
 }
 
 #endregion

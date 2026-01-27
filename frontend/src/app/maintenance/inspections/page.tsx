@@ -1,5 +1,13 @@
 'use client';
 
+import { redirect } from 'next/navigation';
+
+export default function InspectionsPage() {
+  // Temporarily hide this page and redirect back to Maintenance home
+  redirect('/maintenance');
+}
+
+// Original implementation preserved below for future re-enable
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -63,7 +71,7 @@ interface InspectionTemplate {
 }
 
 
-export default function InspectionsPage() {
+function InspectionsPageOriginal() {
   const [inspectionsData, setInspectionsData] = useState<InspectionItem[]>([]);
   const [inspectionTemplates, setInspectionTemplates] = useState<InspectionTemplate[]>([]);
   const [loading, setLoading] = useState(true);

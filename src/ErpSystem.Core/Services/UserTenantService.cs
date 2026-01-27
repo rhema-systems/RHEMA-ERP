@@ -16,19 +16,19 @@ public interface IUserTenantService
     Task RevokeUserAccessFromTenantAsync(Guid userId, Guid tenantId, string? revokedBy = null, string? reason = null);
     Task<bool> SuspendUserFromTenantAsync(Guid userId, Guid tenantId, string? suspendedBy = null, string? reason = null);
     Task<bool> ReactivateUserInTenantAsync(Guid userId, Guid tenantId, string? reactivatedBy = null);
-    
+
     // Status Management
     Task<bool> UpdateUserTenantStatusAsync(Guid userId, Guid tenantId, UserTenantStatus newStatus, string? changedBy = null, string? reason = null);
     Task<bool> SetDefaultTenantAsync(Guid userId, Guid tenantId);
     Task<bool> UpdateAccessLevelAsync(Guid userId, Guid tenantId, UserTenantAccessLevel newAccessLevel, string? changedBy = null);
-    
+
     // Query Methods
     Task<IEnumerable<UserTenant>> GetActiveUserTenantsAsync(Guid userId);
     Task<IEnumerable<UserTenant>> GetAllUserTenantsAsync(Guid userId);
     Task<IEnumerable<ApplicationUser>> GetActiveTenantUsersAsync(Guid tenantId);
     Task<UserTenant?> GetUserTenantRelationshipAsync(Guid userId, Guid tenantId);
     Task<bool> HasActiveAccessAsync(Guid userId, Guid tenantId);
-    
+
     // Bulk Operations
     Task<int> BulkGrantAccessAsync(IEnumerable<Guid> userIds, Guid tenantId, UserTenantAccessLevel accessLevel = UserTenantAccessLevel.Standard, string? grantedBy = null);
     Task<int> BulkRevokeAccessAsync(IEnumerable<Guid> userIds, Guid tenantId, string? revokedBy = null);
@@ -57,19 +57,19 @@ public class UserTenantService : IUserTenantService
     #region Grant/Revoke Access
 
     public async Task<UserTenant> GrantUserAccessToTenantAsync(
-        Guid userId, 
-        Guid tenantId, 
-        UserTenantAccessLevel accessLevel = UserTenantAccessLevel.Standard, 
-        string? grantedBy = null, 
-        DateTime? expiresAt = null, 
+        Guid userId,
+        Guid tenantId,
+        UserTenantAccessLevel accessLevel = UserTenantAccessLevel.Standard,
+        string? grantedBy = null,
+        DateTime? expiresAt = null,
         string? notes = null)
     {
-        _logger.LogInformation("Granting user {UserId} access to tenant {TenantId} with level {AccessLevel}", 
+        _logger.LogInformation("Granting user {UserId} access to tenant {TenantId} with level {AccessLevel}",
             userId, tenantId, accessLevel);
 
         // Check if relationship already exists
         var existingRelationship = await GetUserTenantRelationshipAsync(userId, tenantId);
-        
+
         if (existingRelationship != null)
         {
             // Reactivate existing relationship
@@ -81,7 +81,7 @@ public class UserTenantService : IUserTenantService
             existingRelationship.UpdatedAt = DateTime.UtcNow;
             existingRelationship.UpdatedBy = grantedBy ?? _currentUserService.UserName;
             existingRelationship.Notes = notes;
-            
+
             // If previously soft-deleted, restore it
             if (existingRelationship.IsDeleted)
             {
@@ -194,7 +194,10 @@ public class UserTenantService : IUserTenantService
     public async Task<bool> UpdateUserTenantStatusAsync(Guid userId, Guid tenantId, UserTenantStatus newStatus, string? changedBy = null, string? reason = null)
     {
         var relationship = await GetUserTenantRelationshipAsync(userId, tenantId);
-        if (relationship == null) return false;
+        if (relationship == null)
+        {
+            return false;
+        }
 
         var oldStatus = relationship.Status;
         relationship.Status = newStatus;
@@ -204,7 +207,7 @@ public class UserTenantService : IUserTenantService
         relationship.Notes = $"{relationship.Notes}\n[STATUS CHANGE] {DateTime.UtcNow}: {oldStatus} -> {newStatus} - {reason ?? "Status updated"}".Trim();
 
         await _unitOfWork.SaveChangesAsync();
-        _logger.LogInformation("Updated user-tenant status: {UserId} -> {TenantId} ({OldStatus} -> {NewStatus})", 
+        _logger.LogInformation("Updated user-tenant status: {UserId} -> {TenantId} ({OldStatus} -> {NewStatus})",
             userId, tenantId, oldStatus, newStatus);
         return true;
     }
@@ -212,7 +215,7 @@ public class UserTenantService : IUserTenantService
     public async Task<bool> SetDefaultTenantAsync(Guid userId, Guid tenantId)
     {
         var userTenantRepo = _unitOfWork.Repository<UserTenant>();
-        
+
         // Remove default from all other tenants for this user
         var userTenants = await userTenantRepo.GetQueryable()
             .Where(ut => ut.UserId == userId && !ut.IsDeleted)
@@ -233,7 +236,10 @@ public class UserTenantService : IUserTenantService
     public async Task<bool> UpdateAccessLevelAsync(Guid userId, Guid tenantId, UserTenantAccessLevel newAccessLevel, string? changedBy = null)
     {
         var relationship = await GetUserTenantRelationshipAsync(userId, tenantId);
-        if (relationship == null) return false;
+        if (relationship == null)
+        {
+            return false;
+        }
 
         var oldAccessLevel = relationship.AccessLevel;
         relationship.AccessLevel = newAccessLevel;
@@ -242,7 +248,7 @@ public class UserTenantService : IUserTenantService
         relationship.Notes = $"{relationship.Notes}\n[ACCESS LEVEL CHANGE] {DateTime.UtcNow}: {oldAccessLevel} -> {newAccessLevel}".Trim();
 
         await _unitOfWork.SaveChangesAsync();
-        _logger.LogInformation("Updated access level for user {UserId} in tenant {TenantId}: {OldLevel} -> {NewLevel}", 
+        _logger.LogInformation("Updated access level for user {UserId} in tenant {TenantId}: {OldLevel} -> {NewLevel}",
             userId, tenantId, oldAccessLevel, newAccessLevel);
         return true;
     }
@@ -256,8 +262,8 @@ public class UserTenantService : IUserTenantService
         var userTenantRepo = _unitOfWork.Repository<UserTenant>();
         return await userTenantRepo.GetQueryable()
             .Include(ut => ut.Tenant)
-            .Where(ut => ut.UserId == userId && 
-                        !ut.IsDeleted && 
+            .Where(ut => ut.UserId == userId &&
+                        !ut.IsDeleted &&
                         ut.Status == UserTenantStatus.Active &&
                         (ut.ExpiresAt == null || ut.ExpiresAt > DateTime.UtcNow))
             .ToListAsync();
@@ -277,8 +283,8 @@ public class UserTenantService : IUserTenantService
         var userTenantRepo = _unitOfWork.Repository<UserTenant>();
         var activeRelationships = await userTenantRepo.GetQueryable()
             .Include(ut => ut.User)
-            .Where(ut => ut.TenantId == tenantId && 
-                        !ut.IsDeleted && 
+            .Where(ut => ut.TenantId == tenantId &&
+                        !ut.IsDeleted &&
                         ut.Status == UserTenantStatus.Active &&
                         (ut.ExpiresAt == null || ut.ExpiresAt > DateTime.UtcNow))
             .ToListAsync();
@@ -298,8 +304,8 @@ public class UserTenantService : IUserTenantService
     public async Task<bool> HasActiveAccessAsync(Guid userId, Guid tenantId)
     {
         var relationship = await GetUserTenantRelationshipAsync(userId, tenantId);
-        return relationship != null && 
-               relationship.Status == UserTenantStatus.Active && 
+        return relationship != null &&
+               relationship.Status == UserTenantStatus.Active &&
                (relationship.ExpiresAt == null || relationship.ExpiresAt > DateTime.UtcNow);
     }
 
@@ -355,8 +361,8 @@ public class UserTenantService : IUserTenantService
     {
         var userTenantRepo = _unitOfWork.Repository<UserTenant>();
         var activeRelationships = await userTenantRepo.GetQueryable()
-            .Where(ut => ut.TenantId == tenantId && 
-                        !ut.IsDeleted && 
+            .Where(ut => ut.TenantId == tenantId &&
+                        !ut.IsDeleted &&
                         ut.Status == UserTenantStatus.Active)
             .ToListAsync();
 

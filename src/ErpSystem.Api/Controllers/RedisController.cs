@@ -1,6 +1,6 @@
+using ErpSystem.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using ErpSystem.Api.Services;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -60,7 +60,7 @@ namespace ErpSystem.Api.Controllers
 
                 // Get test value
                 var retrievedValue = await _redisService.GetAsync<object>(testKey);
-                
+
                 // Check if key exists
                 var keyExists = await _redisService.ExistsAsync(testKey);
 
@@ -99,7 +99,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 await _redisService.RemoveByPatternAsync(pattern);
-                
+
                 _logger.LogWarning("Cleared Redis cache with pattern: {Pattern}", pattern);
 
                 return Ok(new
@@ -166,8 +166,8 @@ namespace ErpSystem.Api.Controllers
                     return BadRequest(new { Error = "Key is required" });
                 }
 
-                var expiry = request.ExpiryMinutes.HasValue 
-                    ? TimeSpan.FromMinutes(request.ExpiryMinutes.Value) 
+                var expiry = request.ExpiryMinutes.HasValue
+                    ? TimeSpan.FromMinutes(request.ExpiryMinutes.Value)
                     : TimeSpan.FromMinutes(30);
 
                 await _redisService.SetAsync(request.Key, request.Value, expiry);

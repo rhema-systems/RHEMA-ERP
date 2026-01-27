@@ -60,6 +60,13 @@ export class AuthService {
     return response;
   }
 
+  forgotPassword = async (request: { email: string }): Promise<{ success: boolean; message: string }> => {
+    return apiService.publicRequest('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
   getStoredUser(): User | null {
     if (typeof window === 'undefined') return null;
     

@@ -1,8 +1,8 @@
-using Microsoft.AspNetCore.ResponseCompression;
 using System.IO.Compression;
 using System.Text.Json;
-using Microsoft.Net.Http.Headers;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Extensions.Options;
+using Microsoft.Net.Http.Headers;
 
 namespace ErpSystem.Api.Performance;
 
@@ -53,7 +53,7 @@ public class FrontendOptimizationMiddleware
         // Add DNS prefetch hints
         if (_options.EnableDnsPrefetch)
         {
-            response.Headers.Add("X-DNS-Prefetch-Control", "on");
+            response.Headers.Append("X-DNS-Prefetch-Control", "on");
         }
 
         // Add preconnect hints for external resources
@@ -61,14 +61,14 @@ public class FrontendOptimizationMiddleware
         {
             foreach (var domain in _options.PreconnectDomains)
             {
-                response.Headers.Add("Link", $"<{domain}>; rel=preconnect");
+                response.Headers.Append("Link", $"<{domain}>; rel=preconnect");
             }
         }
 
         // Add timing information for debugging
         if (_options.EnableTimingHeaders)
         {
-            response.Headers.Add("Server-Timing", $"total;desc=\"Total\";dur={0}"); // Will be updated later
+            response.Headers.Append("Server-Timing", $"total;desc=\"Total\";dur={0}"); // Will be updated later
         }
     }
 
@@ -82,11 +82,11 @@ public class FrontendOptimizationMiddleware
     private async Task HandleLazyLoadingRequest(HttpContext context)
     {
         var response = context.Response;
-        
+
         // Set appropriate headers for lazy loading
         response.Headers[HeaderNames.CacheControl] = "public, max-age=31536000"; // 1 year
-        response.Headers.Add("X-Lazy-Load", "true");
-        
+        response.Headers.Append("X-Lazy-Load", "true");
+
         // Simulate lazy loading response
         var lazyContent = new
         {
@@ -97,7 +97,7 @@ public class FrontendOptimizationMiddleware
 
         response.ContentType = "application/json";
         await response.WriteAsync(JsonSerializer.Serialize(lazyContent));
-        
+
         _logger.LogDebug("Handled lazy loading request for {Path}", context.Request.Path);
     }
 
@@ -112,8 +112,8 @@ public class FrontendOptimizationMiddleware
             // For API requests, add hints for common resources
             if (_options.EnableResourceHints)
             {
-                response.Headers.Add("Link", "</api/users/profile>; rel=prefetch");
-                response.Headers.Add("Link", "</api/settings>; rel=prefetch");
+                response.Headers.Append("Link", "</api/users/profile>; rel=prefetch");
+                response.Headers.Append("Link", "</api/settings>; rel=prefetch");
             }
         }
     }
@@ -125,7 +125,7 @@ public class FrontendOptimizationMiddleware
         // Add compression hints
         if (_options.EnableCompression && IsCompressibleContent(response))
         {
-            response.Headers.Add("X-Compression", "enabled");
+            response.Headers.Append("X-Compression", "enabled");
         }
 
         // Add performance timing
@@ -165,14 +165,14 @@ public class FrontendOptimizationMiddleware
         var response = context.Response;
 
         // Add JSON optimization headers
-        response.Headers.Add("X-Content-Type-Options", "nosniff");
-        response.Headers.Add("X-JSON-Optimized", "true");
+        response.Headers.Append("X-Content-Type-Options", "nosniff");
+        response.Headers.Append("X-JSON-Optimized", "true");
 
         // If it's a large response, suggest pagination
         if (response.ContentLength > _options.LargResponseThreshold)
         {
-            response.Headers.Add("X-Pagination-Suggested", "true");
-            _logger.LogInformation("Large response detected ({Size} bytes) for {Path}", 
+            response.Headers.Append("X-Pagination-Suggested", "true");
+            _logger.LogInformation("Large response detected ({Size} bytes) for {Path}",
                 response.ContentLength, context.Request.Path);
         }
     }
@@ -231,6 +231,18 @@ public class FrontendOptimizationOptions
 public class FrontendCompressionService
 {
     private readonly ILogger<FrontendCompressionService> _logger;
+    private static readonly string[] second = new[]
+        {
+            "application/json",
+            "application/javascript",
+            "text/css",
+            "text/html",
+            "text/json",
+            "text/plain",
+            "text/xml",
+            "application/xml",
+            "image/svg+xml"
+        };
 
     public FrontendCompressionService(ILogger<FrontendCompressionService> logger)
     {
@@ -247,18 +259,7 @@ public class FrontendCompressionService
         options.Providers.Add<GzipCompressionProvider>();
 
         // Configure MIME types to compress
-        options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
-        {
-            "application/json",
-            "application/javascript",
-            "text/css",
-            "text/html",
-            "text/json",
-            "text/plain",
-            "text/xml",
-            "application/xml",
-            "image/svg+xml"
-        });
+        options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(second);
 
         // Enable compression for HTTPS
         options.EnableForHttps = true;
@@ -305,7 +306,7 @@ public class ApiResponseOptimizer
         string? prevPageUrl = null)
     {
         var items = data.ToList();
-        
+
         return new OptimizedApiResponse<T>
         {
             Data = items,
@@ -340,13 +341,13 @@ public class ApiResponseOptimizer
         Func<T, object> summarySelector)
     {
         var items = data.Take(10).Select(summarySelector).ToList(); // Show first 10 as preview
-        
+
         return new ApiSummaryResponse
         {
             Summary = items,
             TotalCount = totalCount,
             PreviewCount = items.Count,
-            Message = totalCount > 10 
+            Message = totalCount > 10
                 ? $"Showing first {items.Count} of {totalCount} items. Use pagination for full results."
                 : $"Showing all {totalCount} items.",
             Links = new Dictionary<string, string>
@@ -446,10 +447,10 @@ public static class FrontendOptimizationExtensions
     {
         // Enable response compression
         app.UseResponseCompression();
-        
+
         // Add frontend optimization middleware
         app.UseMiddleware<FrontendOptimizationMiddleware>();
-        
+
         return app;
     }
 }

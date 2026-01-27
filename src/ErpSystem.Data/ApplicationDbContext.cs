@@ -1,16 +1,18 @@
-using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
-using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data.Configuration;
 using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Entities.HR.Performance;
+using ErpSystem.Data.Configuration.Maintenance;
+using ErpSystem.Data.Configuration.Procurement;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ErpSystem.Data;
 
@@ -31,29 +33,31 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         _tenantId = tenantId;
     }
 
-    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, IServiceProvider serviceProvider) : base(options)
-    {
-        // Try to get tenant ID from ICurrentUserProvider
-        var currentUserProvider = serviceProvider?.GetService(typeof(ErpSystem.Core.Interfaces.ICurrentUserProvider))
-            as ErpSystem.Core.Interfaces.ICurrentUserProvider;
-
-        if (currentUserProvider != null)
-        {
-            try
-            {
-                var tid = currentUserProvider.TenantId;
-                if (tid != Guid.Empty)
-                {
-                    _tenantId = tid;
-                }
-            }
-            catch
-            {
-                // Tenant ID not available - this is fine for seeding and anonymous requests
-                _tenantId = null;
-            }
-        }
-    }
+    // TEMPORARILY DISABLED - This constructor was causing hangs during login
+    // because it tries to access ICurrentUserProvider before authentication is complete
+    // public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, IServiceProvider serviceProvider) : base(options)
+    // {
+    //     // Try to get tenant ID from ICurrentUserProvider
+    //     var currentUserProvider = serviceProvider?.GetService(typeof(ErpSystem.Core.Interfaces.ICurrentUserProvider))
+    //         as ErpSystem.Core.Interfaces.ICurrentUserProvider;
+    //
+    //     if (currentUserProvider != null)
+    //     {
+    //         try
+    //         {
+    //             var tid = currentUserProvider.TenantId;
+    //             if (tid != Guid.Empty)
+    //             {
+    //                 _tenantId = tid;
+    //             }
+    //         }
+    //         catch
+    //         {
+    //             // Tenant ID not available - this is fine for seeding and anonymous requests
+    //             _tenantId = null;
+    //         }
+    //     }
+    // }
 
     // Core entities
     public DbSet<Tenant> Tenants { get; set; }
@@ -82,6 +86,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<RefreshToken> RefreshTokens { get; set; }
     public DbSet<BlacklistedToken> BlacklistedTokens { get; set; }
     public DbSet<UserSession> UserSessions { get; set; }
+    public DbSet<PasswordResetToken> PasswordResetTokens { get; set; }
 
     // Permission entities
     public DbSet<Permission> Permissions { get; set; }
@@ -121,6 +126,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<MaintenanceTaskTemplate> MaintenanceTaskTemplates { get; set; }
 
     public DbSet<MaintenanceSchedule> MaintenanceSchedules { get; set; }
+    public DbSet<MaintenanceScheduleHistory> MaintenanceScheduleHistories { get; set; }
+    public DbSet<MaintenanceScheduleNotificationHistory> MaintenanceScheduleNotificationHistories { get; set; }
+    public DbSet<AssetUsageTracking> AssetUsageTrackings { get; set; }
     public DbSet<InspectionTemplate> InspectionTemplates { get; set; }
     public DbSet<AssetInspection> AssetInspections { get; set; }
     public DbSet<InspectionDocument> InspectionDocuments { get; set; }
@@ -130,6 +138,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<UserTechnicianSkill> UserTechnicianSkills { get; set; }
     public DbSet<AssetDowntime> AssetDowntimes { get; set; }
     public DbSet<MaintenanceAttachment> MaintenanceAttachments { get; set; }
+
+    public DbSet<AssetAdmission> AssetAdmissions { get; set; }
+    public DbSet<AssetDischarge> AssetDischarges { get; set; }
+    public DbSet<AssetMaintenanceDowntime> AssetMaintenanceDowntimes { get; set; }
+
+    // Asset Condition Inspection entities (Pre-Inspection at admission / Post-Inspection at discharge)
+    public DbSet<PreInspectionChecklistTemplate> PreInspectionChecklistTemplates { get; set; }
+    public DbSet<PreInspectionChecklistItem> PreInspectionChecklistItems { get; set; }
+    public DbSet<AssetConditionRecord> AssetConditionRecords { get; set; }
+    public DbSet<AssetConditionItemResult> AssetConditionItemResults { get; set; }
 
     // Quality Control entities
     public DbSet<QualityControlChecklist> QualityControlChecklists { get; set; }
@@ -172,11 +190,28 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<SafetyAudit> SafetyAudits { get; set; }
     public DbSet<ProtocolAuditDetail> ProtocolAuditDetails { get; set; }
 
+    // Tool Management entities
+    public DbSet<MaintenanceTool> MaintenanceTools { get; set; }
+    public DbSet<ToolCheckout> ToolCheckouts { get; set; }
+    public DbSet<WorkOrderTool> WorkOrderTools { get; set; }
+
+    // Resource Management entities
+    public DbSet<MaintenanceStaffSchedule> MaintenanceStaffSchedules { get; set; }
+    public DbSet<MaintenanceExpense> MaintenanceExpenses { get; set; }
+
+    // Notification entities
+    public DbSet<Notification> Notifications { get; set; }
+    public DbSet<MaintenanceNotification> MaintenanceNotifications { get; set; }
+    public DbSet<MaintenanceNotificationTemplate> MaintenanceNotificationTemplates { get; set; }
+    public DbSet<MaintenanceEscalationRule> MaintenanceEscalationRules { get; set; }
+
     #region HR Entities
 
     #region Company Setup
 
     public DbSet<Division> Divisions { get; set; }
+
+    // HR entities
     public DbSet<Department> Departments { get; set; }
     public DbSet<Section> Sections { get; set; }
     public DbSet<Unit> Units { get; set; }
@@ -261,6 +296,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<Warehouse> Warehouses { get; set; }
     public DbSet<WarehouseLocation> WarehouseLocations { get; set; }
     public DbSet<InventoryLocation> InventoryLocations { get; set; }
+    public DbSet<WarehouseQuantity> WarehouseQuantities { get; set; }
     public DbSet<InventoryAllocation> InventoryAllocations { get; set; }
 
     // Procurement entities
@@ -272,7 +308,92 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<PurchaseOrderReceipt> PurchaseOrderReceipts { get; set; }
     public DbSet<PurchaseOrderReceiptItem> PurchaseOrderReceiptItems { get; set; }
     public DbSet<PurchaseRequisition> PurchaseRequisitions { get; set; }
+
+    // Business Partner Management (Unified Supplier/Contractor)
+    public DbSet<BusinessPartner> BusinessPartners { get; set; }
+    public DbSet<PartnerCategory> PartnerCategories { get; set; }
+    public DbSet<BusinessPartnerCategory> BusinessPartnerCategories { get; set; }
+    public DbSet<ContractorSpecialization> ContractorSpecializations { get; set; }
+    public DbSet<BusinessPartnerSpecialization> BusinessPartnerSpecializations { get; set; }
+    public DbSet<LicenseType> LicenseTypes { get; set; }
+    public DbSet<BusinessPartnerLicense> BusinessPartnerLicenses { get; set; }
+    public DbSet<BusinessPartnerContact> BusinessPartnerContacts { get; set; }
+    public DbSet<BusinessPartnerDocument> BusinessPartnerDocuments { get; set; }
+    public DbSet<BusinessPartnerFinancial> BusinessPartnerFinancials { get; set; }
+    public DbSet<BusinessPartnerRegistration> BusinessPartnerRegistrations { get; set; }
+
+    // Tender Management
+    public DbSet<Tender> Tenders { get; set; }
+    public DbSet<TenderLot> TenderLots { get; set; }
+    public DbSet<TenderItem> TenderItems { get; set; }
+    public DbSet<TenderDocument> TenderDocuments { get; set; }
+    public DbSet<TenderInvitation> TenderInvitations { get; set; }
+    public DbSet<TenderBid> TenderBids { get; set; }
+    public DbSet<TenderBidLot> TenderBidLots { get; set; }
+    public DbSet<TenderBidItem> TenderBidItems { get; set; }
+    public DbSet<TenderBidDocument> TenderBidDocuments { get; set; }
+    public DbSet<TenderFee> TenderFees { get; set; }
+    public DbSet<TenderPayment> TenderPayments { get; set; }
+    public DbSet<TenderEvaluator> TenderEvaluators { get; set; }
+    public DbSet<TenderEvaluation> TenderEvaluations { get; set; }
+    public DbSet<TenderInterview> TenderInterviews { get; set; }
+    public DbSet<TenderClarification> TenderClarifications { get; set; }
+    public DbSet<TenderRevision> TenderRevisions { get; set; }
+    public DbSet<TenderAward> TenderAwards { get; set; }
+    public DbSet<TenderTemplate> TenderTemplates { get; set; }
+    public DbSet<TenderViewLog> TenderViewLogs { get; set; }
+    public DbSet<EvaluationCriterion> EvaluationCriteria { get; set; }
+    public DbSet<EvaluationTemplate> EvaluationTemplates { get; set; }
+    public DbSet<EvaluationTemplateCriterion> EvaluationTemplateCriteria { get; set; }
+    public DbSet<TenderDocumentType> TenderDocumentTypes { get; set; }
+    public DbSet<BusinessPartnerRegistrationDocument> BusinessPartnerRegistrationDocuments { get; set; }
+    public DbSet<BusinessPartnerRegistrationStatusHistory> BusinessPartnerRegistrationStatusHistories { get; set; }
     public DbSet<PurchaseRequisitionItem> PurchaseRequisitionItems { get; set; }
+
+    // Business Partner User Management
+    public DbSet<BusinessPartnerUser> BusinessPartnerUsers { get; set; }
+    public DbSet<TenderAssignment> TenderAssignments { get; set; }
+
+    // Award Verification
+    public DbSet<AwardVerificationChecklistTemplate> AwardVerificationChecklistTemplates { get; set; }
+    public DbSet<AwardVerificationChecklistItem> AwardVerificationChecklistItems { get; set; }
+    public DbSet<TenderAwardVerification> TenderAwardVerifications { get; set; }
+    public DbSet<TenderAwardVerificationBidder> TenderAwardVerificationBidders { get; set; }
+    public DbSet<TenderAwardVerificationItemResult> TenderAwardVerificationItemResults { get; set; }
+    public DbSet<TenderAwardVerificationItemDocument> TenderAwardVerificationItemDocuments { get; set; }
+
+    // Performance Bonds
+    public DbSet<PerformanceBondRequest> PerformanceBondRequests { get; set; }
+
+    // Contract Management
+    public DbSet<Contract> Contracts { get; set; }
+    public DbSet<ContractMilestone> ContractMilestones { get; set; }
+    public DbSet<ContractAmendment> ContractAmendments { get; set; }
+    public DbSet<ContractDocument> ContractDocuments { get; set; }
+
+    // Procurement Planning
+    public DbSet<ProcurementPlan> ProcurementPlans { get; set; }
+    public DbSet<ProcurementPlanItem> ProcurementPlanItems { get; set; }
+    public DbSet<ProcurementPlanItemSupplier> ProcurementPlanItemSuppliers { get; set; }
+    public DbSet<ProcurementBudget> ProcurementBudgets { get; set; }
+    public DbSet<ProcurementBudgetAllocation> ProcurementBudgetAllocations { get; set; }
+    public DbSet<ProcurementBudgetRevision> ProcurementBudgetRevisions { get; set; }
+    public DbSet<ProcurementSchedule> ProcurementSchedules { get; set; }
+    public DbSet<MarketAnalysis> MarketAnalyses { get; set; }
+    public DbSet<PriceHistory> PriceHistories { get; set; }
+    public DbSet<SupplierConsolidation> SupplierConsolidations { get; set; }
+    public DbSet<EmergencyProcurementPlan> EmergencyProcurementPlans { get; set; }
+    public DbSet<EmergencyProcurementItem> EmergencyProcurementItems { get; set; }
+    public DbSet<EmergencySupplier> EmergencySuppliers { get; set; }
+
+    // Performance Tracking
+    public DbSet<SupplierPerformanceMetric> SupplierPerformanceMetrics { get; set; }
+    public DbSet<QualityIncident> QualityIncidents { get; set; }
+    public DbSet<PerformanceReview> PerformanceReviews { get; set; }
+
+    // Blacklist Appeals
+    public DbSet<BlacklistAppeal> BlacklistAppeals { get; set; }
+    public DbSet<BlacklistHistory> BlacklistHistories { get; set; }
 
     // Workflow Engine entities
     public DbSet<WorkflowDefinition> WorkflowDefinitions { get; set; }
@@ -294,6 +415,35 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new UserTenantConfiguration());
         builder.ApplyConfiguration(new AssetTypeConfiguration());
         builder.ApplyConfiguration(new AssetTypeFieldConfiguration());
+
+        // Asset Condition Inspection configurations
+        builder.ApplyConfiguration(new PreInspectionChecklistTemplateConfiguration());
+        builder.ApplyConfiguration(new PreInspectionChecklistItemConfiguration());
+        builder.ApplyConfiguration(new AssetConditionRecordConfiguration());
+        builder.ApplyConfiguration(new AssetConditionItemResultConfiguration());
+
+        // Tender configurations
+        builder.ApplyConfiguration(new TenderConfiguration());
+        builder.ApplyConfiguration(new TenderLotConfiguration());
+        builder.ApplyConfiguration(new TenderBidConfiguration());
+        builder.ApplyConfiguration(new TenderBidLotConfiguration());
+        builder.ApplyConfiguration(new TenderAwardConfiguration());
+        builder.ApplyConfiguration(new EvaluationTemplateConfiguration());
+        builder.ApplyConfiguration(new EvaluationTemplateCriterionConfiguration());
+
+        // Award Verification configurations
+        builder.ApplyConfiguration(new AwardVerificationChecklistTemplateConfiguration());
+        builder.ApplyConfiguration(new AwardVerificationChecklistItemConfiguration());
+        builder.ApplyConfiguration(new TenderAwardVerificationConfiguration());
+        builder.ApplyConfiguration(new TenderAwardVerificationBidderConfiguration());
+        builder.ApplyConfiguration(new TenderAwardVerificationItemResultConfiguration());
+        builder.ApplyConfiguration(new TenderAwardVerificationItemDocumentConfiguration());
+
+        // Contract Management configurations
+        builder.ApplyConfiguration(new ContractConfiguration());
+        builder.ApplyConfiguration(new ContractMilestoneConfiguration());
+        builder.ApplyConfiguration(new ContractAmendmentConfiguration());
+        builder.ApplyConfiguration(new ContractDocumentConfiguration());
 
         // Configure Identity tables with custom names
         builder.Entity<ApplicationUser>(entity =>
@@ -680,6 +830,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // Configure Workflow Engine entities
         ConfigureWorkflowEntities(builder);
 
+        // Configure Business Partner entities
+        ConfigureBusinessPartnerEntities(builder);
+
+        // Configure Procurement Planning entities
+        ConfigureProcurementPlanningEntities(builder);
+
         // Apply global query filters for soft delete and multitenancy
         ApplyGlobalFilters(builder);
 
@@ -687,7 +843,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         SeedData(builder);
     }
 
-    private void ConfigureWorkflowEntities(ModelBuilder builder)
+    private static void ConfigureWorkflowEntities(ModelBuilder builder)
     {
         // Configure WorkflowEntityType relationships
         builder.Entity<WorkflowEntityType>(entity =>
@@ -1189,11 +1345,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(tt => tt.Members)
                 .HasForeignKey(ttm => ttm.TeamId)
                 .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(ttm => ttm.Technician)
-                .WithMany()
-                .HasForeignKey(ttm => ttm.TechnicianId)
-                .OnDelete(DeleteBehavior.Restrict);
+            // TechnicianId now references ApplicationUser (Users table) instead of Employee
         });
 
         // Configure TechnicianSkill entity
@@ -1274,11 +1426,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ts => ts.Status);
             entity.HasIndex(ts => ts.ScheduleType);
 
-            entity.HasOne(ts => ts.Technician)
-                .WithMany()
-                .HasForeignKey(ts => ts.TechnicianId)
-                .OnDelete(DeleteBehavior.Cascade);
-
+            // TechnicianId now references ApplicationUser (Users table) instead of Employee
             entity.HasOne(ts => ts.WorkOrder)
                 .WithMany()
                 .HasForeignKey(ts => ts.WorkOrderId)
@@ -1298,10 +1446,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(ta => ta.AvailabilityType);
             entity.HasIndex(ta => ta.Reason);
 
-            entity.HasOne(ta => ta.Technician)
-                .WithMany()
-                .HasForeignKey(ta => ta.TechnicianId)
-                .OnDelete(DeleteBehavior.Cascade);
+            // TechnicianId now references ApplicationUser (Users table) instead of Employee
         });
 
         // Configure TechnicianShift entity
@@ -1515,7 +1660,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // Technician-specific configurations are handled in the Employee entity configuration
     }
 
-    private void ConfigureQualityControlEntities(ModelBuilder builder)
+    private static void ConfigureQualityControlEntities(ModelBuilder builder)
     {
         // Configure QualityControlChecklist entity
         builder.Entity<QualityControlChecklist>(entity =>
@@ -1663,6 +1808,126 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.NoAction);
         });
 
+        // Configure AssetAdmission entity
+        builder.Entity<AssetAdmission>(entity =>
+        {
+            entity.HasIndex(a => a.AdmissionNumber).IsUnique();
+            entity.HasIndex(a => a.AssetId);
+            entity.HasIndex(a => a.Status);
+            entity.HasIndex(a => a.AdmissionDate);
+            entity.HasIndex(a => a.AdmissionType);
+
+            entity.HasOne(a => a.Asset)
+                .WithMany()
+                .HasForeignKey(a => a.AssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(a => a.WorkOrder)
+                .WithMany()
+                .HasForeignKey(a => a.WorkOrderId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(a => a.AdmittedBy)
+                .WithMany()
+                .HasForeignKey(a => a.AdmittedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure AssetDischarge entity
+        builder.Entity<AssetDischarge>(entity =>
+        {
+            entity.HasIndex(d => d.DischargeNumber).IsUnique();
+            entity.HasIndex(d => d.AdmissionId);
+            entity.HasIndex(d => d.AssetId);
+            entity.HasIndex(d => d.DischargeDate);
+            entity.HasIndex(d => d.CustomerAcceptance);
+
+            entity.HasOne(d => d.Admission)
+                .WithOne(a => a.Discharge)
+                .HasForeignKey<AssetDischarge>(d => d.AdmissionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(d => d.Asset)
+                .WithMany()
+                .HasForeignKey(d => d.AssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(d => d.WorkOrder)
+                .WithMany()
+                .HasForeignKey(d => d.WorkOrderId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(d => d.DischargedBy)
+                .WithMany()
+                .HasForeignKey(d => d.DischargedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(d => d.QualityCheckedBy)
+                .WithMany()
+                .HasForeignKey(d => d.QualityCheckedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(d => d.AcceptedBy)
+                .WithMany()
+                .HasForeignKey(d => d.AcceptedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure AssetMaintenanceDowntime entity
+        builder.Entity<AssetMaintenanceDowntime>(entity =>
+        {
+            entity.HasIndex(d => d.AssetId);
+            entity.HasIndex(d => d.AdmissionId);
+            entity.HasIndex(d => d.DischargeId);
+            entity.HasIndex(d => d.WorkOrderId);
+            entity.HasIndex(d => d.DowntimeStart);
+            entity.HasIndex(d => d.Status);
+
+            entity.HasOne(d => d.Asset)
+                .WithMany()
+                .HasForeignKey(d => d.AssetId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(d => d.Admission)
+                .WithMany()
+                .HasForeignKey(d => d.AdmissionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(d => d.Discharge)
+                .WithMany()
+                .HasForeignKey(d => d.DischargeId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(d => d.WorkOrder)
+                .WithMany()
+                .HasForeignKey(d => d.WorkOrderId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure MaintenanceCertificate entity
+        builder.Entity<MaintenanceCertificate>(entity =>
+        {
+            entity.HasIndex(c => c.CertificateNumber).IsUnique();
+            entity.HasIndex(c => c.DischargeId);
+            entity.HasIndex(c => c.AssetId);
+            entity.HasIndex(c => c.IssuedDate);
+
+            entity.HasOne(c => c.Discharge)
+                .WithMany()
+                .HasForeignKey(c => c.DischargeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(c => c.Asset)
+                .WithMany()
+                .HasForeignKey(c => c.AssetId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(c => c.IssuedBy)
+                .WithMany()
+                .HasForeignKey(c => c.IssuedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
         // Configure WorkOrderRejection entity
         builder.Entity<WorkOrderRejection>(entity =>
         {
@@ -1773,7 +2038,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         });
     }
 
-    private void ConfigureHREntities(ModelBuilder builder)
+    private static void ConfigureHREntities(ModelBuilder builder)
     {
         builder.Entity<OrganizationStructure>(entity =>
         {
@@ -2553,6 +2818,390 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         });
     }
 
+    private static void ConfigureBusinessPartnerEntities(ModelBuilder builder)
+    {
+        // Configure BusinessPartner entity
+        builder.Entity<BusinessPartner>(entity =>
+        {
+            entity.HasIndex(bp => bp.PartnerCode).IsUnique();
+            entity.HasIndex(bp => bp.PartnerName);
+            entity.HasIndex(bp => bp.PartnerType);
+            entity.HasIndex(bp => bp.RegistrationStatus);
+            entity.HasIndex(bp => bp.IsActive);
+            entity.HasIndex(bp => bp.IsBlacklisted);
+            entity.HasIndex(bp => bp.IsPreferred);
+            entity.HasIndex(bp => bp.PrimaryEmail);
+            entity.HasIndex(bp => bp.UserId);
+
+            entity.HasOne(bp => bp.User)
+                .WithMany()
+                .HasForeignKey(bp => bp.UserId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(bp => bp.ApprovedBy)
+                .WithMany()
+                .HasForeignKey(bp => bp.ApprovedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure PartnerCategory entity
+        builder.Entity<PartnerCategory>(entity =>
+        {
+            entity.HasIndex(pc => pc.CategoryCode).IsUnique();
+            entity.HasIndex(pc => pc.CategoryName);
+            entity.HasIndex(pc => pc.CategoryType);
+            entity.HasIndex(pc => pc.IsActive);
+
+            // Self-referencing relationship for hierarchical categories
+            entity.HasOne(pc => pc.ParentCategory)
+                .WithMany(p => p.SubCategories)
+                .HasForeignKey(pc => pc.ParentCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure BusinessPartnerCategory junction entity
+        builder.Entity<BusinessPartnerCategory>(entity =>
+        {
+            entity.HasKey(bpc => bpc.Id);
+            entity.HasIndex(bpc => new { bpc.BusinessPartnerId, bpc.CategoryId }).IsUnique();
+
+            entity.HasOne(bpc => bpc.BusinessPartner)
+                .WithMany(bp => bp.Categories)
+                .HasForeignKey(bpc => bpc.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(bpc => bpc.Category)
+                .WithMany(c => c.BusinessPartnerCategories)
+                .HasForeignKey(bpc => bpc.CategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure ContractorSpecialization entity
+        builder.Entity<ContractorSpecialization>(entity =>
+        {
+            entity.HasIndex(cs => cs.SpecializationCode).IsUnique();
+            entity.HasIndex(cs => cs.SpecializationName);
+            entity.HasIndex(cs => cs.IsActive);
+        });
+
+        // Configure BusinessPartnerSpecialization junction entity
+        builder.Entity<BusinessPartnerSpecialization>(entity =>
+        {
+            entity.HasKey(bps => bps.Id);
+            entity.HasIndex(bps => new { bps.BusinessPartnerId, bps.SpecializationId }).IsUnique();
+
+            entity.HasOne(bps => bps.BusinessPartner)
+                .WithMany(bp => bp.Specializations)
+                .HasForeignKey(bps => bps.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(bps => bps.Specialization)
+                .WithMany(s => s.BusinessPartnerSpecializations)
+                .HasForeignKey(bps => bps.SpecializationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure LicenseType entity
+        builder.Entity<LicenseType>(entity =>
+        {
+            entity.HasIndex(lt => lt.LicenseCode).IsUnique();
+            entity.HasIndex(lt => lt.LicenseName);
+            entity.HasIndex(lt => lt.IsActive);
+        });
+
+        // Configure BusinessPartnerLicense entity
+        builder.Entity<BusinessPartnerLicense>(entity =>
+        {
+            entity.HasIndex(bpl => bpl.LicenseNumber);
+            entity.HasIndex(bpl => bpl.BusinessPartnerId);
+            entity.HasIndex(bpl => bpl.ExpiryDate);
+            entity.HasIndex(bpl => bpl.Status);
+
+            entity.HasOne(bpl => bpl.BusinessPartner)
+                .WithMany(bp => bp.Licenses)
+                .HasForeignKey(bpl => bpl.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(bpl => bpl.LicenseType)
+                .WithMany(lt => lt.BusinessPartnerLicenses)
+                .HasForeignKey(bpl => bpl.LicenseTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configure BusinessPartnerContact entity
+        builder.Entity<BusinessPartnerContact>(entity =>
+        {
+            entity.HasIndex(bpc => bpc.BusinessPartnerId);
+            entity.HasIndex(bpc => bpc.Email);
+
+            entity.HasOne(bpc => bpc.BusinessPartner)
+                .WithMany(bp => bp.Contacts)
+                .HasForeignKey(bpc => bpc.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Configure BusinessPartnerDocument entity
+        builder.Entity<BusinessPartnerDocument>(entity =>
+        {
+            entity.HasIndex(bpd => bpd.BusinessPartnerId);
+            entity.HasIndex(bpd => bpd.DocumentType);
+            entity.HasIndex(bpd => bpd.IsVerified);
+            entity.HasIndex(bpd => bpd.ExpiryDate);
+
+            entity.HasOne(bpd => bpd.BusinessPartner)
+                .WithMany(bp => bp.Documents)
+                .HasForeignKey(bpd => bpd.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(bpd => bpd.VerifiedBy)
+                .WithMany()
+                .HasForeignKey(bpd => bpd.VerifiedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(bpd => bpd.UploadedBy)
+                .WithMany()
+                .HasForeignKey(bpd => bpd.UploadedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure BusinessPartnerFinancial entity
+        builder.Entity<BusinessPartnerFinancial>(entity =>
+        {
+            entity.HasIndex(bpf => bpf.BusinessPartnerId);
+            entity.HasIndex(bpf => bpf.FiscalYear);
+            entity.HasIndex(bpf => new { bpf.BusinessPartnerId, bpf.FiscalYear }).IsUnique();
+
+            entity.HasOne(bpf => bpf.BusinessPartner)
+                .WithMany(bp => bp.Financials)
+                .HasForeignKey(bpf => bpf.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Configure BusinessPartnerRegistration entity
+        builder.Entity<BusinessPartnerRegistration>(entity =>
+        {
+            entity.HasIndex(bpr => bpr.RegistrationNumber).IsUnique();
+            entity.HasIndex(bpr => bpr.ApplicantEmail);
+            entity.HasIndex(bpr => bpr.Status);
+            entity.HasIndex(bpr => bpr.SubmittedDate);
+
+            entity.HasOne(bpr => bpr.ReviewedBy)
+                .WithMany()
+                .HasForeignKey(bpr => bpr.ReviewedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(bpr => bpr.ApprovedBy)
+                .WithMany()
+                .HasForeignKey(bpr => bpr.ApprovedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(bpr => bpr.BusinessPartner)
+                .WithMany()
+                .HasForeignKey(bpr => bpr.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure BusinessPartnerRegistrationDocument entity
+        builder.Entity<BusinessPartnerRegistrationDocument>(entity =>
+        {
+            entity.HasIndex(bprd => bprd.RegistrationId);
+            entity.HasIndex(bprd => bprd.DocumentType);
+            entity.HasIndex(bprd => bprd.IsVerified);
+
+            entity.HasOne(bprd => bprd.Registration)
+                .WithMany(r => r.Documents)
+                .HasForeignKey(bprd => bprd.RegistrationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(bprd => bprd.VerifiedBy)
+                .WithMany()
+                .HasForeignKey(bprd => bprd.VerifiedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure BusinessPartnerRegistrationStatusHistory entity
+        builder.Entity<BusinessPartnerRegistrationStatusHistory>(entity =>
+        {
+            entity.HasKey(bprsh => bprsh.Id);
+            entity.HasIndex(bprsh => bprsh.RegistrationId);
+            entity.HasIndex(bprsh => bprsh.ChangedAt);
+
+            entity.HasOne(bprsh => bprsh.Registration)
+                .WithMany(r => r.StatusHistory)
+                .HasForeignKey(bprsh => bprsh.RegistrationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(bprsh => bprsh.ChangedBy)
+                .WithMany()
+                .HasForeignKey(bprsh => bprsh.ChangedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure BusinessPartnerUser entity
+        builder.Entity<BusinessPartnerUser>(entity =>
+        {
+            entity.HasKey(bpu => bpu.Id);
+            entity.HasIndex(bpu => new { bpu.BusinessPartnerId, bpu.UserId }).IsUnique();
+            entity.HasIndex(bpu => bpu.BusinessPartnerId);
+            entity.HasIndex(bpu => bpu.UserId);
+            entity.HasIndex(bpu => bpu.Role);
+            entity.HasIndex(bpu => bpu.IsActive);
+
+            entity.HasOne(bpu => bpu.BusinessPartner)
+                .WithMany()
+                .HasForeignKey(bpu => bpu.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(bpu => bpu.User)
+                .WithMany()
+                .HasForeignKey(bpu => bpu.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(bpu => bpu.GrantedBy)
+                .WithMany()
+                .HasForeignKey(bpu => bpu.GrantedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure TenderAssignment entity
+        builder.Entity<TenderAssignment>(entity =>
+        {
+            entity.HasKey(ta => ta.Id);
+            entity.HasIndex(ta => new { ta.TenderId, ta.BusinessPartnerId, ta.AssignedToUserId });
+            entity.HasIndex(ta => ta.TenderId);
+            entity.HasIndex(ta => ta.BusinessPartnerId);
+            entity.HasIndex(ta => ta.AssignedToUserId);
+            entity.HasIndex(ta => ta.AssignmentType);
+
+            entity.HasOne(ta => ta.Tender)
+                .WithMany()
+                .HasForeignKey(ta => ta.TenderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(ta => ta.BusinessPartner)
+                .WithMany()
+                .HasForeignKey(ta => ta.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(ta => ta.AssignedToUser)
+                .WithMany()
+                .HasForeignKey(ta => ta.AssignedToUserId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(ta => ta.AssignedBy)
+                .WithMany()
+                .HasForeignKey(ta => ta.AssignedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure SupplierPerformanceMetric entity
+        builder.Entity<SupplierPerformanceMetric>(entity =>
+        {
+            entity.HasIndex(spm => spm.BusinessPartnerId);
+            entity.HasIndex(spm => new { spm.BusinessPartnerId, spm.MetricPeriod, spm.Year, spm.Month, spm.Quarter }).IsUnique();
+            entity.HasIndex(spm => spm.Year);
+            entity.HasIndex(spm => spm.OverallPerformanceScore);
+
+            entity.HasOne(spm => spm.BusinessPartner)
+                .WithMany()
+                .HasForeignKey(spm => spm.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(spm => spm.CalculatedBy)
+                .WithMany()
+                .HasForeignKey(spm => spm.CalculatedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure QualityIncident entity
+        builder.Entity<QualityIncident>(entity =>
+        {
+            entity.HasIndex(qi => qi.IncidentNumber).IsUnique();
+            entity.HasIndex(qi => qi.BusinessPartnerId);
+            entity.HasIndex(qi => qi.Status);
+            entity.HasIndex(qi => qi.Severity);
+            entity.HasIndex(qi => qi.IncidentDate);
+
+            entity.HasOne(qi => qi.BusinessPartner)
+                .WithMany()
+                .HasForeignKey(qi => qi.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(qi => qi.ReportedBy)
+                .WithMany()
+                .HasForeignKey(qi => qi.ReportedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(qi => qi.AcknowledgedBy)
+                .WithMany()
+                .HasForeignKey(qi => qi.AcknowledgedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(qi => qi.ResolvedBy)
+                .WithMany()
+                .HasForeignKey(qi => qi.ResolvedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure PerformanceReview entity
+        builder.Entity<PerformanceReview>(entity =>
+        {
+            entity.HasIndex(pr => pr.ReviewNumber).IsUnique();
+            entity.HasIndex(pr => pr.BusinessPartnerId);
+            entity.HasIndex(pr => pr.Status);
+            entity.HasIndex(pr => pr.ReviewDate);
+
+            entity.HasOne(pr => pr.BusinessPartner)
+                .WithMany()
+                .HasForeignKey(pr => pr.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(pr => pr.ReviewedBy)
+                .WithMany()
+                .HasForeignKey(pr => pr.ReviewedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pr => pr.AcknowledgedBy)
+                .WithMany()
+                .HasForeignKey(pr => pr.AcknowledgedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // Configure PerformanceBondRequest entity
+        builder.Entity<PerformanceBondRequest>(entity =>
+        {
+            entity.HasIndex(pb => pb.TenderAwardId);
+            entity.HasIndex(pb => pb.TenderBidId);
+            entity.HasIndex(pb => pb.BusinessPartnerId);
+            entity.HasIndex(pb => pb.Status);
+
+            entity.HasOne(pb => pb.TenderAward)
+                .WithMany()
+                .HasForeignKey(pb => pb.TenderAwardId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(pb => pb.TenderBid)
+                .WithMany()
+                .HasForeignKey(pb => pb.TenderBidId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pb => pb.BusinessPartner)
+                .WithMany()
+                .HasForeignKey(pb => pb.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pb => pb.RequestedBy)
+                .WithMany()
+                .HasForeignKey(pb => pb.RequestedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pb => pb.ReviewedBy)
+                .WithMany()
+                .HasForeignKey(pb => pb.ReviewedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+    }
+
     private void ApplyGlobalFilters(ModelBuilder builder)
     {
         // Apply soft delete filter to all entities that inherit from BaseEntity
@@ -2763,7 +3412,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         SeedRolePermissions(builder, permissions);
     }
 
-    private void SeedRolePermissions(ModelBuilder builder, List<Permission> permissions)
+    private static void SeedRolePermissions(ModelBuilder builder, List<Permission> permissions)
     {
         var rolePermissions = new List<RolePermission>();
 
@@ -2863,6 +3512,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                     entry.Entity.UpdatedAt = DateTime.UtcNow;
                     break;
                 case EntityState.Deleted:
+                    // Soft delete: convert to modified and set IsDeleted flag
                     entry.State = EntityState.Modified;
                     entry.Entity.IsDeleted = true;
                     entry.Entity.DeletedAt = DateTime.UtcNow;
@@ -2871,7 +3521,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         }
     }
 
-    private void ConfigureDecimalPrecision(ModelBuilder builder)
+    private static void ConfigureDecimalPrecision(ModelBuilder builder)
     {
         // Configure decimal precision for all decimal properties to avoid SQL Server warnings
         foreach (var entityType in builder.Model.GetEntityTypes())
@@ -2896,7 +3546,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         }
     }
 
-    private void ConfigureGlobalTenantRelationships(ModelBuilder builder)
+    private static void ConfigureGlobalTenantRelationships(ModelBuilder builder)
     {
         // Configure all TenantEntity relationships to use Restrict instead of Cascade
         // to avoid multiple cascade paths in SQL Server
@@ -2932,8 +3582,175 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         }
     }
 
+    private static void ConfigureProcurementPlanningEntities(ModelBuilder builder)
+    {
+        // ProcurementPlan entity
+        builder.Entity<ProcurementPlan>(entity =>
+        {
+            entity.HasIndex(p => p.PlanNumber).IsUnique();
+            entity.HasIndex(p => p.DepartmentId);
+            entity.HasIndex(p => p.FiscalYear);
+            entity.HasIndex(p => p.Status);
 
-    private void ConfigureInventoryEntities(ModelBuilder builder)
+            entity.HasOne(p => p.Department)
+                .WithMany()
+                .HasForeignKey(p => p.DepartmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(p => p.Items)
+                .WithOne(i => i.ProcurementPlan)
+                .HasForeignKey(i => i.ProcurementPlanId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ProcurementPlanItem entity
+        builder.Entity<ProcurementPlanItem>(entity =>
+        {
+            entity.HasIndex(i => i.ProcurementPlanId);
+            entity.HasIndex(i => i.ItemCategory);
+            entity.HasIndex(i => i.IsCritical);
+
+            entity.HasMany(i => i.ItemSuppliers)
+                .WithOne(s => s.ProcurementPlanItem)
+                .HasForeignKey(s => s.ProcurementPlanItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ProcurementPlanItemSupplier entity
+        builder.Entity<ProcurementPlanItemSupplier>(entity =>
+        {
+            entity.HasIndex(s => s.ProcurementPlanItemId);
+            entity.HasIndex(s => s.SupplierId);
+            entity.HasIndex(s => new { s.ProcurementPlanItemId, s.SupplierId }).IsUnique();
+
+            entity.HasOne(s => s.BusinessPartner)
+                .WithMany()
+                .HasForeignKey(s => s.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ProcurementBudget entity
+        builder.Entity<ProcurementBudget>(entity =>
+        {
+            entity.HasIndex(b => b.BudgetCode).IsUnique();
+            entity.HasIndex(b => b.DepartmentId);
+            entity.HasIndex(b => b.FiscalYear);
+            entity.HasIndex(b => b.Status);
+
+            entity.HasOne(b => b.Department)
+                .WithMany()
+                .HasForeignKey(b => b.DepartmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(b => b.Allocations)
+                .WithOne(a => a.ProcurementBudget)
+                .HasForeignKey(a => a.ProcurementBudgetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(b => b.Revisions)
+                .WithOne(r => r.ProcurementBudget)
+                .HasForeignKey(r => r.ProcurementBudgetId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ProcurementBudgetAllocation entity
+        builder.Entity<ProcurementBudgetAllocation>(entity =>
+        {
+            entity.HasIndex(a => a.ProcurementBudgetId);
+            entity.HasIndex(a => a.CategoryName);
+        });
+
+        // ProcurementBudgetRevision entity
+        builder.Entity<ProcurementBudgetRevision>(entity =>
+        {
+            entity.HasIndex(r => r.ProcurementBudgetId);
+            entity.HasIndex(r => r.RevisionNumber);
+            entity.HasIndex(r => r.Status);
+        });
+
+        // ProcurementSchedule entity
+        builder.Entity<ProcurementSchedule>(entity =>
+        {
+            entity.HasIndex(s => s.ProcurementPlanId);
+            entity.HasIndex(s => s.DepartmentId);
+            entity.HasIndex(s => s.PlannedStartDate);
+            entity.HasIndex(s => s.Status);
+
+            entity.HasOne(s => s.ProcurementPlan)
+                .WithMany(p => p.Schedules)
+                .HasForeignKey(s => s.ProcurementPlanId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(s => s.Department)
+                .WithMany()
+                .HasForeignKey(s => s.DepartmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // MarketAnalysis entity
+        builder.Entity<MarketAnalysis>(entity =>
+        {
+            entity.HasIndex(m => m.ItemCategory);
+            entity.HasIndex(m => m.ItemDescription);
+            entity.HasIndex(m => m.AnalysisPeriodStart);
+
+            entity.HasMany(m => m.PriceHistories)
+                .WithOne(p => p.MarketAnalysis)
+                .HasForeignKey(p => p.MarketAnalysisId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // PriceHistory entity
+        builder.Entity<PriceHistory>(entity =>
+        {
+            entity.HasIndex(p => p.MarketAnalysisId);
+            entity.HasIndex(p => p.PriceDate);
+        });
+
+        // SupplierConsolidation entity
+        builder.Entity<SupplierConsolidation>(entity =>
+        {
+            entity.HasIndex(s => s.ItemCategory);
+            entity.HasIndex(s => s.Status);
+        });
+
+        // EmergencyProcurementPlan entity
+        builder.Entity<EmergencyProcurementPlan>(entity =>
+        {
+            entity.HasIndex(e => e.PlanCode).IsUnique();
+            entity.HasIndex(e => e.EmergencyType);
+            entity.HasIndex(e => e.Status);
+            entity.HasIndex(e => e.CriticalityLevel);
+
+            entity.HasMany(e => e.CriticalItems)
+                .WithOne(i => i.EmergencyProcurementPlan)
+                .HasForeignKey(i => i.EmergencyProcurementPlanId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.EmergencySuppliers)
+                .WithOne(s => s.EmergencyProcurementPlan)
+                .HasForeignKey(s => s.EmergencyProcurementPlanId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // EmergencyProcurementItem entity
+        builder.Entity<EmergencyProcurementItem>(entity =>
+        {
+            entity.HasIndex(i => i.EmergencyProcurementPlanId);
+            entity.HasIndex(i => i.ItemCategory);
+            entity.HasIndex(i => i.CriticalityLevel);
+        });
+
+        // EmergencySupplier entity
+        builder.Entity<EmergencySupplier>(entity =>
+        {
+            entity.HasIndex(s => s.EmergencyProcurementPlanId);
+            entity.HasIndex(s => s.SupplierId);
+            entity.HasIndex(s => s.IsActive);
+        });
+    }
+
+    private static void ConfigureInventoryEntities(ModelBuilder builder)
     {
         // InventoryItem entity
         builder.Entity<InventoryItem>(entity =>
@@ -3145,7 +3962,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         });
     }
 
-    private void SeedMaintenanceData(ModelBuilder builder, Guid tenantId)
+    private static void SeedMaintenanceData(ModelBuilder builder, Guid tenantId)
     {
         var now = DateTime.UtcNow;
         var baseDate = new DateTime(2025, 10, 1, 0, 0, 0, DateTimeKind.Utc);

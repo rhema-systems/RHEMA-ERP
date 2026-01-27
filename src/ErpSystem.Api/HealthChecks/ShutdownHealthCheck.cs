@@ -62,7 +62,7 @@ namespace ErpSystem.Web.HealthChecks
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error checking shutdown health status");
-                
+
                 var errorData = new Dictionary<string, object>
                 {
                     ["status"] = "error",
@@ -85,12 +85,13 @@ namespace ErpSystem.Web.HealthChecks
             services.AddTransient<ShutdownHealthCheck>();
             return services;
         }
+        private static readonly string[] tags = new[] { "shutdown", "lifecycle", "ready", "live" };
 
         public static IHealthChecksBuilder AddShutdownHealthCheck(this IHealthChecksBuilder builder)
         {
             return builder.AddCheck<ShutdownHealthCheck>(
                 "shutdown",
-                tags: new[] { "shutdown", "lifecycle", "ready", "live" });
+                tags: tags);
         }
     }
 }

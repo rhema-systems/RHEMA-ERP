@@ -1,11 +1,27 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { LayoutDashboard, FileText, Package, Users, ClipboardCheck, Calendar, AlertTriangle, Clock, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, FileText, Package, Users, ClipboardCheck, Calendar, AlertTriangle, Clock, BarChart3, Wrench } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { MaintenanceDashboardView } from '@/components/maintenance/MaintenanceDashboardView';
+import { apiService } from '@/services/api.service';
+
+interface MaintenanceDashboardOverviewSummary {
+  totalAssets?: number;
+  totalWorkOrders?: number;
+  activeWorkOrders?: number;
+  overdueWorkOrders?: number;
+  availableTechnicians?: number;
+}
+
+interface MaintenanceDashboardOverview {
+  summary?: MaintenanceDashboardOverviewSummary;
+}
 
 const maintenanceModules = [
   {
@@ -14,6 +30,13 @@ const maintenanceModules = [
     href: '/maintenance/dashboard',
     icon: LayoutDashboard,
     color: 'bg-blue-500',
+  },
+  {
+    title: 'Job Cards',
+    description: 'Create and manage maintenance job cards before work orders',
+    href: '/maintenance/job-cards',
+    icon: ClipboardCheck,
+    color: 'bg-emerald-500',
   },
   {
     title: 'Work Orders',
@@ -50,13 +73,14 @@ const maintenanceModules = [
     icon: Calendar,
     color: 'bg-teal-500',
   },
-  {
-    title: 'Emergency Maintenance',
-    description: 'Handle urgent and emergency maintenance requests',
-    href: '/maintenance/emergency',
-    icon: AlertTriangle,
-    color: 'bg-yellow-500',
-  },
+  // Emergency Maintenance temporarily hidden
+  // {
+  //   title: 'Emergency Maintenance',
+  //   description: 'Handle urgent and emergency maintenance requests',
+  //   href: '/maintenance/emergency',
+  //   icon: AlertTriangle,
+  //   color: 'bg-yellow-500',
+  // },
   {
     title: 'Maintenance History',
     description: 'View historical maintenance records and logs',
@@ -64,16 +88,52 @@ const maintenanceModules = [
     icon: Clock,
     color: 'bg-indigo-500',
   },
+  // Reports temporarily hidden
+  // {
+  //   title: 'Reports',
+  //   description: 'Generate maintenance reports and analytics',
+  //   href: '/maintenance/reports',
+  //   icon: BarChart3,
+  //   color: 'bg-pink-500',
+  // },
   {
-    title: 'Reports',
-    description: 'Generate maintenance reports and analytics',
-    href: '/maintenance/reports',
-    icon: BarChart3,
-    color: 'bg-pink-500',
+    title: 'Tool Management',
+    description: 'Manage tool inventory, checkouts, and returns',
+    href: '/maintenance/tools',
+    icon: Wrench,
+    color: 'bg-cyan-500',
   },
 ];
 
 export default function MaintenancePage() {
+  const [activeWorkOrders, setActiveWorkOrders] = useState(0);
+  const [assetsManaged, setAssetsManaged] = useState(0);
+  const [availableTechnicians, setAvailableTechnicians] = useState(0);
+  const [overdueTasks, setOverdueTasks] = useState(0);
+
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialView = (searchParams.get('view') ?? 'overview') as 'overview' | 'dashboard';
+  const [activeTab, setActiveTab] = useState<'overview' | 'dashboard'>(initialView);
+
+  useEffect(() => {
+    const loadQuickStats = async () => {
+      try {
+        const overview = await apiService.get<MaintenanceDashboardOverview>('/maintenance/dashboard/overview');
+        const summary = overview?.summary || {};
+
+        setActiveWorkOrders(summary.activeWorkOrders ?? 0);
+        setAssetsManaged(summary.totalAssets ?? 0);
+        setAvailableTechnicians(summary.availableTechnicians ?? 0);
+        setOverdueTasks(summary.overdueWorkOrders ?? 0);
+      } catch (error) {
+        console.error('Failed to load maintenance quick stats:', error);
+      }
+    };
+
+    loadQuickStats();
+  }, []);
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -98,62 +158,88 @@ export default function MaintenancePage() {
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {maintenanceModules.map((module) => {
-          const IconComponent = module.icon;
-          return (
-            <Card key={module.href} className="hover:shadow-lg transition-shadow">
-              <CardHeader className="flex flex-row items-center space-y-0 pb-2">
-                <div className={`${module.color} rounded-lg p-3 text-white mr-4`}>
-                  <IconComponent className="h-6 w-6" />
-                </div>
-                <div>
-                  <CardTitle className="text-lg">{module.title}</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="mb-4">
-                  {module.description}
-                </CardDescription>
-                <Button asChild className="w-full">
-                  <Link href={module.href}>
-                    Open {module.title}
-                  </Link>
-                </Button>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Quick Stats</CardTitle>
-          <CardDescription>
-            Overview of current maintenance operations
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-            <div className="space-y-2">
-              <p className="text-2xl font-bold text-blue-600">0</p>
-              <p className="text-sm text-muted-foreground">Active Work Orders</p>
-            </div>
-            <div className="space-y-2">
-              <p className="text-2xl font-bold text-green-600">0</p>
-              <p className="text-sm text-muted-foreground">Assets Managed</p>
-            </div>
-            <div className="space-y-2">
-              <p className="text-2xl font-bold text-orange-600">0</p>
-              <p className="text-sm text-muted-foreground">Available Technicians</p>
-            </div>
-            <div className="space-y-2">
-              <p className="text-2xl font-bold text-red-600">0</p>
-              <p className="text-sm text-muted-foreground">Overdue Tasks</p>
-            </div>
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          const view = value as 'overview' | 'dashboard';
+          setActiveTab(view);
+
+          const params = new URLSearchParams(Array.from(searchParams.entries()));
+          params.set('view', view);
+          const query = params.toString();
+          router.push(query ? `/maintenance?${query}` : '/maintenance');
+        }}
+        className="space-y-6"
+      >
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="dashboard">Analytics Dashboard</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {maintenanceModules.map((module) => {
+              const IconComponent = module.icon;
+              return (
+                <Card key={module.href} className="hover:shadow-lg transition-shadow">
+                  <CardHeader className="flex flex-row items-center space-y-0 pb-2">
+                    <div className={`${module.color} rounded-lg p-3 text-white mr-4`}>
+                      <IconComponent className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg">{module.title}</CardTitle>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <CardDescription className="mb-4">
+                      {module.description}
+                    </CardDescription>
+                    <Button asChild className="w-full">
+                      <Link href={module.href}>
+                        Open {module.title}
+                      </Link>
+                    </Button>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
-        </CardContent>
-      </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Quick Stats</CardTitle>
+              <CardDescription>
+                Overview of current maintenance operations
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                <div className="space-y-2">
+                  <p className="text-2xl font-bold text-blue-600">{activeWorkOrders}</p>
+                  <p className="text-sm text-muted-foreground">Active Work Orders</p>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-2xl font-bold text-green-600">{assetsManaged}</p>
+                  <p className="text-sm text-muted-foreground">Assets Managed</p>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-2xl font-bold text-orange-600">{availableTechnicians}</p>
+                  <p className="text-sm text-muted-foreground">Available Technicians</p>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-2xl font-bold text-red-600">{overdueTasks}</p>
+                  <p className="text-sm text-muted-foreground">Overdue Tasks</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="dashboard">
+          <MaintenanceDashboardView />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

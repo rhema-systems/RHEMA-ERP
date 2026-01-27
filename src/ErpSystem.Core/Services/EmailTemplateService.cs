@@ -1,8 +1,8 @@
-using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services;
 
@@ -20,7 +20,7 @@ public interface IEmailTemplateService
     Task<List<string>> GetTemplateVariablesAsync(Guid templateId);
 }
 
-public class EmailTemplateService : IEmailTemplateService
+public partial class EmailTemplateService : IEmailTemplateService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
@@ -106,7 +106,7 @@ public class EmailTemplateService : IEmailTemplateService
             // Check for duplicate names within the tenant
             var existing = await _unitOfWork.Repository<EmailTemplate>()
                 .FindAsync(t => t.Name == template.Name && t.TenantId == tenantId.Value);
-            
+
             if (existing.Any())
             {
                 throw new InvalidOperationException($"A template with the name '{template.Name}' already exists");
@@ -123,7 +123,7 @@ public class EmailTemplateService : IEmailTemplateService
             var createdTemplate = await _unitOfWork.Repository<EmailTemplate>().AddAsync(template);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Created email template {TemplateName} for tenant {TenantId}", 
+            _logger.LogInformation("Created email template {TemplateName} for tenant {TenantId}",
                 template.Name, tenantId);
 
             return createdTemplate;
@@ -139,11 +139,7 @@ public class EmailTemplateService : IEmailTemplateService
     {
         try
         {
-            var existingTemplate = await GetTemplateByIdAsync(template.Id);
-            if (existingTemplate == null)
-            {
-                throw new InvalidOperationException($"Template with ID {template.Id} not found");
-            }
+            var existingTemplate = await GetTemplateByIdAsync(template.Id) ?? throw new InvalidOperationException($"Template with ID {template.Id} not found");
 
             // Update properties
             existingTemplate.Name = template.Name;
@@ -164,7 +160,7 @@ public class EmailTemplateService : IEmailTemplateService
             await _unitOfWork.Repository<EmailTemplate>().UpdateAsync(existingTemplate);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Updated email template {TemplateName} ({TemplateId})", 
+            _logger.LogInformation("Updated email template {TemplateName} ({TemplateId})",
                 template.Name, template.Id);
 
             return existingTemplate;
@@ -180,11 +176,7 @@ public class EmailTemplateService : IEmailTemplateService
     {
         try
         {
-            var template = await GetTemplateByIdAsync(id);
-            if (template == null)
-            {
-                throw new InvalidOperationException($"Template with ID {id} not found");
-            }
+            var template = await GetTemplateByIdAsync(id) ?? throw new InvalidOperationException($"Template with ID {id} not found");
 
             // Soft delete
             template.IsActive = false;
@@ -194,7 +186,7 @@ public class EmailTemplateService : IEmailTemplateService
             await _unitOfWork.Repository<EmailTemplate>().UpdateAsync(template);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Deleted email template {TemplateName} ({TemplateId})", 
+            _logger.LogInformation("Deleted email template {TemplateName} ({TemplateId})",
                 template.Name, id);
         }
         catch (Exception ex)
@@ -208,12 +200,7 @@ public class EmailTemplateService : IEmailTemplateService
     {
         try
         {
-            var template = await GetTemplateByIdAsync(templateId);
-            if (template == null)
-            {
-                throw new InvalidOperationException($"Template with ID {templateId} not found");
-            }
-
+            var template = await GetTemplateByIdAsync(templateId) ?? throw new InvalidOperationException($"Template with ID {templateId} not found");
             var processedContent = template.HtmlBody;
 
             // Replace placeholders with actual data
@@ -237,12 +224,7 @@ public class EmailTemplateService : IEmailTemplateService
     {
         try
         {
-            var originalTemplate = await GetTemplateByIdAsync(templateId);
-            if (originalTemplate == null)
-            {
-                throw new InvalidOperationException($"Template with ID {templateId} not found");
-            }
-
+            var originalTemplate = await GetTemplateByIdAsync(templateId) ?? throw new InvalidOperationException($"Template with ID {templateId} not found");
             var duplicateTemplate = new EmailTemplate
             {
                 Name = newName,
@@ -269,12 +251,7 @@ public class EmailTemplateService : IEmailTemplateService
     {
         try
         {
-            var template = await GetTemplateByIdAsync(templateId);
-            if (template == null)
-            {
-                throw new InvalidOperationException($"Template with ID {templateId} not found");
-            }
-
+            var template = await GetTemplateByIdAsync(templateId) ?? throw new InvalidOperationException($"Template with ID {templateId} not found");
             if (string.IsNullOrEmpty(template.TemplateVariables))
             {
                 return new List<string>();
@@ -295,7 +272,7 @@ public class EmailTemplateService : IEmailTemplateService
         try
         {
             // Extract placeholders in the format {{Variable.Name}}
-            var regex = new Regex(@"\{\{([^}]+)\}\}", RegexOptions.IgnoreCase);
+            var regex = MyRegex();
             var matches = regex.Matches(htmlContent);
 
             var variables = new Dictionary<string, string>();
@@ -303,7 +280,7 @@ public class EmailTemplateService : IEmailTemplateService
             {
                 var placeholder = match.Value;
                 var variableName = match.Groups[1].Value;
-                
+
                 if (!variables.ContainsKey(placeholder))
                 {
                     // Generate a friendly description from the variable name
@@ -331,12 +308,15 @@ public class EmailTemplateService : IEmailTemplateService
             var field = SplitCamelCase(parts[1]);
             return $"{table} {field}";
         }
-        
+
         return SplitCamelCase(variableName);
     }
 
-    private string SplitCamelCase(string input)
+    private static string SplitCamelCase(string input)
     {
         return Regex.Replace(input, "([A-Z])", " $1", RegexOptions.Compiled).Trim();
     }
+
+    [GeneratedRegex(@"\{\{([^}]+)\}\}", RegexOptions.IgnoreCase, "en-GB")]
+    private static partial Regex MyRegex();
 }

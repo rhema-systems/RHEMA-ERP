@@ -1,8 +1,8 @@
-using Microsoft.Extensions.Logging;
 using ErpSystem.Core.Entities.Workflow;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Services;
-using ErpSystem.Core.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Workflow;
 
@@ -27,12 +27,7 @@ public class WorkflowStepService : IWorkflowStepService
 
     public async Task CompleteStepAsync(Guid stepInstanceId, Guid completedById, object? stepData = null, string? comments = null, CancellationToken cancellationToken = default)
     {
-        var stepInstance = await _stepInstanceRepository.GetByIdAsync(stepInstanceId);
-        if (stepInstance == null)
-        {
-            throw new InvalidOperationException($"Step instance with ID {stepInstanceId} not found");
-        }
-
+        var stepInstance = await _stepInstanceRepository.GetByIdAsync(stepInstanceId) ?? throw new InvalidOperationException($"Step instance with ID {stepInstanceId} not found");
         stepInstance.Status = WorkflowStepInstanceStatus.Completed;
         stepInstance.CompletedDate = DateTime.UtcNow;
         stepInstance.Comments = comments;
@@ -45,12 +40,7 @@ public class WorkflowStepService : IWorkflowStepService
 
     public async Task AssignStepAsync(Guid stepInstanceId, Guid assignedToId, Guid assignedById, string? comments = null, CancellationToken cancellationToken = default)
     {
-        var stepInstance = await _stepInstanceRepository.GetByIdAsync(stepInstanceId);
-        if (stepInstance == null)
-        {
-            throw new InvalidOperationException($"Step instance with ID {stepInstanceId} not found");
-        }
-
+        var stepInstance = await _stepInstanceRepository.GetByIdAsync(stepInstanceId) ?? throw new InvalidOperationException($"Step instance with ID {stepInstanceId} not found");
         stepInstance.AssignedToId = assignedToId;
 
         await _stepInstanceRepository.UpdateAsync(stepInstance);
@@ -61,32 +51,23 @@ public class WorkflowStepService : IWorkflowStepService
 
     public async Task ReassignStepAsync(Guid stepInstanceId, Guid newAssignedToId, Guid reassignedById, string? reason = null, CancellationToken cancellationToken = default)
     {
-        var stepInstance = await _stepInstanceRepository.GetByIdAsync(stepInstanceId);
-        if (stepInstance == null)
-        {
-            throw new InvalidOperationException($"Step instance with ID {stepInstanceId} not found");
-        }
-
+        var stepInstance = await _stepInstanceRepository.GetByIdAsync(stepInstanceId) ?? throw new InvalidOperationException($"Step instance with ID {stepInstanceId} not found");
         var previousAssignedToId = stepInstance.AssignedToId;
         stepInstance.AssignedToId = newAssignedToId;
 
         await _stepInstanceRepository.UpdateAsync(stepInstance);
         await _stepInstanceRepository.SaveChangesAsync();
 
-        _logger.LogInformation("Reassigned step instance {StepInstanceId} from user {PreviousAssignedToId} to user {NewAssignedToId}. Reason: {Reason}", 
+        _logger.LogInformation("Reassigned step instance {StepInstanceId} from user {PreviousAssignedToId} to user {NewAssignedToId}. Reason: {Reason}",
             stepInstanceId, previousAssignedToId, newAssignedToId, reason);
     }
 
     public async Task EscalateStepAsync(Guid stepInstanceId, Guid escalatedById, string? reason = null, CancellationToken cancellationToken = default)
     {
-        var stepInstance = await _stepInstanceRepository.GetByIdAsync(stepInstanceId);
-        if (stepInstance == null)
-        {
-            throw new InvalidOperationException($"Step instance with ID {stepInstanceId} not found");
-        }
+        var stepInstance = await _stepInstanceRepository.GetByIdAsync(stepInstanceId) ?? throw new InvalidOperationException($"Step instance with ID {stepInstanceId} not found");
 
         // Mark as escalated (could add an Escalated status)
-        _logger.LogWarning("Step instance {StepInstanceId} escalated by user {EscalatedById}. Reason: {Reason}", 
+        _logger.LogWarning("Step instance {StepInstanceId} escalated by user {EscalatedById}. Reason: {Reason}",
             stepInstanceId, escalatedById, reason);
 
         await Task.CompletedTask;

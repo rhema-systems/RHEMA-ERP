@@ -18,18 +18,18 @@ public class JwtBlacklistMiddleware
     {
         var requestPath = context.Request.Path;
         _logger.LogInformation("🔍 JWT Blacklist Middleware processing request: {Path}", requestPath);
-        
+
         // Only check JWT tokens for authenticated endpoints
-        if (context.Request.Headers.ContainsKey("Authorization"))
+        if (context.Request.Headers.TryGetValue("Authorization", out Microsoft.Extensions.Primitives.StringValues value))
         {
-            var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
+            var authHeader = value.FirstOrDefault();
             _logger.LogInformation("🔍 Found Authorization header: {Header}", authHeader?.Substring(0, Math.Min(20, authHeader?.Length ?? 0)) + "...");
-            
+
             if (authHeader?.StartsWith("Bearer ") == true)
             {
                 var jwt = authHeader["Bearer ".Length..].Trim();
                 _logger.LogDebug("Extracted JWT token, length: {Length}", jwt.Length);
-                
+
                 // Validate JWT format before processing
                 if (string.IsNullOrWhiteSpace(jwt))
                 {
@@ -37,34 +37,34 @@ public class JwtBlacklistMiddleware
                 }
                 else if (!IsValidJwtFormat(jwt))
                 {
-                    _logger.LogWarning("JWT token is not in valid format (should have 3 parts separated by dots). Token: {TokenPreview}", 
-                        jwt.Length > 50 ? jwt.Substring(0, 50) + "..." : jwt);
+                    _logger.LogWarning("JWT token is not in valid format (should have 3 parts separated by dots). Token: {TokenPreview}",
+                        jwt.Length > 50 ? string.Concat(jwt.AsSpan(0, 50), "...") : jwt);
                 }
                 else
                 {
                     try
                     {
                         var tokenHandler = new JwtSecurityTokenHandler();
-                        
+
                         // First check if the token can be read without validation
                         if (!tokenHandler.CanReadToken(jwt))
                         {
-                            _logger.LogWarning("JWT token cannot be read by token handler. Token preview: {TokenPreview}", 
-                                jwt.Length > 50 ? jwt.Substring(0, 50) + "..." : jwt);
+                            _logger.LogWarning("JWT token cannot be read by token handler. Token preview: {TokenPreview}",
+                                jwt.Length > 50 ? string.Concat(jwt.AsSpan(0, 50), "...") : jwt);
                         }
                         else
                         {
                             var jsonToken = tokenHandler.ReadJwtToken(jwt);
                             var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
-                    
+
                             _logger.LogInformation("🔍 Extracted JTI from token: {Jti}", jti);
-                            
+
                             if (!string.IsNullOrEmpty(jti))
                             {
                                 _logger.LogInformation("🔍 Checking if JTI {Jti} is blacklisted...", jti);
                                 var isBlacklisted = await jwtBlacklistService.IsTokenBlacklistedAsync(jti);
                                 _logger.LogInformation("🔍 JTI {Jti} blacklist status: {IsBlacklisted}", jti, isBlacklisted);
-                                
+
                                 if (isBlacklisted)
                                 {
                                     _logger.LogWarning("🚫 BLOCKED REQUEST: Blacklisted JWT token (JTI: {Jti}) for path: {Path}", jti, requestPath);
@@ -86,8 +86,8 @@ public class JwtBlacklistMiddleware
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Error reading JWT token for blacklist validation. Path: {Path}, Token preview: {TokenPreview}", 
-                            requestPath, jwt.Length > 50 ? jwt.Substring(0, 50) + "..." : jwt);
+                        _logger.LogWarning(ex, "Error reading JWT token for blacklist validation. Path: {Path}, Token preview: {TokenPreview}",
+                            requestPath, jwt.Length > 50 ? string.Concat(jwt.AsSpan(0, 50), "...") : jwt);
                         // Continue processing - don't block requests due to malformed tokens that might be handled elsewhere
                     }
                 }
@@ -113,19 +113,25 @@ public class JwtBlacklistMiddleware
     private static bool IsValidJwtFormat(string token)
     {
         if (string.IsNullOrWhiteSpace(token))
+        {
             return false;
+        }
 
         var parts = token.Split('.');
-        
+
         // JWT should have exactly 3 parts: header.payload.signature
         if (parts.Length != 3)
+        {
             return false;
+        }
 
         // Each part should not be empty
         foreach (var part in parts)
         {
             if (string.IsNullOrWhiteSpace(part))
+            {
                 return false;
+            }
         }
 
         return true;

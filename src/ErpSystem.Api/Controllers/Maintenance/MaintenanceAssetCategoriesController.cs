@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -49,7 +49,9 @@ public class MaintenanceAssetCategoriesController : ControllerBase
         {
             var category = await _categoryService.GetCategoryByIdAsync(id);
             if (category == null)
+            {
                 return NotFound($"Category with ID {id} not found");
+            }
 
             return Ok(category);
         }
@@ -69,7 +71,9 @@ public class MaintenanceAssetCategoriesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var category = await _categoryService.CreateCategoryAsync(createDto);
             return CreatedAtAction(nameof(GetCategory), new { id = category.Id }, category);
@@ -94,7 +98,9 @@ public class MaintenanceAssetCategoriesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var category = await _categoryService.UpdateCategoryAsync(id, updateDto);
             return Ok(category);

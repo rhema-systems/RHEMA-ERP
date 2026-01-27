@@ -30,15 +30,37 @@ class FileUploadService {
       if (this.useBackend) {
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('entityType', entityType);
-        formData.append('entityId', entityId);
+        formData.append('category', entityType);
 
-        const response = await apiService.request<UploadedFile>('/files/upload', {
+        // Use the correct endpoint /api/fileupload/single
+        const response = await apiService.request<{
+          success: boolean;
+          fileName: string;
+          originalFileName: string;
+          filePath: string;
+          publicUrl: string;
+          fileSize: number;
+          contentType: string;
+          category: string;
+          tenantId?: string;
+          uploadedAt: string;
+        }>('/fileupload/single', {
           method: 'POST',
           body: formData,
         });
-        
-        return response;
+
+        // Map the response to UploadedFile format
+        return {
+          id: response.fileName,
+          filename: response.fileName,
+          originalName: response.originalFileName,
+          mimeType: response.contentType,
+          size: response.fileSize,
+          url: response.publicUrl,
+          thumbnailUrl: response.contentType?.startsWith('image/') ? response.publicUrl : undefined,
+          uploadedAt: response.uploadedAt,
+          uploadedBy: 'Current User'
+        };
       }
     } catch (error) {
       console.warn('Backend unavailable, using mock upload:', error);

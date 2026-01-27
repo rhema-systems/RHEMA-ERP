@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -40,7 +40,9 @@ public class SafetyProtocolsController : ControllerBase
         try
         {
             if (pageSize > 100)
+            {
                 pageSize = 100;
+            }
 
             var filter = new SafetyProtocolFilterDto
             {
@@ -112,7 +114,9 @@ public class SafetyProtocolsController : ControllerBase
         {
             var protocol = await _protocolService.GetProtocolByIdAsync(id);
             if (protocol == null)
+            {
                 return NotFound($"Safety protocol with ID {id} not found");
+            }
 
             return Ok(protocol);
         }
@@ -132,7 +136,9 @@ public class SafetyProtocolsController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var protocol = await _protocolService.CreateProtocolAsync(createDto);
             return CreatedAtAction(nameof(GetProtocol), new { id = protocol.Id }, protocol);
@@ -157,7 +163,9 @@ public class SafetyProtocolsController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var protocol = await _protocolService.UpdateProtocolAsync(id, updateDto);
             return Ok(protocol);
@@ -231,7 +239,9 @@ public class SafetyProtocolsController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             await _protocolService.ApproveProtocolAsync(id, approvalRequest);
             var protocol = await _protocolService.GetProtocolByIdAsync(id);

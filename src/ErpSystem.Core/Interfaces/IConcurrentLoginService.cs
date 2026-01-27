@@ -15,7 +15,7 @@ public interface IConcurrentLoginService
     /// <param name="preventConcurrentLogin">The concurrent login prevention setting</param>
     /// <returns>True if login should be allowed, false if it should be blocked</returns>
     Task<bool> ShouldAllowLoginAsync(Guid userId, PreventConcurrentLogin preventConcurrentLogin);
-    
+
     /// <summary>
     /// Handles concurrent login enforcement by invalidating existing sessions if needed
     /// </summary>
@@ -24,14 +24,14 @@ public interface IConcurrentLoginService
     /// <param name="currentRefreshToken">The new refresh token being created (to exclude from invalidation)</param>
     /// <returns>Number of sessions invalidated</returns>
     Task<int> EnforceConcurrentLoginPolicyAsync(Guid userId, PreventConcurrentLogin preventConcurrentLogin, string? currentRefreshToken = null);
-    
+
     /// <summary>
     /// Gets the count of active sessions for a user
     /// </summary>
     /// <param name="userId">The user ID</param>
     /// <returns>Number of active refresh tokens/sessions</returns>
     Task<int> GetActiveSessionCountAsync(Guid userId);
-    
+
     /// <summary>
     /// Gets the current security settings to determine concurrent login policy
     /// </summary>

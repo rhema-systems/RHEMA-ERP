@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { 
+import {
   Plus,
   Search,
   Edit,
@@ -22,6 +22,7 @@ import {
   Wrench,
   Clock
 } from 'lucide-react';
+import { apiService } from '@/services/api.service';
 
 // Work order type interface
 interface WorkOrderType {
@@ -67,52 +68,17 @@ export default function WorkOrderTypesPage() {
     slaHours: 24
   });
 
-  // Fetch work order types from API
+  // Fetch work order types from API using shared apiService
   const fetchWorkOrderTypes = async () => {
     try {
       setLoading(true);
       setError(null);
-      
-      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-      
-      if (!token) {
-        setError('Authentication required. Please log in to access this page.');
-        setWorkOrderTypesData([]);
-        return;
-      }
-      
-      console.log('Fetching work order types with token present:', !!token);
-      
-      const response = await fetch('http://localhost:5000/api/maintenance/work-order-types?pageSize=1000', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      console.log('API Response Status:', response.status, response.statusText);
-      
-      if (!response.ok) {
-        if (response.status === 401) {
-          setError('Authentication failed. Please log in again or check your credentials.');
-        } else if (response.status === 403) {
-          setError('Access denied. You do not have permission to view work order types.');
-        } else {
-          const errorText = await response.text();
-          console.error('Error details:', errorText);
-          setError(`Failed to load work order types: ${errorText}`);
-        }
-        setWorkOrderTypesData([]);
-        return;
-      }
-      
-      const data = await response.json();
-      console.log('API Response:', data);
+
+      const data = await apiService.request<any>('/maintenance/work-order-types?pageSize=1000');
       setWorkOrderTypesData(data.data || data.items || data || []);
-      
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching work order types:', error);
-      setError('Network error occurred while fetching work order types.');
+      setError(error?.message || 'Failed to load work order types');
       setWorkOrderTypesData([]);
     } finally {
       setLoading(false);
@@ -197,13 +163,6 @@ export default function WorkOrderTypesPage() {
 
   const handleCreate = async () => {
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-      
-      if (!token) {
-        setError('Authentication required. Please log in to create work order types.');
-        return;
-      }
-      
       // Map form data to CreateWorkOrderTypeDto structure
       const createDto = {
         name: formData.name,
@@ -218,29 +177,13 @@ export default function WorkOrderTypesPage() {
 
       console.log('Sending create request:', createDto);
 
-      const response = await fetch('http://localhost:5000/api/maintenance/work-order-types', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(createDto)
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Create failed:', response.status, response.statusText, errorText);
-        setError(`Failed to create work order type: ${response.status} ${response.statusText} - ${errorText}`);
-        return;
-      }
-      
-      // Refresh the list
+      await apiService.post('/maintenance/work-order-types', createDto);
       await fetchWorkOrderTypes();
       setIsCreateDialogOpen(false);
       resetForm();
     } catch (error) {
       console.error('Error creating work order type:', error);
-      setError('Failed to create work order type. Please try again.');
+      setError(error instanceof Error ? error.message : 'Failed to create work order type');
     }
   };
 
@@ -264,16 +207,8 @@ export default function WorkOrderTypesPage() {
 
   const handleUpdate = async () => {
     if (!selectedType?.id) return;
-    
+
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-      
-      if (!token) {
-        setError('Authentication required. Please log in to update work order types.');
-        return;
-      }
-      
-      // Map form data to UpdateWorkOrderTypeDto structure
       const updateDto = {
         name: formData.name,
         code: formData.code,
@@ -287,63 +222,25 @@ export default function WorkOrderTypesPage() {
 
       console.log('Sending update request for ID:', selectedType.id, 'DTO:', updateDto);
 
-      const response = await fetch(`http://localhost:5000/api/maintenance/work-order-types/${selectedType.id}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(updateDto)
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Update failed:', response.status, response.statusText, errorText);
-        setError(`Failed to update work order type: ${response.status} ${response.statusText} - ${errorText}`);
-        return;
-      }
-      
-      const updatedWorkOrderType = await response.json();
-      console.log('Update response received:', updatedWorkOrderType);
-      
-      // Refresh the list
+      await apiService.put(`/maintenance/work-order-types/${selectedType.id}`, updateDto);
       await fetchWorkOrderTypes();
       setIsEditDialogOpen(false);
       resetForm();
     } catch (error) {
       console.error('Error updating work order type:', error);
-      setError('Failed to update work order type. Please try again.');
+      setError(error instanceof Error ? error.message : 'Failed to update work order type');
     }
   };
 
   const handleDelete = async (id: string | number) => {
     if (!confirm('Are you sure you want to delete this work order type?')) return;
-    
+
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-      
-      if (!token) {
-        setError('Authentication required. Please log in to delete work order types.');
-        return;
-      }
-      
-      const response = await fetch(`http://localhost:5000/api/maintenance/work-order-types/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to delete work order type');
-      }
-      
-      // Refresh the list
+      await apiService.delete(`/maintenance/work-order-types/${id}`);
       await fetchWorkOrderTypes();
     } catch (error) {
       console.error('Error deleting work order type:', error);
-      setError('Failed to delete work order type. Please try again.');
+      setError(error instanceof Error ? error.message : 'Failed to delete work order type');
     }
   };
 

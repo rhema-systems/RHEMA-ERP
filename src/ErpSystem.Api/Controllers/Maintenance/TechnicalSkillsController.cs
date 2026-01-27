@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -39,7 +39,9 @@ public class TechnicalSkillsController : ControllerBase
         try
         {
             if (pageSize > 100)
+            {
                 pageSize = 100;
+            }
 
             var filter = new TechnicalSkillFilterDto
             {
@@ -110,7 +112,9 @@ public class TechnicalSkillsController : ControllerBase
         {
             var skill = await _skillService.GetSkillByIdAsync(id);
             if (skill == null)
+            {
                 return NotFound($"Technical skill with ID {id} not found");
+            }
 
             return Ok(skill);
         }
@@ -184,7 +188,9 @@ public class TechnicalSkillsController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var assignment = await _skillService.AssignSkillToTechnicianAsync(createDto);
             return CreatedAtAction(nameof(GetTechnicianSkills), new { technicianId = createDto.TechnicianId }, assignment);

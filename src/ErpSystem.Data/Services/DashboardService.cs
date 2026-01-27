@@ -1,10 +1,10 @@
+using ErpSystem.Core.DTOs.Dashboard;
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Services;
+using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using ErpSystem.Core.DTOs.Dashboard;
-using ErpSystem.Core.Services;
-using ErpSystem.Core.Interfaces;
-using ErpSystem.Core.Entities;
-using ErpSystem.Data;
 
 namespace ErpSystem.Data.Services
 {
@@ -112,7 +112,7 @@ namespace ErpSystem.Data.Services
             if (isSuperAdmin)
             {
                 _logger.LogInformation("Loading dashboard metrics for SuperAdmin - showing data across ALL tenants");
-                
+
                 // SuperAdmin sees ALL data across ALL tenants
                 users = await _context.Users
                     .Include(u => u.UserRoles)
@@ -138,7 +138,7 @@ namespace ErpSystem.Data.Services
             else
             {
                 _logger.LogInformation("Loading dashboard metrics for tenant {TenantId} - showing tenant-specific data", tenantId);
-                
+
                 // TenantAdmin/Regular users see only their tenant data
                 users = await _context.Users
                     .Where(u => u.TenantId == tenantGuid)
@@ -166,7 +166,7 @@ namespace ErpSystem.Data.Services
             }
 
             var onlineUsers = activeSessions.Select(s => s.UserId).Distinct().Count();
-                
+
             var loginTrend = recentLoginSessions
                 .GroupBy(s => s.LoginTime.Date)
                 .Select(g => new ChartDataPoint
@@ -215,7 +215,7 @@ namespace ErpSystem.Data.Services
             if (isSuperAdmin)
             {
                 _logger.LogInformation("Loading recent activities for SuperAdmin - showing data across ALL tenants");
-                
+
                 // SuperAdmin sees activities from ALL tenants
                 var recentLogins = await _context.UserSessions
                     .OrderByDescending(s => s.LoginTime)
@@ -257,7 +257,7 @@ namespace ErpSystem.Data.Services
             else
             {
                 _logger.LogInformation("Loading recent activities for tenant {TenantId} - showing tenant-specific data", tenantId);
-                
+
                 // TenantAdmin/Regular users see only their tenant activities
                 var recentLogins = await _context.UserSessions
                     .Where(s => s.TenantId == tenantGuid)
@@ -299,7 +299,7 @@ namespace ErpSystem.Data.Services
             return activities.OrderByDescending(a => a.Timestamp).Take(20).ToList();
         }
 
-        private Task<List<NotificationDto>> GetNotificationsAsync(string tenantId)
+        private static Task<List<NotificationDto>> GetNotificationsAsync(string tenantId)
         {
             // This would be implemented based on your notification system
             // For now, return some sample notifications
@@ -331,7 +331,7 @@ namespace ErpSystem.Data.Services
             if (isSuperAdmin)
             {
                 _logger.LogInformation("Getting online users for SuperAdmin - showing ALL users across ALL tenants");
-                
+
                 // SuperAdmin sees ALL online users across ALL tenants
                 activeSessions = await _context.UserSessions
                     .Where(s => s.IsActive)
@@ -346,7 +346,7 @@ namespace ErpSystem.Data.Services
             else
             {
                 _logger.LogInformation("Getting online users for tenant {TenantId} - showing tenant-specific users only", tenantId);
-                
+
                 // TenantAdmin sees only online users from their own tenant
                 activeSessions = await _context.UserSessions
                     .Where(s => s.TenantId == tenantGuid && s.IsActive)
@@ -368,7 +368,7 @@ namespace ErpSystem.Data.Services
                 Role = GetUserPrimaryRole(session.User),
                 LastActivity = session.LastActivityTime,
                 Status = "Online",
-                Location = isSuperAdmin 
+                Location = isSuperAdmin
                     ? $"{session.Tenant?.Name ?? "Unknown Tenant"} - {session.Location}"  // Include tenant name for SuperAdmin
                     : session.Location  // Just location for TenantAdmin
             }).ToList();
@@ -398,10 +398,10 @@ namespace ErpSystem.Data.Services
             };
         }
 
-        private Dictionary<string, int> GetUsersByRoleDistribution(List<ApplicationUser> users)
+        private static Dictionary<string, int> GetUsersByRoleDistribution(List<ApplicationUser> users)
         {
             var roleDistribution = new Dictionary<string, int>();
-            
+
             foreach (var user in users)
             {
                 if (user.UserRoles?.Any() == true)
@@ -419,17 +419,17 @@ namespace ErpSystem.Data.Services
                     roleDistribution["User"] = roleDistribution.GetValueOrDefault("User", 0) + 1;
                 }
             }
-            
+
             // Ensure at least one entry exists
             if (!roleDistribution.Any())
             {
                 roleDistribution["User"] = users.Count;
             }
-            
+
             return roleDistribution;
         }
 
-        private string GetUserPrimaryRole(ApplicationUser user)
+        private static string GetUserPrimaryRole(ApplicationUser user)
         {
             if (user.UserRoles?.Any() != true)
             {

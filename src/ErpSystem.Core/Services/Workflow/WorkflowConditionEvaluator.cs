@@ -21,7 +21,7 @@ public class WorkflowConditionEvaluator : IWorkflowConditionEvaluator
     {
         // TODO: Implement proper condition evaluation
         _logger.LogInformation("Evaluating condition: {Condition}", conditionExpression);
-        
+
         // For now, always return true (allow all transitions)
         return Task.FromResult(true);
     }
@@ -47,7 +47,7 @@ public class WorkflowConditionEvaluator : IWorkflowConditionEvaluator
             new WorkflowVariableInfo
             {
                 Name = "userId",
-                DisplayName = "User ID", 
+                DisplayName = "User ID",
                 DataType = typeof(Guid),
                 Description = "The ID of the user initiating the workflow"
             }

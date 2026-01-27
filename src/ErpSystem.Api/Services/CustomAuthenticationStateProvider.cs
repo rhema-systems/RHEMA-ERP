@@ -1,9 +1,9 @@
+using System.Security.Claims;
+using ErpSystem.Core.Entities;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
-using System.Security.Claims;
-using ErpSystem.Core.Entities;
 
 namespace ErpSystem.Web.Services
 {
@@ -30,25 +30,25 @@ namespace ErpSystem.Web.Services
         public override async Task<AuthenticationState> GetAuthenticationStateAsync()
         {
             _logger.LogInformation("GetAuthenticationStateAsync called");
-            
+
             // First get the base authentication state from the server
             var authState = await base.GetAuthenticationStateAsync();
-            
+
             _logger.LogInformation("Base auth state - Authenticated: {IsAuthenticated}, Name: {Name}, Claims: {ClaimsCount}",
                 authState?.User?.Identity?.IsAuthenticated,
                 authState?.User?.Identity?.Name,
                 authState?.User?.Claims?.Count() ?? 0);
-            
+
             return authState;
         }
-        
+
         /// <summary>
         /// Forces a refresh of the authentication state and notifies all listeners
         /// </summary>
         public void ForceRefresh()
         {
             _logger.LogInformation("ForceRefresh called - triggering authentication state change notification");
-            
+
             // Trigger a notification that the authentication state has changed
             NotifyAuthenticationStateChanged(GetAuthenticationStateAsync());
         }
@@ -56,14 +56,14 @@ namespace ErpSystem.Web.Services
         protected override async Task<bool> ValidateAuthenticationStateAsync(
             AuthenticationState authenticationState, CancellationToken cancellationToken)
         {
-            _logger.LogInformation("ValidateAuthenticationStateAsync called. User authenticated: {IsAuthenticated}, Name: {Name}", 
-                authenticationState?.User?.Identity?.IsAuthenticated, 
+            _logger.LogInformation("ValidateAuthenticationStateAsync called. User authenticated: {IsAuthenticated}, Name: {Name}",
+                authenticationState?.User?.Identity?.IsAuthenticated,
                 authenticationState?.User?.Identity?.Name);
-                
+
             // Get the user manager from a new scope to ensure it does not get disposed
             using var scope = _scopeFactory.CreateScope();
             var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-            
+
             var result = await ValidateSecurityStampAsync(userManager, authenticationState.User);
             _logger.LogInformation("ValidateSecurityStampAsync result: {Result}", result);
             return result;

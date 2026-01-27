@@ -12,7 +12,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { maintenanceDataService, Employee, Asset, MaintenanceType } from '@/services/maintenanceDataService';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { maintenanceDataService, Employee, Asset, MaintenanceType, PriorityLevel } from '@/services/maintenanceDataService';
+import maintenanceScheduleService, { MaintenanceSchedule, CreateMaintenanceScheduleDto, MaintenanceScheduleHistory } from '@/services/maintenanceScheduleService';
 import { 
   Calendar as CalendarIcon,
   Clock,
@@ -26,7 +28,9 @@ import {
   AlertTriangle,
   Users,
   Package,
-  RefreshCw
+  RefreshCw,
+  Loader2,
+  History
 } from 'lucide-react';
 import { format, addDays } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -48,6 +52,18 @@ interface ScheduledMaintenanceItem {
   status: string;
   estimatedHours: number;
   description: string;
+  // Trigger fields
+  primaryTriggerType?: string;
+  secondaryTriggerType?: string;
+  triggerLogic?: string;
+  mileageTrigger?: number;
+  operatingHoursTrigger?: number;
+  cycleTrigger?: number;
+  conditionCriteria?: string;
+  // Notification fields
+  advanceNotificationDays?: number;
+  notificationRecipients?: string;
+  autoGenerateWorkOrders?: boolean;
 }
 
 export default function ScheduledMaintenancePage() {
@@ -62,7 +78,11 @@ export default function ScheduledMaintenancePage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
+  const [isGeneratingWorkOrder, setIsGeneratingWorkOrder] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<ScheduledMaintenanceItem | null>(null);
+  const [scheduleHistory, setScheduleHistory] = useState<MaintenanceScheduleHistory[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [activeTab, setActiveTab] = useState('details');
   const [scheduleToGenerate, setScheduleToGenerate] = useState<ScheduledMaintenanceItem | null>(null);
   const [filteredData, setFilteredData] = useState<ScheduledMaintenanceItem[]>([]);
   
@@ -70,6 +90,7 @@ export default function ScheduledMaintenancePage() {
   const [technicians, setTechnicians] = useState<Employee[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [maintenanceTypes, setMaintenanceTypes] = useState<MaintenanceType[]>([]);
+  const [priorityLevels, setPriorityLevels] = useState<PriorityLevel[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   
   // Form state for creating new scheduled maintenance
@@ -82,7 +103,19 @@ export default function ScheduledMaintenancePage() {
     assignedTechnician: '',
     priority: 'Medium',
     estimatedHours: '',
-    description: ''
+    description: '',
+    // Trigger fields
+    primaryTriggerType: 'Time',
+    secondaryTriggerType: '',
+    triggerLogic: 'OR',
+    mileageTrigger: '',
+    operatingHoursTrigger: '',
+    cycleTrigger: '',
+    conditionCriteria: '',
+    // Notification fields
+    advanceNotificationDays: '',
+    notificationRecipients: '',
+    autoGenerateWorkOrders: true
   });
 
   // Load data on component mount
@@ -91,20 +124,15 @@ export default function ScheduledMaintenancePage() {
       setLoadingData(true);
       setLoading(true);
       try {
-        const token = localStorage.getItem('authToken');
         console.log('=== LOADING MAINTENANCE DATA ===');
-        const [techniciansList, assetsList, maintenanceTypesList, scheduledDataResponse] = await Promise.all([
+        const [techniciansList, assetsList, maintenanceTypesList, priorityLevelsList, scheduledDataResponse] = await Promise.all([
           maintenanceDataService.getTechnicians(),
           maintenanceDataService.getAssets(),
           maintenanceDataService.getMaintenanceTypes(),
-          fetch('http://localhost:5000/api/maintenance/schedules', {
-            headers: {
-              'Authorization': token ? `Bearer ${token}` : '',
-              'Content-Type': 'application/json'
-            }
-          })
+          maintenanceDataService.getPriorityLevels(),
+          maintenanceScheduleService.getSchedules()
         ]);
-        
+
         console.log('=== TECHNICIANS DEBUG ===');
         console.log('Technicians loaded:', techniciansList.length, techniciansList);
         console.log('Technicians type:', typeof techniciansList, Array.isArray(techniciansList));
@@ -112,6 +140,7 @@ export default function ScheduledMaintenancePage() {
         console.log('=== OTHER DATA DEBUG ===');
         console.log('Assets loaded:', assetsList.length, assetsList);
         console.log('Maintenance types loaded:', maintenanceTypesList.length, maintenanceTypesList);
+        console.log('Priority levels loaded:', priorityLevelsList.length, priorityLevelsList);
         
         if (techniciansList.length === 0) {
           console.warn('⚠️ No technicians loaded - this may indicate an API endpoint issue');
@@ -126,40 +155,45 @@ export default function ScheduledMaintenancePage() {
         setTechnicians(techniciansList);
         setAssets(assetsList);
         setMaintenanceTypes(maintenanceTypesList);
+        setPriorityLevels(priorityLevelsList);
         
-        console.log('Scheduled data response status:', scheduledDataResponse.status);
-        if (scheduledDataResponse.ok) {
-          const scheduledData = await scheduledDataResponse.json();
-          console.log('Raw scheduled data response:', scheduledData);
-          
-          // The controller returns PagedResult<MaintenanceScheduleDto>
-          // Structure: { items: [...], totalCount: X, page: Y, pageSize: Z }
-          const schedules = scheduledData.items || scheduledData.data || scheduledData || [];
-          console.log('Extracted schedules:', schedules);
-          
-          // Map MaintenanceScheduleDto to ScheduledMaintenanceItem interface
-          const mappedSchedules = schedules.map((schedule: any) => ({
-            id: schedule.id,
-            title: schedule.name || schedule.title,
-            assetId: schedule.assetId,
-            assetName: schedule.assetName || 'Unknown Asset',
-            type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
-            frequency: schedule.frequency,
-            nextDue: schedule.nextDueDate || schedule.nextDue,
-            lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
-            assignedTechnician: schedule.AssignedTechnicianName || schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
-            assignedTechnicianId: schedule.AssignedTechnicianId || schedule.assignedTechnicianId || '',
-            priority: schedule.priority,
-            status: schedule.isActive ? 'Scheduled' : 'Inactive',
-            estimatedHours: schedule.estimatedHours || 0,
-            description: schedule.description || ''
-          }));
-          
-          console.log('Mapped scheduled maintenance items:', mappedSchedules);
-          setScheduledMaintenanceData(mappedSchedules);
-        } else {
-          console.error('Failed to fetch scheduled data:', scheduledDataResponse.status, scheduledDataResponse.statusText);
-        }
+        console.log('Raw scheduled data response:', scheduledDataResponse);
+        
+        // The service returns PagedResult<MaintenanceSchedule>
+        const schedules = scheduledDataResponse.items || scheduledDataResponse.data || [];
+        console.log('Extracted schedules:', schedules);
+        
+        // Map MaintenanceSchedule to ScheduledMaintenanceItem interface
+        const mappedSchedules = schedules.map((schedule: any) => ({
+          id: schedule.id,
+          title: schedule.name || schedule.title,
+          assetId: schedule.assetId,
+          assetName: schedule.assetName || 'Unknown Asset',
+          type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
+          frequency: schedule.frequency,
+          nextDue: schedule.nextDueDate || schedule.nextDue,
+          lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
+          assignedTechnician: schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
+          assignedTechnicianId: schedule.assignedTechnicianId || '',
+          priority: schedule.priority,
+          status: schedule.isActive ? 'Scheduled' : 'Inactive',
+          estimatedHours: schedule.estimatedHours || 0,
+          description: schedule.description || '',
+          // Store trigger and notification data
+          primaryTriggerType: schedule.primaryTriggerType,
+          secondaryTriggerType: schedule.secondaryTriggerType,
+          triggerLogic: schedule.triggerLogic,
+          mileageTrigger: schedule.mileageTrigger,
+          operatingHoursTrigger: schedule.operatingHoursTrigger,
+          cycleTrigger: schedule.cycleTrigger,
+          conditionCriteria: schedule.conditionCriteria,
+          advanceNotificationDays: schedule.advanceNotificationDays,
+          notificationRecipients: schedule.notificationRecipients,
+          autoGenerateWorkOrders: schedule.autoGenerateWorkOrders
+        }));
+        
+        console.log('Mapped scheduled maintenance items:', mappedSchedules);
+        setScheduledMaintenanceData(mappedSchedules);
       } catch (error) {
         console.error('Error loading data:', error);
         setScheduledMaintenanceData([]);
@@ -226,9 +260,12 @@ export default function ScheduledMaintenancePage() {
       'Critical': 'bg-red-100 text-red-800',
     } as any;
 
+    const display = priority || 'Not Set';
+    const key = priority && colors[priority] ? priority : undefined;
+
     return (
-      <Badge className={colors[priority] || 'bg-gray-100 text-gray-800'}>
-        {priority}
+      <Badge className={key ? colors[key] : 'bg-gray-100 text-gray-800'}>
+        {display}
       </Badge>
     );
   };
@@ -365,103 +402,65 @@ export default function ScheduledMaintenancePage() {
         requiredParts: [],
         isActive: true,
         autoCreate: true,
-        autoGenerateWorkOrders: true,
+        autoGenerateWorkOrders: formData.autoGenerateWorkOrders,
         leadTime: 5,
-        advanceNotificationDays: 7,
-        notificationRecipients: null,
+        advanceNotificationDays: formData.advanceNotificationDays ? parseInt(formData.advanceNotificationDays) : 7,
+        notificationRecipients: formData.notificationRecipients || null,
         maxDelayDays: 3,
-        notes: formData.description
+        notes: formData.description,
+        // Trigger fields
+        primaryTriggerType: formData.primaryTriggerType,
+        secondaryTriggerType: formData.secondaryTriggerType || null,
+        triggerLogic: formData.triggerLogic, // Always send, backend will ignore if not Combined
+        mileageTrigger: formData.mileageTrigger ? parseFloat(formData.mileageTrigger) : null,
+        operatingHoursTrigger: formData.operatingHoursTrigger ? parseFloat(formData.operatingHoursTrigger) : null,
+        cycleTrigger: formData.cycleTrigger ? parseInt(formData.cycleTrigger) : null,
+        conditionCriteria: formData.conditionCriteria || null
       };
       
       console.log('Sending createDto:', createDto);
-      console.log('maintenanceTypeId type:', typeof createDto.maintenanceTypeId);
-      console.log('maintenanceTypeId value:', createDto.maintenanceTypeId);
-      console.log('JSON stringified payload:', JSON.stringify(createDto, null, 2));
       
-      console.log('=== MAKING API CALL ===');
-      console.log('URL: http://localhost:5000/api/maintenance/schedules');
-      console.log('Method: POST');
-      
-      const response = await fetch('http://localhost:5000/api/maintenance/schedules', {
-        method: 'POST',
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(createDto)
-      });
-      
-      console.log('=== API RESPONSE RECEIVED ===');
-      console.log('Response status:', response.status);
-      console.log('Response ok:', response.ok);
-      console.log('Response headers:', response.headers);
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        console.error('API Error:', errorData);
-        
-        if (errorData?.errors) {
-          const errorMessages = [];
-          
-          // Handle validation errors
-          for (const [field, messages] of Object.entries(errorData.errors)) {
-            if (Array.isArray(messages)) {
-              errorMessages.push(`${field}: ${messages.join(', ')}`);
-            }
-          }
-          
-          toast({
-            title: "Validation Errors",
-            description: errorMessages.join(', '),
-            variant: "destructive"
-          });
-        } else {
-          toast({
-            title: "Error",
-            description: `Failed to create scheduled maintenance: ${response.status} ${response.statusText}`,
-            variant: "destructive"
-          });
-        }
-        
-        return;
-      }
-      
-      console.log('=== API CALL SUCCESSFUL ===');
-      const responseData = await response.json();
+      // Use service instead of fetch
+      const responseData = await maintenanceScheduleService.createSchedule(createDto as CreateMaintenanceScheduleDto);
       console.log('Response data:', responseData);
       
-      // Refresh the data
-      const refreshResponse = await fetch('http://localhost:5000/api/maintenance/schedules', {
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        }
+      toast({
+        title: "Success!",
+        description: "Scheduled maintenance created successfully.",
+        variant: "success"
       });
       
-      if (refreshResponse.ok) {
-        const scheduledData = await refreshResponse.json();
-        console.log('Refresh - Raw scheduled data:', scheduledData);
-        
-        const schedules = scheduledData.items || scheduledData.data || scheduledData || [];
-        const mappedSchedules = schedules.map((schedule: any) => ({
-          id: schedule.id,
-          title: schedule.name || schedule.title,
-          assetId: schedule.assetId,
-          assetName: schedule.assetName || 'Unknown Asset',
-          type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
-          frequency: schedule.frequency,
-          nextDue: schedule.nextDueDate || schedule.nextDue,
-          lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
-          assignedTechnician: schedule.AssignedTechnicianName || schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
-          assignedTechnicianId: schedule.AssignedTechnicianId || schedule.assignedTechnicianId || '',
-          priority: schedule.priority,
-          status: schedule.isActive ? 'Scheduled' : 'Inactive',
-          estimatedHours: schedule.estimatedHours || 0,
-          description: schedule.description || ''
-        }));
-        
-        setScheduledMaintenanceData(mappedSchedules);
-      }
+      // Refresh the data using service
+      const scheduledDataResponse = await maintenanceScheduleService.getSchedules();
+      const schedules = scheduledDataResponse.items || scheduledDataResponse.data || [];
+      const mappedSchedules = schedules.map((schedule: any) => ({
+        id: schedule.id,
+        title: schedule.name || schedule.title,
+        assetId: schedule.assetId,
+        assetName: schedule.assetName || 'Unknown Asset',
+        type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
+        frequency: schedule.frequency,
+        nextDue: schedule.nextDueDate || schedule.nextDue,
+        lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
+        assignedTechnician: schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
+        assignedTechnicianId: schedule.assignedTechnicianId || '',
+        priority: schedule.priority,
+        status: schedule.isActive ? 'Scheduled' : 'Inactive',
+        estimatedHours: schedule.estimatedHours || 0,
+        description: schedule.description || '',
+        primaryTriggerType: schedule.primaryTriggerType,
+        secondaryTriggerType: schedule.secondaryTriggerType,
+        triggerLogic: schedule.triggerLogic,
+        mileageTrigger: schedule.mileageTrigger,
+        operatingHoursTrigger: schedule.operatingHoursTrigger,
+        cycleTrigger: schedule.cycleTrigger,
+        conditionCriteria: schedule.conditionCriteria,
+        advanceNotificationDays: schedule.advanceNotificationDays,
+        notificationRecipients: schedule.notificationRecipients,
+        autoGenerateWorkOrders: schedule.autoGenerateWorkOrders
+      }));
+      
+      setScheduledMaintenanceData(mappedSchedules);
       
       setIsCreateDialogOpen(false);
       // Reset form
@@ -474,32 +473,148 @@ export default function ScheduledMaintenancePage() {
         assignedTechnician: '',
         priority: 'Medium',
         estimatedHours: '',
-        description: ''
+        description: '',
+        primaryTriggerType: 'Time',
+        secondaryTriggerType: '',
+        triggerLogic: 'OR',
+        mileageTrigger: '',
+        operatingHoursTrigger: '',
+        cycleTrigger: '',
+        conditionCriteria: '',
+        advanceNotificationDays: '',
+        notificationRecipients: '',
+        autoGenerateWorkOrders: true
       });
     } catch (error) {
       console.error('Error creating scheduled maintenance:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to create schedule",
+        variant: "destructive"
+      });
     }
   };
 
-  // Handle asset selection and auto-populate type
+  // Handle asset selection and auto-populate type & default schedule based on category config
   const handleAssetSelection = async (value: string) => {
     console.log('=== Asset selected:', value);
-    setFormData({...formData, assetId: value});
+    setFormData({ ...formData, assetId: value });
     
     try {
-      const assetType = await maintenanceDataService.getMaintenanceTypeForAsset(value);
+      const [assetType, categorySchedule] = await Promise.all([
+        maintenanceDataService.getMaintenanceTypeForAsset(value),
+        maintenanceDataService.getAssetCategorySchedule(value)
+      ]);
+
       console.log('Got asset type from service:', assetType);
-      
-      if (assetType) {
-        console.log('Setting asset type:', assetType);
-        setFormData(prev => ({...prev, assetId: value, type: assetType}));
-      } else {
-        console.log('No asset type found, just setting asset');
-        setFormData(prev => ({...prev, assetId: value}));
-      }
+      console.log('Got category schedule config:', categorySchedule);
+
+      setFormData(prev => {
+        let updated = { ...prev, assetId: value };
+
+        if (assetType) {
+          console.log('Setting asset type:', assetType);
+          updated = { ...updated, type: assetType };
+        }
+
+        if (categorySchedule) {
+          const {
+            maintenanceScheduleType,
+            maintenanceType,
+            maintenanceFrequency,
+            maintenanceValue,
+            maintenanceUnit,
+            secondaryMaintenanceType,
+            secondaryMaintenanceFrequency,
+            secondaryMaintenanceValue,
+            secondaryMaintenanceUnit,
+          } = categorySchedule;
+
+          // Default priority if not already set
+          if (!updated.priority) {
+            updated.priority = 'Medium';
+          }
+
+          // Map category-level schedule into formData used by the schedule create dialog
+          if (!maintenanceScheduleType || maintenanceScheduleType === 'single') {
+            // Single criteria mapping
+            if (maintenanceType === 'Time') {
+              // Map frequency label to the UI frequency options
+              let freq = maintenanceFrequency || 'Monthly';
+              if (freq === 'Semi-Annual') {
+                freq = 'Bi-Annual';
+              }
+
+              updated.primaryTriggerType = 'Time';
+              updated.frequency = freq;
+              updated.mileageTrigger = '';
+              updated.operatingHoursTrigger = '';
+              updated.cycleTrigger = '';
+              updated.conditionCriteria = '';
+            } else {
+              // Distance / Usage / Cycles -> usage-based trigger
+              updated.primaryTriggerType = 'Usage';
+              updated.frequency = '';
+
+              if (maintenanceType === 'Distance') {
+                updated.mileageTrigger = maintenanceValue?.toString() || '';
+                updated.operatingHoursTrigger = '';
+                updated.cycleTrigger = '';
+              } else if (maintenanceType === 'Usage') {
+                updated.operatingHoursTrigger = maintenanceValue?.toString() || '';
+                updated.mileageTrigger = '';
+                updated.cycleTrigger = '';
+              } else if (maintenanceType === 'Cycles') {
+                updated.cycleTrigger = maintenanceValue?.toString() || '';
+                updated.mileageTrigger = '';
+                updated.operatingHoursTrigger = '';
+              }
+
+              updated.conditionCriteria = '';
+            }
+          } else if (maintenanceScheduleType === 'multi') {
+            // Multi-criteria: approximate as a Combined trigger in the UI
+            updated.primaryTriggerType = 'Combined';
+            updated.triggerLogic = 'OR';
+
+            // Try to map one time-based and one usage-based side if available
+            const isPrimaryTime = maintenanceType === 'Time';
+            const isSecondaryTime = secondaryMaintenanceType === 'Time';
+
+            // Time side -> frequency
+            const timeFreq = isPrimaryTime ? maintenanceFrequency : isSecondaryTime ? secondaryMaintenanceFrequency : undefined;
+            if (timeFreq) {
+              let freq = timeFreq;
+              if (freq === 'Semi-Annual') {
+                freq = 'Bi-Annual';
+              }
+              updated.frequency = freq;
+            }
+
+            // Usage side -> usage thresholds
+            const usageType = !isPrimaryTime ? maintenanceType : !isSecondaryTime ? secondaryMaintenanceType : undefined;
+            const usageValue = !isPrimaryTime ? maintenanceValue : !isSecondaryTime ? secondaryMaintenanceValue : undefined;
+
+            if (usageType && usageValue) {
+              if (usageType === 'Distance') {
+                updated.mileageTrigger = usageValue.toString();
+              } else if (usageType === 'Usage') {
+                updated.operatingHoursTrigger = usageValue.toString();
+              } else if (usageType === 'Cycles') {
+                updated.cycleTrigger = usageValue.toString();
+              }
+            }
+
+            // No condition JSON by default from category-level config
+            updated.conditionCriteria = '';
+          }
+        }
+
+        return updated;
+      });
     } catch (error) {
-      console.error('Error getting maintenance type for asset:', error);
-      setFormData(prev => ({...prev, assetId: value}));
+      console.error('Error getting maintenance metadata for asset:', error);
+      setFormData(prev => ({ ...prev, assetId: value }));
     }
   };
 
@@ -515,32 +630,13 @@ export default function ScheduledMaintenancePage() {
   const handleConfirmGenerateWorkOrder = async () => {
     if (!scheduleToGenerate) return;
     
+    setIsGeneratingWorkOrder(true);
     try {
-      const token = localStorage.getItem('authToken');
       console.log('Generating work order for schedule:', scheduleToGenerate.id);
       
-      // Generate a work order from the scheduled maintenance
-      const response = await fetch(`http://localhost:5000/api/maintenance/schedules/${scheduleToGenerate.id}/generate-work-orders?count=1`, {
-        method: 'POST',
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error');
-        console.error('Failed to generate work order:', response.status, errorText);
-        toast({
-          title: "Error",
-          description: `Failed to generate work order: ${response.status} ${response.statusText}`,
-          variant: "destructive"
-        });
-        return;
-      }
-      
-      const workOrders = await response.json();
-      console.log('Work orders generated:', workOrders);
+      // Generate a work order using the service
+      const workOrder = await maintenanceScheduleService.generateWorkOrder(scheduleToGenerate.id);
+      console.log('Work order generated:', workOrder);
       
       // Close confirmation dialog and reset state
       setIsConfirmDialogOpen(false);
@@ -548,49 +644,58 @@ export default function ScheduledMaintenancePage() {
       
       toast({
         title: "Success!",
-        description: `Work order(s) generated successfully! ${Array.isArray(workOrders) ? workOrders.length : 1} work order(s) created.`,
+        description: "Work order generated successfully!",
         variant: "success"
       });
       
-      // Refresh the data
-      const refreshResponse = await fetch('http://localhost:5000/api/maintenance/schedules', {
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (refreshResponse.ok) {
-        const scheduledData = await refreshResponse.json();
-        const schedules = scheduledData.items || scheduledData.data || scheduledData || [];
-        const mappedSchedules = schedules.map((schedule: any) => ({
-          id: schedule.id,
-          title: schedule.name || schedule.title,
-          assetId: schedule.assetId,
-          assetName: schedule.assetName || 'Unknown Asset',
-          type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
-          frequency: schedule.frequency,
-          nextDue: schedule.nextDueDate || schedule.nextDue,
-          lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
-          assignedTechnician: schedule.AssignedTechnicianName || schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
-          assignedTechnicianId: schedule.AssignedTechnicianId || schedule.assignedTechnicianId || '',
-          priority: schedule.priority,
-          status: schedule.isActive ? 'Scheduled' : 'Inactive',
-          estimatedHours: schedule.estimatedHours || 0,
-          description: schedule.description || ''
-        }));
-        setScheduledMaintenanceData(mappedSchedules);
-      }
+      // Refresh the data using service
+      const scheduledDataResponse = await maintenanceScheduleService.getSchedules();
+      const schedules = scheduledDataResponse.items || scheduledDataResponse.data || [];
+      const mappedSchedules = schedules.map((schedule: any) => ({
+        id: schedule.id,
+        title: schedule.name || schedule.title,
+        assetId: schedule.assetId,
+        assetName: schedule.assetName || 'Unknown Asset',
+        type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
+        frequency: schedule.frequency,
+        nextDue: schedule.nextDueDate || schedule.nextDue,
+        lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
+        assignedTechnician: schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
+        assignedTechnicianId: schedule.assignedTechnicianId || '',
+        priority: schedule.priority,
+        status: schedule.isActive ? 'Scheduled' : 'Inactive',
+        estimatedHours: schedule.estimatedHours || 0,
+        description: schedule.description || '',
+        primaryTriggerType: schedule.primaryTriggerType,
+        secondaryTriggerType: schedule.secondaryTriggerType,
+        triggerLogic: schedule.triggerLogic,
+        mileageTrigger: schedule.mileageTrigger,
+        operatingHoursTrigger: schedule.operatingHoursTrigger,
+        cycleTrigger: schedule.cycleTrigger,
+        conditionCriteria: schedule.conditionCriteria,
+        advanceNotificationDays: schedule.advanceNotificationDays,
+        notificationRecipients: schedule.notificationRecipients,
+        autoGenerateWorkOrders: schedule.autoGenerateWorkOrders
+      }));
+      setScheduledMaintenanceData(mappedSchedules);
     } catch (error) {
       console.error('Error completing scheduled maintenance:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to generate work order",
+        variant: "destructive"
+      });
       // Close confirmation dialog and reset state on error too
       setIsConfirmDialogOpen(false);
       setScheduleToGenerate(null);
+    } finally {
+      setIsGeneratingWorkOrder(false);
     }
   };
 
   const handleEditSchedule = (schedule: ScheduledMaintenanceItem) => {
     setEditingSchedule(schedule);
+    setActiveTab('details'); // Reset to details tab when opening
     setFormData({
       title: schedule.title,
       assetId: schedule.assetId,
@@ -600,9 +705,42 @@ export default function ScheduledMaintenancePage() {
       assignedTechnician: schedule.assignedTechnicianId || '__UNASSIGNED__', // Use the ID, or placeholder if unassigned
       priority: schedule.priority,
       estimatedHours: schedule.estimatedHours.toString(),
-      description: schedule.description
+      description: schedule.description,
+      // Populate trigger and notification fields
+      primaryTriggerType: schedule.primaryTriggerType || 'Time',
+      secondaryTriggerType: schedule.secondaryTriggerType || '',
+      triggerLogic: schedule.triggerLogic || 'OR',
+      mileageTrigger: schedule.mileageTrigger?.toString() || '',
+      operatingHoursTrigger: schedule.operatingHoursTrigger?.toString() || '',
+      cycleTrigger: schedule.cycleTrigger?.toString() || '',
+      conditionCriteria: schedule.conditionCriteria || '',
+      advanceNotificationDays: schedule.advanceNotificationDays?.toString() || '',
+      notificationRecipients: schedule.notificationRecipients || '',
+      autoGenerateWorkOrders: schedule.autoGenerateWorkOrders !== undefined ? schedule.autoGenerateWorkOrders : true
     });
+    
+    // Load history for this schedule
+    loadScheduleHistory(schedule.id);
+    
     setIsEditDialogOpen(true);
+  };
+
+  const loadScheduleHistory = async (scheduleId: string) => {
+    try {
+      setLoadingHistory(true);
+      const history = await maintenanceScheduleService.getScheduleHistory(scheduleId);
+      setScheduleHistory(history);
+    } catch (error) {
+      console.error('Error loading schedule history:', error);
+      setScheduleHistory([]);
+      toast({
+        title: "Error",
+        description: "Failed to load schedule history",
+        variant: "destructive"
+      });
+    } finally {
+      setLoadingHistory(false);
+    }
   };
 
   const handleUpdateSchedule = async () => {
@@ -666,38 +804,26 @@ export default function ScheduledMaintenancePage() {
         requiredParts: [],
         isActive: true,
         autoCreate: true,
-        autoGenerateWorkOrders: true,
+        autoGenerateWorkOrders: formData.autoGenerateWorkOrders,
         leadTime: 5,
-        advanceNotificationDays: 7,
-        notificationRecipients: null,
+        advanceNotificationDays: formData.advanceNotificationDays ? parseInt(formData.advanceNotificationDays) : 7,
+        notificationRecipients: formData.notificationRecipients || null,
         maxDelayDays: 3,
-        notes: formData.description
+        notes: formData.description,
+        // Trigger fields
+        primaryTriggerType: formData.primaryTriggerType,
+        secondaryTriggerType: formData.secondaryTriggerType || null,
+        triggerLogic: formData.triggerLogic, // Always send, backend will ignore if not Combined
+        mileageTrigger: formData.mileageTrigger ? parseFloat(formData.mileageTrigger) : null,
+        operatingHoursTrigger: formData.operatingHoursTrigger ? parseFloat(formData.operatingHoursTrigger) : null,
+        cycleTrigger: formData.cycleTrigger ? parseInt(formData.cycleTrigger) : null,
+        conditionCriteria: formData.conditionCriteria || null
       };
       
-      // Send DTO directly, not wrapped in { updateDto: ... }
-      const requestBody = updateDto;
+      console.log('Final request payload:', JSON.stringify(updateDto, null, 2));
       
-      console.log('Final request payload:', JSON.stringify(requestBody, null, 2));
-      
-      const response = await fetch(`http://localhost:5000/api/maintenance/schedules/${editingSchedule.id}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody)
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        console.error('Update API Error:', errorData);
-        toast({
-          title: "Error",
-          description: `Failed to update scheduled maintenance: ${response.status} ${response.statusText}`,
-          variant: "destructive"
-        });
-        return;
-      }
+      // Use service instead of fetch
+      await maintenanceScheduleService.updateSchedule(editingSchedule.id, updateDto);
       
       toast({
         title: "Success!",
@@ -705,58 +831,73 @@ export default function ScheduledMaintenancePage() {
         variant: "success"
       });
       
-      // Refresh the data
-      const refreshResponse = await fetch('http://localhost:5000/api/maintenance/schedules', {
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (refreshResponse.ok) {
-        const scheduledData = await refreshResponse.json();
-        const schedules = scheduledData.items || scheduledData.data || scheduledData || [];
-        const mappedSchedules = schedules.map((schedule: any) => ({
-          id: schedule.id,
-          title: schedule.name || schedule.title,
-          assetId: schedule.assetId,
-          assetName: schedule.assetName || 'Unknown Asset',
-          type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
-          frequency: schedule.frequency,
-          nextDue: schedule.nextDueDate || schedule.nextDue,
-          lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
-          assignedTechnician: schedule.assignedTechnicianName || schedule.assignedTechnician || '',
-          assignedTechnicianId: schedule.assignedTechnicianId || '',
-          priority: schedule.priority,
-          status: schedule.isActive ? 'Scheduled' : 'Inactive',
-          estimatedHours: schedule.estimatedHours || 0,
-          description: schedule.description || ''
-        }));
-        setScheduledMaintenanceData(mappedSchedules);
-      }
+      // Refresh the data using service
+      const scheduledDataResponse = await maintenanceScheduleService.getSchedules();
+      const schedules = scheduledDataResponse.items || scheduledDataResponse.data || [];
+      const mappedSchedules = schedules.map((schedule: any) => ({
+        id: schedule.id,
+        title: schedule.name || schedule.title,
+        assetId: schedule.assetId,
+        assetName: schedule.assetName || 'Unknown Asset',
+        type: schedule.maintenanceType || schedule.maintenanceTypeName || schedule.type || 'Unknown Type',
+        frequency: schedule.frequency,
+        nextDue: schedule.nextDueDate || schedule.nextDue,
+        lastCompleted: schedule.lastCompletedDate || schedule.lastCompleted || '',
+        assignedTechnician: schedule.assignedTechnicianName || schedule.assignedTechnician || 'Unassigned',
+        assignedTechnicianId: schedule.assignedTechnicianId || '',
+        priority: schedule.priority,
+        status: schedule.isActive ? 'Scheduled' : 'Inactive',
+        estimatedHours: schedule.estimatedHours || 0,
+        description: schedule.description || '',
+        primaryTriggerType: schedule.primaryTriggerType,
+        secondaryTriggerType: schedule.secondaryTriggerType,
+        triggerLogic: schedule.triggerLogic,
+        mileageTrigger: schedule.mileageTrigger,
+        operatingHoursTrigger: schedule.operatingHoursTrigger,
+        cycleTrigger: schedule.cycleTrigger,
+        conditionCriteria: schedule.conditionCriteria,
+        advanceNotificationDays: schedule.advanceNotificationDays,
+        notificationRecipients: schedule.notificationRecipients,
+        autoGenerateWorkOrders: schedule.autoGenerateWorkOrders
+      }));
+      setScheduledMaintenanceData(mappedSchedules);
       
       setIsEditDialogOpen(false);
       setEditingSchedule(null);
-      // Reset form
-      setFormData({
-        title: '',
-        assetId: '',
-        type: '',
-        frequency: '',
-        nextDue: '',
-        assignedTechnician: '',
-        priority: 'Medium',
-        estimatedHours: '',
-        description: ''
-      });
+      resetForm();
     } catch (error) {
       console.error('Error updating scheduled maintenance:', error);
       toast({
         title: "Error",
-        description: "An unexpected error occurred while updating the scheduled maintenance.",
+        description: error instanceof Error ? error.message : "Failed to update schedule",
         variant: "destructive"
       });
     }
+  };
+
+  // Reset form to initial state
+  const resetForm = () => {
+    setFormData({
+      title: '',
+      assetId: '',
+      type: '',
+      frequency: '',
+      nextDue: '',
+      assignedTechnician: '',
+      priority: 'Medium',
+      estimatedHours: '',
+      description: '',
+      primaryTriggerType: 'Time',
+      secondaryTriggerType: '',
+      triggerLogic: 'OR',
+      mileageTrigger: '',
+      operatingHoursTrigger: '',
+      cycleTrigger: '',
+      conditionCriteria: '',
+      advanceNotificationDays: '',
+      notificationRecipients: '',
+      autoGenerateWorkOrders: true
+    });
   };
 
   return (
@@ -770,14 +911,17 @@ export default function ScheduledMaintenancePage() {
           </p>
         </div>
         <ClientOnly>
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+          <Dialog open={isCreateDialogOpen} onOpenChange={(open) => {
+            setIsCreateDialogOpen(open);
+            if (open) resetForm(); // Reset form when opening create dialog
+          }}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
                 Schedule Maintenance
               </Button>
             </DialogTrigger>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Schedule New Maintenance</DialogTitle>
               <DialogDescription>
@@ -867,15 +1011,19 @@ export default function ScheduledMaintenancePage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="priority">Priority</Label>
-                  <Select value={formData.priority} onValueChange={(value) => setFormData({...formData, priority: value})}>
+                  <Select
+                    value={formData.priority}
+                    onValueChange={(value) => setFormData({ ...formData, priority: value })}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select priority" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Low">Low</SelectItem>
-                      <SelectItem value="Medium">Medium</SelectItem>
-                      <SelectItem value="High">High</SelectItem>
-                      <SelectItem value="Critical">Critical</SelectItem>
+                      {priorityLevels.map((priority) => (
+                        <SelectItem key={priority.id} value={priority.name}>
+                          {priority.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -929,6 +1077,129 @@ export default function ScheduledMaintenancePage() {
                   rows={3}
                 />
               </div>
+
+              {/* Trigger Configuration Section */}
+              <div className="space-y-4 border-t pt-4">
+                <Label className="text-base font-semibold">Trigger Configuration</Label>
+                <Tabs value={formData.primaryTriggerType} onValueChange={(value) => setFormData({...formData, primaryTriggerType: value})}>
+                  <TabsList className="grid w-full grid-cols-4">
+                    <TabsTrigger value="Time">Time-Based</TabsTrigger>
+                    <TabsTrigger value="Usage">Usage-Based</TabsTrigger>
+                    <TabsTrigger value="Condition">Condition-Based</TabsTrigger>
+                    <TabsTrigger value="Combined">Combined</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+
+                {/* Usage Trigger Fields */}
+                {(formData.primaryTriggerType === 'Usage' || formData.primaryTriggerType === 'Combined') && (
+                  <div className="space-y-3 bg-muted/50 p-4 rounded-md">
+                    <Label className="text-sm font-semibold">Usage Thresholds</Label>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="mileageTrigger" className="text-xs">Mileage (km)</Label>
+                        <Input
+                          id="mileageTrigger"
+                          type="number"
+                          value={formData.mileageTrigger}
+                          onChange={(e) => setFormData({...formData, mileageTrigger: e.target.value})}
+                          placeholder="e.g., 5000"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="operatingHoursTrigger" className="text-xs">Operating Hours</Label>
+                        <Input
+                          id="operatingHoursTrigger"
+                          type="number"
+                          value={formData.operatingHoursTrigger}
+                          onChange={(e) => setFormData({...formData, operatingHoursTrigger: e.target.value})}
+                          placeholder="e.g., 200"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="cycleTrigger" className="text-xs">Cycle Count</Label>
+                        <Input
+                          id="cycleTrigger"
+                          type="number"
+                          value={formData.cycleTrigger}
+                          onChange={(e) => setFormData({...formData, cycleTrigger: e.target.value})}
+                          placeholder="e.g., 1000"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Condition Trigger Fields */}
+                {(formData.primaryTriggerType === 'Condition' || formData.primaryTriggerType === 'Combined') && (
+                  <div className="space-y-2 bg-muted/50 p-4 rounded-md">
+                    <Label htmlFor="conditionCriteria" className="text-sm font-semibold">Condition Criteria (JSON)</Label>
+                    <Textarea
+                      id="conditionCriteria"
+                      value={formData.conditionCriteria}
+                      onChange={(e) => setFormData({...formData, conditionCriteria: e.target.value})}
+                      placeholder='{"parameter": "temperature", "operator": ">", "value": 80}'
+                      rows={3}
+                      className="font-mono text-xs"
+                    />
+                    <p className="text-xs text-muted-foreground">Supported operators: &gt;, &gt;=, &lt;, &lt;=, ==, !=</p>
+                  </div>
+                )}
+
+                {/* Combined Trigger Logic */}
+                {formData.primaryTriggerType === 'Combined' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="triggerLogic">Trigger Logic</Label>
+                    <Select value={formData.triggerLogic} onValueChange={(value) => setFormData({...formData, triggerLogic: value})}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select logic" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="AND">AND (All conditions must be met)</SelectItem>
+                        <SelectItem value="OR">OR (Any condition triggers)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              {/* Notification Settings Section */}
+              <div className="space-y-3 border-t pt-4">
+                <Label className="text-base font-semibold">Notification Settings</Label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="advanceNotificationDays">Advance Notification (days)</Label>
+                    <Input
+                      id="advanceNotificationDays"
+                      type="number"
+                      value={formData.advanceNotificationDays}
+                      onChange={(e) => setFormData({...formData, advanceNotificationDays: e.target.value})}
+                      placeholder="e.g., 7"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="autoGenerateWorkOrders">Auto-Generate Work Orders</Label>
+                    <Select value={formData.autoGenerateWorkOrders.toString()} onValueChange={(value) => setFormData({...formData, autoGenerateWorkOrders: value === 'true'})}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="true">Yes</SelectItem>
+                        <SelectItem value="false">No</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="notificationRecipients">Notification Recipients</Label>
+                  <Input
+                    id="notificationRecipients"
+                    value={formData.notificationRecipients}
+                    onChange={(e) => setFormData({...formData, notificationRecipients: e.target.value})}
+                    placeholder="email1@example.com, email2@example.com"
+                  />
+                  <p className="text-xs text-muted-foreground">Separate multiple emails with commas</p>
+                </div>
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -942,15 +1213,33 @@ export default function ScheduledMaintenancePage() {
         
         {/* Edit Scheduled Maintenance Dialog */}
         <ClientOnly>
-          <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="sm:max-w-[600px]">
+          <Dialog open={isEditDialogOpen} onOpenChange={(open) => {
+            setIsEditDialogOpen(open);
+            if (!open) {
+              setEditingSchedule(null);
+              setScheduleHistory([]);
+              setActiveTab('details');
+              resetForm();
+            }
+          }}>
+          <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit Scheduled Maintenance</DialogTitle>
               <DialogDescription>
                 Update the scheduled maintenance task details.
               </DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
+            
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="details">Details</TabsTrigger>
+                <TabsTrigger value="history">
+                  <History className="mr-2 h-4 w-4" />
+                  History
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="details" className="space-y-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="edit-title">Title</Label>
@@ -1033,15 +1322,19 @@ export default function ScheduledMaintenancePage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="edit-priority">Priority</Label>
-                  <Select value={formData.priority} onValueChange={(value) => setFormData({...formData, priority: value})}>
+                  <Select
+                    value={formData.priority}
+                    onValueChange={(value) => setFormData({ ...formData, priority: value })}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select priority" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Low">Low</SelectItem>
-                      <SelectItem value="Medium">Medium</SelectItem>
-                      <SelectItem value="High">High</SelectItem>
-                      <SelectItem value="Critical">Critical</SelectItem>
+                      {priorityLevels.map((priority) => (
+                        <SelectItem key={priority.id} value={priority.name}>
+                          {priority.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1095,23 +1388,231 @@ export default function ScheduledMaintenancePage() {
                   rows={3}
                 />
               </div>
-            </div>
+
+              {/* Trigger Configuration Section */}
+              <div className="space-y-4 border-t pt-4">
+                <Label className="text-base font-semibold">Trigger Configuration</Label>
+                <Tabs value={formData.primaryTriggerType} onValueChange={(value) => setFormData({...formData, primaryTriggerType: value})}>
+                  <TabsList className="grid w-full grid-cols-4">
+                    <TabsTrigger value="Time">Time-Based</TabsTrigger>
+                    <TabsTrigger value="Usage">Usage-Based</TabsTrigger>
+                    <TabsTrigger value="Condition">Condition-Based</TabsTrigger>
+                    <TabsTrigger value="Combined">Combined</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+
+                {/* Usage Trigger Fields */}
+                {(formData.primaryTriggerType === 'Usage' || formData.primaryTriggerType === 'Combined') && (
+                  <div className="space-y-3 bg-muted/50 p-4 rounded-md">
+                    <Label className="text-sm font-semibold">Usage Thresholds</Label>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-mileageTrigger" className="text-xs">Mileage (km)</Label>
+                        <Input
+                          id="edit-mileageTrigger"
+                          type="number"
+                          value={formData.mileageTrigger}
+                          onChange={(e) => setFormData({...formData, mileageTrigger: e.target.value})}
+                          placeholder="e.g., 5000"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-operatingHoursTrigger" className="text-xs">Operating Hours</Label>
+                        <Input
+                          id="edit-operatingHoursTrigger"
+                          type="number"
+                          value={formData.operatingHoursTrigger}
+                          onChange={(e) => setFormData({...formData, operatingHoursTrigger: e.target.value})}
+                          placeholder="e.g., 200"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-cycleTrigger" className="text-xs">Cycle Count</Label>
+                        <Input
+                          id="edit-cycleTrigger"
+                          type="number"
+                          value={formData.cycleTrigger}
+                          onChange={(e) => setFormData({...formData, cycleTrigger: e.target.value})}
+                          placeholder="e.g., 1000"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Condition Trigger Fields */}
+                {(formData.primaryTriggerType === 'Condition' || formData.primaryTriggerType === 'Combined') && (
+                  <div className="space-y-2 bg-muted/50 p-4 rounded-md">
+                    <Label htmlFor="edit-conditionCriteria" className="text-sm font-semibold">Condition Criteria (JSON)</Label>
+                    <Textarea
+                      id="edit-conditionCriteria"
+                      value={formData.conditionCriteria}
+                      onChange={(e) => setFormData({...formData, conditionCriteria: e.target.value})}
+                      placeholder='{"parameter": "temperature", "operator": ">", "value": 80}'
+                      rows={3}
+                      className="font-mono text-xs"
+                    />
+                    <p className="text-xs text-muted-foreground">Supported operators: &gt;, &gt;=, &lt;, &lt;=, ==, !=</p>
+                  </div>
+                )}
+
+                {/* Combined Trigger Logic */}
+                {formData.primaryTriggerType === 'Combined' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-triggerLogic">Trigger Logic</Label>
+                    <Select value={formData.triggerLogic} onValueChange={(value) => setFormData({...formData, triggerLogic: value})}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select logic" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="AND">AND (All conditions must be met)</SelectItem>
+                        <SelectItem value="OR">OR (Any condition triggers)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              {/* Notification Settings Section */}
+              <div className="space-y-3 border-t pt-4">
+                <Label className="text-base font-semibold">Notification Settings</Label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-advanceNotificationDays">Advance Notification (days)</Label>
+                    <Input
+                      id="edit-advanceNotificationDays"
+                      type="number"
+                      value={formData.advanceNotificationDays}
+                      onChange={(e) => setFormData({...formData, advanceNotificationDays: e.target.value})}
+                      placeholder="e.g., 7"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-autoGenerateWorkOrders">Auto-Generate Work Orders</Label>
+                    <Select value={formData.autoGenerateWorkOrders.toString()} onValueChange={(value) => setFormData({...formData, autoGenerateWorkOrders: value === 'true'})}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="true">Yes</SelectItem>
+                        <SelectItem value="false">No</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-notificationRecipients">Notification Recipients</Label>
+                  <Input
+                    id="edit-notificationRecipients"
+                    value={formData.notificationRecipients}
+                    onChange={(e) => setFormData({...formData, notificationRecipients: e.target.value})}
+                    placeholder="email1@example.com, email2@example.com"
+                  />
+                  <p className="text-xs text-muted-foreground">Separate multiple emails with commas</p>
+                </div>
+              </div>
+              </TabsContent>
+              
+              <TabsContent value="history" className="py-4">
+                <div className="space-y-4">
+                  {loadingHistory ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      <span className="ml-2 text-muted-foreground">Loading history...</span>
+                    </div>
+                  ) : scheduleHistory.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <History className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                      <p>No history records found for this schedule.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {scheduleHistory.map((historyItem) => {
+                        // Parse newValues to extract WorkOrderId if present
+                        let workOrderId = null;
+                        let workOrderTitle = null;
+                        try {
+                          if (historyItem.newValues && historyItem.changeType === 'WorkOrderGenerated') {
+                            const newValues = JSON.parse(historyItem.newValues);
+                            workOrderId = newValues.WorkOrderId;
+                            workOrderTitle = newValues.WorkOrderTitle;
+                          }
+                        } catch (e) {
+                          // Ignore parse errors
+                        }
+
+                        return (
+                          <div key={historyItem.id} className="border rounded-lg p-4 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <Badge variant="outline">{historyItem.changeType}</Badge>
+                                <span className="text-sm text-muted-foreground">
+                                  {format(new Date(historyItem.createdAt), 'MMM dd, yyyy HH:mm')}
+                                </span>
+                              </div>
+                              <span className="text-sm font-medium">{historyItem.changedByName}</span>
+                            </div>
+                            
+                            {historyItem.changeReason && (
+                              <div>
+                                <span className="text-sm font-medium">Reason: </span>
+                                <span className="text-sm text-muted-foreground">{historyItem.changeReason}</span>
+                              </div>
+                            )}
+                            
+                            {workOrderId && (
+                              <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-md border border-blue-200 dark:border-blue-800">
+                                <div className="flex items-center space-x-2">
+                                  <CheckCircle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                                  <span className="text-sm font-medium text-blue-900 dark:text-blue-100">Work Order Created:</span>
+                                </div>
+                                <div className="mt-2 ml-6">
+                                  <button
+                                    onClick={() => window.open(`/maintenance/work-orders?id=${workOrderId}`, '_blank')}
+                                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline font-medium flex items-center gap-1 cursor-pointer"
+                                    title="Open work order in new tab"
+                                  >
+                                    {workOrderTitle || `Work Order ${workOrderId.substring(0, 8)}...`}
+                                    <CheckCircle className="h-3 w-3" />
+                                  </button>
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    ID: {workOrderId}
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+                            
+                            {historyItem.previousValues && (
+                              <details className="group">
+                                <summary className="text-sm font-medium cursor-pointer hover:text-primary">
+                                  Previous Values
+                                </summary>
+                                <pre className="text-xs bg-muted p-2 rounded mt-2 overflow-x-auto">{historyItem.previousValues}</pre>
+                              </details>
+                            )}
+                            
+                            {historyItem.newValues && !workOrderId && (
+                              <details className="group">
+                                <summary className="text-sm font-medium cursor-pointer hover:text-primary">
+                                  New Values
+                                </summary>
+                                <pre className="text-xs bg-muted p-2 rounded mt-2 overflow-x-auto">{historyItem.newValues}</pre>
+                              </details>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            </Tabs>
+            
             <DialogFooter>
               <Button variant="outline" onClick={() => {
                 setIsEditDialogOpen(false);
                 setEditingSchedule(null);
-                // Reset form
-                setFormData({
-                  title: '',
-                  assetId: '',
-                  type: '',
-                  frequency: '',
-                  nextDue: '',
-                  assignedTechnician: '',
-                  priority: 'Medium',
-                  estimatedHours: '',
-                  description: ''
-                });
+                resetForm();
               }}>
                 Cancel
               </Button>
@@ -1176,10 +1677,11 @@ export default function ScheduledMaintenancePage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Priorities</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="critical">Critical</SelectItem>
+                {priorityLevels.map((priority) => (
+                  <SelectItem key={priority.id} value={priority.name.toLowerCase()}>
+                    {priority.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
 
@@ -1273,7 +1775,7 @@ export default function ScheduledMaintenancePage() {
                       </div>
                       <div className="flex items-center space-x-2">
                         <CalendarIcon className="h-4 w-4" />
-                        <span>Due: {new Date(item.nextDue).toLocaleDateString()}</span>
+                        <span>Due: {item.nextDue ? format(new Date(item.nextDue), 'MMM dd, yyyy') : 'Not set'}</span>
                       </div>
                       <div className="flex items-center space-x-2">
                         <Clock className="h-4 w-4" />
@@ -1284,7 +1786,7 @@ export default function ScheduledMaintenancePage() {
                     <div className="text-sm">
                       <span className="font-medium">Type:</span> {item.type} | 
                       <span className="font-medium"> Frequency:</span> {item.frequency} |
-                      <span className="font-medium"> Last Done:</span> {new Date(item.lastCompleted).toLocaleDateString()}
+                      <span className="font-medium"> Last Done:</span> {item.lastCompleted ? format(new Date(item.lastCompleted), 'MMM dd, yyyy') : 'Never'}
                     </div>
                     
                     <p className="text-sm text-muted-foreground">{item.description}</p>
@@ -1328,11 +1830,7 @@ export default function ScheduledMaintenancePage() {
                 <p><strong>Asset:</strong> {scheduleToGenerate.assetName}</p>
                 <p><strong>Type:</strong> {scheduleToGenerate.type}</p>
                 <p><strong>Priority:</strong> {scheduleToGenerate.priority}</p>
-                <p><strong>Due Date:</strong> {new Date(scheduleToGenerate.nextDue).toLocaleDateString('en-GB', { 
-                  day: '2-digit', 
-                  month: 'short', 
-                  year: 'numeric' 
-                }).replace(/ /g, '-')}</p>
+                <p><strong>Due Date:</strong> {format(new Date(scheduleToGenerate.nextDue), 'MMM dd, yyyy')}</p>
                 {scheduleToGenerate.assignedTechnician && scheduleToGenerate.assignedTechnician !== 'Unassigned' ? (
                   <p><strong>Assigned to:</strong> {scheduleToGenerate.assignedTechnician}</p>
                 ) : (
@@ -1349,11 +1847,19 @@ export default function ScheduledMaintenancePage() {
                 setIsConfirmDialogOpen(false);
                 setScheduleToGenerate(null);
               }}
+              disabled={isGeneratingWorkOrder}
             >
               Cancel
             </Button>
-            <Button onClick={handleConfirmGenerateWorkOrder}>
-              Generate Work Order
+            <Button onClick={handleConfirmGenerateWorkOrder} disabled={isGeneratingWorkOrder}>
+              {isGeneratingWorkOrder ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                'Generate Work Order'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

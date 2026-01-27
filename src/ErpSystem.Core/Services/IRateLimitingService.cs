@@ -62,7 +62,7 @@ namespace ErpSystem.Core.Services
     public enum RateLimitType
     {
         QueryExecution,
-        ReportGeneration, 
+        ReportGeneration,
         DataExport,
         SchemaInspection,
         ConnectionTest,

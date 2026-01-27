@@ -1,5 +1,7 @@
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Core.Interfaces.HR;
 
@@ -12,6 +14,7 @@ public interface IEmployeeRepository : IGenericRepository<Employee>
 {
     Task<Employee?> GetByEmployeeNumberAsync(string employeeNumber);
     Task<Employee?> GetByIdWithDetailsAsync(Guid id);
+    Task<Employee?> GetByApplicationUserIdAsync(Guid applicationUserId);
     Task<IEnumerable<Employee>> GetActiveEmployeesAsync();
     Task<IEnumerable<Employee>> GetByStationAsync(Guid stationId);
     Task<IEnumerable<Employee>> GetByDivisionAsync(Guid divisionId);

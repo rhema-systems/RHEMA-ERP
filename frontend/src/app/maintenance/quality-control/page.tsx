@@ -64,6 +64,8 @@ import {
 import { inspectionExecutionService, InspectionExecution, WorkOrderInfo } from '@/services/inspectionExecutionService';
 import { qualityChecklistService, QualityChecklist } from '@/services/qualityChecklistService';
 import { regulatoryComplianceService, ComplianceDashboard, ComplianceStatus } from '@/services/regulatoryComplianceService';
+import qualityControlService, { WorkOrderQualityCheck } from '@/services/qualityControlService';
+import { useToast } from '@/hooks/use-toast';
 
 interface QualityInspection {
   id: string;
@@ -100,6 +102,7 @@ interface QualityMetrics {
 
 export default function QualityControlPage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [inspections, setInspections] = useState<QualityInspection[]>([]);
   const [qualityTrendData, setQualityTrendData] = useState<any[]>([]);
   const [inspectionStatusData, setInspectionStatusData] = useState<any[]>([]);
@@ -114,6 +117,10 @@ export default function QualityControlPage() {
   const [complianceDashboard, setComplianceDashboard] = useState<ComplianceDashboard | null>(null);
   const [upcomingDeadlines, setUpcomingDeadlines] = useState<ComplianceStatus[]>([]);
   const [totalChecklists, setTotalChecklists] = useState(0);
+  const [pendingQCInspections, setPendingQCInspections] = useState<WorkOrderQualityCheck[]>([]);
+  const [completedInspections, setCompletedInspections] = useState<any[]>([]);
+  const [selectedCompletedInspection, setSelectedCompletedInspection] = useState<any | null>(null);
+  const [showInspectionDetailsDialog, setShowInspectionDetailsDialog] = useState(false);
 
   const getStatusBadge = (status: QualityInspection['status']) => {
     const colors = {
@@ -198,114 +205,23 @@ export default function QualityControlPage() {
     try {
       setLoading(true);
       
-      // Try to load quality inspections, fallback to mock data
-      try {
-        const [inspectionsResponse, trendDataResponse, statusDataResponse] = await Promise.all([
-          fetch('/api/maintenance/quality-control/inspections'),
-          fetch('/api/maintenance/quality-control/trend-data'),
-          fetch('/api/maintenance/quality-control/status-data')
-        ]);
-        
-        if (inspectionsResponse.ok) {
-          const inspectionsData = await inspectionsResponse.json();
-          setInspections(inspectionsData);
-        }
-        
-        if (trendDataResponse.ok) {
-          const trendData = await trendDataResponse.json();
-          setQualityTrendData(trendData);
-        }
-        
-        if (statusDataResponse.ok) {
-          const statusData = await statusDataResponse.json();
-          setInspectionStatusData(statusData);
-        }
-      } catch (fetchError) {
-        console.log('Quality control API not available, using mock data');
-        // Mock data for quality inspections
-        setInspections([
-          {
-            id: '1',
-            workOrderId: 'WO-2024-001',
-            workOrderNumber: 'WO-2024-001',
-            assetName: 'HVAC Unit 1',
-            inspectorId: '1',
-            inspectorName: 'John Smith',
-            checklist: { id: '1', name: 'HVAC Maintenance Checklist' },
-            status: 'Completed',
-            result: 'Pass',
-            score: 95,
-            scheduledDate: new Date().toISOString(),
-            completedDate: new Date().toISOString(),
-            notes: 'All systems operating normally'
-          },
-          {
-            id: '2',
-            workOrderId: 'WO-2024-002',
-            workOrderNumber: 'WO-2024-002',
-            assetName: 'Elevator 1',
-            inspectorId: '2',
-            inspectorName: 'Sarah Wilson',
-            checklist: { id: '2', name: 'Elevator Safety Checklist' },
-            status: 'In Progress',
-            result: 'Not Inspected',
-            score: 0,
-            scheduledDate: new Date().toISOString(),
-            notes: ''
-          }
-        ]);
-        setQualityTrendData([]);
-        setInspectionStatusData([]);
-      }
+      // Clear mock inspections - will be loaded from real API later
+      setInspections([]);
+      setQualityTrendData([]);
+      setInspectionStatusData([]);
       
-      // Try to load active inspections, fallback to mock data
+      // Try to load active inspections
       try {
         const activeInspectionsData = await inspectionExecutionService.getActiveInspections();
         setActiveInspections(activeInspectionsData);
       } catch (activeError) {
-        console.log('Active inspections API not available, using mock data');
-        setActiveInspections([
-          {
-            id: '1',
-            workOrderId: 'WO-2024-003',
-            workOrderNumber: 'WO-2024-003',
-            title: 'Generator Maintenance Inspection',
-            assetName: 'Emergency Generator',
-            checklist: { id: '3', name: 'Generator Inspection Checklist' },
-            status: 'In Progress',
-            progress: 45,
-            dueDate: new Date().toISOString()
-          }
-        ]);
+        console.log('Active inspections API not available:', activeError);
+        setActiveInspections([]);
       }
       
-      // Try to load completed work orders, fallback to mock data
-      try {
-        const workOrdersData = await inspectionExecutionService.getWorkOrdersForInspection();
-        setCompletedWorkOrders(workOrdersData);
-      } catch (workOrderError) {
-        console.log('Work orders API not available, using mock data');
-        setCompletedWorkOrders([
-          {
-            id: 'WO-2024-004',
-            workOrderNumber: 'WO-2024-004',
-            title: 'HVAC Filter Replacement',
-            assetName: 'Main Building HVAC Unit 2',
-            priority: 'Medium',
-            completedDate: new Date().toISOString(),
-            technician: 'Mike Johnson'
-          },
-          {
-            id: 'WO-2024-005',
-            workOrderNumber: 'WO-2024-005',
-            title: 'Fire System Test',
-            assetName: 'Fire Suppression System',
-            priority: 'High',
-            completedDate: new Date().toISOString(),
-            technician: 'Lisa Davis'
-          }
-        ]);
-      }
+      // Note: completedWorkOrders is no longer used - we use pendingQCInspections instead
+      // Keeping the state variable for backward compatibility but setting empty array
+      setCompletedWorkOrders([]);
       
       // Try to load compliance data, fallback to mock data
       try {
@@ -345,6 +261,26 @@ export default function QualityControlPage() {
         setTotalChecklists(5);
       }
       
+      // Load pending QC inspections from new API
+      try {
+        const pendingInspections = await qualityControlService.getPendingInspections();
+        setPendingQCInspections(pendingInspections);
+        console.log(`Loaded ${pendingInspections.length} pending QC inspections`);
+      } catch (pendingError) {
+        console.log('Pending QC inspections API not available:', pendingError);
+        setPendingQCInspections([]);
+      }
+      
+      // Load completed inspections
+      try {
+        const completed = await qualityControlService.getCompletedInspections();
+        setCompletedInspections(completed);
+        console.log(`Loaded ${completed.length} completed inspections`);
+      } catch (completedError) {
+        console.log('Completed inspections API not available:', completedError);
+        setCompletedInspections([]);
+      }
+      
     } catch (error) {
       console.error('Error loading dashboard data:', error);
       // Set fallback values
@@ -357,8 +293,17 @@ export default function QualityControlPage() {
     }
   };
 
-  const startInspection = (workOrderId: string) => {
-    router.push(`/maintenance/quality-control/inspect/${workOrderId}`);
+  const startInspection = async (workOrderId: string) => {
+    try {
+      // Start the inspection (changes status from Pending to InProgress)
+      await qualityControlService.startInspection(workOrderId);
+      // Navigate to inspection page
+      router.push(`/maintenance/quality-control/inspect/${workOrderId}`);
+    } catch (error) {
+      console.error('Error starting inspection:', error);
+      // Still navigate even if API call fails
+      router.push(`/maintenance/quality-control/inspect/${workOrderId}`);
+    }
   };
 
   const navigateToChecklistManagement = () => {
@@ -393,33 +338,33 @@ export default function QualityControlPage() {
               <DialogHeader>
                 <DialogTitle>Start Quality Inspection</DialogTitle>
                 <DialogDescription>
-                  Select a completed work order to begin quality inspection.
+                  Select a pending work order to begin quality inspection.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="workOrder">Completed Work Orders</Label>
+                  <Label htmlFor="workOrder">Pending QC Inspections</Label>
                   <div className="space-y-2 max-h-64 overflow-y-auto">
                     {loading ? (
-                      <div className="text-center py-4">Loading work orders...</div>
-                    ) : completedWorkOrders.length === 0 ? (
+                      <div className="text-center py-4">Loading pending inspections...</div>
+                    ) : pendingQCInspections.length === 0 ? (
                       <div className="text-center py-4 text-muted-foreground">
-                        No completed work orders available for inspection
+                        No work orders pending QC inspection
                       </div>
                     ) : (
-                      completedWorkOrders.map((workOrder) => (
-                        <div key={workOrder.id} className="border rounded-lg p-3 hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => {
-                          startInspection(workOrder.id);
+                      pendingQCInspections.map((qcInspection) => (
+                        <div key={qcInspection.id} className="border rounded-lg p-3 hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => {
+                          startInspection(qcInspection.workOrderId);
                           setIsCreateDialogOpen(false);
                         }}>
                           <div className="flex items-center justify-between">
                             <div>
-                              <p className="font-medium text-sm">{workOrder.workOrderNumber}</p>
-                              <p className="text-sm text-muted-foreground">{workOrder.title}</p>
-                              <p className="text-xs text-muted-foreground">{workOrder.assetName}</p>
+                              <p className="font-medium text-sm">{qcInspection.workOrderNumber}</p>
+                              <p className="text-sm text-muted-foreground">{qcInspection.checklistName}</p>
+                              <p className="text-xs text-muted-foreground">{qcInspection.assetName}</p>
                             </div>
                             <div className="flex items-center space-x-2">
-                              <Badge variant="outline">{workOrder.priority}</Badge>
+                              <Badge variant="outline" style={{ backgroundColor: '#fef3c7', color: '#92400e', borderColor: '#fef3c7' }}>{qcInspection.status}</Badge>
                               <Button size="sm" variant="ghost">
                                 <Play className="h-4 w-4" />
                               </Button>
@@ -466,7 +411,7 @@ export default function QualityControlPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-lg font-semibold">Start Inspection</p>
-                  <p className="text-sm text-muted-foreground">{completedWorkOrders.length} work orders ready</p>
+                  <p className="text-sm text-muted-foreground">{pendingQCInspections.length} pending inspections</p>
                 </div>
                 <Play className="h-8 w-8 text-blue-500" />
               </div>
@@ -584,13 +529,13 @@ export default function QualityControlPage() {
 
       {/* Compliance Alerts */}
       {!loading && upcomingDeadlines.length > 0 && (
-        <Card className="border-yellow-200 bg-yellow-50">
+        <Card className="border-yellow-400 bg-yellow-50">
           <CardHeader>
-            <CardTitle className="flex items-center space-x-2 text-yellow-800">
-              <AlertCircle className="h-5 w-5" />
+            <CardTitle className="flex items-center space-x-2 text-yellow-900">
+              <AlertCircle className="h-5 w-5 text-yellow-600" />
               <span>Upcoming Compliance Deadlines</span>
             </CardTitle>
-            <CardDescription>
+            <CardDescription className="text-yellow-800">
               These assets have compliance requirements due within 30 days
             </CardDescription>
           </CardHeader>
@@ -679,6 +624,189 @@ export default function QualityControlPage() {
         </Card>
       </div>
 
+      {/* Pending QC Inspections */}
+      {!loading && pendingQCInspections.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <Clock className="h-5 w-5" />
+              <span>Pending QC Inspections</span>
+            </CardTitle>
+            <CardDescription>
+              Work orders awaiting quality control inspection
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {pendingQCInspections.map((qcInspection) => (
+                <div key={qcInspection.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-sm">{qcInspection.workOrderNumber}</p>
+                      <p className="text-sm text-muted-foreground">{qcInspection.checklistName}</p>
+                      <p className="text-xs text-muted-foreground">{qcInspection.assetName}</p>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Badge style={{ backgroundColor: '#fef3c7', color: '#92400e', borderColor: '#fef3c7' }}>
+                        {qcInspection.status}
+                      </Badge>
+                      <Button size="sm" onClick={() => startInspection(qcInspection.workOrderId)}>
+                        <Play className="mr-2 h-4 w-4" />
+                        Start
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    Submitted: {(() => {
+                      const d = new Date(qcInspection.inspectionDate);
+                      const day = d.getDate().toString().padStart(2, '0');
+                      const month = d.toLocaleString('en-GB', { month: 'short' });
+                      const year = d.getFullYear();
+                      const hours = d.getHours().toString().padStart(2, '0');
+                      const minutes = d.getMinutes().toString().padStart(2, '0');
+                      const seconds = d.getSeconds().toString().padStart(2, '0');
+                      return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+                    })()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Completed Inspections */}
+      {!loading && completedInspections.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <CheckCircle className="h-5 w-5" />
+              <span>Completed Inspections</span>
+            </CardTitle>
+            <CardDescription>
+              Recent quality control inspections with results
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Work Order</TableHead>
+                  <TableHead>Asset</TableHead>
+                  <TableHead>Checklist</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Result</TableHead>
+                  <TableHead>Score</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {completedInspections.map((inspection) => (
+                  <TableRow key={inspection.id}>
+                    <TableCell>
+                      <p className="font-medium text-sm">{inspection.workOrderNumber}</p>
+                    </TableCell>
+                    <TableCell className="text-sm">{inspection.assetName}</TableCell>
+                    <TableCell className="text-sm">{inspection.checklistName}</TableCell>
+                    <TableCell className="text-sm">
+                      {new Date(inspection.inspectionDate).toLocaleDateString('en-GB', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: '2-digit'
+                      }).replace(/ /g, '-')}
+                      {' '}
+                      {new Date(inspection.inspectionDate).toLocaleTimeString('en-GB', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: false
+                      })}
+                    </TableCell>
+                    <TableCell>
+                      <Badge style={inspection.overallResult === 'Pass' ? { backgroundColor: '#d1fae5', color: '#065f46', borderColor: '#d1fae5' } : { backgroundColor: '#fee2e2', color: '#991b1b', borderColor: '#fee2e2' }}>
+                        {inspection.overallResult === 'Pass' ? (
+                          <CheckCircle className="h-3 w-3 mr-1" />
+                        ) : (
+                          <XCircle className="h-3 w-3 mr-1" />
+                        )}
+                        {inspection.overallResult}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-medium">{inspection.score}%</span>
+                        <div className="w-16">
+                          <Progress value={inspection.score} className="h-2" />
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center space-x-2">
+                        {inspection.overallResult === 'Pass' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              try {
+                                const token = localStorage.getItem('authToken');
+                                const response = await fetch(
+                                  `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/maintenance/quality-control/certificate/${inspection.id}`,
+                                  {
+                                    headers: {
+                                      'Authorization': token ? `Bearer ${token}` : ''
+                                    }
+                                  }
+                                );
+                                
+                                if (response.ok) {
+                                  const blob = await response.blob();
+                                  const url = window.URL.createObjectURL(blob);
+                                  const link = document.createElement('a');
+                                  link.href = url;
+                                  link.download = `QC-Certificate-${inspection.id}.pdf`;
+                                  link.click();
+                                  window.URL.revokeObjectURL(url);
+                                } else {
+                                  toast({
+                                    title: "Error",
+                                    description: "Failed to download certificate",
+                                    variant: "destructive"
+                                  });
+                                }
+                              } catch (error) {
+                                console.error('Error downloading certificate:', error);
+                                toast({
+                                  title: "Error",
+                                  description: "Failed to download certificate",
+                                  variant: "destructive"
+                                });
+                              }
+                            }}
+                          >
+                            <FileText className="h-4 w-4 mr-1" />
+                            View Certificate
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setSelectedCompletedInspection(inspection);
+                            setShowInspectionDetailsDialog(true);
+                          }}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Active Inspections */}
       {!loading && activeInspections.length > 0 && (
         <Card>
@@ -702,7 +830,7 @@ export default function QualityControlPage() {
                       <p className="text-xs text-muted-foreground">{inspection.assetName}</p>
                     </div>
                     <div className="flex items-center space-x-2">
-                      <Badge className="bg-blue-100 text-blue-800">
+                      <Badge style={{ backgroundColor: '#dbeafe', color: '#1e40af', borderColor: '#dbeafe' }}>
                         {inspection.status}
                       </Badge>
                       <Button size="sm" onClick={() => startInspection(inspection.workOrderId)}>
@@ -727,69 +855,84 @@ export default function QualityControlPage() {
       )}
 
       {/* Inspections Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Quality Inspections</CardTitle>
-          <CardDescription>All quality control inspections and their results</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Work Order</TableHead>
-                <TableHead>Asset</TableHead>
-                <TableHead>Inspector</TableHead>
-                <TableHead>Scheduled Date</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Result</TableHead>
-                <TableHead>Score</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {inspections.map((inspection) => (
-                <TableRow key={inspection.id}>
-                  <TableCell>
-                    <div>
-                      <p className="font-medium">{inspection.workOrderId}</p>
-                      <p className="text-sm text-muted-foreground">{inspection.workOrderTitle}</p>
-                    </div>
-                  </TableCell>
-                  <TableCell>{inspection.assetName}</TableCell>
-                  <TableCell>{inspection.inspectorName}</TableCell>
-                  <TableCell>{new Date(inspection.scheduledDate).toLocaleDateString()}</TableCell>
-                  <TableCell>{getStatusBadge(inspection.status)}</TableCell>
-                  <TableCell>{getResultBadge(inspection.result)}</TableCell>
-                  <TableCell>
-                    {inspection.status === 'Completed' ? (
+      {!loading && completedInspections.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Quality Inspections</CardTitle>
+            <CardDescription>All quality control inspections and their results</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Work Order</TableHead>
+                  <TableHead>Asset</TableHead>
+                  <TableHead>Checklist</TableHead>
+                  <TableHead>Inspector</TableHead>
+                  <TableHead>Inspection Date</TableHead>
+                  <TableHead>Result</TableHead>
+                  <TableHead>Score</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {completedInspections.map((inspection) => (
+                  <TableRow key={inspection.id}>
+                    <TableCell>
+                      <p className="font-medium text-sm">{inspection.workOrderNumber}</p>
+                    </TableCell>
+                    <TableCell className="text-sm">{inspection.assetName}</TableCell>
+                    <TableCell className="text-sm">{inspection.checklistName}</TableCell>
+                    <TableCell className="text-sm">{inspection.inspectorName || '-'}</TableCell>
+                    <TableCell className="text-sm">
+                      {(() => {
+                        const d = new Date(inspection.inspectionDate);
+                        const day = d.getDate().toString().padStart(2, '0');
+                        const month = d.toLocaleString('en-GB', { month: 'short' });
+                        const year = d.getFullYear();
+                        const hours = d.getHours().toString().padStart(2, '0');
+                        const minutes = d.getMinutes().toString().padStart(2, '0');
+                        const seconds = d.getSeconds().toString().padStart(2, '0');
+                        return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+                      })()}
+                    </TableCell>
+                    <TableCell>
+                      <Badge style={inspection.overallResult === 'Pass' ? { backgroundColor: '#d1fae5', color: '#065f46', borderColor: '#d1fae5' } : { backgroundColor: '#fee2e2', color: '#991b1b', borderColor: '#fee2e2' }}>
+                        {inspection.overallResult === 'Pass' ? (
+                          <CheckCircle className="h-3 w-3 mr-1" />
+                        ) : (
+                          <XCircle className="h-3 w-3 mr-1" />
+                        )}
+                        {inspection.overallResult}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
                       <div className="flex items-center space-x-2">
-                        <span className="font-medium">{inspection.score}</span>
-                        <div className="w-20">
+                        <span className="font-medium">{inspection.score}%</span>
+                        <div className="w-16">
                           <Progress value={inspection.score} className="h-2" />
                         </div>
                       </div>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setSelectedInspection(inspection);
-                        setIsViewDialogOpen(true);
-                      }}
-                    >
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setSelectedCompletedInspection(inspection);
+                          setShowInspectionDetailsDialog(true);
+                        }}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       {/* View Inspection Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
@@ -914,6 +1057,146 @@ export default function QualityControlPage() {
             <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>
               Close
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Completed Inspection Details Dialog */}
+      <Dialog open={showInspectionDetailsDialog} onOpenChange={setShowInspectionDetailsDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Inspection Details</DialogTitle>
+            <DialogDescription>
+              Completed quality control inspection information
+            </DialogDescription>
+          </DialogHeader>
+          {selectedCompletedInspection && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Work Order</Label>
+                  <p className="text-sm font-medium mt-1">{selectedCompletedInspection.workOrderNumber}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Job Card Number</Label>
+                  <p className="text-sm mt-1">{selectedCompletedInspection.jobCardNumber}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Asset</Label>
+                  <p className="text-sm mt-1">{selectedCompletedInspection.assetName}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Checklist</Label>
+                  <p className="text-sm mt-1">{selectedCompletedInspection.checklistName}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Inspection Date</Label>
+                  <p className="text-sm mt-1">
+                    {new Date(selectedCompletedInspection.inspectionDate).toLocaleDateString('en-GB', {
+                      day: '2-digit',
+                      month: 'short',
+                      year: '2-digit'
+                    }).replace(/ /g, '-')}
+                    {' '}
+                    {new Date(selectedCompletedInspection.inspectionDate).toLocaleTimeString('en-GB', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                      hour12: false
+                    })}
+                  </p>
+                </div>
+                <div></div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Result</Label>
+                  <div className="mt-1">
+                    <Badge style={selectedCompletedInspection.overallResult === 'Pass' ? { backgroundColor: '#d1fae5', color: '#065f46', borderColor: '#d1fae5' } : { backgroundColor: '#fee2e2', color: '#991b1b', borderColor: '#fee2e2' }}>
+                      {selectedCompletedInspection.overallResult === 'Pass' ? (
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                      ) : (
+                        <XCircle className="h-3 w-3 mr-1" />
+                      )}
+                      {selectedCompletedInspection.overallResult}
+                    </Badge>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Score</Label>
+                  <div className="flex items-center space-x-2 mt-1">
+                    <span className="text-lg font-bold">{selectedCompletedInspection.score}%</span>
+                    <div className="w-24">
+                      <Progress value={selectedCompletedInspection.score} className="h-2" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {selectedCompletedInspection.notes && (
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Inspector Notes</Label>
+                  <div className="border rounded-lg p-3 mt-1 bg-muted/50">
+                    <p className="text-sm">{selectedCompletedInspection.notes}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowInspectionDetailsDialog(false)}>
+              Close
+            </Button>
+            {selectedCompletedInspection?.overallResult === 'Pass' && (
+              <Button
+                onClick={async () => {
+                  try {
+                    const token = localStorage.getItem('authToken');
+                    const response = await fetch(
+                      `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/maintenance/quality-control/certificate/${selectedCompletedInspection.id}`,
+                      {
+                        headers: {
+                          'Authorization': token ? `Bearer ${token}` : ''
+                        }
+                      }
+                    );
+                    
+                    if (response.ok) {
+                      const blob = await response.blob();
+                      const url = window.URL.createObjectURL(blob);
+                      const link = document.createElement('a');
+                      link.href = url;
+                      link.download = `QC-Certificate-${selectedCompletedInspection.id}.pdf`;
+                      link.click();
+                      window.URL.revokeObjectURL(url);
+                    } else {
+                      toast({
+                        title: "Error",
+                        description: "Failed to download certificate",
+                        variant: "destructive"
+                      });
+                    }
+                  } catch (error) {
+                    console.error('Error downloading certificate:', error);
+                    toast({
+                      title: "Error",
+                      description: "Failed to download certificate",
+                      variant: "destructive"
+                    });
+                  }
+                }}
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                View Certificate
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -31,7 +31,7 @@ namespace ErpSystem.Web.Middleware
 
             try
             {
-                _logger.LogDebug("[{RequestId}] {Method} {Path} - Start", 
+                _logger.LogDebug("[{RequestId}] {Method} {Path} - Start",
                     requestId, context.Request.Method, context.Request.Path);
 
                 // Set up to add response time header when response starts
@@ -55,13 +55,13 @@ namespace ErpSystem.Web.Middleware
 
                 stopwatch.Stop();
                 _logger.LogDebug("[{RequestId}] {Method} {Path} - {StatusCode} - {ElapsedMs}ms",
-                    requestId, context.Request.Method, context.Request.Path, 
+                    requestId, context.Request.Method, context.Request.Path,
                     context.Response.StatusCode, stopwatch.ElapsedMilliseconds);
             }
             catch (Exception ex)
             {
                 stopwatch.Stop();
-                _logger.LogError(ex, "[{RequestId}] {Method} {Path} - Exception after {ElapsedMs}ms", 
+                _logger.LogError(ex, "[{RequestId}] {Method} {Path} - Exception after {ElapsedMs}ms",
                     requestId, context.Request.Method, context.Request.Path, stopwatch.ElapsedMilliseconds);
                 throw;
             }
@@ -87,16 +87,24 @@ namespace ErpSystem.Web.Middleware
 
                 // Add security headers if not already present
                 if (!headers.ContainsKey("X-Content-Type-Options"))
-                    headers["X-Content-Type-Options"] = "nosniff";
+                {
+                    headers.XContentTypeOptions = "nosniff";
+                }
 
                 if (!headers.ContainsKey("X-Frame-Options"))
+                {
                     headers["X-Frame-Options"] = "DENY";
+                }
 
                 if (!headers.ContainsKey("X-XSS-Protection"))
+                {
                     headers["X-XSS-Protection"] = "1; mode=block";
+                }
 
                 if (!headers.ContainsKey("Referrer-Policy"))
+                {
                     headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+                }
 
                 // In development, add some debugging headers
                 if (_environment.IsDevelopment())

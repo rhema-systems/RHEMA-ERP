@@ -1,7 +1,7 @@
-using Microsoft.Extensions.Logging;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Services;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Workflow;
 
@@ -61,14 +61,10 @@ public class WorkflowEntityTypeService : IWorkflowEntityTypeService
     {
         _logger.LogInformation("Updating workflow entity type: {Id}", entityType.Id);
 
-        var existingEntityType = await _workflowEntityTypeRepository.GetByIdAsync(entityType.Id);
-        if (existingEntityType == null)
-        {
-            throw new InvalidOperationException($"Workflow entity type with ID {entityType.Id} not found");
-        }
+        var existingEntityType = await _workflowEntityTypeRepository.GetByIdAsync(entityType.Id) ?? throw new InvalidOperationException($"Workflow entity type with ID {entityType.Id} not found");
 
         // Check for duplicate name (excluding current entity type)
-        var duplicateEntityType = await _workflowEntityTypeRepository.GetByNameAsync(entityType.Name, entityType.TenantId);
+        var duplicateEntityType = await _workflowEntityTypeRepository.GetByNameAsync(entityType.Name, entityType.TenantId, cancellationToken);
         if (duplicateEntityType != null && duplicateEntityType.Id != entityType.Id)
         {
             throw new InvalidOperationException($"An entity type with name '{entityType.Name}' already exists");
@@ -104,12 +100,7 @@ public class WorkflowEntityTypeService : IWorkflowEntityTypeService
     {
         _logger.LogInformation("Activating workflow entity type: {Id}", entityTypeId);
 
-        var entityType = await _workflowEntityTypeRepository.GetByIdAsync(entityTypeId);
-        if (entityType == null)
-        {
-            throw new InvalidOperationException($"Workflow entity type with ID {entityTypeId} not found");
-        }
-
+        var entityType = await _workflowEntityTypeRepository.GetByIdAsync(entityTypeId) ?? throw new InvalidOperationException($"Workflow entity type with ID {entityTypeId} not found");
         if (entityType.IsActive)
         {
             _logger.LogInformation("Workflow entity type {Id} is already active", entityTypeId);
@@ -128,12 +119,7 @@ public class WorkflowEntityTypeService : IWorkflowEntityTypeService
     {
         _logger.LogInformation("Deactivating workflow entity type: {Id}", entityTypeId);
 
-        var entityType = await _workflowEntityTypeRepository.GetByIdAsync(entityTypeId);
-        if (entityType == null)
-        {
-            throw new InvalidOperationException($"Workflow entity type with ID {entityTypeId} not found");
-        }
-
+        var entityType = await _workflowEntityTypeRepository.GetByIdAsync(entityTypeId) ?? throw new InvalidOperationException($"Workflow entity type with ID {entityTypeId} not found");
         if (!entityType.IsActive)
         {
             _logger.LogInformation("Workflow entity type {Id} is already inactive", entityTypeId);

@@ -1,7 +1,7 @@
-using Microsoft.EntityFrameworkCore;
-using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories;
 
@@ -30,7 +30,7 @@ public class WorkflowApprovalRepository : GenericRepository<WorkflowApproval>, I
         return await _dbSet
             .Include(a => a.StepInstance)
             .ThenInclude(si => si.WorkflowInstance)
-            .Where(a => a.ApproverId == userId && a.TenantId == tenantId && 
+            .Where(a => a.ApproverId == userId && a.TenantId == tenantId &&
                        a.Status == WorkflowApprovalStatus.Pending && !a.IsDeleted)
             .OrderBy(a => a.DueDate)
             .ToListAsync(cancellationToken);

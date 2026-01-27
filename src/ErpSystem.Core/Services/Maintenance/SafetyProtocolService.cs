@@ -1,9 +1,9 @@
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -48,7 +48,9 @@ public class SafetyProtocolService : ISafetyProtocolService
             _logger.LogInformation("Creating safety protocol: {ProtocolTitle}", createDto.Title);
 
             if (!await _protocolRepository.IsCodeUniqueAsync(createDto.Code))
+            {
                 throw new ArgumentException($"Protocol code '{createDto.Code}' already exists");
+            }
 
             var protocol = new SafetyProtocol
             {
@@ -84,9 +86,9 @@ public class SafetyProtocolService : ISafetyProtocolService
             };
 
             await _protocolRepository.AddAsync(protocol);
-            
+
             _logger.LogInformation("Created safety protocol {ProtocolId} successfully", protocol.Id);
-            
+
             return await MapToDto(protocol);
         }
         catch (Exception ex)
@@ -102,10 +104,7 @@ public class SafetyProtocolService : ISafetyProtocolService
         {
             _logger.LogInformation("Updating safety protocol: {ProtocolId}", id);
 
-            var protocol = await _protocolRepository.GetByIdAsync(id);
-            if (protocol == null)
-                throw new ArgumentException($"Protocol with ID {id} not found");
-
+            var protocol = await _protocolRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Protocol with ID {id} not found");
             protocol.Title = updateDto.Title;
             protocol.Description = updateDto.Description;
             protocol.Category = updateDto.Category;
@@ -134,9 +133,9 @@ public class SafetyProtocolService : ISafetyProtocolService
             protocol.LastModifiedById = _currentUserProvider.UserId;
 
             await _protocolRepository.UpdateAsync(protocol);
-            
+
             _logger.LogInformation("Updated safety protocol {ProtocolId} successfully", id);
-            
+
             return await MapToDto(protocol);
         }
         catch (Exception ex)
@@ -152,15 +151,14 @@ public class SafetyProtocolService : ISafetyProtocolService
         {
             _logger.LogInformation("Deleting safety protocol: {ProtocolId}", id);
 
-            var protocol = await _protocolRepository.GetByIdAsync(id);
-            if (protocol == null)
-                throw new ArgumentException($"Protocol with ID {id} not found");
-
+            var protocol = await _protocolRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Protocol with ID {id} not found");
             if (protocol.IsRegulatory)
+            {
                 throw new InvalidOperationException("Cannot delete regulatory protocols. Deactivate instead.");
+            }
 
             await _protocolRepository.DeleteAsync(id);
-            
+
             _logger.LogInformation("Deleted safety protocol {ProtocolId} successfully", id);
         }
         catch (Exception ex)
@@ -180,12 +178,12 @@ public class SafetyProtocolService : ISafetyProtocolService
     {
         var protocols = await _protocolRepository.GetAllAsync();
         var result = new List<SafetyProtocolDto>();
-        
+
         foreach (var protocol in protocols)
         {
             result.Add(await MapToDto(protocol));
         }
-        
+
         return result;
     }
 
@@ -203,22 +201,34 @@ public class SafetyProtocolService : ISafetyProtocolService
         }
 
         if (!string.IsNullOrEmpty(filter.Category))
+        {
             filtered = filtered.Where(p => p.Category == filter.Category);
+        }
 
         if (!string.IsNullOrEmpty(filter.RiskLevel))
+        {
             filtered = filtered.Where(p => p.RiskLevel == filter.RiskLevel);
+        }
 
         if (filter.IsActive.HasValue)
+        {
             filtered = filtered.Where(p => p.IsActive == filter.IsActive.Value);
+        }
 
         if (filter.IsRegulatory.HasValue)
+        {
             filtered = filtered.Where(p => p.IsRegulatory == filter.IsRegulatory.Value);
+        }
 
         if (filter.NeedsReview.HasValue && filter.NeedsReview.Value)
+        {
             filtered = filtered.Where(p => p.NextReviewDate <= DateTime.UtcNow.AddDays(30));
+        }
 
         if (filter.IsExpired.HasValue && filter.IsExpired.Value)
+        {
             filtered = filtered.Where(p => p.ExpirationDate <= DateTime.UtcNow);
+        }
 
         var totalCount = filtered.Count();
         var protocolsPage = filtered
@@ -249,12 +259,12 @@ public class SafetyProtocolService : ISafetyProtocolService
     {
         var protocols = await _protocolRepository.GetActiveAsync();
         var result = new List<SafetyProtocolDto>();
-        
+
         foreach (var protocol in protocols)
         {
             result.Add(await MapToDto(protocol));
         }
-        
+
         return result;
     }
 
@@ -262,12 +272,12 @@ public class SafetyProtocolService : ISafetyProtocolService
     {
         var protocols = await _protocolRepository.GetByCategoryAsync(category);
         var result = new List<SafetyProtocolDto>();
-        
+
         foreach (var protocol in protocols)
         {
             result.Add(await MapToDto(protocol));
         }
-        
+
         return result;
     }
 
@@ -275,12 +285,12 @@ public class SafetyProtocolService : ISafetyProtocolService
     {
         var protocols = await _protocolRepository.GetByRiskLevelAsync(riskLevel);
         var result = new List<SafetyProtocolDto>();
-        
+
         foreach (var protocol in protocols)
         {
             result.Add(await MapToDto(protocol));
         }
-        
+
         return result;
     }
 
@@ -288,12 +298,12 @@ public class SafetyProtocolService : ISafetyProtocolService
     {
         var protocols = await _protocolRepository.GetMandatoryAsync();
         var result = new List<SafetyProtocolDto>();
-        
+
         foreach (var protocol in protocols)
         {
             result.Add(await MapToDto(protocol));
         }
-        
+
         return result;
     }
 
@@ -301,12 +311,12 @@ public class SafetyProtocolService : ISafetyProtocolService
     {
         var protocols = await _protocolRepository.GetBySeverityAsync(severity);
         var result = new List<SafetyProtocolDto>();
-        
+
         foreach (var protocol in protocols)
         {
             result.Add(await MapToDto(protocol));
         }
-        
+
         return result;
     }
 
@@ -314,12 +324,12 @@ public class SafetyProtocolService : ISafetyProtocolService
     {
         var protocols = await _protocolRepository.GetByRegulatoryStandardAsync(standard);
         var result = new List<SafetyProtocolDto>();
-        
+
         foreach (var protocol in protocols)
         {
             result.Add(await MapToDto(protocol));
         }
-        
+
         return result;
     }
 
@@ -327,12 +337,12 @@ public class SafetyProtocolService : ISafetyProtocolService
     {
         var protocols = await _protocolRepository.GetOverdueAsync();
         var result = new List<SafetyProtocolDto>();
-        
+
         foreach (var protocol in protocols)
         {
             result.Add(await MapToDto(protocol));
         }
-        
+
         return result;
     }
 
@@ -340,12 +350,12 @@ public class SafetyProtocolService : ISafetyProtocolService
     {
         var protocols = await _protocolRepository.GetDueForReviewAsync();
         var result = new List<SafetyProtocolDto>();
-        
+
         foreach (var protocol in protocols)
         {
             result.Add(await MapToDto(protocol));
         }
-        
+
         return result;
     }
 
@@ -353,26 +363,23 @@ public class SafetyProtocolService : ISafetyProtocolService
     {
         var protocols = await _protocolRepository.GetExpiredAsync();
         var result = new List<SafetyProtocolDto>();
-        
+
         foreach (var protocol in protocols)
         {
             result.Add(await MapToDto(protocol));
         }
-        
+
         return result;
     }
 
     public async Task<SafetyProtocolDto> ToggleProtocolStatusAsync(Guid id)
     {
-        var protocol = await _protocolRepository.GetByIdAsync(id);
-        if (protocol == null)
-            throw new ArgumentException($"Protocol with ID {id} not found");
-
+        var protocol = await _protocolRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Protocol with ID {id} not found");
         protocol.IsActive = !protocol.IsActive;
         protocol.LastModifiedById = _currentUserProvider.UserId;
-        
+
         await _protocolRepository.UpdateAsync(protocol);
-        
+
         return await MapToDto(protocol);
     }
 
@@ -384,10 +391,7 @@ public class SafetyProtocolService : ISafetyProtocolService
     // Approval workflow methods
     public async Task SubmitForApprovalAsync(Guid protocolId)
     {
-        var protocol = await _protocolRepository.GetByIdAsync(protocolId);
-        if (protocol == null)
-            throw new ArgumentException($"Protocol with ID {protocolId} not found");
-
+        var protocol = await _protocolRepository.GetByIdAsync(protocolId) ?? throw new ArgumentException($"Protocol with ID {protocolId} not found");
         protocol.Status = "PendingApproval";
         protocol.LastModifiedById = _currentUserProvider.UserId;
         await _protocolRepository.UpdateAsync(protocol);
@@ -397,10 +401,7 @@ public class SafetyProtocolService : ISafetyProtocolService
 
     public async Task ApproveProtocolAsync(Guid protocolId, ApprovalRequestDto approvalRequest)
     {
-        var protocol = await _protocolRepository.GetByIdAsync(protocolId);
-        if (protocol == null)
-            throw new ArgumentException($"Protocol with ID {protocolId} not found");
-
+        var protocol = await _protocolRepository.GetByIdAsync(protocolId) ?? throw new ArgumentException($"Protocol with ID {protocolId} not found");
         protocol.Status = "Approved";
         protocol.ApprovedBy = approvalRequest.ApproverName;
         protocol.ApprovalDate = DateTime.UtcNow;
@@ -412,10 +413,7 @@ public class SafetyProtocolService : ISafetyProtocolService
 
     public async Task RejectProtocolAsync(Guid protocolId, ApprovalRequestDto approvalRequest)
     {
-        var protocol = await _protocolRepository.GetByIdAsync(protocolId);
-        if (protocol == null)
-            throw new ArgumentException($"Protocol with ID {protocolId} not found");
-
+        var protocol = await _protocolRepository.GetByIdAsync(protocolId) ?? throw new ArgumentException($"Protocol with ID {protocolId} not found");
         protocol.Status = "Rejected";
         protocol.LastModifiedById = _currentUserProvider.UserId;
         await _protocolRepository.UpdateAsync(protocol);
@@ -425,10 +423,7 @@ public class SafetyProtocolService : ISafetyProtocolService
 
     public async Task RequestChangesAsync(Guid protocolId, ApprovalRequestDto approvalRequest)
     {
-        var protocol = await _protocolRepository.GetByIdAsync(protocolId);
-        if (protocol == null)
-            throw new ArgumentException($"Protocol with ID {protocolId} not found");
-
+        var protocol = await _protocolRepository.GetByIdAsync(protocolId) ?? throw new ArgumentException($"Protocol with ID {protocolId} not found");
         protocol.Status = "ChangesRequested";
         protocol.LastModifiedById = _currentUserProvider.UserId;
         await _protocolRepository.UpdateAsync(protocol);
@@ -587,7 +582,7 @@ public class SafetyProtocolService : ISafetyProtocolService
             ProtocolCode = p.Code,
             TotalAdherence = adherenceRecords.Count(a => a.ProtocolId == p.Id),
             TotalViolations = violationRecords.Count(v => v.ProtocolId == p.Id),
-            ComplianceRate = adherenceRecords.Any(a => a.ProtocolId == p.Id) 
+            ComplianceRate = adherenceRecords.Any(a => a.ProtocolId == p.Id)
                 ? (decimal)adherenceRecords.Count(a => a.ProtocolId == p.Id && a.AdherenceLevel == "Full") / adherenceRecords.Count(a => a.ProtocolId == p.Id) * 100
                 : 0
         });
@@ -624,7 +619,7 @@ public class SafetyProtocolService : ISafetyProtocolService
             ProtocolsDueForReview = protocols.Count(p => p.NextReviewDate <= DateTime.UtcNow.AddDays(30)),
             ExpiredProtocols = protocols.Count(p => p.ExpirationDate <= DateTime.UtcNow),
             TotalComplianceChecks = complianceRecords.Count(),
-            OverallComplianceRate = complianceRecords.Any() ? 
+            OverallComplianceRate = complianceRecords.Any() ?
                 (decimal)complianceRecords.Count(r => r.ComplianceStatus == "Compliant") / complianceRecords.Count() * 100 : 0,
             AnalysisPeriodStart = startDate,
             AnalysisPeriodEnd = endDate
@@ -641,10 +636,7 @@ public class SafetyProtocolService : ISafetyProtocolService
         {
             _logger.LogInformation("Recording compliance check for protocol {ProtocolId}", createDto.ProtocolId);
 
-            var protocol = await _protocolRepository.GetByIdAsync(createDto.ProtocolId);
-            if (protocol == null)
-                throw new ArgumentException($"Protocol with ID {createDto.ProtocolId} not found");
-
+            var protocol = await _protocolRepository.GetByIdAsync(createDto.ProtocolId) ?? throw new ArgumentException($"Protocol with ID {createDto.ProtocolId} not found");
             var complianceRecord = new SafetyComplianceRecord
             {
                 Id = Guid.NewGuid(),
@@ -667,10 +659,10 @@ public class SafetyProtocolService : ISafetyProtocolService
 
             // Update protocol compliance statistics
             await UpdateProtocolComplianceStats(createDto.ProtocolId);
-            
-            _logger.LogInformation("Recorded compliance check {ComplianceId} for protocol {ProtocolId}", 
+
+            _logger.LogInformation("Recorded compliance check {ComplianceId} for protocol {ProtocolId}",
                 complianceRecord.Id, createDto.ProtocolId);
-            
+
             return MapComplianceToDto(complianceRecord);
         }
         catch (Exception ex)
@@ -682,10 +674,7 @@ public class SafetyProtocolService : ISafetyProtocolService
 
     public async Task<SafetyComplianceRecordDto> UpdateComplianceRecordAsync(Guid id, UpdateSafetyComplianceRecordDto updateDto)
     {
-        var record = await _complianceRepository.GetByIdAsync(id);
-        if (record == null)
-            throw new ArgumentException($"Compliance record with ID {id} not found");
-
+        var record = await _complianceRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Compliance record with ID {id} not found");
         record.ComplianceStatus = updateDto.ComplianceStatus;
         record.ChecklistItems = JsonSerializer.Serialize(updateDto.ChecklistItems);
         record.Violations = JsonSerializer.Serialize(updateDto.Violations);
@@ -720,7 +709,7 @@ public class SafetyProtocolService : ISafetyProtocolService
         _logger.LogInformation("Generating compliance report from {StartDate} to {EndDate}", startDate, endDate);
 
         var records = await _complianceRepository.GetByDateRangeAsync(startDate, endDate);
-        
+
         var totalChecks = records.Count();
         var compliantChecks = records.Count(r => r.ComplianceStatus == "Compliant");
         var nonCompliantChecks = records.Count(r => r.ComplianceStatus == "Non-Compliant");
@@ -765,7 +754,7 @@ public class SafetyProtocolService : ISafetyProtocolService
             ProtocolsDueForReview = protocols.Count(p => p.NextReviewDate <= DateTime.UtcNow.AddDays(30)),
             ExpiredProtocols = protocols.Count(p => p.ExpirationDate <= DateTime.UtcNow),
             TotalComplianceChecks = complianceRecords.Count(),
-            OverallComplianceRate = complianceRecords.Any() ? 
+            OverallComplianceRate = complianceRecords.Any() ?
                 (decimal)complianceRecords.Count(r => r.ComplianceStatus == "Compliant") / complianceRecords.Count() * 100 : 0,
             AnalysisPeriodStart = start,
             AnalysisPeriodEnd = end
@@ -776,7 +765,7 @@ public class SafetyProtocolService : ISafetyProtocolService
 
     #region Private Methods
 
-    private async Task<SafetyProtocolDto> MapToDto(SafetyProtocol protocol)
+    private static async Task<SafetyProtocolDto> MapToDto(SafetyProtocol protocol)
     {
         return new SafetyProtocolDto
         {
@@ -847,7 +836,7 @@ public class SafetyProtocolService : ISafetyProtocolService
             {
                 var compliantCount = recentRecords.Count(r => r.ComplianceStatus == "Compliant");
                 var complianceScore = (decimal)compliantCount / recentRecords.Count * 100;
-                var totalViolations = recentRecords.Sum(r => 
+                var totalViolations = recentRecords.Sum(r =>
                     JsonSerializer.Deserialize<List<ComplianceViolationDto>>(r.Violations ?? "[]")?.Count ?? 0);
 
                 var protocol = await _protocolRepository.GetByIdAsync(protocolId);

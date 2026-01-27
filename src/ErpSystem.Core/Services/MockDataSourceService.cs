@@ -155,24 +155,50 @@ namespace ErpSystem.Core.Services
             await Task.Delay(150);
 
             var dataSource = _mockDataSources.FirstOrDefault(ds => ds.Id == dataSourceId);
-            if (dataSource == null) return null;
+            if (dataSource == null)
+            {
+                return null;
+            }
 
             if (!string.IsNullOrEmpty(updateDto.Name))
+            {
                 dataSource.Name = updateDto.Name;
+            }
+
             if (updateDto.Description != null)
+            {
                 dataSource.Description = updateDto.Description;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.Host))
+            {
                 dataSource.Host = updateDto.Host;
+            }
+
             if (updateDto.Port.HasValue)
+            {
                 dataSource.Port = updateDto.Port;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.DatabaseName))
+            {
                 dataSource.DatabaseName = updateDto.DatabaseName;
+            }
+
             if (!string.IsNullOrEmpty(updateDto.Username))
+            {
                 dataSource.Username = updateDto.Username;
+            }
+
             if (updateDto.AdditionalSettings != null)
+            {
                 dataSource.AdditionalSettings = updateDto.AdditionalSettings;
+            }
+
             if (updateDto.IsActive.HasValue)
+            {
                 dataSource.IsActive = updateDto.IsActive.Value;
+            }
 
             return dataSource;
         }
@@ -181,7 +207,10 @@ namespace ErpSystem.Core.Services
         {
             await Task.Delay(100);
             var dataSource = _mockDataSources.FirstOrDefault(ds => ds.Id == dataSourceId);
-            if (dataSource == null) return false;
+            if (dataSource == null)
+            {
+                return false;
+            }
 
             _mockDataSources.Remove(dataSource);
             return true;
@@ -328,7 +357,7 @@ namespace ErpSystem.Core.Services
             var mockData = new List<Dictionary<string, object>>();
             var columns = new List<ColumnInfo>();
 
-            if (queryDto.Query.ToLower().Contains("users"))
+            if (queryDto.Query.Contains("users", StringComparison.CurrentCultureIgnoreCase))
             {
                 columns = new List<ColumnInfo>
                 {
@@ -351,7 +380,7 @@ namespace ErpSystem.Core.Services
                     });
                 }
             }
-            else if (queryDto.Query.ToLower().Contains("orders"))
+            else if (queryDto.Query.Contains("orders", StringComparison.CurrentCultureIgnoreCase))
             {
                 columns = new List<ColumnInfo>
                 {

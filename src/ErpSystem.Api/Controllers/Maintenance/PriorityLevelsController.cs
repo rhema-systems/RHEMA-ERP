@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -34,7 +34,9 @@ public class PriorityLevelsController : ControllerBase
         try
         {
             if (pageSize > 100)
+            {
                 pageSize = 100;
+            }
 
             var filter = new PriorityLevelFilterDto
             {
@@ -43,7 +45,7 @@ public class PriorityLevelsController : ControllerBase
                 SearchTerm = searchTerm,
                 IsActive = isActive
             };
-            
+
             var result = await _priorityLevelService.GetPriorityLevelsPagedAsync(filter);
             return Ok(result);
         }
@@ -82,7 +84,9 @@ public class PriorityLevelsController : ControllerBase
         {
             var priorityLevel = await _priorityLevelService.GetPriorityLevelByIdAsync(id);
             if (priorityLevel == null)
+            {
                 return NotFound($"Priority level with ID {id} not found");
+            }
 
             return Ok(priorityLevel);
         }
@@ -102,7 +106,9 @@ public class PriorityLevelsController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var priorityLevel = await _priorityLevelService.CreatePriorityLevelAsync(createDto);
             return CreatedAtAction(nameof(GetPriorityLevel), new { id = priorityLevel.Id }, priorityLevel);
@@ -127,7 +133,9 @@ public class PriorityLevelsController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var priorityLevel = await _priorityLevelService.UpdatePriorityLevelAsync(id, updateDto);
             return Ok(priorityLevel);

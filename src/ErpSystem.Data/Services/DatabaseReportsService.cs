@@ -1,18 +1,18 @@
-using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
-using Microsoft.Data.SqlClient;
 using System.Data;
-using OfficeOpenXml;
-using iText.Kernel.Pdf;
-using iText.Layout;
-using iText.Layout.Element;
-using iText.Layout.Properties;
-using Microsoft.Extensions.Configuration;
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Reports;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
+using iText.Kernel.Pdf;
+using iText.Layout;
+using iText.Layout.Element;
+using iText.Layout.Properties;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using OfficeOpenXml;
 
 namespace ErpSystem.Data.Services;
 
@@ -99,7 +99,7 @@ public class DatabaseReportsService : IReportsService
                 // Get assigned role names for this report
                 var roleAssignments = await _roleAssignmentRepository.GetAssignmentsByReportAsync(report.Id, tenantId);
                 var assignedRoleNames = roleAssignments.Select(ra => ra.Role?.Name).Where(name => !string.IsNullOrEmpty(name)).Cast<string>().ToList();
-                
+
                 var dto = MapToReportDefinitionDto(report, assignedRoleNames);
                 dto.IsFavorite = await _reportRepository.IsReportFavoriteAsync(report.Id, userId, tenantId);
                 reportDtos.Add(dto);
@@ -120,12 +120,14 @@ public class DatabaseReportsService : IReportsService
         {
             var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId);
             if (report == null)
+            {
                 return null;
-            
+            }
+
             // Get assigned role names for this report
             var roleAssignments = await _roleAssignmentRepository.GetAssignmentsByReportAsync(reportId, tenantId);
             var assignedRoleNames = roleAssignments.Select(ra => ra.Role?.Name).Where(name => !string.IsNullOrEmpty(name)).Cast<string>().ToList();
-            
+
             return MapToReportDefinitionDto(report, assignedRoleNames);
         }
         catch (Exception ex)
@@ -176,40 +178,60 @@ public class DatabaseReportsService : IReportsService
         {
             var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId);
             if (report == null)
+            {
                 return null;
+            }
 
             // Check if user has permission to edit this report (admins bypass role/module filtering)
             if (!isAdminUser)
             {
                 var hasEditPermission = await ValidateReportAccessAsync(reportId, userId, tenantId, "edit");
                 if (!hasEditPermission)
+                {
                     throw new UnauthorizedAccessException("Access denied: You do not have the required role permissions to edit this report. Please contact your administrator to request access or ensure you have the appropriate role assigned.");
+                }
             }
 
             // Update only provided fields
             if (!string.IsNullOrEmpty(updateReportDto.Name))
+            {
                 report.Name = updateReportDto.Name;
+            }
 
             if (!string.IsNullOrEmpty(updateReportDto.Description))
+            {
                 report.Description = updateReportDto.Description;
+            }
 
             if (!string.IsNullOrEmpty(updateReportDto.Status))
+            {
                 report.Status = updateReportDto.Status;
+            }
 
             if (updateReportDto.Parameters != null)
+            {
                 report.Parameters = JsonSerializer.Serialize(updateReportDto.Parameters);
+            }
 
             if (!string.IsNullOrEmpty(updateReportDto.Query))
+            {
                 report.Query = updateReportDto.Query;
+            }
 
             if (updateReportDto.Columns != null)
+            {
                 report.Columns = JsonSerializer.Serialize(updateReportDto.Columns);
+            }
 
             if (updateReportDto.Visualization != null)
+            {
                 report.Visualization = JsonSerializer.Serialize(updateReportDto.Visualization);
+            }
 
             if (updateReportDto.Tags != null)
+            {
                 report.Tags = JsonSerializer.Serialize(updateReportDto.Tags);
+            }
 
             report.UpdatedAt = DateTime.UtcNow;
             report.UpdatedBy = userId.ToString();
@@ -236,7 +258,9 @@ public class DatabaseReportsService : IReportsService
         {
             var report = await _reportRepository.GetByIdAsync(reportId);
             if (report == null || report.TenantId != tenantId)
+            {
                 return false;
+            }
 
             report.IsDeleted = true;
             report.DeletedAt = DateTime.UtcNow;
@@ -257,19 +281,19 @@ public class DatabaseReportsService : IReportsService
     public async Task<ReportResultDto> ExecuteReportAsync(Guid reportId, ExecuteReportDto executeReportDto, Guid tenantId, Guid userId, bool isAdminUser = false)
     {
         var startTime = DateTime.UtcNow;
-        
+
         try
         {
-            var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId);
-            if (report == null)
-                throw new InvalidOperationException("Report not found");
+            var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new InvalidOperationException("Report not found");
 
             // Check if user has permission to execute this report (admins bypass role/module filtering)
             if (!isAdminUser)
             {
                 var hasExecutePermission = await ValidateReportAccessAsync(reportId, userId, tenantId, "execute");
                 if (!hasExecutePermission)
+                {
                     throw new UnauthorizedAccessException("Access denied: You do not have the required role permissions to execute this report. Please contact your administrator to request access or ensure you have the appropriate role assigned.");
+                }
             }
 
             // Execute the query directly without complex tracking to avoid concurrency issues
@@ -285,13 +309,13 @@ public class DatabaseReportsService : IReportsService
             if (string.IsNullOrEmpty(report.Query))
             {
                 _logger.LogWarning("Report {ReportId} has no query defined, returning sample data", reportId);
-                
+
                 var sampleEndTime = DateTime.UtcNow;
                 var sampleExecutionTime = sampleEndTime - startTime;
-                
+
                 // Return sample data for reports without queries
                 var sampleResult = CreateSampleReportResult(report, sampleEndTime, sampleExecutionTime);
-                
+
                 // Log sample execution
                 var sampleExecutionLog = new ReportExecution
                 {
@@ -310,7 +334,7 @@ public class DatabaseReportsService : IReportsService
                 await _executionRepository.AddAsync(sampleExecutionLog);
                 await _reportRepository.UpdateLastRunAsync(reportId, sampleEndTime);
                 await _unitOfWork.SaveChangesAsync();
-                
+
                 return sampleResult;
             }
 
@@ -351,7 +375,7 @@ public class DatabaseReportsService : IReportsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error executing report {ReportId} for tenant {TenantId}", reportId, tenantId);
-            
+
             // Log failed execution - create new record instead of updating
             try
             {
@@ -368,7 +392,7 @@ public class DatabaseReportsService : IReportsService
                     Parameters = executeReportDto.Parameters != null ? JsonSerializer.Serialize(executeReportDto.Parameters) : null,
                     CreatedBy = userId.ToString()
                 };
-                
+
                 await _executionRepository.AddAsync(failedExecutionLog);
                 await _unitOfWork.SaveChangesAsync();
             }
@@ -376,7 +400,7 @@ public class DatabaseReportsService : IReportsService
             {
                 _logger.LogError(logEx, "Failed to log execution error for report {ReportId}", reportId);
             }
-            
+
             throw;
         }
     }
@@ -387,14 +411,18 @@ public class DatabaseReportsService : IReportsService
         {
             var report = await _reportRepository.GetByIdAsync(reportId);
             if (report == null || report.TenantId != tenantId)
+            {
                 throw new InvalidOperationException("Report not found");
+            }
 
             // Check if user has permission to export this report (admins bypass role/module filtering)
             if (!isAdminUser)
             {
                 var hasExportPermission = await ValidateReportAccessAsync(reportId, userId, tenantId, "export");
                 if (!hasExportPermission)
+                {
                     throw new UnauthorizedAccessException("Access denied: You do not have the required role permissions to export this report. Please contact your administrator to request access or ensure you have the appropriate role assigned.");
+                }
             }
 
             // Execute report first to get data
@@ -449,7 +477,9 @@ public class DatabaseReportsService : IReportsService
         {
             var report = await _reportRepository.GetByIdAsync(reportId);
             if (report == null || report.TenantId != tenantId)
+            {
                 throw new InvalidOperationException("Report not found");
+            }
 
             var schedule = new ReportSchedule
             {
@@ -495,7 +525,9 @@ public class DatabaseReportsService : IReportsService
         {
             var schedule = await _scheduleRepository.GetByIdAsync(scheduleId);
             if (schedule == null || schedule.TenantId != tenantId)
+            {
                 return null;
+            }
 
             return MapToReportScheduleDto(schedule);
         }
@@ -512,7 +544,9 @@ public class DatabaseReportsService : IReportsService
         {
             var schedule = await _scheduleRepository.GetByIdAsync(scheduleId);
             if (schedule == null || schedule.TenantId != tenantId)
+            {
                 return false;
+            }
 
             schedule.IsDeleted = true;
             schedule.DeletedAt = DateTime.UtcNow;
@@ -565,8 +599,8 @@ public class DatabaseReportsService : IReportsService
                 ReportsRunToday = executionsToday,
                 DataSourcesConnected = 3, // This would come from actual data sources
                 TotalExports = recentExecutions.Count(),
-                AvgGenerationTime = recentExecutions.Any() 
-                    ? recentExecutions.Average(e => e.ExecutionTime.TotalSeconds) 
+                AvgGenerationTime = recentExecutions.Any()
+                    ? recentExecutions.Average(e => e.ExecutionTime.TotalSeconds)
                     : 0,
                 UsageStats = GenerateUsageStats(recentExecutions),
                 TopReports = GenerateTopReports(reports, recentExecutions)
@@ -596,13 +630,13 @@ public class DatabaseReportsService : IReportsService
 
     public async Task<ReportTemplateDto> CreateReportTemplateAsync(CreateReportTemplateDto createTemplateDto, Guid tenantId, Guid userId)
     {
-        _logger.LogInformation("🏁 CreateReportTemplateAsync called: Name={Name}, TenantId={TenantId}, UserId={UserId}", 
+        _logger.LogInformation("🏁 CreateReportTemplateAsync called: Name={Name}, TenantId={TenantId}, UserId={UserId}",
             createTemplateDto.Name, tenantId, userId);
-        
+
         try
         {
             _logger.LogInformation("📄 Creating ReportTemplate entity with data: {@CreateTemplateDto}", createTemplateDto);
-            
+
             var template = new ReportTemplate
             {
                 Name = createTemplateDto.Name,
@@ -619,32 +653,32 @@ public class DatabaseReportsService : IReportsService
                 UsageCount = 0
             };
 
-            _logger.LogInformation("💾 Adding template to repository: Id={Id}, Name={Name}, TenantId={TenantId}", 
+            _logger.LogInformation("💾 Adding template to repository: Id={Id}, Name={Name}, TenantId={TenantId}",
                 template.Id, template.Name, template.TenantId);
-            
+
             await _templateRepository.AddAsync(template);
-            
+
             _logger.LogInformation("🔄 Calling SaveChangesAsync on unit of work...");
             await _unitOfWork.SaveChangesAsync();
-            
-            _logger.LogInformation("✅ Report template created successfully: Id={Id}, Name={Name}", 
+
+            _logger.LogInformation("✅ Report template created successfully: Id={Id}, Name={Name}",
                 template.Id, template.Name);
 
             var result = MapToReportTemplateDto(template);
             _logger.LogInformation("📤 Returning mapped DTO: Id={Id}, Name={Name}", result.Id, result.Name);
-            
+
             return result;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Error creating report template for tenant {TenantId}: {ErrorMessage}", 
+            _logger.LogError(ex, "❌ Error creating report template for tenant {TenantId}: {ErrorMessage}",
                 tenantId, ex.Message);
             throw;
         }
     }
 
     // Private helper methods
-    private ReportDefinitionDto MapToReportDefinitionDto(Report report, List<string>? assignedRoleNames = null)
+    private static ReportDefinitionDto MapToReportDefinitionDto(Report report, List<string>? assignedRoleNames = null)
     {
         return new ReportDefinitionDto
         {
@@ -662,23 +696,23 @@ public class DatabaseReportsService : IReportsService
             Query = report.Query,
             ModuleId = report.ModuleId,
             ModuleName = report.Module?.ModuleName,
-            Parameters = !string.IsNullOrEmpty(report.Parameters) 
-                ? JsonSerializer.Deserialize<Dictionary<string, object>>(report.Parameters) 
+            Parameters = !string.IsNullOrEmpty(report.Parameters)
+                ? JsonSerializer.Deserialize<Dictionary<string, object>>(report.Parameters)
                 : null,
-            Columns = !string.IsNullOrEmpty(report.Columns) 
-                ? JsonSerializer.Deserialize<List<ReportColumnDto>>(report.Columns) 
+            Columns = !string.IsNullOrEmpty(report.Columns)
+                ? JsonSerializer.Deserialize<List<ReportColumnDto>>(report.Columns)
                 : null,
-            Visualization = !string.IsNullOrEmpty(report.Visualization) 
-                ? JsonSerializer.Deserialize<ReportVisualizationDto>(report.Visualization) 
+            Visualization = !string.IsNullOrEmpty(report.Visualization)
+                ? JsonSerializer.Deserialize<ReportVisualizationDto>(report.Visualization)
                 : null,
-            Tags = !string.IsNullOrEmpty(report.Tags) 
-                ? JsonSerializer.Deserialize<List<string>>(report.Tags) 
+            Tags = !string.IsNullOrEmpty(report.Tags)
+                ? JsonSerializer.Deserialize<List<string>>(report.Tags)
                 : null,
             AssignedRoles = assignedRoleNames ?? new List<string>()
         };
     }
 
-    private ReportScheduleDto MapToReportScheduleDto(ReportSchedule schedule)
+    private static ReportScheduleDto MapToReportScheduleDto(ReportSchedule schedule)
     {
         return new ReportScheduleDto
         {
@@ -731,7 +765,7 @@ public class DatabaseReportsService : IReportsService
         };
     }
 
-    private DateTime? CalculateNextExecutionDate(ReportSchedule schedule)
+    private static DateTime? CalculateNextExecutionDate(ReportSchedule schedule)
     {
         var baseDate = DateTime.Today;
         var time = schedule.TimeOfDay;
@@ -762,42 +796,42 @@ public class DatabaseReportsService : IReportsService
     private byte[] GenerateCsvContent(ReportResultDto reportResult)
     {
         var sb = new System.Text.StringBuilder();
-        
+
         // Add headers
         var visibleColumns = reportResult.Columns.Where(c => c.IsVisible).OrderBy(c => c.Order);
         sb.AppendLine(string.Join(",", visibleColumns.Select(c => $"\"{c.DisplayName ?? c.Name}\"")));
-        
+
         // Add data rows
         foreach (var row in reportResult.Data)
         {
             var values = visibleColumns.Select(column =>
             {
-                var value = row.ContainsKey(column.Name) ? row[column.Name] : "";
+                var value = row.TryGetValue(column.Name, out var tempValue) ? tempValue : "";
                 var stringValue = value?.ToString() ?? "";
                 return $"\"{stringValue.Replace("\"", "\"\"")}\"";
             });
             sb.AppendLine(string.Join(",", values));
         }
-        
+
         return System.Text.Encoding.UTF8.GetBytes(sb.ToString());
     }
 
-    private byte[] GenerateExcelContent(ReportResultDto reportResult)
+    private static byte[] GenerateExcelContent(ReportResultDto reportResult)
     {
         ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-        
+
         using var package = new ExcelPackage();
         var worksheet = package.Workbook.Worksheets.Add("Report Data");
-        
+
         var visibleColumns = reportResult.Columns.Where(c => c.IsVisible).OrderBy(c => c.Order).ToList();
-        
+
         // Add headers
         for (int i = 0; i < visibleColumns.Count; i++)
         {
             worksheet.Cells[1, i + 1].Value = visibleColumns[i].DisplayName ?? visibleColumns[i].Name;
             worksheet.Cells[1, i + 1].Style.Font.Bold = true;
         }
-        
+
         // Add data rows
         for (int row = 0; row < reportResult.Data.Count; row++)
         {
@@ -805,18 +839,18 @@ public class DatabaseReportsService : IReportsService
             for (int col = 0; col < visibleColumns.Count; col++)
             {
                 var column = visibleColumns[col];
-                var value = dataRow.ContainsKey(column.Name) ? dataRow[column.Name] : null;
+                var value = dataRow.TryGetValue(column.Name, out var tempValue) ? tempValue : null;
                 worksheet.Cells[row + 2, col + 1].Value = value;
             }
         }
-        
+
         // Auto-fit columns
         worksheet.Cells.AutoFitColumns();
-        
+
         return package.GetAsByteArray();
     }
 
-    private byte[] GenerateJsonContent(ReportResultDto reportResult)
+    private static byte[] GenerateJsonContent(ReportResultDto reportResult)
     {
         var exportData = new
         {
@@ -826,7 +860,7 @@ public class DatabaseReportsService : IReportsService
             Columns = reportResult.Columns.Where(c => c.IsVisible).OrderBy(c => c.Order),
             Data = reportResult.Data
         };
-        
+
         var json = JsonSerializer.Serialize(exportData, new JsonSerializerOptions { WriteIndented = true });
         return System.Text.Encoding.UTF8.GetBytes(json);
     }
@@ -837,13 +871,13 @@ public class DatabaseReportsService : IReportsService
         using var writer = new PdfWriter(stream);
         using var pdf = new PdfDocument(writer);
         using var document = new Document(pdf);
-        
+
         // Add title
         document.Add(new Paragraph(reportResult.ReportName)
             .SetFontSize(20)
             .SetBold()
             .SetMarginBottom(10));
-        
+
         // Add metadata
         document.Add(new Paragraph($"Executed: {reportResult.ExecutedAt:yyyy-MM-dd HH:mm:ss}")
             .SetFontSize(10)
@@ -851,12 +885,12 @@ public class DatabaseReportsService : IReportsService
         document.Add(new Paragraph($"Total Rows: {reportResult.TotalRows}")
             .SetFontSize(10)
             .SetMarginBottom(15));
-        
+
         // Create table
         var visibleColumns = reportResult.Columns.Where(c => c.IsVisible).OrderBy(c => c.Order).ToList();
         var table = new Table(visibleColumns.Count);
         table.SetWidth(UnitValue.CreatePercentValue(100));
-        
+
         // Add headers
         foreach (var column in visibleColumns)
         {
@@ -865,24 +899,24 @@ public class DatabaseReportsService : IReportsService
                 .SetBold()
                 .SetBackgroundColor(iText.Kernel.Colors.ColorConstants.LIGHT_GRAY));
         }
-        
+
         // Add data rows
         foreach (var row in reportResult.Data)
         {
             foreach (var column in visibleColumns)
             {
-                var value = row.ContainsKey(column.Name) ? row[column.Name] : null;
+                var value = row.TryGetValue(column.Name, out var tempValue) ? tempValue : null;
                 table.AddCell(new Cell().Add(new Paragraph(value?.ToString() ?? "")));
             }
         }
-        
+
         document.Add(table);
         document.Close();
-        
+
         return stream.ToArray();
     }
 
-    private string GetContentType(string format)
+    private static string GetContentType(string format)
     {
         return format.ToLower() switch
         {
@@ -894,7 +928,7 @@ public class DatabaseReportsService : IReportsService
         };
     }
 
-    private List<ReportUsageStatsDto> GenerateUsageStats(IEnumerable<ReportExecution> executions)
+    private static List<ReportUsageStatsDto> GenerateUsageStats(IEnumerable<ReportExecution> executions)
     {
         return executions
             .GroupBy(e => e.ExecutedAt.Date)
@@ -911,7 +945,7 @@ public class DatabaseReportsService : IReportsService
             .ToList();
     }
 
-    private List<TopReportDto> GenerateTopReports(IEnumerable<Report> reports, IEnumerable<ReportExecution> executions)
+    private static List<TopReportDto> GenerateTopReports(IEnumerable<Report> reports, IEnumerable<ReportExecution> executions)
     {
         var reportExecutionStats = executions
             .GroupBy(e => e.ReportId)
@@ -953,7 +987,7 @@ public class DatabaseReportsService : IReportsService
 
             // Apply parameters to the query if any
             var baseQuery = ApplyParametersToQuery(report.Query, executeReportDto.Parameters);
-            
+
             // First, get total count for pagination
             var countQuery = $"SELECT COUNT(*) FROM ({baseQuery}) AS CountQuery";
             await using (var countCommand = new SqlCommand(countQuery, connection) { CommandTimeout = 30 })
@@ -966,7 +1000,7 @@ public class DatabaseReportsService : IReportsService
             var page = Math.Max(1, executeReportDto.Page);
             var pageSize = Math.Min(Math.Max(1, executeReportDto.PageSize), 1000); // Max 1000 records per page
             var offset = (page - 1) * pageSize;
-            
+
             var paginatedQuery = $@"
                 SELECT * FROM (
                     SELECT *, ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) as RowNum 
@@ -988,10 +1022,13 @@ public class DatabaseReportsService : IReportsService
             for (int i = 0; i < reader.FieldCount; i++)
             {
                 var fieldName = reader.GetName(i);
-                if (fieldName == "RowNum") continue; // Skip pagination column
-                
+                if (fieldName == "RowNum")
+                {
+                    continue; // Skip pagination column
+                }
+
                 var fieldType = reader.GetFieldType(i);
-                
+
                 columns.Add(new ReportColumnDto
                 {
                     Name = fieldName,
@@ -1009,8 +1046,11 @@ public class DatabaseReportsService : IReportsService
                 for (int i = 0; i < reader.FieldCount; i++)
                 {
                     var columnName = reader.GetName(i);
-                    if (columnName == "RowNum") continue; // Skip pagination column
-                    
+                    if (columnName == "RowNum")
+                    {
+                        continue; // Skip pagination column
+                    }
+
                     var value = reader.IsDBNull(i) ? null : reader.GetValue(i);
                     row[columnName] = value;
                 }
@@ -1023,7 +1063,7 @@ public class DatabaseReportsService : IReportsService
             var hasNextPage = page < totalPages;
             var hasPreviousPage = page > 1;
 
-            _logger.LogInformation("Query executed successfully. Returned {ActualRowCount} rows (page {Page} of {TotalPages}) with {ColumnCount} columns. Total records: {TotalRows}", 
+            _logger.LogInformation("Query executed successfully. Returned {ActualRowCount} rows (page {Page} of {TotalPages}) with {ColumnCount} columns. Total records: {TotalRows}",
                 actualRowCount, page, totalPages, columns.Count, totalRows);
 
             return new ReportResultDto
@@ -1079,7 +1119,7 @@ public class DatabaseReportsService : IReportsService
         return processedQuery;
     }
 
-    private string GetSqlTypeName(Type fieldType)
+    private static string GetSqlTypeName(Type fieldType)
     {
         return fieldType.Name switch
         {
@@ -1099,7 +1139,7 @@ public class DatabaseReportsService : IReportsService
         };
     }
 
-    private ReportResultDto CreateSampleReportResult(Report report, DateTime executedAt, TimeSpan executionTime)
+    private static ReportResultDto CreateSampleReportResult(Report report, DateTime executedAt, TimeSpan executionTime)
     {
         return new ReportResultDto
         {
@@ -1116,23 +1156,23 @@ public class DatabaseReportsService : IReportsService
             },
             Data = new List<Dictionary<string, object>>
             {
-                new Dictionary<string, object> 
-                { 
-                    ["Message"] = "This report has no SQL query configured yet", 
-                    ["Status"] = "No Query", 
-                    ["Timestamp"] = DateTime.Now 
+                new Dictionary<string, object>
+                {
+                    ["Message"] = "This report has no SQL query configured yet",
+                    ["Status"] = "No Query",
+                    ["Timestamp"] = DateTime.Now
                 },
-                new Dictionary<string, object> 
-                { 
-                    ["Message"] = "Please add a SQL query to this report to see real data", 
-                    ["Status"] = "Configuration Needed", 
-                    ["Timestamp"] = DateTime.Now 
+                new Dictionary<string, object>
+                {
+                    ["Message"] = "Please add a SQL query to this report to see real data",
+                    ["Status"] = "Configuration Needed",
+                    ["Timestamp"] = DateTime.Now
                 },
-                new Dictionary<string, object> 
-                { 
-                    ["Message"] = "Example: SELECT TOP 10 * FROM YourTable WHERE IsActive = 1", 
-                    ["Status"] = "Example", 
-                    ["Timestamp"] = DateTime.Now 
+                new Dictionary<string, object>
+                {
+                    ["Message"] = "Example: SELECT TOP 10 * FROM YourTable WHERE IsActive = 1",
+                    ["Status"] = "Example",
+                    ["Timestamp"] = DateTime.Now
                 }
             }
         };
@@ -1162,11 +1202,13 @@ public class DatabaseReportsService : IReportsService
     {
         // Check if role assignments exist for this tenant
         var hasRoleAssignments = await HasAnyRoleAssignmentsAsync(tenantId);
-        
+
         // If no role assignments configured, allow access (fallback behavior)
         if (!hasRoleAssignments)
+        {
             return true;
-            
+        }
+
         // If role assignments exist, check specific permission
         return await HasReportPermissionAsync(reportId, userId, tenantId, permission);
     }
@@ -1175,10 +1217,7 @@ public class DatabaseReportsService : IReportsService
     {
         try
         {
-            var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId);
-            if (report == null)
-                throw new ArgumentException("Report not found", nameof(reportId));
-
+            var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new ArgumentException("Report not found", nameof(reportId));
             report.Status = "published";
             report.UpdatedAt = DateTime.UtcNow;
             report.UpdatedBy = userId.ToString();
@@ -1201,10 +1240,7 @@ public class DatabaseReportsService : IReportsService
     {
         try
         {
-            var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId);
-            if (report == null)
-                throw new ArgumentException("Report not found", nameof(reportId));
-
+            var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new ArgumentException("Report not found", nameof(reportId));
             report.Status = "draft";
             report.UpdatedAt = DateTime.UtcNow;
             report.UpdatedBy = userId.ToString();
@@ -1227,13 +1263,11 @@ public class DatabaseReportsService : IReportsService
     {
         try
         {
-            var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId);
-            if (report == null)
-                throw new ArgumentException("Report not found", nameof(reportId));
+            var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new ArgumentException("Report not found", nameof(reportId));
 
             // Verify module exists and belongs to the same tenant
             // You might want to add a module repository check here
-            
+
             report.ModuleId = moduleId;
             report.UpdatedAt = DateTime.UtcNow;
             report.UpdatedBy = userId.ToString();
@@ -1241,14 +1275,14 @@ public class DatabaseReportsService : IReportsService
             await _reportRepository.UpdateAsync(report);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Report {ReportId} assigned to module {ModuleId} by user {UserId} in tenant {TenantId}", 
+            _logger.LogInformation("Report {ReportId} assigned to module {ModuleId} by user {UserId} in tenant {TenantId}",
                 reportId, moduleId, userId, tenantId);
 
             return report.UpdatedAt.Value;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error assigning report {ReportId} to module {ModuleId} for tenant {TenantId}", 
+            _logger.LogError(ex, "Error assigning report {ReportId} to module {ModuleId} for tenant {TenantId}",
                 reportId, moduleId, tenantId);
             throw;
         }
@@ -1258,10 +1292,7 @@ public class DatabaseReportsService : IReportsService
     {
         try
         {
-            var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId);
-            if (report == null)
-                throw new ArgumentException("Report not found", nameof(reportId));
-
+            var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new ArgumentException("Report not found", nameof(reportId));
             report.ModuleId = null;
             report.UpdatedAt = DateTime.UtcNow;
             report.UpdatedBy = userId.ToString();
@@ -1269,14 +1300,14 @@ public class DatabaseReportsService : IReportsService
             await _reportRepository.UpdateAsync(report);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Report {ReportId} unassigned from module by user {UserId} in tenant {TenantId}", 
+            _logger.LogInformation("Report {ReportId} unassigned from module by user {UserId} in tenant {TenantId}",
                 reportId, userId, tenantId);
 
             return report.UpdatedAt.Value;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error unassigning report {ReportId} from module for tenant {TenantId}", 
+            _logger.LogError(ex, "Error unassigning report {ReportId} from module for tenant {TenantId}",
                 reportId, tenantId);
             throw;
         }

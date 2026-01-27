@@ -1,8 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Entities.Base;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Core.Entities.Sales;
 

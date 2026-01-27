@@ -1,10 +1,10 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
-using ErpSystem.Core.DTOs.Maintenance;
-using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Interfaces;
-using ErpSystem.Web.Services;
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Web.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -48,12 +48,16 @@ public class EmergencyMaintenanceController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             // Validate asset exists and is critical
             var asset = await _assetService.GetAssetByIdAsync(createDto.AssetId);
             if (asset == null)
+            {
                 return BadRequest($"Asset with ID {createDto.AssetId} not found");
+            }
 
             // Create emergency work order
             var workOrderDto = new CreateWorkOrderDto
@@ -131,7 +135,9 @@ public class EmergencyMaintenanceController : ControllerBase
         {
             var workOrder = await _workOrderService.GetWorkOrderByIdAsync(id);
             if (workOrder == null || workOrder.Priority != "Emergency")
+            {
                 return NotFound($"Emergency work order with ID {id} not found");
+            }
 
             return Ok(workOrder);
         }
@@ -154,7 +160,9 @@ public class EmergencyMaintenanceController : ControllerBase
         {
             var workOrder = await _workOrderService.GetWorkOrderByIdAsync(workOrderId);
             if (workOrder == null || workOrder.Priority != "Emergency")
+            {
                 return NotFound($"Emergency work order with ID {workOrderId} not found");
+            }
 
             // Update work order with escalation notes
             var updateDto = new UpdateWorkOrderDto
@@ -194,11 +202,15 @@ public class EmergencyMaintenanceController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var asset = await _assetService.GetAssetByIdAsync(breakdownDto.AssetId);
             if (asset == null)
+            {
                 return BadRequest($"Asset with ID {breakdownDto.AssetId} not found");
+            }
 
             // Determine criticality and response level
             var criticality = await DetermineAssetCriticality(breakdownDto.AssetId);
@@ -297,7 +309,9 @@ public class EmergencyMaintenanceController : ControllerBase
         {
             var workOrder = await _workOrderService.GetWorkOrderByIdAsync(workOrderId);
             if (workOrder == null || workOrder.Priority != "Emergency")
+            {
                 return NotFound($"Emergency work order with ID {workOrderId} not found");
+            }
 
             // Update work order status
             if (!string.IsNullOrEmpty(statusDto.NewStatus))
@@ -363,7 +377,7 @@ public class EmergencyMaintenanceController : ControllerBase
         {
             // Send real-time notification
             await _notificationService.SendNotificationToAllAsync(
-                $"Emergency Work Order {workOrder.WorkOrderNumber} created for {workOrder.AssetName}", 
+                $"Emergency Work Order {workOrder.WorkOrderNumber} created for {workOrder.AssetName}",
                 "EmergencyWorkOrderCreated");
 
             // Send email to maintenance team
@@ -397,7 +411,7 @@ public class EmergencyMaintenanceController : ControllerBase
         try
         {
             await _notificationService.SendNotificationToAllAsync(
-                $"Emergency Work Order {workOrder.WorkOrderNumber} escalated: {escalateDto.EscalationReason}", 
+                $"Emergency Work Order {workOrder.WorkOrderNumber} escalated: {escalateDto.EscalationReason}",
                 "EmergencyWorkOrderEscalated");
 
             var subject = $"ESCALATED: Emergency Work Order {workOrder.WorkOrderNumber}";
@@ -432,7 +446,7 @@ public class EmergencyMaintenanceController : ControllerBase
         try
         {
             await _notificationService.SendNotificationToAllAsync(
-                $"Equipment Breakdown: {asset.Name} - {breakdownDto.Severity} severity (WO: {workOrder.WorkOrderNumber})", 
+                $"Equipment Breakdown: {asset.Name} - {breakdownDto.Severity} severity (WO: {workOrder.WorkOrderNumber})",
                 "EquipmentBreakdown");
 
             var subject = $"EQUIPMENT BREAKDOWN: {asset.Name}";
@@ -448,8 +462,8 @@ public class EmergencyMaintenanceController : ControllerBase
                 <p><strong>Reported by:</strong> {_currentUserService.UserName}</p>
                 <p><strong>Reported at:</strong> {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}</p>";
 
-            var contacts = responseLevel >= ResponseLevel.High 
-                ? GetEmergencyContactList() 
+            var contacts = responseLevel >= ResponseLevel.High
+                ? GetEmergencyContactList()
                 : GetMaintenanceTeamContacts();
 
             foreach (var contact in contacts)
@@ -468,7 +482,7 @@ public class EmergencyMaintenanceController : ControllerBase
         try
         {
             await _notificationService.SendNotificationToAllAsync(
-                $"Emergency Work Order {workOrder.WorkOrderNumber} status updated to {statusDto.NewStatus}", 
+                $"Emergency Work Order {workOrder.WorkOrderNumber} status updated to {statusDto.NewStatus}",
                 "EmergencyStatusUpdate");
         }
         catch (Exception ex)
@@ -477,7 +491,7 @@ public class EmergencyMaintenanceController : ControllerBase
         }
     }
 
-    private async Task<AssetCriticality> DetermineAssetCriticality(Guid assetId)
+    private static async Task<AssetCriticality> DetermineAssetCriticality(Guid assetId)
     {
         // This would query asset criticality from database or configuration
         // For now, return a default value
@@ -588,7 +602,7 @@ public class EmergencyMaintenanceController : ControllerBase
         };
     }
 
-    private async Task<EmergencyMetricsDto> CalculateEmergencyMetrics(DateTime startDate, DateTime endDate)
+    private static async Task<EmergencyMetricsDto> CalculateEmergencyMetrics(DateTime startDate, DateTime endDate)
     {
         // This would query actual emergency work orders and calculate metrics
         return new EmergencyMetricsDto

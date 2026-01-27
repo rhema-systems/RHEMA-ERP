@@ -1,12 +1,12 @@
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.Extensions.Logging;
-using ErpSystem.Core.Entities.Inventory;
-using ErpSystem.Core.Entities.Maintenance;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -50,12 +50,11 @@ public class MaintenanceInventoryService : IMaintenanceInventoryService
         {
             _logger.LogInformation("Starting parts allocation for work order {WorkOrderId}", workOrderId);
 
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {workOrderId} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
             if (workOrder.Status != "Approved" && workOrder.Status != "Assigned")
+            {
                 throw new InvalidOperationException($"Cannot allocate parts for work order in {workOrder.Status} status");
+            }
 
             var result = new MaintenancePartsAllocationResult
             {
@@ -74,9 +73,9 @@ public class MaintenanceInventoryService : IMaintenanceInventoryService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to allocate part {PartId} for work order {WorkOrderId}", 
+                    _logger.LogWarning(ex, "Failed to allocate part {PartId} for work order {WorkOrderId}",
                         part.Id, workOrderId);
-                    
+
                     result.FailedAllocations.Add(new PartAllocationFailure
                     {
                         PartId = part.Id,
@@ -98,7 +97,7 @@ public class MaintenanceInventoryService : IMaintenanceInventoryService
             }
 
             _logger.LogInformation("Completed parts allocation for work order {WorkOrderId}. " +
-                "Success: {Success}, Failed: {Failed}", 
+                "Success: {Success}, Failed: {Failed}",
                 workOrderId, result.SuccessfulAllocations, result.FailedAllocationCount);
 
             return result;
@@ -167,10 +166,7 @@ public class MaintenanceInventoryService : IMaintenanceInventoryService
         {
             _logger.LogInformation("Starting parts consumption for work order {WorkOrderId}", workOrderId);
 
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {workOrderId} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
             var result = new MaintenancePartsConsumptionResult
             {
                 WorkOrderId = workOrderId,
@@ -189,9 +185,9 @@ public class MaintenanceInventoryService : IMaintenanceInventoryService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to consume part {PartId} for work order {WorkOrderId}", 
+                    _logger.LogWarning(ex, "Failed to consume part {PartId} for work order {WorkOrderId}",
                         consumption.PartId, workOrderId);
-                    
+
                     result.ConsumptionFailures.Add(new PartConsumptionFailure
                     {
                         PartId = consumption.PartId,
@@ -206,7 +202,7 @@ public class MaintenanceInventoryService : IMaintenanceInventoryService
             result.ConsumptionDate = DateTime.UtcNow;
 
             _logger.LogInformation("Completed parts consumption for work order {WorkOrderId}. " +
-                "Success: {Success}, Failed: {Failed}", 
+                "Success: {Success}, Failed: {Failed}",
                 workOrderId, result.SuccessfulConsumptions, result.FailedConsumptions);
 
             return result;
@@ -224,35 +220,39 @@ public class MaintenanceInventoryService : IMaintenanceInventoryService
     private async Task<PartConsumptionResultDto> ConsumeWorkOrderPartAsync(
         Guid partId, decimal quantityConsumed, Guid userId)
     {
-        var part = await _workOrderPartRepository.GetByIdAsync(partId);
-        if (part == null)
-            throw new ArgumentException($"Work order part {partId} not found");
-
+        var part = await _workOrderPartRepository.GetByIdAsync(partId) ?? throw new ArgumentException($"Work order part {partId} not found");
         if (part.AllocationId == null)
+        {
             throw new InvalidOperationException($"Part {part.ItemName} is not allocated");
+        }
 
         if (quantityConsumed > part.QuantityAllocated)
+        {
             throw new InvalidOperationException(
                 $"Cannot consume {quantityConsumed} units. Only {part.QuantityAllocated} allocated");
+        }
 
         // Simplified consumption without missing DTO - consuming directly via inventory service
         var consumeSuccess = await _inventoryService.ConsumeAllocatedInventoryAsync(
             part.AllocationId.Value, quantityConsumed, userId);
 
         if (!consumeSuccess)
+        {
             throw new InvalidOperationException("Failed to consume inventory");
+        }
 
         // Create a placeholder consumption result
-        var consumption = new { 
-            ConsumptionDate = DateTime.UtcNow, 
-            UnitCost = 0m, 
-            TotalCost = 0m 
+        var consumption = new
+        {
+            ConsumptionDate = DateTime.UtcNow,
+            UnitCost = 0m,
+            TotalCost = 0m
         };
 
         // Update work order part record
         part.QuantityUsed += quantityConsumed;
         part.UsedAt = consumption.ConsumptionDate;
-        
+
         if (part.QuantityUsed >= part.QuantityRequired)
         {
             part.Status = "Used";
@@ -304,15 +304,15 @@ public class MaintenanceInventoryService : IMaintenanceInventoryService
                 try
                 {
                     var returnResult = await ReturnWorkOrderPartAsync(
-                        returnRequest.PartId, returnRequest.QuantityReturned, 
+                        returnRequest.PartId, returnRequest.QuantityReturned,
                         returnRequest.ReturnReason, userId);
                     result.ReturnedParts.Add(returnResult);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to return part {PartId} for work order {WorkOrderId}", 
+                    _logger.LogWarning(ex, "Failed to return part {PartId} for work order {WorkOrderId}",
                         returnRequest.PartId, workOrderId);
-                    
+
                     result.ReturnFailures.Add(new PartReturnFailure
                     {
                         PartId = returnRequest.PartId,
@@ -327,7 +327,7 @@ public class MaintenanceInventoryService : IMaintenanceInventoryService
             result.ReturnDate = DateTime.UtcNow;
 
             _logger.LogInformation("Completed parts return for work order {WorkOrderId}. " +
-                "Success: {Success}, Failed: {Failed}", 
+                "Success: {Success}, Failed: {Failed}",
                 workOrderId, result.SuccessfulReturns, result.FailedReturns);
 
             return result;
@@ -345,27 +345,31 @@ public class MaintenanceInventoryService : IMaintenanceInventoryService
     private async Task<PartReturnResultDto> ReturnWorkOrderPartAsync(
         Guid partId, decimal quantityReturned, string returnReason, Guid userId)
     {
-        var part = await _workOrderPartRepository.GetByIdAsync(partId);
-        if (part == null)
-            throw new ArgumentException($"Work order part {partId} not found");
-
+        var part = await _workOrderPartRepository.GetByIdAsync(partId) ?? throw new ArgumentException($"Work order part {partId} not found");
         if (part.AllocationId == null)
+        {
             throw new InvalidOperationException($"Part {part.ItemName} has no allocation to return from");
+        }
 
         var availableToReturn = part.QuantityAllocated - part.QuantityUsed;
         if (quantityReturned > availableToReturn)
+        {
             throw new InvalidOperationException(
                 $"Cannot return {quantityReturned} units. Only {availableToReturn} available to return");
+        }
 
         // Simplified return without missing DTO - returning directly via inventory service
         var returnSuccess = await _inventoryService.ReleaseAllocationAsync(
             part.AllocationId.Value, userId);
 
         if (!returnSuccess)
+        {
             throw new InvalidOperationException("Failed to return inventory");
+        }
 
         // Create a placeholder return result
-        var returnResult = new { 
+        var returnResult = new
+        {
             ReturnDate = DateTime.UtcNow
         };
 
@@ -398,10 +402,7 @@ public class MaintenanceInventoryService : IMaintenanceInventoryService
     {
         try
         {
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {workOrderId} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
             var partsStatus = workOrder.Parts.Select(part => new WorkOrderPartStatusDto
             {
                 PartId = part.Id,
@@ -447,10 +448,7 @@ public class MaintenanceInventoryService : IMaintenanceInventoryService
     {
         try
         {
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {workOrderId} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
             var availabilityChecks = new List<PartAvailabilityDto>();
 
             foreach (var part in workOrder.Parts)

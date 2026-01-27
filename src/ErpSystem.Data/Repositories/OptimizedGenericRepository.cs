@@ -1,7 +1,7 @@
 using System.Linq.Expressions;
-using Microsoft.EntityFrameworkCore;
-using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Interfaces;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories;
 
@@ -27,23 +27,23 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
     }
 
     public async Task<T?> GetByIdWithIncludesAsync(
-        object id, 
+        object id,
         params Expression<Func<T, object>>[] includes)
     {
         IQueryable<T> query = _dbSet;
-        
+
         foreach (var include in includes)
         {
             query = query.Include(include);
         }
-        
+
         // Assume T has an Id property - this works for BaseEntity derived classes
         var parameter = Expression.Parameter(typeof(T), "x");
         var property = Expression.Property(parameter, "Id");
         var constant = Expression.Constant(id);
         var equals = Expression.Equal(property, constant);
         var lambda = Expression.Lambda<Func<T, bool>>(equals, parameter);
-        
+
         return await query.FirstOrDefaultAsync(lambda);
     }
 
@@ -97,7 +97,9 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
     {
         var entity = await GetByIdAsync(id, cancellationToken);
         if (entity == null)
+        {
             return false;
+        }
 
         _dbSet.Remove(entity);
         return true;
@@ -118,7 +120,7 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
     #region Advanced Query Operations
 
     public async Task<IEnumerable<T>> FindAsync(
-        Expression<Func<T, bool>> predicate, 
+        Expression<Func<T, bool>> predicate,
         CancellationToken cancellationToken = default)
     {
         return await _dbSet.Where(predicate).ToListAsync(cancellationToken);
@@ -134,17 +136,17 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
         params Expression<Func<T, object>>[] includes)
     {
         IQueryable<T> query = _dbSet;
-        
+
         foreach (var include in includes)
         {
             query = query.Include(include);
         }
-        
+
         return await query.Where(predicate).ToListAsync();
     }
 
     public async Task<T?> FirstOrDefaultAsync(
-        Expression<Func<T, bool>> predicate, 
+        Expression<Func<T, bool>> predicate,
         CancellationToken cancellationToken = default)
     {
         return await _dbSet.FirstOrDefaultAsync(predicate, cancellationToken);
@@ -156,17 +158,17 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
     }
 
     public async Task<bool> ExistsAsync(
-        Expression<Func<T, bool>> predicate, 
+        Expression<Func<T, bool>> predicate,
         CancellationToken cancellationToken = default)
     {
         return await _dbSet.AnyAsync(predicate, cancellationToken);
     }
 
     public async Task<int> CountAsync(
-        Expression<Func<T, bool>>? predicate = null, 
+        Expression<Func<T, bool>>? predicate = null,
         CancellationToken cancellationToken = default)
     {
-        return predicate == null 
+        return predicate == null
             ? await _dbSet.CountAsync(cancellationToken)
             : await _dbSet.CountAsync(predicate, cancellationToken);
     }
@@ -201,7 +203,7 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
         var totalCount = await query.CountAsync();
 
         // Apply sorting
-        query = descending 
+        query = descending
             ? query.OrderByDescending(orderBy)
             : query.OrderBy(orderBy);
 
@@ -241,7 +243,7 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
         var totalCount = await query.CountAsync();
 
         // Apply sorting
-        query = descending 
+        query = descending
             ? query.OrderByDescending(orderBy)
             : query.OrderBy(orderBy);
 
@@ -273,14 +275,14 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
     {
         // Note: This would typically use EF Extensions or similar for better performance
         var entities = await _dbSet.Where(predicate).ToListAsync(cancellationToken);
-        
+
         foreach (var entity in entities)
         {
             var compiledUpdate = updateExpression.Compile();
             var updatedEntity = compiledUpdate(entity);
             _context.Entry(entity).CurrentValues.SetValues(updatedEntity);
         }
-        
+
         return entities.Count;
     }
 
@@ -323,14 +325,14 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
     #region Raw SQL Support
 
     public async Task<IEnumerable<T>> FromSqlAsync(
-        string sql, 
+        string sql,
         params object[] parameters)
     {
         return await _dbSet.FromSqlRaw(sql, parameters).ToListAsync();
     }
 
     public async Task<int> ExecuteSqlAsync(
-        string sql, 
+        string sql,
         params object[] parameters)
     {
         return await _context.Database.ExecuteSqlRawAsync(sql, parameters);
@@ -481,10 +483,22 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
     {
         return await _dbSet.Where(predicate).Select(projection).ToListAsync();
     }
-    
+
     public async Task<int> SaveChangesAsync()
     {
         return await _context.SaveChangesAsync();
+    }
+
+    public async Task HardDeleteAsync(T entity)
+    {
+        _dbSet.Remove(entity);
+        await Task.CompletedTask;
+    }
+
+    public async Task HardDeleteRangeAsync(IEnumerable<T> entities)
+    {
+        _dbSet.RemoveRange(entities);
+        await Task.CompletedTask;
     }
 
     #endregion
@@ -499,19 +513,19 @@ public interface IOptimizedGenericRepository<T> : IGenericRepository<T> where T 
     Task<T?> GetByIdWithIncludesAsync(object id, params Expression<Func<T, object>>[] includes);
     Task<IEnumerable<T>> FindWithIncludesAsync(Expression<Func<T, bool>> predicate, params Expression<Func<T, object>>[] includes);
     Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate, CancellationToken cancellationToken = default);
-    
+
     // Pagination
     Task<PagedResult<T>> GetPagedAsync<TKey>(int pageNumber, int pageSize, Expression<Func<T, TKey>> orderBy, bool descending = false, Expression<Func<T, bool>>? filter = null, params Expression<Func<T, object>>[] includes);
     Task<PagedResult<TDto>> GetPagedWithProjectionAsync<TDto, TKey>(int pageNumber, int pageSize, Expression<Func<T, TKey>> orderBy, Expression<Func<T, TDto>> projection, bool descending = false, Expression<Func<T, bool>>? filter = null);
-    
+
     // Bulk operations
     Task<int> BulkUpdateAsync(Expression<Func<T, bool>> predicate, Expression<Func<T, T>> updateExpression, CancellationToken cancellationToken = default);
     Task<int> BulkDeleteAsync(Expression<Func<T, bool>> predicate, CancellationToken cancellationToken = default);
-    
+
     // Caching
     Task<T?> GetByIdCachedAsync(object id, TimeSpan? cacheExpiry = null, CancellationToken cancellationToken = default);
     Task<IEnumerable<T>> FindCachedAsync(Expression<Func<T, bool>> predicate, string cacheKey, TimeSpan? cacheExpiry = null, CancellationToken cancellationToken = default);
-    
+
     // Raw SQL
     Task<IEnumerable<T>> FromSqlAsync(string sql, params object[] parameters);
     Task<int> ExecuteSqlAsync(string sql, params object[] parameters);

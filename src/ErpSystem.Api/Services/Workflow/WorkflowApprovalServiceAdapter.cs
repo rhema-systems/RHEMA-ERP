@@ -1,5 +1,5 @@
-using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 
@@ -33,7 +33,7 @@ public class WorkflowApprovalServiceAdapter : ErpSystem.Core.Interfaces.Workflow
     public async Task<WorkflowApproval> ProcessApprovalAsync(Guid approvalId, Guid userId, WorkflowApprovalAction action, string? comments = null)
     {
         await _coreService.ProcessApprovalAsync(approvalId, action, userId, comments);
-        
+
         // Return the updated approval (would need to fetch it)
         _logger.LogInformation("Processed approval {ApprovalId} with action {Action}", approvalId, action);
         return new WorkflowApproval
@@ -42,8 +42,8 @@ public class WorkflowApprovalServiceAdapter : ErpSystem.Core.Interfaces.Workflow
             ProcessedById = userId,
             ProcessedDate = DateTime.UtcNow,
             Comments = comments,
-            Status = action == WorkflowApprovalAction.Approve 
-                ? WorkflowApprovalStatus.Approved 
+            Status = action == WorkflowApprovalAction.Approve
+                ? WorkflowApprovalStatus.Approved
                 : WorkflowApprovalStatus.Rejected
         };
     }
@@ -51,7 +51,7 @@ public class WorkflowApprovalServiceAdapter : ErpSystem.Core.Interfaces.Workflow
     public async Task<WorkflowApproval> DelegateApprovalAsync(Guid approvalId, Guid delegateToId, Guid delegatedById, string? reason = null)
     {
         await _coreService.DelegateApprovalAsync(approvalId, delegateToId, delegatedById, reason);
-        
+
         // Return the updated approval (would need to fetch it)
         _logger.LogInformation("Delegated approval {ApprovalId} to user {DelegateToId}", approvalId, delegateToId);
         return new WorkflowApproval

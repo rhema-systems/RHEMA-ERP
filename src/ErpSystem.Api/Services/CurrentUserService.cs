@@ -1,15 +1,24 @@
 using System.Security.Claims;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Data;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services;
 
 public class CurrentUserService : ICurrentUserService, ICurrentUserProvider
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly UserManager<ApplicationUser> _userManager;
+    private ApplicationUser? _cachedUser;
 
-    public CurrentUserService(IHttpContextAccessor httpContextAccessor)
+    public CurrentUserService(
+        IHttpContextAccessor httpContextAccessor,
+        UserManager<ApplicationUser> userManager)
     {
         _httpContextAccessor = httpContextAccessor;
+        _userManager = userManager;
     }
 
     public string? UserId
@@ -60,8 +69,8 @@ public class CurrentUserService : ICurrentUserService, ICurrentUserProvider
     {
         get
         {
-            return _httpContextAccessor.HttpContext?.User?.FindFirst("full_name")?.Value ?? 
-                   _httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.GivenName)?.Value ?? 
+            return _httpContextAccessor.HttpContext?.User?.FindFirst("full_name")?.Value ??
+                   _httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.GivenName)?.Value ??
                    Username;
         }
     }
@@ -164,6 +173,26 @@ public class CurrentUserService : ICurrentUserService, ICurrentUserProvider
         get
         {
             return _httpContextAccessor.HttpContext?.Request?.Headers["User-Agent"].FirstOrDefault();
+        }
+    }
+
+    public bool IsExternalUser
+    {
+        get
+        {
+            var authProvider = _httpContextAccessor.HttpContext?.User?.FindFirst("auth_provider")?.Value;
+
+            // External users use Local authentication
+            // Internal users use LDAP authentication
+            return authProvider == "Local";
+        }
+    }
+
+    public string AuthenticationProvider
+    {
+        get
+        {
+            return _httpContextAccessor.HttpContext?.User?.FindFirst("auth_provider")?.Value ?? "Local";
         }
     }
 }

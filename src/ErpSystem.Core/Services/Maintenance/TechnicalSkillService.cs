@@ -1,9 +1,9 @@
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -40,7 +40,9 @@ public class TechnicalSkillService : ITechnicalSkillService
 
             // Check if skill name already exists
             if (!await _skillRepository.IsNameUniqueAsync(createDto.Name))
+            {
                 throw new ArgumentException($"Skill name '{createDto.Name}' already exists");
+            }
 
             var skill = new Core.Entities.HR.Skill
             {
@@ -54,9 +56,9 @@ public class TechnicalSkillService : ITechnicalSkillService
             };
 
             await _skillRepository.AddAsync(skill);
-            
+
             _logger.LogInformation("Created technical skill {SkillId} successfully", skill.Id);
-            
+
             return await MapToDto(skill);
         }
         catch (Exception ex)
@@ -72,10 +74,7 @@ public class TechnicalSkillService : ITechnicalSkillService
         {
             _logger.LogInformation("Updating technical skill: {SkillId}", id);
 
-            var skill = await _skillRepository.GetByIdAsync(id);
-            if (skill == null)
-                throw new ArgumentException($"Skill with ID {id} not found");
-
+            var skill = await _skillRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Skill with ID {id} not found");
             skill.Name = updateDto.Name;
             skill.Description = updateDto.Description;
             skill.Category = updateDto.Category;
@@ -83,9 +82,9 @@ public class TechnicalSkillService : ITechnicalSkillService
             skill.RequiresCertification = false; // Default value
 
             await _skillRepository.UpdateAsync(skill);
-            
+
             _logger.LogInformation("Updated technical skill {SkillId} successfully", id);
-            
+
             return await MapToDto(skill);
         }
         catch (Exception ex)
@@ -101,12 +100,9 @@ public class TechnicalSkillService : ITechnicalSkillService
         {
             _logger.LogInformation("Deleting technical skill: {SkillId}", id);
 
-            var skill = await _skillRepository.GetByIdAsync(id);
-            if (skill == null)
-                throw new ArgumentException($"Skill with ID {id} not found");
-
+            var skill = await _skillRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Skill with ID {id} not found");
             await _skillRepository.DeleteAsync(id);
-            
+
             _logger.LogInformation("Deleted technical skill {SkillId} successfully", id);
         }
         catch (Exception ex)
@@ -126,12 +122,12 @@ public class TechnicalSkillService : ITechnicalSkillService
     {
         var skills = await _skillRepository.GetAllAsync();
         var result = new List<TechnicalSkillDto>();
-        
+
         foreach (var skill in skills)
         {
             result.Add(await MapToDto(skill));
         }
-        
+
         return result;
     }
 
@@ -140,18 +136,22 @@ public class TechnicalSkillService : ITechnicalSkillService
         var allSkills = await _skillRepository.GetAllAsync();
         var filtered = allSkills.AsQueryable();
 
-            // Apply filters
-            if (!string.IsNullOrEmpty(filter.SearchTerm))
-            {
-                filtered = filtered.Where(s => s.Name.Contains(filter.SearchTerm, StringComparison.OrdinalIgnoreCase) ||
-                                              (s.Description ?? "").Contains(filter.SearchTerm, StringComparison.OrdinalIgnoreCase));
-            }
+        // Apply filters
+        if (!string.IsNullOrEmpty(filter.SearchTerm))
+        {
+            filtered = filtered.Where(s => s.Name.Contains(filter.SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                                          (s.Description ?? "").Contains(filter.SearchTerm, StringComparison.OrdinalIgnoreCase));
+        }
 
-            if (!string.IsNullOrEmpty(filter.Category))
-                filtered = filtered.Where(s => s.Category == filter.Category);
+        if (!string.IsNullOrEmpty(filter.Category))
+        {
+            filtered = filtered.Where(s => s.Category == filter.Category);
+        }
 
-            if (filter.IsActive.HasValue)
-                filtered = filtered.Where(s => s.IsActive == filter.IsActive.Value);
+        if (filter.IsActive.HasValue)
+        {
+            filtered = filtered.Where(s => s.IsActive == filter.IsActive.Value);
+        }
 
         var totalCount = filtered.Count();
         var skillsPage = filtered
@@ -182,12 +182,12 @@ public class TechnicalSkillService : ITechnicalSkillService
     {
         var skills = await _skillRepository.GetActiveAsync();
         var result = new List<TechnicalSkillDto>();
-        
+
         foreach (var skill in skills)
         {
             result.Add(await MapToDto(skill));
         }
-        
+
         return result;
     }
 
@@ -195,12 +195,12 @@ public class TechnicalSkillService : ITechnicalSkillService
     {
         var skills = await _skillRepository.GetByCategoryAsync(category);
         var result = new List<TechnicalSkillDto>();
-        
+
         foreach (var skill in skills)
         {
             result.Add(await MapToDto(skill));
         }
-        
+
         return result;
     }
 
@@ -215,26 +215,24 @@ public class TechnicalSkillService : ITechnicalSkillService
         // HR Skills don't have complexity - return all active skills  
         return await GetActiveSkillsAsync();
     }
-    
+
 
     public async Task<IEnumerable<TechnicalSkillDto>> GetSkillsByRiskLevelAsync(string riskLevel)
     {
         // HR Skills don't have risk level - return all active skills
         return await GetActiveSkillsAsync();
     }
-    
+
 
     public async Task<TechnicalSkillDto> ToggleSkillStatusAsync(Guid id)
     {
-        var skill = await _skillRepository.GetByIdAsync(id);
-        if (skill == null)
-            throw new ArgumentException($"Skill with ID {id} not found");
+        var skill = await _skillRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Skill with ID {id} not found");
 
         // HR Skills can have status toggled
         skill.IsActive = !skill.IsActive;
-        
+
         await _skillRepository.UpdateAsync(skill);
-        
+
         return await MapToDto(skill);
     }
 
@@ -259,7 +257,7 @@ public class TechnicalSkillService : ITechnicalSkillService
 
             // Get all available skills
             var allSkills = await _skillRepository.GetActiveAsync();
-            
+
             // Recommend skills that:
             // 1. The technician doesn't already have
             // 2. Are related to their current skills or department
@@ -316,19 +314,19 @@ public class TechnicalSkillService : ITechnicalSkillService
     {
         try
         {
-            _logger.LogInformation("Assigning skill {SkillId} to technician {TechnicianId}", 
+            _logger.LogInformation("Assigning skill {SkillId} to technician {TechnicianId}",
                 createDto.SkillId, createDto.TechnicianId);
 
-            var skill = await _skillRepository.GetByIdAsync(createDto.SkillId);
-            if (skill == null)
-                throw new ArgumentException($"Skill with ID {createDto.SkillId} not found");
+            var skill = await _skillRepository.GetByIdAsync(createDto.SkillId) ?? throw new ArgumentException($"Skill with ID {createDto.SkillId} not found");
 
             // Check if assignment already exists
             var existingAssignment = await _assignmentRepository.GetTechnicianSkillAsync(
                 createDto.TechnicianId, createDto.SkillId);
-            
+
             if (existingAssignment != null)
+            {
                 throw new InvalidOperationException("Skill is already assigned to this technician");
+            }
 
             var assignment = new TechnicianSkillAssignment
             {
@@ -347,15 +345,15 @@ public class TechnicalSkillService : ITechnicalSkillService
             };
 
             await _assignmentRepository.AddAsync(assignment);
-            
-            _logger.LogInformation("Assigned skill {SkillId} to technician {TechnicianId} successfully", 
+
+            _logger.LogInformation("Assigned skill {SkillId} to technician {TechnicianId} successfully",
                 createDto.SkillId, createDto.TechnicianId);
-            
+
             return MapAssignmentToDto(assignment, skill);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error assigning skill {SkillId} to technician {TechnicianId}", 
+            _logger.LogError(ex, "Error assigning skill {SkillId} to technician {TechnicianId}",
                 createDto.SkillId, createDto.TechnicianId);
             throw;
         }
@@ -363,10 +361,7 @@ public class TechnicalSkillService : ITechnicalSkillService
 
     public async Task<TechnicianSkillAssignmentDto> UpdateTechnicianSkillAsync(Guid id, UpdateTechnicianSkillAssignmentDto updateDto)
     {
-        var assignment = await _assignmentRepository.GetByIdAsync(id);
-        if (assignment == null)
-            throw new ArgumentException($"Skill assignment with ID {id} not found");
-
+        var assignment = await _assignmentRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Skill assignment with ID {id} not found");
         assignment.ProficiencyLevel = updateDto.ProficiencyLevel;
         assignment.ProficiencyDescription = updateDto.ProficiencyDescription;
         assignment.ExpirationDate = updateDto.ExpirationDate;
@@ -391,7 +386,7 @@ public class TechnicalSkillService : ITechnicalSkillService
     {
         var assignments = await _assignmentRepository.GetByTechnicianIdAsync(technicianId);
         var result = new List<TechnicianSkillAssignmentDto>();
-        
+
         foreach (var assignment in assignments)
         {
             var skill = await _skillRepository.GetByIdAsync(assignment.SkillId);
@@ -400,7 +395,7 @@ public class TechnicalSkillService : ITechnicalSkillService
                 result.Add(MapAssignmentToDto(assignment, skill));
             }
         }
-        
+
         return result;
     }
 
@@ -408,7 +403,7 @@ public class TechnicalSkillService : ITechnicalSkillService
     {
         var assignments = await _assignmentRepository.GetBySkillIdAsync(skillId);
         var result = new List<TechnicianSkillAssignmentDto>();
-        
+
         var skill = await _skillRepository.GetByIdAsync(skillId);
         if (skill != null)
         {
@@ -417,7 +412,7 @@ public class TechnicalSkillService : ITechnicalSkillService
                 result.Add(MapAssignmentToDto(assignment, skill));
             }
         }
-        
+
         return result;
     }
 
@@ -443,15 +438,15 @@ public class TechnicalSkillService : ITechnicalSkillService
         try
         {
             _logger.LogInformation("Getting technicians with skill: {SkillId}", skillId);
-            
+
             var assignments = await _assignmentRepository.GetBySkillIdAsync(skillId);
             var result = new List<TechnicianDto>();
-            
+
             // For now, return empty list - this would typically call HR/Technician service
             // In a real implementation, this would resolve technician details
-            
+
             _logger.LogInformation("Found {TechnicianCount} technicians with skill {SkillId}", result.Count, skillId);
-            
+
             return result;
         }
         catch (Exception ex)
@@ -469,7 +464,7 @@ public class TechnicalSkillService : ITechnicalSkillService
     private async Task<TechnicalSkillDto> MapToDto(Core.Entities.HR.Skill skill)
     {
         var technicianCount = await _skillRepository.GetTechnicianCountBySkillAsync(skill.Id);
-        
+
         return new TechnicalSkillDto
         {
             Id = skill.Id,
@@ -499,7 +494,7 @@ public class TechnicalSkillService : ITechnicalSkillService
         };
     }
 
-    private TechnicianSkillAssignmentDto MapAssignmentToDto(TechnicianSkillAssignment assignment, Core.Entities.HR.Skill skill)
+    private static TechnicianSkillAssignmentDto MapAssignmentToDto(TechnicianSkillAssignment assignment, Core.Entities.HR.Skill skill)
     {
         return new TechnicianSkillAssignmentDto
         {

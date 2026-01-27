@@ -1,7 +1,7 @@
 using System.Diagnostics;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace ErpSystem.Api.Performance;
 
@@ -35,7 +35,7 @@ public class PerformanceAnalyzer : IPerformanceAnalyzer
     public async Task<PerformanceMetrics> GetCurrentMetricsAsync()
     {
         var process = Process.GetCurrentProcess();
-        
+
         return new PerformanceMetrics
         {
             Timestamp = DateTime.UtcNow,
@@ -55,19 +55,19 @@ public class PerformanceAnalyzer : IPerformanceAnalyzer
     public async Task<DatabasePerformanceMetrics> AnalyzeDatabasePerformanceAsync()
     {
         var stopwatch = Stopwatch.StartNew();
-        
+
         try
         {
             // Test basic connection
             var connectionTime = await MeasureConnectionTimeAsync();
-            
+
             // Analyze query performance on key tables
             var auditLogCount = await _context.AuditLogs.CountAsync();
             var userCount = await _context.Users.CountAsync();
             var tenantCount = await _context.Tenants.CountAsync();
-            
+
             stopwatch.Stop();
-            
+
             return new DatabasePerformanceMetrics
             {
                 ConnectionTime = connectionTime,
@@ -112,7 +112,7 @@ public class PerformanceAnalyzer : IPerformanceAnalyzer
     private async Task<TimeSpan> MeasureConnectionTimeAsync()
     {
         var stopwatch = Stopwatch.StartNew();
-        
+
         try
         {
             await _context.Database.ExecuteSqlRawAsync("SELECT 1");
@@ -145,7 +145,7 @@ public class MemoryMetrics
     public long PrivateMemorySize { get; set; }
     public long VirtualMemorySize { get; set; }
     public long GCMemory { get; set; }
-    
+
     public double WorkingSetMB => WorkingSet / (1024.0 * 1024.0);
     public double PrivateMemoryMB => PrivateMemorySize / (1024.0 * 1024.0);
     public double GCMemoryMB => GCMemory / (1024.0 * 1024.0);

@@ -1,13 +1,13 @@
+using System.ComponentModel.DataAnnotations;
+using ErpSystem.Api.Caching;
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Services;
+using ErpSystem.Data.Repositories;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.RateLimiting;
-using System.ComponentModel.DataAnnotations;
-using ErpSystem.Core.Services;
-using ErpSystem.Core.Entities;
-using ErpSystem.Shared;
-using ErpSystem.Api.Caching;
-using ErpSystem.Data.Repositories;
 
 namespace ErpSystem.Api.Controllers.Optimized;
 
@@ -26,7 +26,7 @@ public class OptimizedAuditLogController : ControllerBase
     private readonly IOptimizedGenericRepository<AuditLog> _repository;
 
     public OptimizedAuditLogController(
-        IAuditLogService auditLogService, 
+        IAuditLogService auditLogService,
         ILogger<OptimizedAuditLogController> logger,
         ICachingService cachingService,
         IOptimizedGenericRepository<AuditLog> repository)
@@ -64,7 +64,7 @@ public class OptimizedAuditLogController : ControllerBase
             var cachedResult = await _cachingService.GetAsync<PagedAuditLogResponse>(cacheKey);
             if (cachedResult != null)
             {
-                Response.Headers.Add("X-Cache-Status", "HIT");
+                Response.Headers.Append("X-Cache-Status", "HIT");
                 return Ok(cachedResult);
             }
 
@@ -107,9 +107,9 @@ public class OptimizedAuditLogController : ControllerBase
             // Cache the result for 5 minutes
             await _cachingService.SetAsync(cacheKey, response, TimeSpan.FromMinutes(5));
 
-            Response.Headers.Add("X-Cache-Status", "MISS");
-            Response.Headers.Add("X-Total-Count", result.TotalCount.ToString());
-            
+            Response.Headers.Append("X-Cache-Status", "MISS");
+            Response.Headers.Append("X-Total-Count", result.TotalCount.ToString());
+
             return Ok(response);
         }
         catch (Exception ex)
@@ -134,12 +134,12 @@ public class OptimizedAuditLogController : ControllerBase
         try
         {
             var cacheKey = $"audit:log:{id}";
-            
+
             // Try cache first
             var cachedLog = await _cachingService.GetAsync<DetailedAuditLogDto>(cacheKey);
             if (cachedLog != null)
             {
-                Response.Headers.Add("X-Cache-Status", "HIT");
+                Response.Headers.Append("X-Cache-Status", "HIT");
                 return Ok(cachedLog);
             }
 
@@ -157,11 +157,11 @@ public class OptimizedAuditLogController : ControllerBase
                 Action = auditLog.Action,
                 Resource = auditLog.Resource,
                 ResourceId = auditLog.ResourceId,
-                OldValues = auditLog.OldValues != null 
-                    ? System.Text.Json.JsonSerializer.Deserialize<object>(auditLog.OldValues) 
+                OldValues = auditLog.OldValues != null
+                    ? System.Text.Json.JsonSerializer.Deserialize<object>(auditLog.OldValues)
                     : null,
-                NewValues = auditLog.NewValues != null 
-                    ? System.Text.Json.JsonSerializer.Deserialize<object>(auditLog.NewValues) 
+                NewValues = auditLog.NewValues != null
+                    ? System.Text.Json.JsonSerializer.Deserialize<object>(auditLog.NewValues)
                     : null,
                 IpAddress = auditLog.IpAddress,
                 UserAgent = auditLog.UserAgent,
@@ -171,7 +171,7 @@ public class OptimizedAuditLogController : ControllerBase
             // Cache for 1 hour since audit logs don't change
             await _cachingService.SetAsync(cacheKey, detailedDto, TimeSpan.FromHours(1));
 
-            Response.Headers.Add("X-Cache-Status", "MISS");
+            Response.Headers.Append("X-Cache-Status", "MISS");
             return Ok(detailedDto);
         }
         catch (Exception ex)
@@ -194,11 +194,11 @@ public class OptimizedAuditLogController : ControllerBase
         try
         {
             var cacheKey = "audit:stats:global";
-            
+
             var cachedStats = await _cachingService.GetAsync<AuditLogStatsDto>(cacheKey);
             if (cachedStats != null)
             {
-                Response.Headers.Add("X-Cache-Status", "HIT");
+                Response.Headers.Append("X-Cache-Status", "HIT");
                 return Ok(cachedStats);
             }
 
@@ -230,7 +230,7 @@ public class OptimizedAuditLogController : ControllerBase
             // Cache for 10 minutes
             await _cachingService.SetAsync(cacheKey, stats, TimeSpan.FromMinutes(10));
 
-            Response.Headers.Add("X-Cache-Status", "MISS");
+            Response.Headers.Append("X-Cache-Status", "MISS");
             return Ok(stats);
         }
         catch (Exception ex)
@@ -255,7 +255,7 @@ public class OptimizedAuditLogController : ControllerBase
         {
             // This would typically enqueue a background job
             var jobId = Guid.NewGuid().ToString();
-            
+
             // TODO: Implement with Hangfire or similar background processing
             _logger.LogInformation("Export job {JobId} queued for user {UserId}", jobId, User.Identity?.Name);
 
@@ -278,7 +278,7 @@ public class OptimizedAuditLogController : ControllerBase
 
     #region Private Helper Methods
 
-    private System.Linq.Expressions.Expression<Func<AuditLog, bool>>? BuildAuditLogQuery(AuditLogQueryRequest request)
+    private static System.Linq.Expressions.Expression<Func<AuditLog, bool>>? BuildAuditLogQuery(AuditLogQueryRequest request)
     {
         System.Linq.Expressions.Expression<Func<AuditLog, bool>>? query = null;
 
@@ -319,12 +319,12 @@ public class OptimizedAuditLogController : ControllerBase
         System.Linq.Expressions.Expression<Func<AuditLog, bool>> expr2)
     {
         var parameter = System.Linq.Expressions.Expression.Parameter(typeof(AuditLog), "a");
-        
+
         var body1 = ReplaceParameter(expr1.Body, expr1.Parameters[0], parameter);
         var body2 = ReplaceParameter(expr2.Body, expr2.Parameters[0], parameter);
-        
+
         var combined = System.Linq.Expressions.Expression.AndAlso(body1, body2);
-        
+
         return System.Linq.Expressions.Expression.Lambda<Func<AuditLog, bool>>(combined, parameter);
     }
 
@@ -336,7 +336,7 @@ public class OptimizedAuditLogController : ControllerBase
         return new ParameterReplacer(oldParameter, newParameter).Visit(expression);
     }
 
-    private System.Linq.Expressions.Expression<Func<AuditLog, object>> GetOrderByExpression(string? sortBy)
+    private static System.Linq.Expressions.Expression<Func<AuditLog, object>> GetOrderByExpression(string? sortBy)
     {
         return sortBy?.ToLower() switch
         {
@@ -405,20 +405,20 @@ public class AuditLogQueryRequest
 {
     [Range(1, int.MaxValue)]
     public int PageNumber { get; set; } = 1;
-    
+
     [Range(1, 1000)]
     public int PageSize { get; set; } = 50;
-    
+
     public string? SortBy { get; set; }
     public string SortDirection { get; set; } = "desc";
-    
+
     public Guid? UserId { get; set; }
     public string? Action { get; set; }
     public string? Resource { get; set; }
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
     public string? IpAddress { get; set; }
-    
+
     public override int GetHashCode()
     {
         return HashCode.Combine(PageNumber, PageSize, SortBy, SortDirection, UserId, Action, Resource, FromDate?.Date);

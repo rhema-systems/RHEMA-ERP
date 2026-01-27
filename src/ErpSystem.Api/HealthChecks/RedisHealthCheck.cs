@@ -25,8 +25,8 @@ namespace ErpSystem.Api.HealthChecks
                 await database.StringSetAsync(testKey, "test", TimeSpan.FromSeconds(10));
                 var result = await database.StringGetAsync(testKey);
                 await database.KeyDeleteAsync(testKey);
-                
-                return result == "test" 
+
+                return result == "test"
                     ? HealthCheckResult.Healthy("Redis is responding")
                     : HealthCheckResult.Degraded("Redis test failed");
             }

@@ -1,6 +1,6 @@
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.Maintenance;
 
@@ -48,7 +48,7 @@ public class TechnicalSkillRepository : GenericRepository<Skill>, ITechnicalSkil
 
         return !await query.AnyAsync();
     }
-    
+
     public async Task<int> GetTechnicianCountBySkillAsync(Guid skillId)
     {
         return await _context.TechnicianSkillAssignments

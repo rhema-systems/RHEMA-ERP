@@ -158,7 +158,9 @@ public class AzureBlobStorageService : IFileStorageService
                     });
 
                     if (request.StopOnFirstError)
+                    {
                         break;
+                    }
                 }
             }
             catch (Exception ex)
@@ -171,7 +173,9 @@ public class AzureBlobStorageService : IFileStorageService
                 });
 
                 if (request.StopOnFirstError)
+                {
                     break;
+                }
             }
         }
 
@@ -310,7 +314,7 @@ public class AzureBlobStorageService : IFileStorageService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error copying file in Azure Blob Storage: {SourcePath} -> {DestinationPath}", 
+            _logger.LogError(ex, "Error copying file in Azure Blob Storage: {SourcePath} -> {DestinationPath}",
                 sourceFilePath, destinationFilePath);
             return false;
         }
@@ -331,7 +335,7 @@ public class AzureBlobStorageService : IFileStorageService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error moving file in Azure Blob Storage: {SourcePath} -> {DestinationPath}", 
+            _logger.LogError(ex, "Error moving file in Azure Blob Storage: {SourcePath} -> {DestinationPath}",
                 sourceFilePath, destinationFilePath);
             return false;
         }
@@ -406,7 +410,7 @@ public class AzureBlobStorageService : IFileStorageService
         var datePath = DateTime.UtcNow.ToString("yyyy/MM");
         var tenantPath = !string.IsNullOrEmpty(tenantId) ? tenantId : "global";
         var uniqueFileName = GenerateUniqueFileName(fileName);
-        
+
         return $"{category}/{tenantPath}/{datePath}/{uniqueFileName}";
     }
 
@@ -417,26 +421,26 @@ public class AzureBlobStorageService : IFileStorageService
         var sanitizedFileName = SanitizeFileName(fileNameWithoutExtension);
         var uniqueId = Guid.NewGuid().ToString("N")[..8];
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-        
+
         return $"{sanitizedFileName}_{timestamp}_{uniqueId}{extension}";
     }
 
-    private string SanitizeFileName(string fileName)
+    private static string SanitizeFileName(string fileName)
     {
         // Azure blob names have specific rules
         var invalidChars = new[] { '\\', '/', ':', '*', '?', '"', '<', '>', '|' };
         var sanitized = new string(fileName.Where(c => !invalidChars.Contains(c)).ToArray());
         sanitized = sanitized.Replace(" ", "_").ToLowerInvariant();
-        
+
         if (sanitized.Length > 50)
         {
             sanitized = sanitized[..50];
         }
-        
+
         return string.IsNullOrEmpty(sanitized) ? "file" : sanitized;
     }
 
-    private bool IsMatch(string fileName, string pattern)
+    private static bool IsMatch(string fileName, string pattern)
     {
         // Simple pattern matching - can be enhanced with regex
         return pattern == "*.*" || fileName.EndsWith(pattern.Replace("*", ""));

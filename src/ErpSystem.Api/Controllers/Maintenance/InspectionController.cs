@@ -1,7 +1,9 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
-using ErpSystem.Core.Interfaces;
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -10,13 +12,16 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 [Authorize]
 public class InspectionController : ControllerBase
 {
+    private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<InspectionController> _logger;
 
     public InspectionController(
+        ApplicationDbContext context,
         ICurrentUserService currentUserService,
         ILogger<InspectionController> logger)
     {
+        _context = context;
         _currentUserService = currentUserService;
         _logger = logger;
     }
@@ -25,90 +30,98 @@ public class InspectionController : ControllerBase
     /// Gets active inspections for quality control dashboard
     /// </summary>
     [HttpGet("active")]
-    public ActionResult<object[]> GetActiveInspections([FromQuery] string? inspectorId = null)
+    public async Task<ActionResult<object[]>> GetActiveInspections([FromQuery] string? inspectorId = null)
     {
         try
         {
             var tenantId = _currentUserService.TenantId;
             _logger.LogInformation("Getting active inspections for tenant {TenantId}", tenantId);
 
-            // Return mock data for active inspections
-            var activeInspections = new[]
-            {
-                new
-                {
-                    id = "inspection-1",
-                    title = "Monthly Safety Inspection - HVAC Unit 1",
-                    assetId = "asset-1",
-                    assetName = "HVAC Unit 1",
-                    inspectorId = "inspector-1",
-                    inspectorName = "John Smith",
-                    status = "In Progress",
-                    scheduledDate = DateTime.Today.AddDays(-1),
-                    dueDate = DateTime.Today.AddDays(2),
-                    checklistId = "checklist-1",
-                    checklistName = "HVAC Safety Inspection",
-                    progress = 65,
-                    priority = "High",
-                    workOrderId = "wo-001",
-                    location = "Building A - Floor 3",
-                    estimatedDuration = 120,
-                    actualDuration = 78,
-                    createdAt = DateTime.Today.AddDays(-1),
-                    updatedAt = DateTime.Now.AddHours(-2)
-                },
-                new
-                {
-                    id = "inspection-2",
-                    title = "Quality Control Check - Elevator 1",
-                    assetId = "asset-2",
-                    assetName = "Elevator 1",
-                    inspectorId = "inspector-2",
-                    inspectorName = "Sarah Johnson",
-                    status = "Scheduled",
-                    scheduledDate = DateTime.Today,
-                    dueDate = DateTime.Today.AddDays(1),
-                    checklistId = "checklist-2",
-                    checklistName = "Elevator Safety Checklist",
-                    progress = 0,
-                    priority = "Medium",
-                    workOrderId = "wo-002",
-                    location = "Building B - Lobby",
-                    estimatedDuration = 90,
-                    actualDuration = 0,
-                    createdAt = DateTime.Today.AddDays(-2),
-                    updatedAt = DateTime.Today.AddDays(-2)
-                },
-                new
-                {
-                    id = "inspection-3",
-                    title = "Emergency Generator Test",
-                    assetId = "asset-3",
-                    assetName = "Emergency Generator",
-                    inspectorId = "inspector-1",
-                    inspectorName = "John Smith",
-                    status = "In Progress",
-                    scheduledDate = DateTime.Today.AddDays(-3),
-                    dueDate = DateTime.Today,
-                    checklistId = "checklist-3",
-                    checklistName = "Generator Performance Test",
-                    progress = 85,
-                    priority = "Critical",
-                    workOrderId = "wo-003",
-                    location = "Building C - Basement",
-                    estimatedDuration = 180,
-                    actualDuration = 153,
-                    createdAt = DateTime.Today.AddDays(-3),
-                    updatedAt = DateTime.Now.AddMinutes(-30)
-                }
-            };
+            // Query WorkOrderQualityChecks with status "InProgress"
+            IQueryable<ErpSystem.Core.Entities.Maintenance.WorkOrderQualityCheck> query = _context.WorkOrderQualityChecks
+                .Where(qc => qc.TenantId == tenantId && qc.OverallResult == "InProgress")
+                .Include(qc => qc.Checklist);
 
             // Filter by inspector if specified
-            if (!string.IsNullOrEmpty(inspectorId))
+            if (!string.IsNullOrEmpty(inspectorId) && Guid.TryParse(inspectorId, out var inspectorGuid))
             {
-                activeInspections = activeInspections.Where(i => i.inspectorId == inspectorId).ToArray();
+                query = query.Where(qc => qc.InspectorId == inspectorGuid);
             }
 
+            var qualityChecks = await query.ToListAsync();
+
+            // Load work orders separately
+            var workOrderIds = qualityChecks.Select(qc => qc.WorkOrderId).Distinct().ToList();
+            var workOrders = await _context.WorkOrders
+                .Include(wo => wo.Asset)
+                .Where(wo => workOrderIds.Contains(wo.Id))
+                .ToDictionaryAsync(wo => wo.Id);
+
+            // Map to response format
+            var activeInspections = qualityChecks.Select(qc =>
+            {
+                workOrders.TryGetValue(qc.WorkOrderId, out var workOrder);
+
+                // Parse CheckResults JSON to calculate progress
+                List<System.Text.Json.JsonElement>? checkResults = null;
+                try
+                {
+                    checkResults = string.IsNullOrEmpty(qc.CheckResults) || qc.CheckResults == "[]"
+                        ? new List<System.Text.Json.JsonElement>()
+                        : System.Text.Json.JsonSerializer.Deserialize<List<System.Text.Json.JsonElement>>(qc.CheckResults);
+                }
+                catch
+                {
+                    checkResults = new List<System.Text.Json.JsonElement>();
+                }
+
+                List<System.Text.Json.JsonElement>? checklistItems = null;
+                try
+                {
+                    checklistItems = string.IsNullOrEmpty(qc.Checklist?.ChecklistItems) || qc.Checklist.ChecklistItems == "[]"
+                        ? new List<System.Text.Json.JsonElement>()
+                        : System.Text.Json.JsonSerializer.Deserialize<List<System.Text.Json.JsonElement>>(qc.Checklist.ChecklistItems);
+                }
+                catch
+                {
+                    checklistItems = new List<System.Text.Json.JsonElement>();
+                }
+
+                var completedItems = checkResults.Count;
+                var totalItems = checklistItems.Count;
+                var progress = totalItems > 0 ? (completedItems * 100 / totalItems) : 0;
+
+                return new
+                {
+                    id = qc.Id.ToString(),
+                    workOrderId = qc.WorkOrderId.ToString(),
+                    workOrderNumber = workOrder?.WorkOrderNumber ?? "Unknown",
+                    workOrderTitle = workOrder?.Title ?? "Unknown Work Order",
+                    assetId = workOrder?.AssetId.ToString() ?? "",
+                    assetName = workOrder?.Asset?.Name ?? "Unknown",
+                    assetLocation = workOrder?.Asset?.Location ?? "",
+                    checklistId = qc.ChecklistId.ToString(),
+                    checklist = new
+                    {
+                        id = qc.ChecklistId.ToString(),
+                        name = qc.Checklist?.Name ?? "Unknown",
+                        items = checklistItems
+                    },
+                    inspectorId = qc.InspectorId.ToString(),
+                    inspectorName = "Inspector", // TODO: Load from Employee table
+                    status = "In Progress",
+                    scheduledDate = qc.InspectionDate,
+                    startedDate = qc.InspectionDate,
+                    progress = progress,
+                    overallScore = qc.Score,
+                    itemResponses = checkResults,
+                    generalNotes = qc.Notes,
+                    createdAt = qc.InspectionDate,
+                    updatedAt = qc.InspectionDate
+                };
+            }).ToArray();
+
+            _logger.LogInformation("Found {Count} active inspections for tenant {TenantId}", activeInspections.Length, tenantId);
             return Ok(activeInspections);
         }
         catch (Exception ex)
@@ -167,7 +180,7 @@ public class InspectionController : ControllerBase
                     },
                     new
                     {
-                        itemId = "item-2", 
+                        itemId = "item-2",
                         itemText = "Thermostat calibration",
                         result = (string?)null,
                         score = 8,
@@ -179,7 +192,7 @@ public class InspectionController : ControllerBase
                 createdAt = DateTime.Today.AddDays(-1),
                 updatedAt = DateTime.Now.AddMinutes(-30),
                 workflowStatus = "In Progress",
-                signatures = new object[0]
+                signatures = Array.Empty<object>()
             };
 
             return Ok(inspection);

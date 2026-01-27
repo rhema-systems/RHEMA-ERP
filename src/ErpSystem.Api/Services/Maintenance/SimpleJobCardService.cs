@@ -1,10 +1,10 @@
-using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.DTOs.Maintenance;
-using ErpSystem.Shared;
-using Microsoft.Extensions.Logging;
-using ErpSystem.Data;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Api.Services.Maintenance;
 
@@ -26,7 +26,7 @@ public class SimpleJobCardService : IJobCardService
     public Task<PagedResult<JobCardListDto>> GetJobCardsPagedAsync(JobCardFilterDto filter)
     {
         _logger.LogInformation("GetJobCardsPagedAsync called - returning empty result");
-        
+
         return Task.FromResult(new PagedResult<JobCardListDto>
         {
             Items = new List<JobCardListDto>(),
@@ -51,11 +51,11 @@ public class SimpleJobCardService : IJobCardService
     public async Task<JobCardDto> CreateJobCardAsync(CreateJobCardDto createDto)
     {
         _logger.LogInformation("CreateJobCardAsync called with title: {Title}", createDto.Title);
-        
+
         // Create a simple mock job card for testing
         var jobCardId = Guid.NewGuid();
         var jobCardNumber = $"JC-{DateTime.Now:yyyy}-{Random.Shared.Next(1000, 9999):D4}";
-        
+
         var jobCard = new JobCardDto
         {
             Id = jobCardId,
@@ -87,10 +87,10 @@ public class SimpleJobCardService : IJobCardService
             RequiredCompletionDate = createDto.RequiredCompletionDate,
             CreatedAt = DateTime.UtcNow
         };
-        
-        _logger.LogInformation("Created mock job card {JobCardNumber} with ID {JobCardId}", 
+
+        _logger.LogInformation("Created mock job card {JobCardNumber} with ID {JobCardId}",
             jobCardNumber, jobCardId);
-        
+
         return await Task.FromResult(jobCard);
     }
 

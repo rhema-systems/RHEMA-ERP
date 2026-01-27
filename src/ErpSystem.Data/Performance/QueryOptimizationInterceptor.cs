@@ -1,11 +1,11 @@
 using System.Data.Common;
 using System.Diagnostics;
-using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Configuration;
 using ErpSystem.Core.Interfaces;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Data.Performance;
 
@@ -24,9 +24,9 @@ public class QueryOptimizationInterceptor : DbCommandInterceptor
     }
 
     public override async ValueTask<DbDataReader> ReaderExecutedAsync(
-        DbCommand command, 
-        CommandExecutedEventData eventData, 
-        DbDataReader result, 
+        DbCommand command,
+        CommandExecutedEventData eventData,
+        DbDataReader result,
         CancellationToken cancellationToken = default)
     {
         await LogSlowQueryIfNeeded(command, eventData);
@@ -34,8 +34,8 @@ public class QueryOptimizationInterceptor : DbCommandInterceptor
     }
 
     public override DbDataReader ReaderExecuted(
-        DbCommand command, 
-        CommandExecutedEventData eventData, 
+        DbCommand command,
+        CommandExecutedEventData eventData,
         DbDataReader result)
     {
         _ = Task.Run(async () => await LogSlowQueryIfNeeded(command, eventData));
@@ -43,9 +43,9 @@ public class QueryOptimizationInterceptor : DbCommandInterceptor
     }
 
     public override async ValueTask<object?> ScalarExecutedAsync(
-        DbCommand command, 
-        CommandExecutedEventData eventData, 
-        object? result, 
+        DbCommand command,
+        CommandExecutedEventData eventData,
+        object? result,
         CancellationToken cancellationToken = default)
     {
         await LogSlowQueryIfNeeded(command, eventData);
@@ -53,8 +53,8 @@ public class QueryOptimizationInterceptor : DbCommandInterceptor
     }
 
     public override object? ScalarExecuted(
-        DbCommand command, 
-        CommandExecutedEventData eventData, 
+        DbCommand command,
+        CommandExecutedEventData eventData,
         object? result)
     {
         _ = Task.Run(async () => await LogSlowQueryIfNeeded(command, eventData));
@@ -62,9 +62,9 @@ public class QueryOptimizationInterceptor : DbCommandInterceptor
     }
 
     public override async ValueTask<int> NonQueryExecutedAsync(
-        DbCommand command, 
-        CommandExecutedEventData eventData, 
-        int result, 
+        DbCommand command,
+        CommandExecutedEventData eventData,
+        int result,
         CancellationToken cancellationToken = default)
     {
         await LogSlowQueryIfNeeded(command, eventData);
@@ -72,8 +72,8 @@ public class QueryOptimizationInterceptor : DbCommandInterceptor
     }
 
     public override int NonQueryExecuted(
-        DbCommand command, 
-        CommandExecutedEventData eventData, 
+        DbCommand command,
+        CommandExecutedEventData eventData,
         int result)
     {
         _ = Task.Run(async () => await LogSlowQueryIfNeeded(command, eventData));
@@ -85,30 +85,30 @@ public class QueryOptimizationInterceptor : DbCommandInterceptor
         try
         {
             var duration = eventData.Duration;
-            
+
             // Log queries that take longer than 500ms as warnings, 1s as errors
             if (duration.TotalMilliseconds > 500)
             {
                 using var scope = _serviceProvider.CreateScope();
                 var performanceAnalyzer = scope.ServiceProvider.GetService<IPerformanceAnalyzer>();
-                
+
                 if (performanceAnalyzer != null)
                 {
                     await performanceAnalyzer.LogSlowQuery(
-                        SanitizeQuery(command.CommandText), 
-                        duration, 
+                        SanitizeQuery(command.CommandText),
+                        duration,
                         "QueryOptimizationInterceptor"
                     );
                 }
 
                 var logLevel = duration.TotalMilliseconds > 1000 ? LogLevel.Error : LogLevel.Warning;
-                _logger.Log(logLevel, "Slow query detected: {Duration}ms - {Query}", 
+                _logger.Log(logLevel, "Slow query detected: {Duration}ms - {Query}",
                     duration.TotalMilliseconds, SanitizeQuery(command.CommandText));
-                
+
                 // Log query execution plan for very slow queries (SQL Server specific)
                 if (duration.TotalMilliseconds > 2000 && command.CommandText.Contains("SELECT"))
                 {
-                    _logger.LogInformation("Consider analyzing execution plan for query: {Query}", 
+                    _logger.LogInformation("Consider analyzing execution plan for query: {Query}",
                         SanitizeQuery(command.CommandText));
                 }
             }
@@ -135,7 +135,7 @@ public static class DatabasePerformanceExtensions
     /// Add database performance monitoring and optimization
     /// </summary>
     public static IServiceCollection AddDatabasePerformanceOptimization(
-        this IServiceCollection services, 
+        this IServiceCollection services,
         IConfiguration configuration)
     {
         // Register query optimization interceptor
@@ -152,7 +152,7 @@ public static class DatabasePerformanceExtensions
     /// Add the query optimization interceptor to DbContext options
     /// </summary>
     public static DbContextOptionsBuilder AddQueryOptimizationInterceptor(
-        this DbContextOptionsBuilder optionsBuilder, 
+        this DbContextOptionsBuilder optionsBuilder,
         IServiceProvider serviceProvider)
     {
         var interceptor = serviceProvider.GetRequiredService<QueryOptimizationInterceptor>();

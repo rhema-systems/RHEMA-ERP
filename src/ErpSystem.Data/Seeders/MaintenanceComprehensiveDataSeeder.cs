@@ -1,6 +1,6 @@
-using ErpSystem.Core.Entities.Maintenance;
-using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -106,7 +106,10 @@ public class MaintenanceComprehensiveDataSeeder
         var lubCategory = await _context.InventoryCategories.FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Code == "LUBRICANTS");
         var filterCategory = await _context.InventoryCategories.FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Code == "FILTERS");
 
-        if (elecCategory == null) return;
+        if (elecCategory == null)
+        {
+            return;
+        }
 
         var items = new[]
         {
@@ -165,7 +168,10 @@ public class MaintenanceComprehensiveDataSeeder
         var powerCategory = await _context.MaintenanceAssetCategories.FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Code == "POWER");
         var elecCategory = await _context.MaintenanceAssetCategories.FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Code == "ELEC");
 
-        if (hvacCategory == null) return;
+        if (hvacCategory == null)
+        {
+            return;
+        }
 
         // Get maintenance technician (if exists)
         var techEmployee = await _context.Employees
@@ -174,28 +180,28 @@ public class MaintenanceComprehensiveDataSeeder
 
         var assets = new[]
         {
-            new { 
-                Number = "HVAC-001", Name = "Main HVAC Unit - Building A", Description = "Primary HVAC system for Building A", 
+            new {
+                Number = "HVAC-001", Name = "Main HVAC Unit - Building A", Description = "Primary HVAC system for Building A",
                 CategoryId = hvacCategory.Id, Manufacturer = "Carrier", Model = "50TCQ-480", SerialNo = "CAR-2023-001",
                 Location = "Building A - Roof", Status = AssetStatus.Active, Criticality = AssetCriticality.High
             },
-            new { 
-                Number = "HVAC-002", Name = "Chiller Unit 1", Description = "Central chiller for cooling system", 
+            new {
+                Number = "HVAC-002", Name = "Chiller Unit 1", Description = "Central chiller for cooling system",
                 CategoryId = hvacCategory.Id, Manufacturer = "Trane", Model = "CGAM100", SerialNo = "TRA-2022-045",
                 Location = "Mechanical Room 1", Status = AssetStatus.Active, Criticality = AssetCriticality.Critical
             },
-            new { 
-                Number = "GEN-001", Name = "Backup Generator", Description = "Emergency diesel generator", 
+            new {
+                Number = "GEN-001", Name = "Backup Generator", Description = "Emergency diesel generator",
                 CategoryId = powerCategory?.Id ?? hvacCategory.Id, Manufacturer = "Caterpillar", Model = "C18", SerialNo = "CAT-2021-789",
                 Location = "Generator Room", Status = AssetStatus.Active, Criticality = AssetCriticality.Critical
             },
-            new { 
-                Number = "ELEC-001", Name = "Main Electrical Panel", Description = "Primary distribution panel", 
+            new {
+                Number = "ELEC-001", Name = "Main Electrical Panel", Description = "Primary distribution panel",
                 CategoryId = elecCategory?.Id ?? hvacCategory.Id, Manufacturer = "Schneider Electric", Model = "NF630", SerialNo = "SCH-2020-123",
                 Location = "Electrical Room", Status = AssetStatus.Active, Criticality = AssetCriticality.Critical
             },
-            new { 
-                Number = "HVAC-003", Name = "Air Handler Unit - Floor 2", Description = "Air handling unit for second floor", 
+            new {
+                Number = "HVAC-003", Name = "Air Handler Unit - Floor 2", Description = "Air handling unit for second floor",
                 CategoryId = hvacCategory.Id, Manufacturer = "York", Model = "YCAV0090", SerialNo = "YRK-2023-567",
                 Location = "Building A - Floor 2", Status = AssetStatus.Active, Criticality = AssetCriticality.Medium
             }
@@ -244,36 +250,39 @@ public class MaintenanceComprehensiveDataSeeder
         var correctiveMT = await _context.MaintenanceTypes.FirstOrDefaultAsync(mt => mt.TenantId == tenantId && mt.Code == "CORR");
         var emergencyMT = await _context.MaintenanceTypes.FirstOrDefaultAsync(mt => mt.TenantId == tenantId && mt.Code == "EMER");
 
-        if (preventiveMT == null) return;
+        if (preventiveMT == null)
+        {
+            return;
+        }
 
         var templates = new[]
         {
-            new { 
+            new {
                 MaintenanceTypeId = preventiveMT.Id, TaskName = "Inspect HVAC Filters", Description = "Check and replace air filters if needed",
                 Sequence = 1, Hours = 0.5, Instructions = "1. Turn off unit\n2. Remove filter panel\n3. Inspect filter condition\n4. Replace if dirty\n5. Reinstall panel",
                 Safety = "Use PPE, ensure power is off", Tools = "Screwdriver, replacement filters", Parts = "Air filters"
             },
-            new { 
+            new {
                 MaintenanceTypeId = preventiveMT.Id, TaskName = "Check Refrigerant Levels", Description = "Verify refrigerant pressure and levels",
                 Sequence = 2, Hours = 1.0, Instructions = "1. Connect gauges\n2. Check pressure readings\n3. Compare to spec\n4. Add refrigerant if needed\n5. Check for leaks",
                 Safety = "Certified technician required, use safety goggles", Tools = "Pressure gauges, leak detector", Parts = "Refrigerant R410A"
             },
-            new { 
+            new {
                 MaintenanceTypeId = preventiveMT.Id, TaskName = "Lubricate Moving Parts", Description = "Lubricate bearings and moving components",
                 Sequence = 3, Hours = 0.75, Instructions = "1. Identify lubrication points\n2. Clean old grease\n3. Apply fresh lubricant\n4. Check for smooth operation",
                 Safety = "Ensure equipment is off and locked out", Tools = "Grease gun", Parts = "Multi-purpose grease"
             },
-            new { 
+            new {
                 MaintenanceTypeId = correctiveMT?.Id ?? preventiveMT.Id, TaskName = "Replace Faulty Belt", Description = "Remove and replace worn or broken belt",
                 Sequence = 1, Hours = 1.5, Instructions = "1. Turn off power\n2. Release tension\n3. Remove old belt\n4. Install new belt\n5. Adjust tension\n6. Test operation",
                 Safety = "Lockout/tagout required", Tools = "Belt tension gauge, wrenches", Parts = "V-Belt"
             },
-            new { 
+            new {
                 MaintenanceTypeId = correctiveMT?.Id ?? preventiveMT.Id, TaskName = "Replace Defective Relay", Description = "Diagnose and replace failed relay",
                 Sequence = 1, Hours = 1.0, Instructions = "1. Identify faulty relay\n2. Turn off power\n3. Remove old relay\n4. Install replacement\n5. Test circuit\n6. Verify operation",
                 Safety = "Qualified electrician required", Tools = "Multimeter, screwdrivers", Parts = "12V Relay"
             },
-            new { 
+            new {
                 MaintenanceTypeId = emergencyMT?.Id ?? preventiveMT.Id, TaskName = "Emergency Generator Start", Description = "Respond to power outage and start backup generator",
                 Sequence = 1, Hours = 2.0, Instructions = "1. Assess power outage\n2. Check generator fuel\n3. Start generator\n4. Monitor voltage/frequency\n5. Switch loads\n6. Document incident",
                 Safety = "Follow emergency procedures, use communication equipment", Tools = "Multimeter, flashlight", Parts = "Diesel fuel"
@@ -282,9 +291,9 @@ public class MaintenanceComprehensiveDataSeeder
 
         foreach (var template in templates)
         {
-            var exists = await _context.MaintenanceTaskTemplates.AnyAsync(t => 
+            var exists = await _context.MaintenanceTaskTemplates.AnyAsync(t =>
                 t.TenantId == tenantId && t.MaintenanceTypeId == template.MaintenanceTypeId && t.TaskName == template.TaskName);
-            
+
             if (!exists)
             {
                 var taskTemplate = new MaintenanceTaskTemplate
@@ -324,7 +333,10 @@ public class MaintenanceComprehensiveDataSeeder
         var preventiveMT = await _context.MaintenanceTypes.FirstOrDefaultAsync(mt => mt.TenantId == tenantId && mt.Code == "PREV");
         var correctiveMT = await _context.MaintenanceTypes.FirstOrDefaultAsync(mt => mt.TenantId == tenantId && mt.Code == "CORR");
 
-        if (hvacAsset == null || preventiveMT == null) return;
+        if (hvacAsset == null || preventiveMT == null)
+        {
+            return;
+        }
 
         var assetTemplates = new[]
         {
@@ -401,7 +413,10 @@ public class MaintenanceComprehensiveDataSeeder
         var preventiveMT = await _context.MaintenanceTypes.FirstOrDefaultAsync(mt => mt.TenantId == tenantId && mt.Code == "PREV");
         var inspectionMT = await _context.MaintenanceTypes.FirstOrDefaultAsync(mt => mt.TenantId == tenantId && mt.Code == "PRED");
 
-        if (equipmentType == null || preventiveMT == null) return;
+        if (equipmentType == null || preventiveMT == null)
+        {
+            return;
+        }
 
         var assetTypeTemplates = new[]
         {

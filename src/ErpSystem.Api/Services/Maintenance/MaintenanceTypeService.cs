@@ -1,11 +1,11 @@
 using AutoMapper;
-using Microsoft.Extensions.Logging;
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.DTOs.Maintenance;
-using ErpSystem.Core.Entities.Maintenance;
-using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Api.Services.Maintenance;
 
@@ -51,10 +51,10 @@ public class MaintenanceTypeService : IMaintenanceTypeService
 
             var maintenanceType = _mapper.Map<MaintenanceType>(createDto);
             maintenanceType.TenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
-            
+
             var createdMaintenanceType = await _maintenanceTypeRepository.AddAsync(maintenanceType);
             await _unitOfWork.SaveChangesAsync();
-            
+
             _logger.LogInformation("Successfully created maintenance type with ID: {Id}", createdMaintenanceType.Id);
 
             return _mapper.Map<MaintenanceTypeDto>(createdMaintenanceType);
@@ -72,11 +72,7 @@ public class MaintenanceTypeService : IMaintenanceTypeService
         {
             _logger.LogInformation("Updating maintenance type: {Id}", id);
 
-            var existingMaintenanceType = await _maintenanceTypeRepository.GetByIdAsync(id);
-            if (existingMaintenanceType == null)
-            {
-                throw new ArgumentException($"Maintenance type with ID {id} not found");
-            }
+            var existingMaintenanceType = await _maintenanceTypeRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Maintenance type with ID {id} not found");
 
             // Validate code uniqueness (exclude current record)
             if (!await IsMaintenanceTypeCodeUniqueAsync(updateDto.Code, id))
@@ -111,11 +107,7 @@ public class MaintenanceTypeService : IMaintenanceTypeService
         {
             _logger.LogInformation("Deleting maintenance type: {Id}", id);
 
-            var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(id);
-            if (maintenanceType == null)
-            {
-                throw new ArgumentException($"Maintenance type with ID {id} not found");
-            }
+            var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Maintenance type with ID {id} not found");
 
             // Check if maintenance type is being used by work orders
             var workOrderCount = await _maintenanceTypeRepository.GetWorkOrderCountByMaintenanceTypeAsync(id);
@@ -195,7 +187,7 @@ public class MaintenanceTypeService : IMaintenanceTypeService
 
             if (!string.IsNullOrEmpty(filter.SearchTerm))
             {
-                query = query.Where(m => 
+                query = query.Where(m =>
                     m.Name.Contains(filter.SearchTerm) ||
                     m.Code.Contains(filter.SearchTerm) ||
                     (m.Description != null && m.Description.Contains(filter.SearchTerm)) ||
@@ -268,7 +260,7 @@ public class MaintenanceTypeService : IMaintenanceTypeService
         {
             var query = _maintenanceTypeRepository.GetQueryable()
                 .Where(m => m.Name == name && !m.IsDeleted);
-            
+
             if (excludeId.HasValue)
             {
                 query = query.Where(m => m.Id != excludeId.Value);
@@ -289,12 +281,7 @@ public class MaintenanceTypeService : IMaintenanceTypeService
         {
             _logger.LogInformation("Toggling maintenance type status: {Id}", id);
 
-            var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(id);
-            if (maintenanceType == null)
-            {
-                throw new ArgumentException($"Maintenance type with ID {id} not found");
-            }
-
+            var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Maintenance type with ID {id} not found");
             maintenanceType.IsActive = !maintenanceType.IsActive;
             await _maintenanceTypeRepository.UpdateAsync(maintenanceType);
 

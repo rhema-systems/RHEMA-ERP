@@ -1,10 +1,10 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
+using System.Text.Json;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Shared;
-using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services;
 
@@ -12,13 +12,13 @@ public interface ISecurityService
 {
     Task<SecurityMetricsDto> GetSecurityMetricsAsync();
     Task<SecurityMetricsDto> CalculateAndCacheSecurityMetricsAsync();
-    
+
     Task<List<SecurityAlertDto>> GetSecurityAlertsAsync(bool dismissed = false);
     Task<SecurityAlertDto> CreateSecurityAlertAsync(CreateSecurityAlertRequest request);
     Task DismissSecurityAlertAsync(Guid alertId);
-    
+
     Task<AuditLogResponseDto> GetAuditLogsAsync(AuditLogFilterDto filter);
-    
+
     Task<List<DeviceSessionDto>> GetDeviceSessionsAsync();
     Task<DeviceSessionDto?> GetDeviceSessionDetailsAsync(string sessionId);
     Task<bool> TerminateDeviceSessionAsync(string sessionId, string reason = "Manual termination");
@@ -26,16 +26,16 @@ public interface ISecurityService
     Task<DeviceSessionStats> GetDeviceSessionStatsAsync(int days = 30);
     Task<List<DeviceSessionDto>> GetRecentDeviceSessionsAsync(int count = 10);
     Task<SecurityHealthScoreDto> GetSecurityHealthScoreAsync();
-    
+
     // Threat Detection methods
     Task<List<ThreatDetectionDto>> GetThreatDetectionsAsync();
     Task UpdateThreatStatusAsync(Guid threatId, UpdateThreatStatusRequest request);
-    
+
     // Two-Factor Authentication methods
     Task<TwoFactorSettingsDto> GetTwoFactorSettingsAsync();
     Task<TwoFactorSetupDto> EnableTwoFactorAsync(EnableTwoFactorRequest request);
     Task DisableTwoFactorAsync(DisableTwoFactorRequest request);
-    
+
     // Security Policy methods
     Task<List<SecurityPolicyDto>> GetSecurityPoliciesAsync();
     Task<SecurityPolicyDto> CreateSecurityPolicyAsync(CreateSecurityPolicyRequest request);
@@ -78,7 +78,9 @@ public class SecurityService : ISecurityService
         {
             var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
+            {
                 throw new InvalidOperationException("Tenant ID is required");
+            }
 
             // Try to get cached metrics from today
             var today = DateTime.UtcNow.Date;
@@ -106,11 +108,13 @@ public class SecurityService : ISecurityService
         {
             var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
+            {
                 throw new InvalidOperationException("Tenant ID is required");
+            }
 
             var today = DateTime.UtcNow.Date;
             var yesterday = today.AddDays(-1);
-            
+
             // Get real user data
             var allUsers = await _userService.GetAllUsersAsync();
             var tenantUsers = allUsers.Where(u => u.TenantId == tenantId.Value).ToList();
@@ -119,8 +123,8 @@ public class SecurityService : ISecurityService
             var twoFactorAdoptionRate = totalUsers > 0 ? (int)((double)usersWithTwoFactor / totalUsers * 100) : 0;
 
             var failedLoginsToday = await _unitOfWork.Repository<SecurityLog>()
-                .CountAsync(sl => sl.TenantId == tenantId.Value && 
-                                  sl.Timestamp >= today && 
+                .CountAsync(sl => sl.TenantId == tenantId.Value &&
+                                  sl.Timestamp >= today &&
                                   !sl.Success);
 
             // Get real active sessions count for tenant
@@ -133,8 +137,8 @@ public class SecurityService : ISecurityService
             var activeSessions = activeSessionsCount;
 
             var securityIncidentsToday = await _unitOfWork.Repository<SecurityLog>()
-                .CountAsync(sl => sl.TenantId == tenantId.Value && 
-                                  sl.Timestamp >= today && 
+                .CountAsync(sl => sl.TenantId == tenantId.Value &&
+                                  sl.Timestamp >= today &&
                                   (sl.Action.Contains("SUSPICIOUS") || sl.Action.Contains("BRUTE_FORCE")));
 
             var auditEventsToday = await _unitOfWork.Repository<AuditLog>()
@@ -191,7 +195,7 @@ public class SecurityService : ISecurityService
                 existingMetrics.TotalUsers = totalUsers;
                 existingMetrics.UsersWithTwoFactorEnabled = usersWithTwoFactor;
                 existingMetrics.LastUpdated = DateTime.UtcNow;
-                
+
                 await _unitOfWork.Repository<SecurityMetrics>().UpdateAsync(existingMetrics);
             }
             else
@@ -253,7 +257,9 @@ public class SecurityService : ISecurityService
         {
             var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
+            {
                 throw new InvalidOperationException("Tenant ID is required");
+            }
 
             var alerts = await _unitOfWork.Repository<SecurityAlert>()
                 .FindAsync(sa => sa.TenantId == tenantId.Value && sa.Dismissed == dismissed);
@@ -273,7 +279,9 @@ public class SecurityService : ISecurityService
         {
             var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
+            {
                 throw new InvalidOperationException("Tenant ID is required");
+            }
 
             var alert = new SecurityAlert
             {
@@ -311,14 +319,12 @@ public class SecurityService : ISecurityService
         {
             var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
+            {
                 throw new InvalidOperationException("Tenant ID is required");
+            }
 
             var alert = await _unitOfWork.Repository<SecurityAlert>()
-                .FirstOrDefaultAsync(sa => sa.Id == alertId && sa.TenantId == tenantId.Value);
-
-            if (alert == null)
-                throw new InvalidOperationException("Security alert not found");
-
+                .FirstOrDefaultAsync(sa => sa.Id == alertId && sa.TenantId == tenantId.Value) ?? throw new InvalidOperationException("Security alert not found");
             alert.Dismissed = true;
             alert.DismissedAt = DateTime.UtcNow;
             alert.DismissedBy = _currentUserService.UserName;
@@ -351,8 +357,8 @@ public class SecurityService : ISecurityService
             AffectedUser = alert.AffectedUser,
             IpAddress = alert.IpAddress,
             Location = alert.Location,
-            Metadata = !string.IsNullOrEmpty(alert.Metadata) 
-                ? JsonSerializer.Deserialize<Dictionary<string, object>>(alert.Metadata) 
+            Metadata = !string.IsNullOrEmpty(alert.Metadata)
+                ? JsonSerializer.Deserialize<Dictionary<string, object>>(alert.Metadata)
                 : null
         };
     }
@@ -367,33 +373,47 @@ public class SecurityService : ISecurityService
         {
             var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
+            {
                 throw new InvalidOperationException("Tenant ID is required");
+            }
 
             var query = _unitOfWork.Repository<AuditLog>().GetQueryable()
                 .Where(al => al.TenantId == tenantId.Value);
 
             // Apply filters
             if (filter.StartDate.HasValue)
+            {
                 query = query.Where(al => al.Timestamp >= filter.StartDate.Value);
+            }
 
             if (filter.EndDate.HasValue)
+            {
                 query = query.Where(al => al.Timestamp <= filter.EndDate.Value);
+            }
 
             if (!string.IsNullOrEmpty(filter.UserName))
+            {
                 query = query.Where(al => al.Username.Contains(filter.UserName));
+            }
 
             if (!string.IsNullOrEmpty(filter.Action))
+            {
                 query = query.Where(al => al.Action.Contains(filter.Action));
+            }
 
             if (!string.IsNullOrEmpty(filter.Resource))
+            {
                 query = query.Where(al => al.Resource.Contains(filter.Resource));
+            }
 
             if (!string.IsNullOrEmpty(filter.IpAddress))
+            {
                 query = query.Where(al => al.IpAddress.Contains(filter.IpAddress));
+            }
 
             if (!string.IsNullOrEmpty(filter.SearchTerm))
             {
-                query = query.Where(al => 
+                query = query.Where(al =>
                     al.Action.Contains(filter.SearchTerm) ||
                     al.Username.Contains(filter.SearchTerm) ||
                     al.Resource.Contains(filter.SearchTerm));
@@ -443,9 +463,9 @@ public class SecurityService : ISecurityService
     private async Task<AuditLogEntryDto> MapToAuditLogEntryDtoAsync(AuditLog auditLog)
     {
         // Map to the expected frontend format
-        var result = auditLog.Action.Contains("SUCCESS") || auditLog.Action.Contains("CREATE") || auditLog.Action.Contains("UPDATE") 
+        var result = auditLog.Action.Contains("SUCCESS") || auditLog.Action.Contains("CREATE") || auditLog.Action.Contains("UPDATE")
             ? "success" : "failure";
-        
+
         var risk = auditLog.Action.Contains("DELETE") || auditLog.Action.Contains("ROLE_CHANGE") ? "high" : "low";
 
         return new AuditLogEntryDto
@@ -476,14 +496,17 @@ public class SecurityService : ISecurityService
     {
         try
         {
-            if (string.IsNullOrEmpty(ipAddress)) return "Unknown";
-            
+            if (string.IsNullOrEmpty(ipAddress))
+            {
+                return "Unknown";
+            }
+
             var geolocation = await _deviceSessionService.GetGeolocationAsync(ipAddress);
             if (geolocation != null)
             {
                 return $"{geolocation.City}, {geolocation.Country}";
             }
-            
+
             return "Unknown";
         }
         catch (Exception ex)
@@ -503,20 +526,22 @@ public class SecurityService : ISecurityService
         {
             var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
+            {
                 throw new InvalidOperationException("Tenant ID is required");
+            }
 
             // Get all users for the current tenant
             var allUsers = await _userService.GetAllUsersAsync();
             var tenantUsers = allUsers.Where(u => u.TenantId == tenantId.Value).ToList();
-            
+
             var deviceSessions = new List<DeviceSessionDto>();
-            
+
             foreach (var user in tenantUsers)
             {
                 var userDeviceSessions = await _deviceSessionService.GetActiveSessionsForUserAsync(user.Id);
                 deviceSessions.AddRange(userDeviceSessions);
             }
-            
+
             return deviceSessions;
         }
         catch (Exception ex)
@@ -558,7 +583,9 @@ public class SecurityService : ISecurityService
         {
             var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
             if (!userId.HasValue)
+            {
                 throw new InvalidOperationException("User ID is required");
+            }
 
             return await _deviceSessionService.TerminateAllSessionsExceptCurrentAsync(userId.Value, currentSessionId, reason);
         }
@@ -575,7 +602,9 @@ public class SecurityService : ISecurityService
         {
             var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
             if (!userId.HasValue)
+            {
                 throw new InvalidOperationException("User ID is required");
+            }
 
             return await _deviceSessionService.GetSessionStatsAsync(userId.Value, days);
         }
@@ -592,7 +621,9 @@ public class SecurityService : ISecurityService
         {
             var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
             if (!userId.HasValue)
+            {
                 throw new InvalidOperationException("User ID is required");
+            }
 
             return await _deviceSessionService.GetRecentSessionsAsync(userId.Value, count);
         }
@@ -614,7 +645,9 @@ public class SecurityService : ISecurityService
         {
             var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
+            {
                 throw new InvalidOperationException("Tenant ID is required");
+            }
 
             // Calculate health scores for each category
             var passwordPoliciesScore = await CalculatePasswordPoliciesScore(tenantId.Value);
@@ -623,11 +656,11 @@ public class SecurityService : ISecurityService
             var accessControlsScore = await CalculateAccessControlsScore(tenantId.Value);
             var auditComplianceScore = await CalculateAuditComplianceScore(tenantId.Value);
 
-            var overallScore = (passwordPoliciesScore + twoFactorScore + sessionSecurityScore + 
+            var overallScore = (passwordPoliciesScore + twoFactorScore + sessionSecurityScore +
                                accessControlsScore + auditComplianceScore) / 5;
 
             var recommendations = GenerateSecurityRecommendations(
-                passwordPoliciesScore, twoFactorScore, sessionSecurityScore, 
+                passwordPoliciesScore, twoFactorScore, sessionSecurityScore,
                 accessControlsScore, auditComplianceScore);
 
             return new SecurityHealthScoreDto
@@ -656,16 +689,42 @@ public class SecurityService : ISecurityService
     {
         var security = await _unitOfWork.Repository<Security>()
             .FirstOrDefaultAsync(s => s.TenantId == tenantId);
-        
-        if (security == null) return 50;
+
+        if (security == null)
+        {
+            return 50;
+        }
 
         var score = 60; // Base score
-        if (security.PasswordMinLength >= 12) score += 10;
-        if (security.PasswordRequireUppercase) score += 5;
-        if (security.PasswordRequireLowercase) score += 5;
-        if (security.PasswordRequireDigits) score += 5;
-        if (security.PasswordRequireSpecialChars) score += 10;
-        if (security.PasswordMaxAge.HasValue && security.PasswordMaxAge <= 90) score += 5;
+        if (security.PasswordMinLength >= 12)
+        {
+            score += 10;
+        }
+
+        if (security.PasswordRequireUppercase)
+        {
+            score += 5;
+        }
+
+        if (security.PasswordRequireLowercase)
+        {
+            score += 5;
+        }
+
+        if (security.PasswordRequireDigits)
+        {
+            score += 5;
+        }
+
+        if (security.PasswordRequireSpecialChars)
+        {
+            score += 10;
+        }
+
+        if (security.PasswordMaxAge.HasValue && security.PasswordMaxAge <= 90)
+        {
+            score += 5;
+        }
 
         return Math.Min(score, 100);
     }
@@ -677,19 +736,28 @@ public class SecurityService : ISecurityService
             // Get real user data for tenant
             var allUsers = await _userService.GetAllUsersAsync();
             var tenantUsers = allUsers.Where(u => u.TenantId == tenantId).ToList();
-            
-            if (tenantUsers.Count == 0) return 50; // No users, return base score
-            
+
+            if (tenantUsers.Count == 0)
+            {
+                return 50; // No users, return base score
+            }
+
             var usersWithTwoFactor = tenantUsers.Count(u => u.TwoFactorEnabled);
             var adoptionPercentage = (double)usersWithTwoFactor / tenantUsers.Count * 100;
-            
+
             // Convert percentage to score (0-100)
             var score = (int)Math.Round(adoptionPercentage);
-            
+
             // Add bonus points for high adoption
-            if (adoptionPercentage >= 95) score += 5;
-            else if (adoptionPercentage >= 80) score += 3;
-            
+            if (adoptionPercentage >= 95)
+            {
+                score += 5;
+            }
+            else if (adoptionPercentage >= 80)
+            {
+                score += 3;
+            }
+
             return Math.Min(score, 100);
         }
         catch (Exception ex)
@@ -703,13 +771,27 @@ public class SecurityService : ISecurityService
     {
         var security = await _unitOfWork.Repository<Security>()
             .FirstOrDefaultAsync(s => s.TenantId == tenantId);
-        
-        if (security == null) return 50;
+
+        if (security == null)
+        {
+            return 50;
+        }
 
         var score = 50; // Base score
-        if (security.SessionTimeoutMinutes <= 60) score += 20;
-        if (security.JwtTokenLifetimeMinutes <= 120) score += 15;
-        if (security.PreventConcurrentLogin != ErpSystem.Core.Enums.PreventConcurrentLogin.Disabled) score += 15;
+        if (security.SessionTimeoutMinutes <= 60)
+        {
+            score += 20;
+        }
+
+        if (security.JwtTokenLifetimeMinutes <= 120)
+        {
+            score += 15;
+        }
+
+        if (security.PreventConcurrentLogin != ErpSystem.Core.Enums.PreventConcurrentLogin.Disabled)
+        {
+            score += 15;
+        }
 
         return Math.Min(score, 100);
     }
@@ -719,41 +801,65 @@ public class SecurityService : ISecurityService
         try
         {
             var score = 50; // Base score
-            
+
             // Check role-based access control using UserService
             var allUsers = await _userService.GetAllUsersAsync();
             var tenantUsers = allUsers.Where(u => u.TenantId == tenantId).ToList();
-            
+
             // Count unique roles across all tenant users
             var uniqueRoles = tenantUsers
                 .SelectMany(u => u.UserRoles?.Select(ur => ur.RoleId) ?? new List<Guid>())
                 .Distinct()
                 .Count();
-            
+
             // Bonus for having multiple roles (better access control)
-            if (uniqueRoles >= 5) score += 20;
-            else if (uniqueRoles >= 3) score += 15;
-            else if (uniqueRoles >= 2) score += 10;
-            
+            if (uniqueRoles >= 5)
+            {
+                score += 20;
+            }
+            else if (uniqueRoles >= 3)
+            {
+                score += 15;
+            }
+            else if (uniqueRoles >= 2)
+            {
+                score += 10;
+            }
+
             if (tenantUsers.Count > 0)
             {
                 var usersWithRoles = tenantUsers.Count(u => u.UserRoles != null && u.UserRoles.Any());
                 var roleAssignmentPercentage = (double)usersWithRoles / tenantUsers.Count * 100;
-                
+
                 // Bonus for proper role assignment
-                if (roleAssignmentPercentage >= 90) score += 15;
-                else if (roleAssignmentPercentage >= 75) score += 10;
-                else if (roleAssignmentPercentage >= 50) score += 5;
+                if (roleAssignmentPercentage >= 90)
+                {
+                    score += 15;
+                }
+                else if (roleAssignmentPercentage >= 75)
+                {
+                    score += 10;
+                }
+                else if (roleAssignmentPercentage >= 50)
+                {
+                    score += 5;
+                }
             }
-            
+
             // Check security policies
             var activePolicies = await _unitOfWork.Repository<SecurityPolicy>()
                 .CountAsync(sp => sp.TenantId == tenantId && sp.IsActive);
-            
+
             // Bonus for having security policies
-            if (activePolicies >= 3) score += 10;
-            else if (activePolicies >= 1) score += 5;
-            
+            if (activePolicies >= 3)
+            {
+                score += 10;
+            }
+            else if (activePolicies >= 1)
+            {
+                score += 5;
+            }
+
             return Math.Min(score, 100);
         }
         catch (Exception ex)
@@ -772,15 +878,31 @@ public class SecurityService : ISecurityService
             .CountAsync(al => al.TenantId == tenantId && al.Timestamp >= last30Days);
 
         // Score based on audit activity (more activity = better compliance)
-        if (auditLogsCount > 1000) return 95;
-        if (auditLogsCount > 500) return 85;
-        if (auditLogsCount > 100) return 75;
-        if (auditLogsCount > 10) return 65;
+        if (auditLogsCount > 1000)
+        {
+            return 95;
+        }
+
+        if (auditLogsCount > 500)
+        {
+            return 85;
+        }
+
+        if (auditLogsCount > 100)
+        {
+            return 75;
+        }
+
+        if (auditLogsCount > 10)
+        {
+            return 65;
+        }
+
         return 50;
     }
 
     private static List<SecurityRecommendationDto> GenerateSecurityRecommendations(
-        int passwordScore, int twoFactorScore, int sessionScore, 
+        int passwordScore, int twoFactorScore, int sessionScore,
         int accessControlsScore, int auditScore)
     {
         var recommendations = new List<SecurityRecommendationDto>();
@@ -831,7 +953,9 @@ public class SecurityService : ISecurityService
         {
             var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
+            {
                 throw new InvalidOperationException("Tenant ID is required");
+            }
 
             var threats = await _unitOfWork.Repository<ThreatDetection>()
                 .FindAsync(td => td.TenantId == tenantId.Value);
@@ -851,14 +975,12 @@ public class SecurityService : ISecurityService
         {
             var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
+            {
                 throw new InvalidOperationException("Tenant ID is required");
+            }
 
             var threat = await _unitOfWork.Repository<ThreatDetection>()
-                .FirstOrDefaultAsync(td => td.Id == threatId && td.TenantId == tenantId.Value);
-
-            if (threat == null)
-                throw new InvalidOperationException("Threat detection not found");
-
+                .FirstOrDefaultAsync(td => td.Id == threatId && td.TenantId == tenantId.Value) ?? throw new InvalidOperationException("Threat detection not found");
             threat.Status = Enum.Parse<Core.Enums.ThreatStatus>(request.Status);
             threat.Resolution = request.Resolution;
             threat.ResolvedBy = _currentUserService.UserName;
@@ -926,12 +1048,11 @@ public class SecurityService : ISecurityService
         {
             var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
             if (!userId.HasValue)
+            {
                 throw new InvalidOperationException("User ID is required");
+            }
 
-            var user = await _userService.GetUserByIdAsync(userId.Value);
-            if (user == null)
-                throw new InvalidOperationException("User not found");
-
+            var user = await _userService.GetUserByIdAsync(userId.Value) ?? throw new InvalidOperationException("User not found");
             return new TwoFactorSettingsDto
             {
                 IsEnabled = user.TwoFactorEnabled,
@@ -955,25 +1076,24 @@ public class SecurityService : ISecurityService
         {
             var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
             if (!userId.HasValue)
+            {
                 throw new InvalidOperationException("User ID is required");
+            }
 
-            var user = await _userService.GetUserByIdAsync(userId.Value);
-            if (user == null)
-                throw new InvalidOperationException("User not found");
-
-            _logger.LogInformation("EnableTwoFactorAsync called for user {UserId}. User has AuthenticatorKey: {HasKey}, VerificationCode provided: '{Code}'", 
+            var user = await _userService.GetUserByIdAsync(userId.Value) ?? throw new InvalidOperationException("User not found");
+            _logger.LogInformation("EnableTwoFactorAsync called for user {UserId}. User has AuthenticatorKey: {HasKey}, VerificationCode provided: '{Code}'",
                 userId.Value, !string.IsNullOrEmpty(user.AuthenticatorKey), request.VerificationCode);
 
             // ALWAYS verify the password first before doing anything
             var passwordHasher = new PasswordHasher<ApplicationUser>();
             var passwordVerificationResult = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
-            
+
             if (passwordVerificationResult == PasswordVerificationResult.Failed)
             {
                 _logger.LogWarning("Password verification failed for user {UserId} during 2FA setup", userId.Value);
                 throw new ArgumentException("Incorrect password. Please check your password and try again.");
             }
-            
+
             _logger.LogInformation("Password verified successfully for user {UserId}", userId.Value);
 
             // If user already has a secret key and provided a verification code, verify and enable
@@ -982,14 +1102,16 @@ public class SecurityService : ISecurityService
                 _logger.LogInformation("Verifying TOTP code to enable 2FA for user {UserId}", userId.Value);
                 var isValidCode = await _twoFactorAuthService.ValidateTotpAsync(user, request.VerificationCode);
                 if (!isValidCode)
+                {
                     throw new ArgumentException("The verification code you entered is incorrect or has expired. Please try again with a new code from your authenticator app.");
-                
+                }
+
                 // Enable 2FA for the user
                 user.TwoFactorEnabled = true;
                 await _userService.UpdateUserAsync(user);
-                
+
                 _logger.LogInformation("Two-factor authentication enabled for user {UserId}", userId.Value);
-                
+
                 return new TwoFactorSetupDto
                 {
                     AuthenticatorKey = user.AuthenticatorKey,
@@ -1004,13 +1126,13 @@ public class SecurityService : ISecurityService
                 _logger.LogInformation("Setting up 2FA for the first time for user {UserId}", userId.Value);
                 // Setup 2FA for the first time
                 var setupResult = await _twoFactorAuthService.SetupTwoFactorAsync(user);
-                
+
                 // Save the authenticator key to the user
                 await _userService.UpdateUserAsync(user);
-                
-                _logger.LogInformation("2FA setup completed for user {UserId}. Generated secret key: {SecretKey}", 
+
+                _logger.LogInformation("2FA setup completed for user {UserId}. Generated secret key: {SecretKey}",
                     userId.Value, setupResult.SecretKey);
-                
+
                 return new TwoFactorSetupDto
                 {
                     AuthenticatorKey = setupResult.ManualEntryKey,
@@ -1033,29 +1155,29 @@ public class SecurityService : ISecurityService
         {
             var userId = Guid.TryParse(_currentUserService.UserId, out var id) ? id : (Guid?)null;
             if (!userId.HasValue)
+            {
                 throw new InvalidOperationException("User ID is required");
+            }
 
-            var user = await _userService.GetUserByIdAsync(userId.Value);
-            if (user == null)
-                throw new InvalidOperationException("User not found");
+            var user = await _userService.GetUserByIdAsync(userId.Value) ?? throw new InvalidOperationException("User not found");
 
             // Verify current password before disabling 2FA
             var passwordHasher = new PasswordHasher<ApplicationUser>();
             var passwordVerificationResult = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
-            
+
             if (passwordVerificationResult == PasswordVerificationResult.Failed)
             {
                 _logger.LogWarning("Password verification failed for user {UserId} during 2FA disable", userId.Value);
                 throw new ArgumentException("Incorrect password. Please check your password and try again.");
             }
-            
+
             _logger.LogInformation("Password verified successfully for user {UserId} - disabling 2FA", userId.Value);
-            
+
             user.TwoFactorEnabled = false;
             user.AuthenticatorKey = null; // Clear the authenticator key
-            
+
             await _userService.UpdateUserAsync(user);
-            
+
             _logger.LogInformation("Two-factor authentication disabled for user {UserId}", userId.Value);
         }
         catch (Exception ex)
@@ -1075,7 +1197,9 @@ public class SecurityService : ISecurityService
         {
             var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
+            {
                 throw new InvalidOperationException("Tenant ID is required");
+            }
 
             var policies = await _unitOfWork.Repository<SecurityPolicy>()
                 .FindAsync(sp => sp.TenantId == tenantId.Value);
@@ -1095,7 +1219,9 @@ public class SecurityService : ISecurityService
         {
             var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
+            {
                 throw new InvalidOperationException("Tenant ID is required");
+            }
 
             var policy = new SecurityPolicy
             {
@@ -1129,14 +1255,12 @@ public class SecurityService : ISecurityService
         {
             var tenantId = _currentUserService.TenantId;
             if (!tenantId.HasValue)
+            {
                 throw new InvalidOperationException("Tenant ID is required");
+            }
 
             var policy = await _unitOfWork.Repository<SecurityPolicy>()
-                .FirstOrDefaultAsync(sp => sp.Id == policyId && sp.TenantId == tenantId.Value);
-
-            if (policy == null)
-                throw new InvalidOperationException("Security policy not found");
-
+                .FirstOrDefaultAsync(sp => sp.Id == policyId && sp.TenantId == tenantId.Value) ?? throw new InvalidOperationException("Security policy not found");
             policy.Name = request.Name;
             policy.Description = request.Description;
             policy.PolicyRules = JsonSerializer.Serialize(request.Configuration ?? new Dictionary<string, object>());
@@ -1175,18 +1299,21 @@ public class SecurityService : ISecurityService
     }
 
     #endregion
-    
+
     #region Helper Methods
-    
-    private async Task<int> CalculatePasswordComplianceAsync(List<ApplicationUser> users)
+
+    private static async Task<int> CalculatePasswordComplianceAsync(List<ApplicationUser> users)
     {
-        if (!users.Any()) return 100;
-        
+        if (!users.Any())
+        {
+            return 100;
+        }
+
         // Simple password compliance calculation
         // In a real implementation, this would check password age, complexity, etc.
         var compliantUsers = 0;
         var totalUsers = users.Count;
-        
+
         foreach (var user in users)
         {
             // Assume users are compliant if they have 2FA enabled or were created recently
@@ -1195,9 +1322,9 @@ public class SecurityService : ISecurityService
                 compliantUsers++;
             }
         }
-        
+
         return totalUsers > 0 ? (int)((double)compliantUsers / totalUsers * 100) : 100;
     }
-    
+
     #endregion
 }

@@ -75,7 +75,7 @@ public class Tenant : BaseEntity, IAuditable
     // Navigation properties
     public virtual ICollection<UserTenant> UserTenants { get; set; } = new List<UserTenant>();
     public virtual ICollection<TenantModule> TenantModules { get; set; } = new List<TenantModule>();
-    
+
     // Helper properties for accessing user information
     public IEnumerable<ApplicationUser> Users => UserTenants.Where(ut => !ut.IsDeleted && (ut.ExpiresAt == null || ut.ExpiresAt > DateTime.UtcNow)).Select(ut => ut.User);
     public int ActiveUserCount => UserTenants.Count(ut => !ut.IsDeleted && (ut.ExpiresAt == null || ut.ExpiresAt > DateTime.UtcNow));

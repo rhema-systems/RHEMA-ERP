@@ -1,5 +1,5 @@
-using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Api.Services.Workflow;

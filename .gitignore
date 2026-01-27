@@ -253,3 +253,17 @@ tools/
 
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
+
+# Uploaded files
+uploads/
+**/uploads/
+src/ErpSystem.Api/uploads/
+src/ErpSystem.Api/wwwroot/uploads/
+
+# HTTP logs
+http-logs/
+**/http-logs/
+src/ErpSystem.Api/http-logs/
+
+# Migration output
+migration_output.txt

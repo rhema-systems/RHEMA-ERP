@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -35,7 +35,9 @@ public class MaintenanceTypesController : ControllerBase
         try
         {
             if (pageSize > 100)
+            {
                 pageSize = 100;
+            }
 
             var filter = new MaintenanceTypeFilterDto
             {
@@ -45,7 +47,7 @@ public class MaintenanceTypesController : ControllerBase
                 Category = category,
                 IsActive = isActive
             };
-            
+
             var result = await _maintenanceTypeService.GetMaintenanceTypesPagedAsync(filter);
             return Ok(result);
         }
@@ -84,7 +86,9 @@ public class MaintenanceTypesController : ControllerBase
         {
             var maintenanceType = await _maintenanceTypeService.GetMaintenanceTypeByIdAsync(id);
             if (maintenanceType == null)
+            {
                 return NotFound($"Maintenance type with ID {id} not found");
+            }
 
             return Ok(maintenanceType);
         }
@@ -104,7 +108,9 @@ public class MaintenanceTypesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var maintenanceType = await _maintenanceTypeService.CreateMaintenanceTypeAsync(createDto);
             return CreatedAtAction(nameof(GetMaintenanceType), new { id = maintenanceType.Id }, maintenanceType);
@@ -129,7 +135,9 @@ public class MaintenanceTypesController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var maintenanceType = await _maintenanceTypeService.UpdateMaintenanceTypeAsync(id, updateDto);
             return Ok(maintenanceType);

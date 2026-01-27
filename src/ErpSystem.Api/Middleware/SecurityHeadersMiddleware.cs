@@ -36,12 +36,14 @@ public class SecurityHeadersMiddleware
             // HSTS (HTTP Strict Transport Security)
             if (_options.EnableHsts && context.Request.IsHttps)
             {
-                var hstsValue = _options.HstsIncludeSubdomains 
-                    ? $"max-age={_options.HstsMaxAge}; includeSubDomains" 
+                var hstsValue = _options.HstsIncludeSubdomains
+                    ? $"max-age={_options.HstsMaxAge}; includeSubDomains"
                     : $"max-age={_options.HstsMaxAge}";
-                
+
                 if (_options.HstsPreload)
+                {
                     hstsValue += "; preload";
+                }
 
                 headers["Strict-Transport-Security"] = hstsValue;
             }
@@ -61,7 +63,7 @@ public class SecurityHeadersMiddleware
             // X-Content-Type-Options
             if (_options.EnableNoSniff)
             {
-                headers["X-Content-Type-Options"] = "nosniff";
+                headers.XContentTypeOptions = "nosniff";
             }
 
             // X-XSS-Protection
@@ -114,7 +116,7 @@ public class SecurityHeadersOptions
     public bool HstsIncludeSubdomains { get; set; } = true;
     public bool HstsPreload { get; set; } = false;
 
-    public string ContentSecurityPolicy { get; set; } = 
+    public string ContentSecurityPolicy { get; set; } =
         "default-src 'self'; " +
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; " +
         "style-src 'self' 'unsafe-inline' https:; " +
@@ -129,8 +131,8 @@ public class SecurityHeadersOptions
     public bool EnableNoSniff { get; set; } = true;
     public bool EnableXssProtection { get; set; } = true;
     public string ReferrerPolicy { get; set; } = "strict-origin-when-cross-origin";
-    
-    public string PermissionsPolicy { get; set; } = 
+
+    public string PermissionsPolicy { get; set; } =
         "camera=(), microphone=(), geolocation=(), payment=(), usb=()";
 
     public bool EnableCrossDomainPolicy { get; set; } = true;
@@ -143,12 +145,12 @@ public class SecurityHeadersOptions
 public static class SecurityHeadersExtensions
 {
     public static IServiceCollection AddSecurityHeaders(
-        this IServiceCollection services, 
+        this IServiceCollection services,
         IConfiguration configuration)
     {
         services.Configure<SecurityHeadersOptions>(
             configuration.GetSection("SecurityHeaders"));
-        
+
         return services;
     }
 

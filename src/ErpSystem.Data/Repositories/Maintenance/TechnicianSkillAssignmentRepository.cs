@@ -1,7 +1,7 @@
-using Microsoft.EntityFrameworkCore;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Entities.HR;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.Maintenance;
 
@@ -36,8 +36,8 @@ public class TechnicianSkillAssignmentRepository : GenericRepository<TechnicianS
     public async Task<TechnicianSkillAssignment?> GetTechnicianSkillAsync(Guid technicianId, Guid skillId)
     {
         return await _context.TechnicianSkillAssignments
-            .Where(tsa => tsa.TechnicianId == technicianId && 
-                         tsa.SkillId == skillId && 
+            .Where(tsa => tsa.TechnicianId == technicianId &&
+                         tsa.SkillId == skillId &&
                          !tsa.IsDeleted)
             .Include(tsa => tsa.Skill)
             .Include(tsa => tsa.Technician)
@@ -77,8 +77,8 @@ public class TechnicianSkillAssignmentRepository : GenericRepository<TechnicianS
     public async Task<IEnumerable<TechnicianSkillAssignment>> GetExpiringAssignmentsAsync(DateTime withinDate)
     {
         return await _context.TechnicianSkillAssignments
-            .Where(tsa => tsa.ExpirationDate.HasValue && 
-                         tsa.ExpirationDate.Value <= withinDate && 
+            .Where(tsa => tsa.ExpirationDate.HasValue &&
+                         tsa.ExpirationDate.Value <= withinDate &&
                          !tsa.IsDeleted)
             .Include(tsa => tsa.Skill)
             .Include(tsa => tsa.Technician)
@@ -89,10 +89,10 @@ public class TechnicianSkillAssignmentRepository : GenericRepository<TechnicianS
     public async Task<IEnumerable<TechnicianSkillAssignment>> GetExpiredAssignmentsAsync()
     {
         var today = DateTime.UtcNow.Date;
-        
+
         return await _context.TechnicianSkillAssignments
-            .Where(tsa => tsa.ExpirationDate.HasValue && 
-                         tsa.ExpirationDate.Value < today && 
+            .Where(tsa => tsa.ExpirationDate.HasValue &&
+                         tsa.ExpirationDate.Value < today &&
                          !tsa.IsDeleted)
             .Include(tsa => tsa.Skill)
             .Include(tsa => tsa.Technician)
@@ -114,8 +114,8 @@ public class TechnicianSkillAssignmentRepository : GenericRepository<TechnicianS
     public async Task<bool> HasSkillAssignmentAsync(Guid technicianId, Guid skillId)
     {
         return await _context.TechnicianSkillAssignments
-            .AnyAsync(tsa => tsa.TechnicianId == technicianId && 
-                            tsa.SkillId == skillId && 
+            .AnyAsync(tsa => tsa.TechnicianId == technicianId &&
+                            tsa.SkillId == skillId &&
                             !tsa.IsDeleted);
     }
 
@@ -178,7 +178,7 @@ public class TechnicianSkillAssignmentRepository : GenericRepository<TechnicianS
     public async Task<IEnumerable<TechnicianSkillAssignment>> GetRecentAssignmentsAsync(int daysBack = 30)
     {
         var cutoffDate = DateTime.UtcNow.AddDays(-daysBack);
-        
+
         return await _context.TechnicianSkillAssignments
             .Where(tsa => tsa.CreatedAt >= cutoffDate && !tsa.IsDeleted)
             .Include(tsa => tsa.Skill)
@@ -190,10 +190,10 @@ public class TechnicianSkillAssignmentRepository : GenericRepository<TechnicianS
     public async Task<IEnumerable<TechnicianSkillAssignment>> GetAssignmentsDueForAssessmentAsync(int daysOverdue = 90)
     {
         var cutoffDate = DateTime.UtcNow.AddDays(-daysOverdue);
-        
+
         return await _context.TechnicianSkillAssignments
-            .Where(tsa => (tsa.LastAssessmentDate == null || 
-                          tsa.LastAssessmentDate < cutoffDate) && 
+            .Where(tsa => (tsa.LastAssessmentDate == null ||
+                          tsa.LastAssessmentDate < cutoffDate) &&
                          !tsa.IsDeleted)
             .Include(tsa => tsa.Skill)
             .Include(tsa => tsa.Technician)
@@ -210,28 +210,28 @@ public class TechnicianSkillAssignmentRepository : GenericRepository<TechnicianS
             await UpdateAsync(assignment);
         }
     }
-    
+
     public async Task<IEnumerable<TechnicianSkillAssignment>> GetByTechnicalSkillIdAsync(Guid skillId)
     {
         return await GetBySkillIdAsync(skillId);
     }
-    
+
     public async Task<IEnumerable<TechnicianSkillAssignment>> GetExpiredCertificationsAsync()
     {
         return await GetExpiredAssignmentsAsync();
     }
-    
+
     public async Task<IEnumerable<TechnicianSkillAssignment>> GetCertificationsExpiringInDaysAsync(int days)
     {
         var targetDate = DateTime.UtcNow.AddDays(days);
         return await GetExpiringAssignmentsAsync(targetDate);
     }
-    
+
     public async Task<bool> HasTechnicianSkillAsync(Guid technicianId, Guid skillId)
     {
         return await HasSkillAssignmentAsync(technicianId, skillId);
     }
-    
+
     public async Task<IEnumerable<Employee>> GetTechniciansBySkillAsync(Guid skillId, int? minProficiencyLevel = null)
     {
         var assignments = await GetTechniciansWithSkillAsync(skillId, minProficiencyLevel);

@@ -60,7 +60,7 @@ public class TechnicianDto
     public DateTime? LastSyncDate { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
-    
+
     // Additional properties for controller compatibility
     public string? JobTitle { get; set; }
     public string? EmploymentStatus { get; set; }
@@ -88,48 +88,48 @@ public class CreateTechnicianDto
 {
     [Required]
     public Guid EmployeeId { get; set; }
-    
+
     [StringLength(50)]
     public string? EmployeeNumber { get; set; }
-    
+
     [Required, StringLength(100)]
     public string FirstName { get; set; } = string.Empty;
-    
+
     [Required, StringLength(100)]
     public string LastName { get; set; } = string.Empty;
-    
+
     [EmailAddress, StringLength(200)]
     public string? Email { get; set; }
-    
+
     [StringLength(20)]
     public string? Phone { get; set; }
-    
+
     [StringLength(100)]
     public string? Department { get; set; }
-    
+
     [StringLength(100)]
     public string? Position { get; set; }
-    
+
     [StringLength(500)]
     public string? Specialization { get; set; }
-    
+
     [StringLength(500)]
     public string? Specializations { get; set; }
-    
+
     [StringLength(100)]
     public string? CertificationLevel { get; set; }
-    
+
     [StringLength(50)]
     public string? ExperienceLevel { get; set; }
-    
+
     public DateTime? HireDate { get; set; }
-    
+
     [Range(0, 100)]
     public decimal MaxWorkload { get; set; } = 40;
-    
+
     [StringLength(1000)]
     public string? Notes { get; set; }
-    
+
     public bool IsActive { get; set; } = true;
 }
 
@@ -140,40 +140,40 @@ public class UpdateTechnicianDto
 {
     [StringLength(100)]
     public string? FirstName { get; set; }
-    
+
     [StringLength(100)]
     public string? LastName { get; set; }
-    
+
     [EmailAddress, StringLength(200)]
     public string? Email { get; set; }
-    
+
     [StringLength(20)]
     public string? Phone { get; set; }
-    
+
     [StringLength(100)]
     public string? Department { get; set; }
-    
+
     [StringLength(100)]
     public string? Position { get; set; }
-    
+
     [StringLength(500)]
     public string? Specialization { get; set; }
-    
+
     [StringLength(500)]
     public string? Specializations { get; set; }
-    
+
     [StringLength(100)]
     public string? CertificationLevel { get; set; }
-    
+
     [StringLength(50)]
     public string? ExperienceLevel { get; set; }
-    
+
     [Range(0, 100)]
     public decimal? MaxWorkload { get; set; }
-    
+
     [StringLength(1000)]
     public string? Notes { get; set; }
-    
+
     public bool IsActive { get; set; } = true;
 }
 
@@ -192,7 +192,7 @@ public class TechnicianSkillDto
     public bool IsCertified { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
-    
+
     // Additional property for mapping profile compatibility
     public int UserCount { get; set; }
 }
@@ -235,34 +235,34 @@ public class CreateTechnicianSkillAssignmentDto
 {
     [Required]
     public Guid TechnicianId { get; set; }
-    
+
     [Required]
     public Guid SkillId { get; set; }
-    
+
     [Range(1, 4)]
     public int ProficiencyLevel { get; set; } = 1;
-    
+
     [StringLength(500)]
     public string? ProficiencyDescription { get; set; }
-    
+
     public DateTime? CertificationDate { get; set; }
     public DateTime? AcquiredDate { get; set; }
     public DateTime? CertificationExpiry { get; set; }
     public DateTime? ExpirationDate { get; set; }
-    
+
     [StringLength(200)]
     public string? CertifyingBody { get; set; }
-    
+
     [StringLength(100)]
     public string? CertificationNumber { get; set; }
-    
+
     public bool IsVerified { get; set; }
-    
+
     [StringLength(200)]
     public string? VerifiedBy { get; set; }
-    
+
     public DateTime? LastAssessmentDate { get; set; }
-    
+
     [StringLength(1000)]
     public string? Notes { get; set; }
 }
@@ -274,27 +274,27 @@ public class UpdateTechnicianSkillAssignmentDto
 {
     [Range(1, 4)]
     public int ProficiencyLevel { get; set; }
-    
+
     [StringLength(500)]
     public string? ProficiencyDescription { get; set; }
-    
+
     public DateTime? CertificationDate { get; set; }
     public DateTime? CertificationExpiry { get; set; }
     public DateTime? ExpirationDate { get; set; }
-    
+
     [StringLength(200)]
     public string? CertifyingBody { get; set; }
-    
+
     [StringLength(100)]
     public string? CertificationNumber { get; set; }
-    
+
     public bool IsVerified { get; set; }
-    
+
     [StringLength(200)]
     public string? VerifiedBy { get; set; }
-    
+
     public DateTime? LastAssessmentDate { get; set; }
-    
+
     [StringLength(1000)]
     public string? Notes { get; set; }
 }
@@ -346,7 +346,7 @@ public class TechnicalSkillListDto
     public DateTime? LastSyncDate { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
-    
+
     // Additional properties for controller compatibility
     public int TechniciansCount { get; set; }
     public decimal AverageRating { get; set; }
@@ -411,7 +411,7 @@ public class TechnicianFilterDto
     public string? CertificationLevel { get; set; }
     public Guid? DepartmentId { get; set; }
     public List<Guid>? SkillIds { get; set; }
-    
+
     // Additional filter properties
     public string? JobTitle { get; set; }
     public string? EmploymentStatus { get; set; }
@@ -421,7 +421,7 @@ public class TechnicianFilterDto
     public string? Location { get; set; }
     public bool? HasExpiredCertifications { get; set; }
     public bool? HasExpiringCertifications { get; set; }
-    
+
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 10;
 }
@@ -459,7 +459,7 @@ public class SafetyProtocolFilterDto
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 10;
     public int PageNumber { get; set; } = 1;
-    
+
     // Additional properties for controller compatibility
     public string? RegulatoryStandard { get; set; }
     public string? ApprovalStatus { get; set; }
@@ -539,13 +539,13 @@ public class ScheduleWorkOrderDto
 {
     [Required]
     public Guid WorkOrderId { get; set; }
-    
+
     [Required]
     public Guid TechnicianId { get; set; }
-    
+
     public Guid? AssignedTechnicianId { get; set; }
     public Guid? AssignedTeamId { get; set; }
-    
+
     public DateTime ScheduledStartDate { get; set; }
     public DateTime? ScheduledEndDate { get; set; }
     public DateTime? RequestedStartDate { get; set; }
@@ -607,7 +607,7 @@ public class TechnicianAvailabilityDto
     public int CurrentWorkOrders { get; set; }
     public decimal WorkloadPercentage { get; set; }
     public decimal Utilization { get; set; }
-    
+
     // Additional properties for controller compatibility
     public string AvailabilityStatus { get; set; } = string.Empty;
     public string? ShiftSchedule { get; set; }
@@ -636,7 +636,7 @@ public class TechnicianWorkloadDto
     public int CompletedThisWeek { get; set; }
     public TimeSpan TotalScheduledTimeSpan { get; set; }
     public TimeSpan AvailableTimeSpan { get; set; }
-    
+
     // Additional properties for controller compatibility
     public double EstimatedHours { get; set; }
     public double CapacityUtilization { get; set; }
@@ -671,7 +671,7 @@ public class SetAvailabilityDto
 {
     [Required]
     public Guid TechnicianId { get; set; }
-    
+
     public DateTime StartDate { get; set; }
     public DateTime EndDate { get; set; }
     public bool IsAvailable { get; set; } = true;
@@ -739,7 +739,7 @@ public class TechnicianPerformanceDto
     public decimal TotalCost { get; set; }
     public double UtilizationRate { get; set; }
     public double QualityScore { get; set; }
-    
+
     // Additional properties for controller compatibility
     public int CompletedWorkOrders { get; set; }
     public double AverageQualityRating { get; set; }
@@ -767,7 +767,7 @@ public class TechnicianStatsDto
     public double AverageRating { get; set; }
     public TimeSpan TotalHoursWorked { get; set; }
     public decimal TotalCostSaved { get; set; }
-    
+
     // Additional properties for controller compatibility
     public int TotalTechnicians { get; set; }
     public int ActiveTechnicians { get; set; }
@@ -798,7 +798,7 @@ public class SafetyComplianceReportDto
     public int Violations { get; set; }
     public List<ProtocolComplianceDto> ProtocolCompliance { get; set; } = new();
     public List<SafetyViolationSummaryDto> TopViolations { get; set; } = new();
-    
+
     // Additional properties for controller compatibility
     public int ActiveProtocols { get; set; }
     public int MandatoryProtocols { get; set; }
@@ -823,7 +823,7 @@ public class ProtocolComplianceDto
     public int TotalChecks { get; set; }
     public int ComplianceCount { get; set; }
     public int ViolationCount { get; set; }
-    
+
     // Additional properties for controller compatibility
     public decimal CompliancePercentage { get; set; }
     public DateTime? LastViolationDate { get; set; }
@@ -838,7 +838,7 @@ public class SafetyViolationSummaryDto
     public int Count { get; set; }
     public string Severity { get; set; } = string.Empty;
     public decimal TotalCost { get; set; }
-    
+
     // Additional properties for controller compatibility
     public Guid Id { get; set; }
     public string ProtocolCode { get; set; } = string.Empty;
@@ -1088,6 +1088,9 @@ public class RequiredInspectionDto
     public string InspectionName { get; set; } = string.Empty;
     public bool IsRegulatory { get; set; }
     public string? Description { get; set; }
+    public bool IsCompleted { get; set; }
+    public DateTime? CompletedDate { get; set; }
+    public string? Result { get; set; }
 }
 
 public class QualityChecklistItemDto
@@ -1147,46 +1150,46 @@ public class CreateMaintenanceTypeDto
 {
     [Required, StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [Required, StringLength(20)]
     public string Code { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string Description { get; set; } = string.Empty;
-    
+
     [Required, StringLength(50)]
     public string Category { get; set; } = string.Empty;
-    
+
     [StringLength(20)]
     public string Location { get; set; } = "Internal"; // Internal, External, Onsite, Offsite
-    
+
     [Required, StringLength(20)]
     public string Priority { get; set; } = string.Empty;
-    
+
     [Range(0.1, 24)]
     public decimal EstimatedDuration { get; set; } = 1.0m;
-    
+
     public bool IsActive { get; set; } = true;
     public bool RequiresDowntime { get; set; } = false;
-    
+
     [StringLength(10)]
     public string Color { get; set; } = "#3b82f6";
-    
+
     [StringLength(50)]
     public string Icon { get; set; } = "wrench";
-    
+
     [StringLength(50)]
     public string Frequency { get; set; } = "As Needed";
-    
+
     [StringLength(50)]
     public string SkillLevel { get; set; } = "Basic";
-    
+
     [StringLength(1000)]
     public string SafetyRequirements { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string ToolsRequired { get; set; } = string.Empty;
-    
+
     [StringLength(1000)]
     public string Notes { get; set; } = string.Empty;
 }
@@ -1229,38 +1232,38 @@ public class CreatePriorityLevelDto
 {
     [Required, StringLength(50)]
     public string Name { get; set; } = string.Empty;
-    
+
     [Required, StringLength(10)]
     public string Code { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string Description { get; set; } = string.Empty;
-    
+
     [Range(1, 10)]
     public int Level { get; set; } = 1;
-    
+
     public bool IsActive { get; set; } = true;
-    
+
     [StringLength(10)]
     public string Color { get; set; } = "#3b82f6";
-    
+
     [StringLength(50)]
     public string Icon { get; set; } = "alert-triangle";
-    
+
     [Range(1, 43200)] // Up to 30 days in minutes
     public int ResponseTime { get; set; } = 60;
-    
+
     [Range(1, 43200)]
     public int EscalationTime { get; set; } = 120;
-    
+
     public bool RequiresApproval { get; set; } = false;
-    
+
     [StringLength(1000)]
     public string NotificationRules { get; set; } = string.Empty;
-    
+
     [Range(1, 8760)] // Up to 1 year in hours
     public int SlaHours { get; set; } = 24;
-    
+
     public bool AutoAssign { get; set; } = false;
 }
 
@@ -1312,32 +1315,32 @@ public class CreateInspectionTemplateDto
 {
     [Required, StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [Required, StringLength(20)]
     public string Code { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string Description { get; set; } = string.Empty;
-    
+
     [Required, StringLength(50)]
     public string Category { get; set; } = string.Empty;
-    
+
     [Required, StringLength(50)]
     public string Frequency { get; set; } = string.Empty;
-    
+
     [Range(1, 1440)] // Up to 24 hours in minutes
     public int EstimatedDuration { get; set; } = 60;
-    
+
     public bool IsActive { get; set; } = true;
     public bool RequiresSignature { get; set; } = false;
     public bool AllowPhotos { get; set; } = false;
-    
+
     [StringLength(10)]
     public string Version { get; set; } = "1.0";
-    
+
     [Required, StringLength(20)]
     public string Priority { get; set; } = "Medium";
-    
+
     public List<string> AssetTypes { get; set; } = new();
     public List<string> InspectorRoles { get; set; } = new();
     public List<CreateInspectionChecklistItemDto> ChecklistItems { get; set; } = new();
@@ -1347,10 +1350,10 @@ public class CreateInspectionChecklistItemDto
 {
     [Required, StringLength(200)]
     public string Item { get; set; } = string.Empty;
-    
+
     [Required, StringLength(20)]
     public string Type { get; set; } = "checklist";
-    
+
     public bool Required { get; set; } = false;
     public int Order { get; set; }
 }
@@ -1427,93 +1430,120 @@ public class MaintenanceScheduleDto
     public DateTime? UpdatedAt { get; set; }
     public DateTime? LastModifiedDate { get; set; }
     public string? LastModifiedBy { get; set; }
-    
+
     // Additional properties for mapping profile compatibility
     public MaintenanceAssetDto? Asset { get; set; }
     public TechnicianDto? DefaultTechnician { get; set; }
     public TechnicianTeamDto? DefaultTeam { get; set; }
     public PriorityLevelDto? PriorityLevel { get; set; }
+
+    // Multi-criteria scheduling fields
+    public string? PrimaryTriggerType { get; set; }
+    public string? SecondaryTriggerType { get; set; }
+    public string? TriggerLogic { get; set; }
+    public decimal? MileageTrigger { get; set; }
+    public decimal? OperatingHoursTrigger { get; set; }
+    public decimal? CycleTrigger { get; set; }
+    public string? ConditionCriteria { get; set; }
 }
 
 public class CreateMaintenanceScheduleDto
 {
     [Required, StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [Required, StringLength(20)]
     public string Code { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string Description { get; set; } = string.Empty;
-    
+
     [Required]
     public Guid AssetId { get; set; }
-    
+
     [Required]
     public Guid MaintenanceTypeId { get; set; }
-    
+
     [Required, StringLength(50)]
     public string MaintenanceType { get; set; } = string.Empty;
-    
+
     [Required, StringLength(20)]
     public string Priority { get; set; } = string.Empty;
-    
+
     [Required, StringLength(50)]
     public string Frequency { get; set; } = string.Empty;
-    
+
     public int FrequencyValue { get; set; } = 1;
-    
+
     [Required, StringLength(20)]
     public string FrequencyUnit { get; set; } = string.Empty;
-    
+
     [Range(1, 365)]
     public int FrequencyInterval { get; set; } = 1;
-    
+
     public DateTime StartDate { get; set; } = DateTime.Today;
     public DateTime NextDueDate { get; set; } = DateTime.Today.AddDays(30);
-    
+
     [Range(1, 1440)]
     public int EstimatedDuration { get; set; } = 60;
-    
+
     public decimal EstimatedHours { get; set; } = 4;
     public decimal EstimatedCost { get; set; } = 0;
-    
+
     [StringLength(100)]
     public string AssignedTeam { get; set; } = string.Empty;
-    
+
     public Guid? AssignedTechnicianId { get; set; }
     public Guid? AssignedTeamId { get; set; }
-    
+
     [StringLength(100)]
     public string AssetCategory { get; set; } = string.Empty;
-    
+
     [StringLength(2000)]
     public string Instructions { get; set; } = string.Empty;
-    
+
     [StringLength(1000)]
     public string SafetyNotes { get; set; } = string.Empty;
-    
+
     public List<string> RequiredSkills { get; set; } = new();
     public List<string> RequiredTools { get; set; } = new();
     public List<string> RequiredParts { get; set; } = new();
-    
+
     public bool IsActive { get; set; } = true;
     public bool AutoCreate { get; set; } = true;
     public bool AutoGenerateWorkOrders { get; set; } = true;
-    
+
     [Range(0, 365)]
     public int LeadTime { get; set; } = 5;
-    
+
     public int? AdvanceNotificationDays { get; set; } = 7;
-    
+
     [StringLength(500)]
     public string? NotificationRecipients { get; set; }
-    
+
     [Range(0, 30)]
     public int MaxDelayDays { get; set; } = 3;
-    
+
     [StringLength(1000)]
     public string Notes { get; set; } = string.Empty;
+
+    // Multi-criteria scheduling fields
+    [StringLength(20)]
+    public string PrimaryTriggerType { get; set; } = "Time"; // Time, Usage, Condition, Combined
+
+    [StringLength(20)]
+    public string? SecondaryTriggerType { get; set; }
+
+    [StringLength(10)]
+    public string? TriggerLogic { get; set; } = "OR"; // OR, AND (only required for Combined)
+
+    // Usage-based triggers
+    public decimal? MileageTrigger { get; set; }
+    public decimal? OperatingHoursTrigger { get; set; }
+    public decimal? CycleTrigger { get; set; }
+
+    // Condition-based triggers
+    public string? ConditionCriteria { get; set; }
 }
 
 public class UpdateMaintenanceScheduleDto : CreateMaintenanceScheduleDto
@@ -1535,6 +1565,19 @@ public class MaintenanceScheduleFilterDto
     public Guid? AssignedTeamId { get; set; }
     public DateTime? DueDateFrom { get; set; }
     public DateTime? DueDateTo { get; set; }
+}
+
+public class MaintenanceScheduleHistoryDto
+{
+    public Guid Id { get; set; }
+    public Guid ScheduleId { get; set; }
+    public string ChangeType { get; set; } = string.Empty;
+    public string? PreviousValues { get; set; }
+    public string? NewValues { get; set; }
+    public string? ChangeReason { get; set; }
+    public Guid ChangedById { get; set; }
+    public string? ChangedByName { get; set; }
+    public DateTime CreatedAt { get; set; }
 }
 
 // Technical Skills DTOs
@@ -1566,7 +1609,7 @@ public class TechnicalSkillDto
     public DateTime? UpdatedAt { get; set; }
     public DateTime? LastModifiedDate { get; set; }
     public string? LastModifiedBy { get; set; }
-    
+
     // Additional property for mapping profile compatibility
     public int UserCount { get; set; }
 }
@@ -1575,37 +1618,37 @@ public class CreateTechnicalSkillDto
 {
     [Required, StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [Required, StringLength(20)]
     public string Code { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string Description { get; set; } = string.Empty;
-    
+
     [Required, StringLength(50)]
     public string Category { get; set; } = string.Empty;
-    
+
     [Required, StringLength(20)]
     public string SkillLevel { get; set; } = "Basic";
-    
+
     public bool IsActive { get; set; } = true;
     public List<string> Prerequisites { get; set; } = new();
     public List<string> Certifications { get; set; } = new();
-    
+
     [Range(1, 1000)]
     public int EstimatedLearningHours { get; set; } = 40;
-    
+
     [Required, StringLength(20)]
     public string Complexity { get; set; } = "Low";
-    
+
     [Required, StringLength(20)]
     public string RiskLevel { get; set; } = "Low";
-    
+
     public List<string> ToolsRequired { get; set; } = new();
-    
+
     [StringLength(1000)]
     public string SafetyRequirements { get; set; } = string.Empty;
-    
+
     public List<string> CompetencyAreas { get; set; } = new();
     public List<string> RelatedMaintenanceTypes { get; set; } = new();
 }
@@ -1668,7 +1711,7 @@ public class SafetyProtocolDto
     public DateTime? UpdatedAt { get; set; }
     public DateTime? LastModifiedDate { get; set; }
     public string? LastModifiedBy { get; set; }
-    
+
     // Additional properties for controller compatibility
     public string Severity { get; set; } = string.Empty;
     public string RegulatoryStandard { get; set; } = string.Empty;
@@ -1685,37 +1728,37 @@ public class CreateSafetyProtocolDto
 {
     [Required, StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [Required, StringLength(100)]
     public string Title { get; set; } = string.Empty;
-    
+
     [Required, StringLength(20)]
     public string Code { get; set; } = string.Empty;
-    
+
     [StringLength(500)]
     public string Description { get; set; } = string.Empty;
-    
+
     [Required, StringLength(50)]
     public string Category { get; set; } = string.Empty;
-    
+
     [Required, StringLength(20)]
     public string RiskLevel { get; set; } = "Medium";
-    
+
     public bool IsActive { get; set; } = true;
     public bool IsMandatory { get; set; } = false;
     public bool IsRegulatory { get; set; } = false;
-    
+
     [StringLength(10)]
     public string Version { get; set; } = "1.0";
-    
+
     [StringLength(10)]
     public string DocumentVersion { get; set; } = "1.0";
-    
+
     [Required, StringLength(20)]
     public string ReviewFrequency { get; set; } = "Annual";
-    
+
     public int ReviewFrequencyMonths { get; set; } = 12;
-    
+
     public List<string> ApplicableAreas { get; set; } = new();
     public List<string> ApplicableEnvironments { get; set; } = new();
     public List<string> RequiredTraining { get; set; } = new();
@@ -1726,27 +1769,27 @@ public class CreateSafetyProtocolDto
     public List<string> RegulatorySources { get; set; } = new();
     public List<string> EquipmentTypes { get; set; } = new();
     public List<string> MaintenanceTypes { get; set; } = new();
-    
+
     [Range(1, 1440)]
     public int EstimatedTime { get; set; } = 15;
-    
+
     [StringLength(50)]
     public string MinimumTrainingLevel { get; set; } = string.Empty;
-    
+
     public List<string> Steps { get; set; } = new();
     public List<string> RequiredPPE { get; set; } = new();
     public List<string> EmergencyContacts { get; set; } = new();
     public List<string> Documents { get; set; } = new();
-    
+
     public DateTime? LastReviewDate { get; set; }
     public DateTime? NextReviewDate { get; set; }
     public DateTime? EffectiveDate { get; set; }
     public DateTime? ExpirationDate { get; set; }
     public DateTime? ApprovalDate { get; set; }
-    
+
     [StringLength(100)]
     public string ReviewedBy { get; set; } = string.Empty;
-    
+
     [StringLength(100)]
     public string ApprovedBy { get; set; } = string.Empty;
 }
@@ -1944,7 +1987,7 @@ public class MaintenanceAssetDto
     // Additional properties
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
-    
+
     // Additional properties for mobile compatibility
     public string? AssetTag { get; set; }
     public string? QrCode { get; set; }
@@ -2087,30 +2130,36 @@ public class MaintenanceAssetCategoryDto
     public string? Icon { get; set; }
     public bool IsActive { get; set; }
     public int AssetCount { get; set; }
-    
+
     // Asset Type Classification
     public string? AssetType { get; set; }
-    
+
     // Parent-child relationship
     public Guid? ParentCategoryId { get; set; }
     public MaintenanceAssetCategoryDto? ParentCategory { get; set; }
     public ICollection<MaintenanceAssetCategoryDto> ChildCategories { get; set; } = new List<MaintenanceAssetCategoryDto>();
-    
+
     // Maintenance Schedule Configuration
     public string MaintenanceScheduleType { get; set; } = "single";
-    
+
+    /// <summary>
+    /// Controls whether maintenance schedules should be auto-generated for
+    /// newly created assets in this category based on the category template.
+    /// </summary>
+    public bool AutoGenerateSchedules { get; set; } = true;
+
     // Primary Maintenance Criteria
     public string MaintenanceType { get; set; } = "Time";
     public string? MaintenanceFrequency { get; set; }
     public double? MaintenanceValue { get; set; }
     public string? MaintenanceUnit { get; set; }
-    
+
     // Secondary Maintenance Criteria
     public string? SecondaryMaintenanceType { get; set; }
     public string? SecondaryMaintenanceFrequency { get; set; }
     public double? SecondaryMaintenanceValue { get; set; }
     public string? SecondaryMaintenanceUnit { get; set; }
-    
+
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 }
@@ -2134,39 +2183,45 @@ public class CreateMaintenanceAssetCategoryDto
     public string? Icon { get; set; }
 
     public bool IsActive { get; set; } = true;
-    
+
     // Asset Type Classification
     [StringLength(50)]
     public string? AssetType { get; set; }
-    
+
     // Parent-child relationship
     public Guid? ParentCategoryId { get; set; }
-    
+
     // Maintenance Schedule Configuration
     [StringLength(20)]
     public string MaintenanceScheduleType { get; set; } = "single";
-    
+
+    /// <summary>
+    /// Controls whether maintenance schedules should be auto-generated for
+    /// newly created assets in this category based on the category template.
+    /// </summary>
+    public bool AutoGenerateSchedules { get; set; } = true;
+
     // Primary Maintenance Criteria
     [StringLength(20)]
     public string MaintenanceType { get; set; } = "Time";
-    
+
     [StringLength(50)]
     public string? MaintenanceFrequency { get; set; }
-    
+
     public double? MaintenanceValue { get; set; }
-    
+
     [StringLength(20)]
     public string? MaintenanceUnit { get; set; }
-    
+
     // Secondary Maintenance Criteria
     [StringLength(20)]
     public string? SecondaryMaintenanceType { get; set; }
-    
+
     [StringLength(50)]
     public string? SecondaryMaintenanceFrequency { get; set; }
-    
+
     public double? SecondaryMaintenanceValue { get; set; }
-    
+
     [StringLength(20)]
     public string? SecondaryMaintenanceUnit { get; set; }
 }
@@ -2190,39 +2245,45 @@ public class UpdateMaintenanceAssetCategoryDto
     public string? Icon { get; set; }
 
     public bool IsActive { get; set; } = true;
-    
+
     // Asset Type Classification
     [StringLength(50)]
     public string? AssetType { get; set; }
-    
+
     // Parent-child relationship
     public Guid? ParentCategoryId { get; set; }
-    
+
     // Maintenance Schedule Configuration
     [StringLength(20)]
     public string MaintenanceScheduleType { get; set; } = "single";
-    
+
+    /// <summary>
+    /// Controls whether maintenance schedules should be auto-generated for
+    /// newly created assets in this category based on the category template.
+    /// </summary>
+    public bool AutoGenerateSchedules { get; set; } = true;
+
     // Primary Maintenance Criteria
     [StringLength(20)]
     public string MaintenanceType { get; set; } = "Time";
-    
+
     [StringLength(50)]
     public string? MaintenanceFrequency { get; set; }
-    
+
     public double? MaintenanceValue { get; set; }
-    
+
     [StringLength(20)]
     public string? MaintenanceUnit { get; set; }
-    
+
     // Secondary Maintenance Criteria
     [StringLength(20)]
     public string? SecondaryMaintenanceType { get; set; }
-    
+
     [StringLength(50)]
     public string? SecondaryMaintenanceFrequency { get; set; }
-    
+
     public double? SecondaryMaintenanceValue { get; set; }
-    
+
     [StringLength(20)]
     public string? SecondaryMaintenanceUnit { get; set; }
 }
@@ -2257,10 +2318,12 @@ public class WorkOrderDto
     public Guid MaintenanceTypeId { get; set; }
     public Guid PriorityLevelId { get; set; }
     public string Status { get; set; } = string.Empty;
+    public string MaintenanceLocation { get; set; } = "Internal";
     public string Priority { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty;
     public string AssetName { get; set; } = string.Empty;
     public string AssetNumber { get; set; } = string.Empty;
+    public string AssetCategory { get; set; } = string.Empty;
     public string AssetLocation { get; set; } = string.Empty;
     public string Instructions { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
@@ -2308,11 +2371,12 @@ public class WorkOrderDto
     public ICollection<WorkOrderTaskDto> Tasks { get; set; } = new List<WorkOrderTaskDto>();
     public ICollection<WorkOrderPartDto> Parts { get; set; } = new List<WorkOrderPartDto>();
     public ICollection<WorkOrderLaborDto> Labor { get; set; } = new List<WorkOrderLaborDto>();
+    public ICollection<WorkOrderToolDto> Tools { get; set; } = new List<WorkOrderToolDto>();
     public ICollection<WorkOrderCommentDto> Comments { get; set; } = new List<WorkOrderCommentDto>();
 
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
-    
+
     // Additional properties for mobile and analytics
     public DateTime? DueDate { get; set; }
     public double? EstimatedDuration { get; set; }
@@ -2334,6 +2398,7 @@ public class WorkOrderListDto
     public Guid MaintenanceTypeId { get; set; }
     public string MaintenanceTypeName { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    public string MaintenanceLocation { get; set; } = "Internal";
     public string Priority { get; set; } = string.Empty;
     public string PriorityName { get; set; } = string.Empty;
     public Guid PriorityLevelId { get; set; }
@@ -2358,7 +2423,7 @@ public class WorkOrderListDto
     public double CompletionPercentage { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime CreatedDate { get; set; }
-    
+
     // Additional properties for mobile and analytics
     public DateTime? UpdatedAt { get; set; }
     public DateTime? DueDate { get; set; }
@@ -2392,6 +2457,10 @@ public class CreateWorkOrderDto
     public string WorkOrderType { get; set; } = string.Empty;
     public string Priority { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+
+    [StringLength(20)]
+    public string MaintenanceLocation { get; set; } = "Internal";
+
     public string Instructions { get; set; } = string.Empty;
     public string SafetyNotes { get; set; } = string.Empty;
     public string RequiredSkills { get; set; } = string.Empty;
@@ -2418,7 +2487,10 @@ public class CreateWorkOrderDto
     public Guid? ParentWorkOrderId { get; set; }
     public Guid? MaintenanceScheduleId { get; set; }
     public Guid? JobCardId { get; set; }
-    
+
+    // Tenant ID for background service context (when current user tenant is null)
+    public Guid? TenantId { get; set; }
+
     // Custom field values (JSON serialized)
     public Dictionary<string, object>? CustomFieldValues { get; set; }
 }
@@ -2426,7 +2498,7 @@ public class CreateWorkOrderDto
 public class UpdateWorkOrderDto : IValidatableObject
 {
     public Guid Id { get; set; }
-    
+
     [Required]
     [StringLength(200)]
     public string Title { get; set; } = string.Empty;
@@ -2437,6 +2509,9 @@ public class UpdateWorkOrderDto : IValidatableObject
     public string Instructions { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+
+    [StringLength(20)]
+    public string? MaintenanceLocation { get; set; }
 
     public Guid? WorkOrderTypeId { get; set; }
 
@@ -2464,19 +2539,29 @@ public class UpdateWorkOrderDto : IValidatableObject
     {
         // Ensure empty GUIDs (Guid.Empty) are treated as null
         if (WorkOrderTypeId.HasValue && WorkOrderTypeId.Value == Guid.Empty)
+        {
             WorkOrderTypeId = null;
-        
+        }
+
         if (MaintenanceTypeId.HasValue && MaintenanceTypeId.Value == Guid.Empty)
+        {
             MaintenanceTypeId = null;
-        
+        }
+
         if (PriorityLevelId.HasValue && PriorityLevelId.Value == Guid.Empty)
+        {
             PriorityLevelId = null;
-        
+        }
+
         if (AssignedTechnicianId.HasValue && AssignedTechnicianId.Value == Guid.Empty)
+        {
             AssignedTechnicianId = null;
-        
+        }
+
         if (AssignedTeamId.HasValue && AssignedTeamId.Value == Guid.Empty)
+        {
             AssignedTeamId = null;
+        }
 
         return Enumerable.Empty<ValidationResult>();
     }
@@ -2487,7 +2572,7 @@ public class UpdateWorkOrderStatusRequest
     [Required]
     [StringLength(20)]
     public string Status { get; set; } = string.Empty;
-    
+
     [StringLength(1000)]
     public string? Notes { get; set; }
 }
@@ -2607,6 +2692,7 @@ public class WorkOrderTaskDto
     public DateTime? CompletedAt { get; set; }
     public string? CompletionNotes { get; set; }
     public bool IsRequired { get; set; }
+    public string? PhotoPath { get; set; }
 
     public EmployeeDto? AssignedTechnician { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -2651,29 +2737,31 @@ public class WorkOrderPartDto
 {
     public Guid Id { get; set; }
     public Guid WorkOrderId { get; set; }
-    
+
     // Inventory Integration
     public Guid InventoryItemId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
     public string? Description { get; set; }
-    
+
     // Quantities
     public decimal QuantityRequired { get; set; }
     public decimal QuantityAllocated { get; set; }
     public decimal QuantityUsed { get; set; }
     public decimal QuantityReturned { get; set; }
-    
+
     // Costing
     public decimal UnitCost { get; set; }
     public decimal TotalCost { get; set; }
-    
+
     // Location and tracking
+    public Guid? WarehouseId { get; set; }
+    public string? WarehouseName { get; set; }
     public string? SerialNumber { get; set; }
     public string? LotNumber { get; set; }
     public string? WarehouseLocationCode { get; set; }
     public string? WarehouseLocationName { get; set; }
-    
+
     // Status and allocation tracking
     public string Status { get; set; } = string.Empty;
     public Guid? AllocationId { get; set; }
@@ -2681,10 +2769,10 @@ public class WorkOrderPartDto
     public DateTime? PickedAt { get; set; }
     public DateTime? UsedAt { get; set; }
     public string? Notes { get; set; }
-    
+
     // Inventory item details
     public InventoryItemSummaryDto? InventoryItem { get; set; }
-    
+
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 }
@@ -2704,14 +2792,17 @@ public class CreateWorkOrderPartDto
     [Range(0, double.MaxValue)]
     public decimal UnitCost { get; set; }
 
+    [Required]
+    public Guid WarehouseId { get; set; }
+
     public Guid? WarehouseLocationId { get; set; }
-    
+
     [StringLength(100)]
     public string? SerialNumber { get; set; }
-    
+
     [StringLength(100)]
     public string? LotNumber { get; set; }
-    
+
     [StringLength(1000)]
     public string? Notes { get; set; }
 }
@@ -2732,16 +2823,16 @@ public class UpdateWorkOrderPartDto
     public decimal UnitCost { get; set; }
 
     public Guid? WarehouseLocationId { get; set; }
-    
+
     [StringLength(100)]
     public string? SerialNumber { get; set; }
-    
+
     [StringLength(100)]
     public string? LotNumber { get; set; }
 
     [StringLength(20)]
     public string Status { get; set; } = string.Empty;
-    
+
     [StringLength(1000)]
     public string? Notes { get; set; }
 }
@@ -2801,6 +2892,15 @@ public class UpdateWorkOrderLaborDto
     public string LaborType { get; set; } = string.Empty;
 }
 
+public class EndLaborDto
+{
+    [Required]
+    public DateTime EndTime { get; set; }
+
+    [StringLength(1000)]
+    public string? Notes { get; set; }
+}
+
 // Work Order Comment DTOs
 public class WorkOrderCommentDto
 {
@@ -2843,6 +2943,110 @@ public class DatePeriodDto
 
 #endregion
 
+#region Usage Tracking DTOs
+
+/// <summary>
+/// DTO for asset usage tracking records
+/// </summary>
+public class AssetUsageTrackingDto
+{
+    public Guid Id { get; set; }
+    public Guid AssetId { get; set; }
+    public string? AssetName { get; set; }
+    public string? AssetNumber { get; set; }
+    public DateTime RecordedAt { get; set; }
+    public decimal? Mileage { get; set; }
+    public string? MileageUnit { get; set; }
+    public decimal? OperatingHours { get; set; }
+    public int? Cycles { get; set; }
+    public decimal? FuelConsumed { get; set; }
+    public string? FuelUnit { get; set; }
+    public string DataSource { get; set; } = "Manual";
+    public string? ExternalReferenceId { get; set; }
+    public string? AdditionalMetrics { get; set; }
+    public string? Notes { get; set; }
+    public Guid? RecordedById { get; set; }
+    public string? RecordedByName { get; set; }
+    public bool TriggeredMaintenance { get; set; }
+    public bool IsValidated { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>
+/// DTO for creating asset usage tracking records
+/// </summary>
+public class CreateAssetUsageTrackingDto
+{
+    [Required]
+    public Guid AssetId { get; set; }
+
+    [Required]
+    public DateTime RecordedAt { get; set; }
+
+    public decimal? Mileage { get; set; }
+
+    [MaxLength(10)]
+    public string? MileageUnit { get; set; }
+
+    public decimal? OperatingHours { get; set; }
+
+    public int? Cycles { get; set; }
+
+    public decimal? FuelConsumed { get; set; }
+
+    [MaxLength(10)]
+    public string? FuelUnit { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string DataSource { get; set; } = "Manual";
+
+    [MaxLength(100)]
+    public string? ExternalReferenceId { get; set; }
+
+    public string? AdditionalMetrics { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+
+    public bool IsValidated { get; set; } = true;
+}
+
+/// <summary>
+/// DTO for bulk import of usage data
+/// </summary>
+public class BulkUsageImportDto
+{
+    [Required]
+    public List<CreateAssetUsageTrackingDto> UsageRecords { get; set; } = new();
+
+    public string DataSource { get; set; } = "Import";
+    public bool ValidateAll { get; set; } = true;
+}
+
+/// <summary>
+/// DTO for usage tracking summary by asset
+/// </summary>
+public class AssetUsageSummaryDto
+{
+    public Guid AssetId { get; set; }
+    public string AssetName { get; set; } = string.Empty;
+    public string AssetNumber { get; set; } = string.Empty;
+    public decimal? CurrentMileage { get; set; }
+    public decimal? CurrentOperatingHours { get; set; }
+    public int? CurrentCycles { get; set; }
+    public decimal? AverageDailyMileage { get; set; }
+    public decimal? AverageDailyOperatingHours { get; set; }
+    public decimal? TotalFuelConsumed { get; set; }
+    public DateTime? LastRecordedAt { get; set; }
+    public int TotalRecords { get; set; }
+    public DateTime? NextMaintenanceDue { get; set; }
+    public decimal? MileageUntilMaintenance { get; set; }
+    public decimal? HoursUntilMaintenance { get; set; }
+}
+
+#endregion
+
 #region Analytics and Reporting DTOs
 
 public class AssetMetricsDto
@@ -2856,7 +3060,7 @@ public class AssetMetricsDto
     public Dictionary<string, int> AssetsByCategory { get; set; } = new();
     public Dictionary<string, int> AssetsByStatus { get; set; } = new();
     public Dictionary<string, int> AssetsByCriticality { get; set; } = new();
-    
+
     // Additional properties for analytics
     public int CriticalAssets { get; set; }
     public int AssetsRequiringMaintenance { get; set; }
@@ -2884,7 +3088,7 @@ public class MaintenanceDashboardDto
     public IEnumerable<MaintenanceAssetListDto> AssetsRequiringMaintenance { get; set; } = new List<MaintenanceAssetListDto>();
     public IEnumerable<AssetDowntimeDto> ActiveDowntime { get; set; } = new List<AssetDowntimeDto>();
     public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
-    
+
     // Additional properties for MaintenanceAnalyticsService compatibility
     public DashboardSummaryDto Summary { get; set; } = new();
     public Dictionary<string, int> WorkOrdersByStatus { get; set; } = new();
@@ -2908,7 +3112,7 @@ public class MaintenanceKPIsDto
     public double WorkOrderCompletionRate { get; set; }
     public double PreventiveMaintenanceCompliance { get; set; }
     public double AssetAvailability { get; set; }
-    
+
     // Additional properties for service compatibility
     public double MTTR { get; set; }
     public double MTBF { get; set; }
@@ -2946,7 +3150,7 @@ public class DashboardSummaryDto
     public decimal TotalMaintenanceCost { get; set; }
     public double AverageCompletionTime { get; set; }
     public double SystemAvailability { get; set; }
-    
+
     // Additional properties for analytics service
     public int ActiveAssets { get; set; }
     public int CriticalAssets { get; set; }
@@ -2976,7 +3180,7 @@ public class ScheduleComplianceReportDto
     public double CompliancePercentage { get; set; }
     public Dictionary<string, double> ComplianceByAssetCategory { get; set; } = new();
     public Dictionary<string, double> ComplianceByMaintenanceType { get; set; } = new();
-    
+
     // Additional properties for service compatibility
     public int ActiveSchedules { get; set; }
     public int OverdueSchedules { get; set; }
@@ -3045,7 +3249,7 @@ public class SafetyComplianceRecordDto
     public string? ViolationType { get; set; }
     public string? CorrectiveActions { get; set; }
     public DateTime? CorrectiveActionDueDate { get; set; }
-    
+
     // Additional properties for service compatibility
     public List<ComplianceChecklistItemDto>? ChecklistItems { get; set; }
     public List<ComplianceViolationDto>? Violations { get; set; }
@@ -3060,51 +3264,51 @@ public class CreateSafetyComplianceRecordDto
 {
     [Required]
     public Guid SafetyProtocolId { get; set; }
-    
+
     // Alias for compatibility
-    public Guid ProtocolId 
+    public Guid ProtocolId
     {
         get => SafetyProtocolId;
         set => SafetyProtocolId = value;
     }
-    
+
     [Required]
     public Guid TechnicianId { get; set; }
-    
+
     public Guid? WorkOrderId { get; set; }
-    
+
     [Required]
     public DateTime ComplianceDate { get; set; }
-    
+
     // Alias for compatibility
-    public DateTime CheckDate 
+    public DateTime CheckDate
     {
         get => ComplianceDate;
         set => ComplianceDate = value;
     }
-    
+
     [Required]
     [MaxLength(20)]
     public string ComplianceStatus { get; set; } = string.Empty;
-    
+
     [MaxLength(2000)]
     public string? Notes { get; set; }
-    
+
     public bool IsCompliant { get; set; }
-    
+
     [MaxLength(50)]
     public string? ViolationType { get; set; }
-    
+
     [MaxLength(2000)]
     public string? CorrectiveActions { get; set; }
-    
+
     public DateTime? CorrectiveActionDueDate { get; set; }
-    
+
     // Additional properties for service compatibility
     public List<ComplianceChecklistItemDto>? ChecklistItems { get; set; }
     public List<ComplianceViolationDto>? Violations { get; set; }
     public Guid? InspectorId { get; set; }
-    
+
     [MaxLength(2000)]
     public string? InspectorNotes { get; set; }
 }
@@ -3114,25 +3318,25 @@ public class UpdateSafetyComplianceRecordDto
     [Required]
     [MaxLength(20)]
     public string ComplianceStatus { get; set; } = string.Empty;
-    
+
     [MaxLength(2000)]
     public string? Notes { get; set; }
-    
+
     public bool IsCompliant { get; set; }
-    
+
     [MaxLength(50)]
     public string? ViolationType { get; set; }
-    
+
     [MaxLength(2000)]
     public string? CorrectiveActions { get; set; }
-    
+
     public DateTime? CorrectiveActionDueDate { get; set; }
-    
+
     // Additional properties for service compatibility
     public List<ComplianceChecklistItemDto>? ChecklistItems { get; set; }
     public List<ComplianceViolationDto>? Violations { get; set; }
     public Guid? InspectorId { get; set; }
-    
+
     [MaxLength(2000)]
     public string? InspectorNotes { get; set; }
 }
@@ -3204,7 +3408,7 @@ public class CategoryComplianceDto
     public int TotalAdherence { get; set; }
     public int TotalViolations { get; set; }
     public decimal ComplianceRate { get; set; }
-    
+
     // Additional properties for controller compatibility
     public int ProtocolCount { get; set; }
     public decimal AverageCompliance { get; set; }
@@ -3227,7 +3431,7 @@ public class SafetyAnalyticsDto
     public DateTime AnalysisPeriodEnd { get; set; }
     public IEnumerable<TrendDataDto> ComplianceTrends { get; set; } = new List<TrendDataDto>();
     public IEnumerable<ViolationTypeDto> ViolationsByType { get; set; } = new List<ViolationTypeDto>();
-    
+
     // Additional properties for controller compatibility
     public int CriticalViolations { get; set; }
     public Dictionary<string, int> ProtocolsByCategory { get; set; } = new();
@@ -3290,12 +3494,12 @@ public class ApprovalRequestDto
     [Required]
     [MaxLength(2000)]
     public string Comments { get; set; } = string.Empty;
-    
+
     [Required]
     public Guid ApproverId { get; set; }
-    
+
     public string ApproverName { get; set; } = string.Empty;
-    
+
     public DateTime ApprovalDate { get; set; } = DateTime.UtcNow;
 }
 
@@ -3303,18 +3507,18 @@ public class CreateProtocolAdherenceDto
 {
     [Required]
     public Guid ProtocolId { get; set; }
-    
+
     [Required]
     public Guid TechnicianId { get; set; }
-    
+
     public Guid? WorkOrderId { get; set; }
-    
+
     [Required]
     public DateTime AdherenceDate { get; set; }
-    
+
     [MaxLength(20)]
     public string AdherenceLevel { get; set; } = "Full";
-    
+
     [MaxLength(2000)]
     public string? Notes { get; set; }
 }
@@ -3323,32 +3527,32 @@ public class CreateProtocolViolationDto
 {
     [Required]
     public Guid ProtocolId { get; set; }
-    
+
     [Required]
     public Guid TechnicianId { get; set; }
-    
+
     public Guid? WorkOrderId { get; set; }
-    
+
     [Required]
     public DateTime ViolationDate { get; set; }
-    
+
     [Required]
     [MaxLength(50)]
     public string ViolationType { get; set; } = string.Empty;
-    
+
     [Required]
     [MaxLength(20)]
     public string Severity { get; set; } = string.Empty;
-    
+
     [MaxLength(2000)]
     public string? Description { get; set; }
-    
+
     [MaxLength(2000)]
     public string? CorrectiveActions { get; set; }
-    
+
     [MaxLength(2000)]
     public string? CorrectiveAction { get; set; }
-    
+
     public DateTime? CorrectiveActionDueDate { get; set; }
 }
 
@@ -3356,32 +3560,32 @@ public class CreateProtocolTrainingDto
 {
     [Required]
     public Guid ProtocolId { get; set; }
-    
+
     [Required]
     public Guid TechnicianId { get; set; }
-    
+
     [Required]
     public DateTime TrainingDate { get; set; }
-    
+
     [Required]
     [MaxLength(50)]
     public string TrainingType { get; set; } = string.Empty;
-    
+
     [MaxLength(20)]
     public string CompletionStatus { get; set; } = "NotStarted";
-    
+
     public int? Score { get; set; }
-    
+
     public bool CertificationIssued { get; set; } = false;
-    
+
     [MaxLength(200)]
     public string? TrainerName { get; set; }
-    
+
     [MaxLength(2000)]
     public string? Notes { get; set; }
-    
+
     public bool Passed { get; set; }
-    
+
     public DateTime? CertificationExpiry { get; set; }
 }
 
@@ -3776,7 +3980,7 @@ public class SkillDeficitDto
     public int DeficitCount { get; set; }
     public string Category { get; set; } = string.Empty;
     public decimal ImpactScore { get; set; }
-    
+
     // Additional properties for controller compatibility
     public int RequiredTechnicians { get; set; }
     public int CurrentTechnicians { get; set; }
@@ -3792,7 +3996,7 @@ public class OverstaffedSkillDto
     public int AvailableCount { get; set; }
     public int ExcessCount { get; set; }
     public string Category { get; set; } = string.Empty;
-    
+
     // Additional properties for controller compatibility
     public int RequiredTechnicians { get; set; }
     public int CurrentTechnicians { get; set; }
@@ -3807,7 +4011,7 @@ public class CriticalSkillDto
     public int TechniciansWithSkill { get; set; }
     public decimal CriticalityScore { get; set; }
     public string RiskLevel { get; set; } = string.Empty;
-    
+
     // Additional properties for controller compatibility
     public int TechnicianCount { get; set; }
     public string MitegationActions { get; set; } = string.Empty;
@@ -3918,6 +4122,289 @@ public class AssetDowntimeReportDto
 
 #endregion
 
+#region Staff Schedule and Expense DTOs
+
+public class MaintenanceStaffScheduleDto
+{
+    public Guid Id { get; set; }
+    public Guid TechnicianId { get; set; }
+    public string TechnicianName { get; set; } = string.Empty;
+    public DateTime StartDateTime { get; set; }
+    public DateTime EndDateTime { get; set; }
+    public string ScheduleType { get; set; } = "WorkOrder"; // WorkOrder, Available, Training, Leave, Travel
+    public string Status { get; set; } = "Scheduled"; // Scheduled, InProgress, Completed, Cancelled
+
+    // Work assignment
+    public Guid? WorkOrderId { get; set; }
+    public string? WorkOrderNumber { get; set; }
+    public Guid? JobCardId { get; set; }
+    public string? JobCardNumber { get; set; }
+    public Guid? TeamId { get; set; }
+    public string? TeamName { get; set; }
+
+    // Location information
+    public string? WorkLocation { get; set; }
+    public string? Address { get; set; }
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+
+    // Travel information
+    public bool RequiresTravel { get; set; }
+    public DateTime? DepartureTime { get; set; }
+    public DateTime? ArrivalTime { get; set; }
+    public int? EstimatedTravelMinutes { get; set; }
+    public int? ActualTravelMinutes { get; set; }
+
+    // Vehicle/transportation
+    public Guid? AssignedVehicleId { get; set; }
+    public string? VehicleName { get; set; }
+    public string? TransportationType { get; set; }
+
+    public string? Notes { get; set; }
+
+    // Time tracking
+    public DateTime? ActualStartTime { get; set; }
+    public DateTime? ActualEndTime { get; set; }
+
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+public class CreateMaintenanceStaffScheduleDto
+{
+    [Required]
+    public Guid TechnicianId { get; set; }
+
+    [Required]
+    public DateTime StartDateTime { get; set; }
+
+    [Required]
+    public DateTime EndDateTime { get; set; }
+
+    [Required]
+    [StringLength(50)]
+    public string ScheduleType { get; set; } = "WorkOrder";
+
+    [StringLength(20)]
+    public string Status { get; set; } = "Scheduled";
+
+    public Guid? WorkOrderId { get; set; }
+    public Guid? JobCardId { get; set; }
+    public Guid? TeamId { get; set; }
+
+    [StringLength(200)]
+    public string? WorkLocation { get; set; }
+
+    [StringLength(200)]
+    public string? Address { get; set; }
+
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+
+    public bool RequiresTravel { get; set; }
+    public DateTime? DepartureTime { get; set; }
+    public DateTime? ArrivalTime { get; set; }
+    public int? EstimatedTravelMinutes { get; set; }
+
+    public Guid? AssignedVehicleId { get; set; }
+
+    [StringLength(100)]
+    public string? TransportationType { get; set; }
+
+    [StringLength(1000)]
+    public string? Notes { get; set; }
+}
+
+public class UpdateMaintenanceStaffScheduleDto
+{
+    public DateTime? StartDateTime { get; set; }
+    public DateTime? EndDateTime { get; set; }
+
+    [StringLength(20)]
+    public string? Status { get; set; }
+
+    [StringLength(200)]
+    public string? WorkLocation { get; set; }
+
+    [StringLength(200)]
+    public string? Address { get; set; }
+
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+
+    public bool? RequiresTravel { get; set; }
+    public DateTime? DepartureTime { get; set; }
+    public DateTime? ArrivalTime { get; set; }
+    public int? EstimatedTravelMinutes { get; set; }
+    public int? ActualTravelMinutes { get; set; }
+
+    public Guid? AssignedVehicleId { get; set; }
+
+    [StringLength(100)]
+    public string? TransportationType { get; set; }
+
+    [StringLength(1000)]
+    public string? Notes { get; set; }
+
+    public DateTime? ActualStartTime { get; set; }
+    public DateTime? ActualEndTime { get; set; }
+}
+
+public class MaintenanceExpenseDto
+{
+    public Guid Id { get; set; }
+    public Guid WorkOrderId { get; set; }
+    public string WorkOrderNumber { get; set; } = string.Empty;
+    public Guid? ScheduleId { get; set; }
+
+    public string ExpenseType { get; set; } = "Travel"; // Travel, Fuel, Accommodation, Meals, Tools, Parts, Other
+    public string Description { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public DateTime ExpenseDate { get; set; }
+
+    // Mileage tracking
+    public decimal? MileageDriven { get; set; }
+    public decimal? MileageRate { get; set; }
+
+    // Fuel tracking
+    public decimal? FuelQuantity { get; set; }
+    public decimal? FuelPricePerUnit { get; set; }
+
+    // Vehicle tracking
+    public Guid? VehicleId { get; set; }
+    public string? VehicleName { get; set; }
+
+    // Receipt and documentation
+    public string? ReceiptPath { get; set; }
+    public string? VendorName { get; set; }
+    public string? ReferenceNumber { get; set; }
+
+    // Approval and reimbursement
+    public string Status { get; set; } = "Pending"; // Pending, Approved, Rejected, Reimbursed
+    public Guid? ApprovedById { get; set; }
+    public string? ApprovedByName { get; set; }
+    public DateTime? ApprovedDate { get; set; }
+    public string? ApprovalNotes { get; set; }
+
+    public bool IsReimbursable { get; set; }
+    public bool IsReimbursed { get; set; }
+    public DateTime? ReimbursedDate { get; set; }
+
+    // Location information
+    public string? Location { get; set; }
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+public class CreateMaintenanceExpenseDto
+{
+    [Required]
+    public Guid WorkOrderId { get; set; }
+
+    public Guid? ScheduleId { get; set; }
+
+    [Required]
+    [StringLength(50)]
+    public string ExpenseType { get; set; } = "Travel";
+
+    [Required]
+    [StringLength(200)]
+    public string Description { get; set; } = string.Empty;
+
+    [Required]
+    [Range(0, double.MaxValue)]
+    public decimal Amount { get; set; }
+
+    public DateTime ExpenseDate { get; set; } = DateTime.UtcNow;
+
+    public decimal? MileageDriven { get; set; }
+    public decimal? MileageRate { get; set; }
+
+    public decimal? FuelQuantity { get; set; }
+    public decimal? FuelPricePerUnit { get; set; }
+
+    public Guid? VehicleId { get; set; }
+
+    [StringLength(500)]
+    public string? ReceiptPath { get; set; }
+
+    [StringLength(100)]
+    public string? VendorName { get; set; }
+
+    [StringLength(50)]
+    public string? ReferenceNumber { get; set; }
+
+    public bool IsReimbursable { get; set; } = true;
+
+    [StringLength(200)]
+    public string? Location { get; set; }
+
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+}
+
+public class UpdateMaintenanceExpenseDto
+{
+    [StringLength(50)]
+    public string? ExpenseType { get; set; }
+
+    [StringLength(200)]
+    public string? Description { get; set; }
+
+    [Range(0, double.MaxValue)]
+    public decimal? Amount { get; set; }
+
+    public DateTime? ExpenseDate { get; set; }
+
+    public decimal? MileageDriven { get; set; }
+    public decimal? MileageRate { get; set; }
+
+    public decimal? FuelQuantity { get; set; }
+    public decimal? FuelPricePerUnit { get; set; }
+
+    public Guid? VehicleId { get; set; }
+
+    [StringLength(500)]
+    public string? ReceiptPath { get; set; }
+
+    [StringLength(100)]
+    public string? VendorName { get; set; }
+
+    [StringLength(50)]
+    public string? ReferenceNumber { get; set; }
+
+    [StringLength(20)]
+    public string? Status { get; set; }
+
+    [StringLength(1000)]
+    public string? ApprovalNotes { get; set; }
+
+    public bool? IsReimbursable { get; set; }
+    public bool? IsReimbursed { get; set; }
+    public DateTime? ReimbursedDate { get; set; }
+
+    [StringLength(200)]
+    public string? Location { get; set; }
+
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+}
+
+public class ApproveExpenseDto
+{
+    [Required]
+    [StringLength(20)]
+    public string Status { get; set; } = "Approved"; // Approved or Rejected
+
+    [StringLength(1000)]
+    public string? ApprovalNotes { get; set; }
+}
+
+#endregion
+
 #region Report Filter DTOs
 
 public class WorkOrderReportFilterDto
@@ -4004,7 +4491,7 @@ public class AssetTypeDto
     public string? Color { get; set; }
     public string? Icon { get; set; }
     public bool IsActive { get; set; }
-    
+
     // Configuration flags
     public bool RequiresLocation { get; set; }
     public bool RequiresOperatingHours { get; set; }
@@ -4013,28 +4500,28 @@ public class AssetTypeDto
     public bool RequiresInspections { get; set; }
     public bool SupportsHierarchy { get; set; }
     public bool RequiresSpecializedFields { get; set; }
-    
+
     // Maintenance Configuration
     public int DefaultMaintenanceIntervalDays { get; set; }
     public bool RequiresPreventiveMaintenance { get; set; }
     public bool RequiresConditionMonitoring { get; set; }
-    
+
     // Safety and Compliance
     public bool RequiresSafetyChecks { get; set; }
     public bool RequiresLockoutTagout { get; set; }
     public bool RequiresPermits { get; set; }
-    
+
     // Workflow Configuration
     public int DefaultWorkOrderPriority { get; set; }
     public double DefaultEstimatedHours { get; set; }
     public string? DefaultWorkInstructions { get; set; }
-    
+
     // Custom fields configuration
     public string? CustomFieldsConfig { get; set; }
-    
+
     // Asset count for this type
     public int AssetCount { get; set; }
-    
+
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 }
@@ -4047,21 +4534,21 @@ public class CreateAssetTypeDto
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(50)]
     public string Code { get; set; } = string.Empty;
-    
+
     [StringLength(1000)]
     public string? Description { get; set; }
-    
+
     [StringLength(7)] // Hex color code
     public string? Color { get; set; }
-    
+
     [StringLength(50)]
     public string? Icon { get; set; }
-    
+
     public bool IsActive { get; set; } = true;
-    
+
     // Configuration flags
     public bool RequiresLocation { get; set; } = true;
     public bool RequiresOperatingHours { get; set; } = false;
@@ -4070,27 +4557,27 @@ public class CreateAssetTypeDto
     public bool RequiresInspections { get; set; } = false;
     public bool SupportsHierarchy { get; set; } = false;
     public bool RequiresSpecializedFields { get; set; } = false;
-    
+
     // Maintenance Configuration
     public int DefaultMaintenanceIntervalDays { get; set; } = 90;
     public bool RequiresPreventiveMaintenance { get; set; } = true;
     public bool RequiresConditionMonitoring { get; set; } = false;
-    
+
     // Safety and Compliance
     public bool RequiresSafetyChecks { get; set; } = false;
     public bool RequiresLockoutTagout { get; set; } = false;
     public bool RequiresPermits { get; set; } = false;
-    
+
     // Workflow Configuration
     [Range(1, 5)]
     public int DefaultWorkOrderPriority { get; set; } = 3; // 1=Critical, 5=Low
-    
+
     [Range(0.1, 9999.0)]
     public double DefaultEstimatedHours { get; set; } = 2.0;
-    
+
     [StringLength(2000)]
     public string? DefaultWorkInstructions { get; set; }
-    
+
     // Custom Fields Configuration (JSON)
     public string? CustomFieldsConfig { get; set; }
 }
@@ -4103,21 +4590,21 @@ public class UpdateAssetTypeDto
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(50)]
     public string Code { get; set; } = string.Empty;
-    
+
     [StringLength(1000)]
     public string? Description { get; set; }
-    
+
     [StringLength(7)] // Hex color code
     public string? Color { get; set; }
-    
+
     [StringLength(50)]
     public string? Icon { get; set; }
-    
+
     public bool IsActive { get; set; }
-    
+
     // Configuration flags
     public bool RequiresLocation { get; set; }
     public bool RequiresOperatingHours { get; set; }
@@ -4126,27 +4613,27 @@ public class UpdateAssetTypeDto
     public bool RequiresInspections { get; set; }
     public bool SupportsHierarchy { get; set; }
     public bool RequiresSpecializedFields { get; set; }
-    
+
     // Maintenance Configuration
     public int DefaultMaintenanceIntervalDays { get; set; }
     public bool RequiresPreventiveMaintenance { get; set; }
     public bool RequiresConditionMonitoring { get; set; }
-    
+
     // Safety and Compliance
     public bool RequiresSafetyChecks { get; set; }
     public bool RequiresLockoutTagout { get; set; }
     public bool RequiresPermits { get; set; }
-    
+
     // Workflow Configuration
     [Range(1, 5)]
     public int DefaultWorkOrderPriority { get; set; }
-    
+
     [Range(0.1, 9999.0)]
     public double DefaultEstimatedHours { get; set; }
-    
+
     [StringLength(2000)]
     public string? DefaultWorkInstructions { get; set; }
-    
+
     // Custom Fields Configuration (JSON)
     public string? CustomFieldsConfig { get; set; }
 }
@@ -4203,25 +4690,25 @@ public class CreateMaintenanceAttachmentDto
 {
     [Required]
     public string FileName { get; set; } = string.Empty;
-    
+
     [Required]
     public string FilePath { get; set; } = string.Empty;
-    
+
     [Required]
     public string ContentType { get; set; } = string.Empty;
-    
+
     public long FileSizeBytes { get; set; }
     public string? Description { get; set; }
-    
+
     [Required]
     public string AttachmentType { get; set; } = string.Empty;
-    
+
     [Required]
     public string EntityType { get; set; } = string.Empty;
-    
+
     [Required]
     public Guid EntityId { get; set; }
-    
+
     public bool IsMainImage { get; set; }
     public int? ImageWidth { get; set; }
     public int? ImageHeight { get; set; }

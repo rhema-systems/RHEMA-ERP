@@ -32,36 +32,45 @@ namespace ErpSystem.Web.Services
 
         public void RegisterResource(IDisposable resource, string name = "")
         {
-            if (resource == null) return;
-            
+            if (resource == null)
+            {
+                return;
+            }
+
             if (string.IsNullOrEmpty(name))
             {
                 name = $"Resource_{Interlocked.Increment(ref _resourceCounter)}";
             }
 
             _disposableResources.TryAdd(name, resource);
-            _logger.LogDebug("Registered disposable resource: {ResourceName} ({ResourceType})", 
+            _logger.LogDebug("Registered disposable resource: {ResourceName} ({ResourceType})",
                 name, resource.GetType().Name);
         }
 
         public void RegisterAsyncResource(IAsyncDisposable resource, string name = "")
         {
-            if (resource == null) return;
-            
+            if (resource == null)
+            {
+                return;
+            }
+
             if (string.IsNullOrEmpty(name))
             {
                 name = $"AsyncResource_{Interlocked.Increment(ref _resourceCounter)}";
             }
 
             _asyncDisposableResources.TryAdd(name, resource);
-            _logger.LogDebug("Registered async disposable resource: {ResourceName} ({ResourceType})", 
+            _logger.LogDebug("Registered async disposable resource: {ResourceName} ({ResourceType})",
                 name, resource.GetType().Name);
         }
 
         public void RegisterCleanupAction(Func<Task> cleanupAction, string name = "")
         {
-            if (cleanupAction == null) return;
-            
+            if (cleanupAction == null)
+            {
+                return;
+            }
+
             if (string.IsNullOrEmpty(name))
             {
                 name = $"CleanupAction_{Interlocked.Increment(ref _resourceCounter)}";
@@ -112,7 +121,7 @@ namespace ErpSystem.Web.Services
                 await Task.WhenAll(tasks);
 
                 stopwatch.Stop();
-                _logger.LogInformation("Completed cleanup of {TotalResources} resources in {ElapsedMs}ms", 
+                _logger.LogInformation("Completed cleanup of {TotalResources} resources in {ElapsedMs}ms",
                     totalResources, stopwatch.ElapsedMilliseconds);
 
                 // Clear all collections
@@ -167,7 +176,10 @@ namespace ErpSystem.Web.Services
 
         public void RemoveResource(string name)
         {
-            if (string.IsNullOrEmpty(name)) return;
+            if (string.IsNullOrEmpty(name))
+            {
+                return;
+            }
 
             var removed = false;
             removed |= _cleanupActions.TryRemove(name, out _);
@@ -206,16 +218,16 @@ namespace ErpSystem.Web.Services
         {
             try
             {
-                _logger.LogDebug("Disposing async resource: {ResourceName} ({ResourceType})", 
+                _logger.LogDebug("Disposing async resource: {ResourceName} ({ResourceType})",
                     name, resource.GetType().Name);
-                
+
                 await resource.DisposeAsync();
-                
+
                 _logger.LogDebug("Completed disposing async resource: {ResourceName}", name);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error disposing async resource '{ResourceName}' ({ResourceType})", 
+                _logger.LogError(ex, "Error disposing async resource '{ResourceName}' ({ResourceType})",
                     name, resource.GetType().Name);
             }
         }
@@ -224,39 +236,45 @@ namespace ErpSystem.Web.Services
         {
             try
             {
-                _logger.LogDebug("Disposing resource: {ResourceName} ({ResourceType})", 
+                _logger.LogDebug("Disposing resource: {ResourceName} ({ResourceType})",
                     name, resource.GetType().Name);
-                
+
                 resource.Dispose();
-                
+
                 _logger.LogDebug("Completed disposing resource: {ResourceName}", name);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error disposing resource '{ResourceName}' ({ResourceType})", 
+                _logger.LogError(ex, "Error disposing resource '{ResourceName}' ({ResourceType})",
                     name, resource.GetType().Name);
             }
         }
 
         public void Dispose()
         {
-            if (_isDisposed) return;
+            if (_isDisposed)
+            {
+                return;
+            }
 
             _logger.LogDebug("Synchronous dispose called on ResourceCleanupService");
-            
+
             // Dispose synchronous resources only
             foreach (var kvp in _disposableResources)
             {
                 CleanupResourceSafely(kvp.Key, kvp.Value);
             }
-            
+
             _disposableResources.Clear();
             _isDisposed = true;
         }
 
         public async ValueTask DisposeAsync()
         {
-            if (_isDisposed) return;
+            if (_isDisposed)
+            {
+                return;
+            }
 
             _logger.LogDebug("Async dispose called on ResourceCleanupService");
             await CleanupAllAsync();
@@ -270,14 +288,14 @@ namespace ErpSystem.Web.Services
             services.AddSingleton<IResourceCleanupService, ResourceCleanupService>();
         }
 
-        public static T RegisterWithCleanup<T>(this T resource, IResourceCleanupService cleanupService, string name = "") 
+        public static T RegisterWithCleanup<T>(this T resource, IResourceCleanupService cleanupService, string name = "")
             where T : IDisposable
         {
             cleanupService.RegisterResource(resource, name);
             return resource;
         }
 
-        public static T RegisterWithAsyncCleanup<T>(this T resource, IResourceCleanupService cleanupService, string name = "") 
+        public static T RegisterWithAsyncCleanup<T>(this T resource, IResourceCleanupService cleanupService, string name = "")
             where T : IAsyncDisposable
         {
             cleanupService.RegisterAsyncResource(resource, name);

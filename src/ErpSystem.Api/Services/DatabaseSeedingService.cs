@@ -57,6 +57,10 @@ namespace ErpSystem.Web.Services
                 else
                 {
                     _logger.LogInformation("Basic data already exists, skipping basic seeding");
+
+                    // But always ensure tenant modules are seeded
+                    _logger.LogInformation("Ensuring tenant modules are seeded...");
+                    await SeedDefaultTenantModulesAsync();
                 }
 
                 // Always seed/update test users in development to ensure correct passwords
@@ -64,14 +68,18 @@ namespace ErpSystem.Web.Services
                 {
                     _logger.LogInformation("Ensuring test users have correct passwords...");
                     await SeedTestUsersAsync();
-                    
+
                     // Always ensure maintenance configuration is seeded in development
                     _logger.LogInformation("Ensuring maintenance configuration is seeded...");
                     await SeedMaintenanceConfigurationAsync();
-                    
+
                     // Seed comprehensive maintenance data (inventory, assets, templates, checklists)
                     _logger.LogInformation("Ensuring comprehensive maintenance data is seeded...");
                     await SeedMaintenanceComprehensiveDataAsync();
+
+                    // Seed quality control checklists
+                    _logger.LogInformation("Ensuring QC checklists are seeded...");
+                    await SeedQualityControlChecklistsAsync();
                 }
 
                 await _context.SaveChangesAsync();
@@ -93,7 +101,7 @@ namespace ErpSystem.Web.Services
 
             // Seed default tenant
             await SeedDefaultTenantAsync();
-            
+
             // Seed default tenant modules
             await SeedDefaultTenantModulesAsync();
 
@@ -117,31 +125,44 @@ namespace ErpSystem.Web.Services
                 return;
             }
 
-            // Create admin user
-            await CreateTestUserAsync("admin", "admin@default.com", "Admin123!", 
-                "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin);
+            // Only create test users if they don't exist - don't update existing users
+            var adminExists = await _userManager.FindByNameAsync("admin") != null;
+            if (!adminExists)
+            {
+                // Create admin user
+                await CreateTestUserAsync("admin", "admin@default.com", "Admin123!",
+                    "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin);
+            }
 
-            // Create manager user
-            await CreateTestUserAsync("manager", "manager@default.com", "Manager123!",
-                "John", "Manager", defaultTenant.Id, Constants.Roles.Manager);
+            var managerExists = await _userManager.FindByNameAsync("manager") != null;
+            if (!managerExists)
+            {
+                // Create manager user
+                await CreateTestUserAsync("manager", "manager@default.com", "Manager123!",
+                    "John", "Manager", defaultTenant.Id, Constants.Roles.Manager);
+            }
 
-            // Create employee user
-            await CreateTestUserAsync("employee", "employee@default.com", "Employee123!",
-                "Jane", "Employee", defaultTenant.Id, Constants.Roles.Employee);
+            var employeeExists = await _userManager.FindByNameAsync("employee") != null;
+            if (!employeeExists)
+            {
+                // Create employee user
+                await CreateTestUserAsync("employee", "employee@default.com", "Employee123!",
+                    "Jane", "Employee", defaultTenant.Id, Constants.Roles.Employee);
+            }
 
             _logger.LogInformation("Test users seeding completed");
         }
-        
+
         public async Task SeedMaintenanceE2ETestDataAsync()
         {
             _logger.LogInformation("Seeding Maintenance E2E test data...");
-            
+
             try
             {
                 // Create a logger factory to get the properly typed logger
                 var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
                 var seederLogger = loggerFactory.CreateLogger<MaintenanceE2ETestSeeder>();
-                
+
                 var seeder = new MaintenanceE2ETestSeeder(_context, seederLogger);
                 await seeder.SeedAsync();
                 _logger.LogInformation("Maintenance E2E test data seeding completed");
@@ -156,12 +177,12 @@ namespace ErpSystem.Web.Services
         private async Task SeedHRDataAsync()
         {
             _logger.LogInformation("Seeding HR data...");
-            
+
             try
             {
                 var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
                 var seederLogger = loggerFactory.CreateLogger<HRDataSeeder>();
-                
+
                 var seeder = new HRDataSeeder(_context, seederLogger);
                 await seeder.SeedAsync();
                 _logger.LogInformation("HR data seeding completed");
@@ -176,12 +197,12 @@ namespace ErpSystem.Web.Services
         private async Task SeedMaintenanceConfigurationAsync()
         {
             _logger.LogInformation("Seeding maintenance configuration...");
-            
+
             try
             {
                 var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
                 var seederLogger = loggerFactory.CreateLogger<MaintenanceConfigurationSeeder>();
-                
+
                 var seeder = new MaintenanceConfigurationSeeder(_context, seederLogger);
                 await seeder.SeedAsync();
                 _logger.LogInformation("Maintenance configuration seeding completed");
@@ -192,16 +213,16 @@ namespace ErpSystem.Web.Services
                 throw;
             }
         }
-        
+
         private async Task SeedMaintenanceComprehensiveDataAsync()
         {
             _logger.LogInformation("Seeding comprehensive maintenance data...");
-            
+
             try
             {
                 var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
                 var seederLogger = loggerFactory.CreateLogger<MaintenanceComprehensiveDataSeeder>();
-                
+
                 var seeder = new MaintenanceComprehensiveDataSeeder(_context, seederLogger);
                 await seeder.SeedAsync();
                 _logger.LogInformation("Comprehensive maintenance data seeding completed");
@@ -209,6 +230,33 @@ namespace ErpSystem.Web.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error seeding comprehensive maintenance data");
+                throw;
+            }
+        }
+
+        private async Task SeedQualityControlChecklistsAsync()
+        {
+            _logger.LogInformation("Seeding quality control checklists...");
+
+            try
+            {
+                var defaultTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Code == "DEFAULT");
+                if (defaultTenant == null)
+                {
+                    _logger.LogWarning("Default tenant not found, skipping QC checklist seeding");
+                    return;
+                }
+
+                var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+                var seederLogger = loggerFactory.CreateLogger<QualityControlChecklistSeeder>();
+
+                var seeder = new QualityControlChecklistSeeder(_context, seederLogger);
+                await seeder.SeedAsync(defaultTenant.Id);
+                _logger.LogInformation("Quality control checklists seeding completed");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error seeding quality control checklists");
                 throw;
             }
         }
@@ -256,7 +304,7 @@ namespace ErpSystem.Web.Services
                     }
                     else
                     {
-                        _logger.LogError("Failed to create role {RoleName}: {Errors}", 
+                        _logger.LogError("Failed to create role {RoleName}: {Errors}",
                             roleInfo.Name, string.Join(", ", result.Errors.Select(e => e.Description)));
                     }
                 }
@@ -299,38 +347,43 @@ namespace ErpSystem.Web.Services
                 return;
             }
 
+            // Check if any modules already exist for this tenant
+            var existingModuleCount = await _context.TenantModules
+                .Where(tm => tm.TenantId == defaultTenant.Id)
+                .CountAsync();
+
+            if (existingModuleCount > 0)
+            {
+                _logger.LogInformation("Tenant modules already exist for {TenantName}. Skipping module seeding.", defaultTenant.Name);
+                return;
+            }
+
             var modules = new[]
             {
-                new { ModuleName = "Financial", Description = "Financial reports and analytics" },
+                new { ModuleName = "Finance", Description = "Financial reports and analytics" },
                 new { ModuleName = "Sales", Description = "Sales performance and CRM reports" },
-                new { ModuleName = "Human Resources", Description = "HR and employee reports" },
+                new { ModuleName = "HR", Description = "HR and employee reports" },
                 new { ModuleName = "Inventory", Description = "Stock and inventory reports" },
-                new { ModuleName = "Operations", Description = "Operational efficiency reports" },
                 new { ModuleName = "Procurement", Description = "Purchasing and supplier reports" },
-                new { ModuleName = "Marketing", Description = "Marketing campaigns and analytics" }
+                new { ModuleName = "Marketing", Description = "Marketing campaigns and analytics" },
+                new { ModuleName = "WorkflowEngine", Description = "Workflow automation and BPM" }
             };
 
             foreach (var moduleInfo in modules)
             {
-                var existingModule = await _context.TenantModules
-                    .FirstOrDefaultAsync(tm => tm.TenantId == defaultTenant.Id && tm.ModuleName == moduleInfo.ModuleName);
-                    
-                if (existingModule == null)
+                var module = new TenantModule
                 {
-                    var module = new TenantModule
-                    {
-                        TenantId = defaultTenant.Id,
-                        ModuleName = moduleInfo.ModuleName,
-                        Description = moduleInfo.Description,
-                        Status = ModuleStatus.Enabled,
-                        EnabledDate = DateTime.UtcNow,
-                        CreatedAt = DateTime.UtcNow,
-                        CreatedBy = "System"
-                    };
+                    TenantId = defaultTenant.Id,
+                    ModuleName = moduleInfo.ModuleName,
+                    Description = moduleInfo.Description,
+                    Status = ModuleStatus.Enabled,
+                    EnabledDate = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "System"
+                };
 
-                    _context.TenantModules.Add(module);
-                    _logger.LogDebug("Created tenant module: {ModuleName} for tenant {TenantName}", moduleInfo.ModuleName, defaultTenant.Name);
-                }
+                _context.TenantModules.Add(module);
+                _logger.LogDebug("Created tenant module: {ModuleName} for tenant {TenantName}", moduleInfo.ModuleName, defaultTenant.Name);
             }
 
             await _context.SaveChangesAsync();

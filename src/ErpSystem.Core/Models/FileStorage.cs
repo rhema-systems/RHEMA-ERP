@@ -92,12 +92,12 @@ public class FileInfoResult
 public class StorageProviderOptions
 {
     public const string SectionName = "FileStorage";
-    
+
     public StorageProviderType Provider { get; set; } = StorageProviderType.Local;
     public LocalStorageOptions Local { get; set; } = new();
     public AzureBlobStorageOptions Azure { get; set; } = new();
     public AwsS3StorageOptions Aws { get; set; } = new();
-    
+
     // General settings
     public long MaxFileSizeBytes { get; set; } = 10 * 1024 * 1024; // 10MB
     public bool EnableImageOptimization { get; set; } = false;

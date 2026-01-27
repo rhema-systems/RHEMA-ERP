@@ -1,11 +1,11 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
-using ErpSystem.Core.Entities.HR;
-using ErpSystem.Core.Interfaces.HR;
-using ErpSystem.Core.Enums;
-using ErpSystem.Core.DTOs.HR;
-using AutoMapper;
 using System.ComponentModel.DataAnnotations;
+using AutoMapper;
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.HR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers
 {
@@ -77,9 +77,9 @@ namespace ErpSystem.Api.Controllers
 
                 var employeeDtos = _mapper.Map<IEnumerable<EmployeeDto>>(paginatedEmployees);
 
-                Response.Headers.Add("X-Total-Count", employees.Count().ToString());
-                Response.Headers.Add("X-Page", page.ToString());
-                Response.Headers.Add("X-Page-Size", pageSize.ToString());
+                Response.Headers.Append("X-Total-Count", employees.Count().ToString());
+                Response.Headers.Append("X-Page", page.ToString());
+                Response.Headers.Append("X-Page-Size", pageSize.ToString());
 
                 return Ok(employeeDtos);
             }
@@ -388,5 +388,26 @@ namespace ErpSystem.Api.Controllers
         //         return StatusCode(500, "An error occurred while retrieving employees");
         //     }
         // }
+
+        /// <summary>
+        /// Get all active departments for dropdown selection
+        /// </summary>
+        [HttpGet("departments")]
+        [ProducesResponseType(typeof(IEnumerable<DepartmentDto>), 200)]
+        public async Task<ActionResult<IEnumerable<DepartmentDto>>> GetDepartments()
+        {
+            try
+            {
+                var departments = await _departmentRepository.GetActiveDepartmentsAsync();
+                var departmentDtos = _mapper.Map<IEnumerable<DepartmentDto>>(departments);
+
+                return Ok(departmentDtos);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving departments");
+                return StatusCode(500, "An error occurred while retrieving departments");
+            }
+        }
     }
 }

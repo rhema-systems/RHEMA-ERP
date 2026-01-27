@@ -1,10 +1,10 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.Reports;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using ErpSystem.Shared;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers;
 
@@ -49,14 +49,16 @@ public class ReportRoleAssignmentController : ControllerBase
         try
         {
             var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Invalid tenant context");
-            
+
             // Verify report exists and belongs to tenant
             var report = await _reportRepository.GetByIdAsync(reportId);
             if (report == null || report.TenantId != tenantId)
+            {
                 return NotFound("Report not found");
+            }
 
             var assignments = await _roleAssignmentRepository.GetAssignmentsByReportAsync(reportId, tenantId);
-            
+
             var assignmentDtos = assignments.Select(a => new ReportRoleAssignmentDto
             {
                 Id = a.Id,
@@ -92,14 +94,16 @@ public class ReportRoleAssignmentController : ControllerBase
         try
         {
             var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Invalid tenant context");
-            
+
             // Verify role exists
             var role = await _roleService.GetRoleByIdAsync(roleId);
             if (role == null)
+            {
                 return NotFound("Role not found");
+            }
 
             var assignments = await _roleAssignmentRepository.GetAssignmentsByRoleAsync(roleId, tenantId);
-            
+
             var assignmentDtos = assignments.Select(a => new ReportRoleAssignmentDto
             {
                 Id = a.Id,
@@ -136,21 +140,27 @@ public class ReportRoleAssignmentController : ControllerBase
         {
             var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Invalid tenant context");
             var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("Invalid user context"));
-            
+
             // Verify report exists and belongs to tenant
             var report = await _reportRepository.GetByIdAsync(createDto.ReportId);
             if (report == null || report.TenantId != tenantId)
+            {
                 return BadRequest("Report not found or does not belong to your tenant");
+            }
 
             // Verify role exists
             var role = await _roleService.GetRoleByIdAsync(createDto.RoleId);
             if (role == null)
+            {
                 return BadRequest("Role not found");
+            }
 
             // Check if assignment already exists
             var existingAssignment = await _roleAssignmentRepository.GetAssignmentAsync(createDto.ReportId, createDto.RoleId, tenantId);
             if (existingAssignment != null)
+            {
                 return BadRequest("Role assignment already exists for this report and role");
+            }
 
             var assignment = new ReportRoleAssignment
             {
@@ -209,10 +219,12 @@ public class ReportRoleAssignmentController : ControllerBase
         {
             var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Invalid tenant context");
             var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("Invalid user context"));
-            
+
             var assignment = await _roleAssignmentRepository.GetByIdAsync(assignmentId);
             if (assignment == null || assignment.TenantId != tenantId)
+            {
                 return NotFound("Role assignment not found");
+            }
 
             // Store old values for audit
             var oldValues = new
@@ -278,10 +290,12 @@ public class ReportRoleAssignmentController : ControllerBase
         {
             var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Invalid tenant context");
             var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("Invalid user context"));
-            
+
             var assignment = await _roleAssignmentRepository.GetByIdAsync(assignmentId);
             if (assignment == null || assignment.TenantId != tenantId)
+            {
                 return NotFound("Role assignment not found");
+            }
 
             // Get related entities for audit logging
             var report = await _reportRepository.GetByIdAsync(assignment.ReportId);
@@ -317,11 +331,13 @@ public class ReportRoleAssignmentController : ControllerBase
         {
             var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Invalid tenant context");
             var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("Invalid user context"));
-            
+
             // Verify report exists
             var report = await _reportRepository.GetByIdAsync(bulkDto.ReportId);
             if (report == null || report.TenantId != tenantId)
+            {
                 return BadRequest("Report not found or does not belong to your tenant");
+            }
 
             var createdAssignments = new List<ReportRoleAssignmentDto>();
 
@@ -330,12 +346,16 @@ public class ReportRoleAssignmentController : ControllerBase
                 // Skip if assignment already exists
                 var existing = await _roleAssignmentRepository.GetAssignmentAsync(assignmentDto.ReportId, assignmentDto.RoleId, tenantId);
                 if (existing != null)
+                {
                     continue;
+                }
 
                 // Verify role exists
                 var role = await _roleService.GetRoleByIdAsync(assignmentDto.RoleId);
                 if (role == null)
+                {
                     continue;
+                }
 
                 var assignment = new ReportRoleAssignment
                 {
@@ -395,7 +415,7 @@ public class ReportRoleAssignmentController : ControllerBase
         {
             var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Invalid tenant context");
             _logger.LogInformation("Getting role assignments for report {ReportId} in tenant {TenantId}", reportId, tenantId);
-            
+
             // Verify report exists and belongs to tenant
             var report = await _reportRepository.GetByIdAsync(reportId);
             if (report == null || report.TenantId != tenantId)
@@ -406,9 +426,10 @@ public class ReportRoleAssignmentController : ControllerBase
 
             var assignments = await _roleAssignmentRepository.GetAssignmentsByReportAsync(reportId, tenantId);
             _logger.LogInformation("Found {AssignmentCount} role assignments for report {ReportId}", assignments.Count(), reportId);
-            
-            var assignmentDtos = assignments.Select(a => {
-                _logger.LogDebug("Processing assignment {AssignmentId}: Role {RoleId} ({RoleName}) -> Report {ReportId}", 
+
+            var assignmentDtos = assignments.Select(a =>
+            {
+                _logger.LogDebug("Processing assignment {AssignmentId}: Role {RoleId} ({RoleName}) -> Report {ReportId}",
                     a.Id, a.RoleId, a.Role?.Name ?? "NULL", a.ReportId);
                 return new ReportRoleAssignmentDto
                 {
@@ -446,10 +467,10 @@ public class ReportRoleAssignmentController : ControllerBase
         try
         {
             var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Invalid tenant context");
-            
+
             // Get all role assignments for the tenant
             var allAssignments = await _roleAssignmentRepository.FindAsync(rra => rra.TenantId == tenantId && !rra.IsDeleted);
-            
+
             var assignmentDtos = allAssignments.Select(a => new ReportRoleAssignmentDto
             {
                 Id = a.Id,
@@ -485,10 +506,12 @@ public class ReportRoleAssignmentController : ControllerBase
         {
             var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Invalid tenant context");
             var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("Invalid user context"));
-            
+
             var report = await _reportRepository.GetByIdAsync(reportId);
             if (report == null || report.TenantId != tenantId)
+            {
                 return NotFound("Report not found");
+            }
 
             var hasRead = await _roleAssignmentRepository.HasReportAccessAsync(reportId, userId, tenantId, "read");
             var hasExecute = await _roleAssignmentRepository.HasReportAccessAsync(reportId, userId, tenantId, "execute");
@@ -588,22 +611,28 @@ public class ReportRoleAssignmentController : ControllerBase
         {
             var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Invalid tenant context");
             var userId = Guid.Parse(_currentUserService.UserId ?? throw new UnauthorizedAccessException("Invalid user context"));
-            
+
             // Get first report and first role for testing
             var reports = await _reportRepository.FindAsync(r => r.TenantId == tenantId && !r.IsDeleted);
             var firstReport = reports.FirstOrDefault();
             if (firstReport == null)
+            {
                 return BadRequest("No reports found in tenant");
+            }
 
             // Get the Employee role (assuming it exists)
             var employeeRole = await _roleService.GetRoleByNameAsync("Employee");
             if (employeeRole == null)
+            {
                 return BadRequest("Employee role not found");
+            }
 
             // Check if assignment already exists
             var existingAssignment = await _roleAssignmentRepository.GetAssignmentAsync(firstReport.Id, employeeRole.Id, tenantId);
             if (existingAssignment != null)
+            {
                 return BadRequest("Test assignment already exists");
+            }
 
             var assignment = new ReportRoleAssignment
             {
@@ -624,8 +653,9 @@ public class ReportRoleAssignmentController : ControllerBase
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Created test role assignment: Report {ReportName} -> Role {RoleName}", firstReport.Name, employeeRole.Name);
-            
-            return Ok(new { 
+
+            return Ok(new
+            {
                 message = "Test role assignment created successfully",
                 reportId = firstReport.Id,
                 reportName = firstReport.Name,

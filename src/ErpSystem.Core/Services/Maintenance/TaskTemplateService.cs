@@ -15,6 +15,7 @@ public class TaskTemplateService : ITaskTemplateService
     private readonly IMaintenanceTaskTemplateRepository _maintenanceTaskTemplateRepository;
     private readonly IMaintenanceAssetRepository _assetRepository;
     private readonly IMaintenanceTypeRepository _maintenanceTypeRepository;
+    private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<TaskTemplateService> _logger;
     private readonly IUnitOfWork _unitOfWork;
 
@@ -24,6 +25,7 @@ public class TaskTemplateService : ITaskTemplateService
         IMaintenanceTaskTemplateRepository maintenanceTaskTemplateRepository,
         IMaintenanceAssetRepository assetRepository,
         IMaintenanceTypeRepository maintenanceTypeRepository,
+        ICurrentUserService currentUserService,
         ILogger<TaskTemplateService> logger,
         IUnitOfWork unitOfWork)
     {
@@ -32,6 +34,7 @@ public class TaskTemplateService : ITaskTemplateService
         _maintenanceTaskTemplateRepository = maintenanceTaskTemplateRepository;
         _assetRepository = assetRepository;
         _maintenanceTypeRepository = maintenanceTypeRepository;
+        _currentUserService = currentUserService;
         _logger = logger;
         _unitOfWork = unitOfWork;
     }
@@ -49,7 +52,7 @@ public class TaskTemplateService : ITaskTemplateService
     {
         try
         {
-            _logger.LogInformation("Getting task templates for asset {AssetId} and maintenance type {MaintenanceTypeId}", 
+            _logger.LogInformation("Getting task templates for asset {AssetId} and maintenance type {MaintenanceTypeId}",
                 assetId, maintenanceTypeId);
 
             var allTasks = new List<WorkOrderTaskDto>();
@@ -79,18 +82,18 @@ public class TaskTemplateService : ITaskTemplateService
                 {
                     // Get all asset type templates for this maintenance type
                     var assetTypeTemplates = await _assetTypeTaskTemplateRepository.GetByMaintenanceTypeIdAsync(maintenanceTypeId);
-                    
+
                     if (assetTypeTemplates?.Any() == true)
                     {
                         var mappedTemplates = assetTypeTemplates
-                            .Select(t => 
+                            .Select(t =>
                             {
                                 var dto = MapAssetTypeTaskTemplateToDto(t);
                                 dto.Sequence += sequenceOffset; // Offset to come after maintenance type templates
                                 return dto;
                             })
                             .ToList();
-                        
+
                         _logger.LogInformation("Found {Count} asset type templates", mappedTemplates.Count);
                         allTasks.AddRange(mappedTemplates);
                         sequenceOffset = mappedTemplates.Max(t => t.Sequence) + 10;
@@ -103,34 +106,36 @@ public class TaskTemplateService : ITaskTemplateService
             }
 
             // 3. Get asset-specific templates (highest priority, loaded last)
+            // Asset templates supersede all others, so we get ALL active templates for the asset
+            // regardless of maintenance type
             var assetTemplates = await _assetTaskTemplateRepository
-                .GetOrderedBySequenceAsync(assetId, maintenanceTypeId);
+                .GetActiveByAssetIdAsync(assetId);
 
             if (assetTemplates?.Any() == true)
             {
                 var mappedTemplates = assetTemplates
-                    .Select(t => 
+                    .Select(t =>
                     {
                         var dto = MapAssetTaskTemplateToDto(t);
                         dto.Sequence += sequenceOffset; // Offset to come after asset type templates
                         return dto;
                     })
                     .ToList();
-                
-                _logger.LogInformation("Found {Count} asset-specific templates", mappedTemplates.Count);
+
+                _logger.LogInformation("Found {Count} asset-specific templates (any maintenance type)", mappedTemplates.Count);
                 allTasks.AddRange(mappedTemplates);
             }
 
             // Return combined list ordered by final sequence
             var result = allTasks.OrderBy(t => t.Sequence).ToList();
             _logger.LogInformation("Total {Count} tasks loaded from all template sources", result.Count);
-            
+
             if (!result.Any())
             {
-                _logger.LogWarning("No task templates found for asset {AssetId} and maintenance type {MaintenanceTypeId}", 
+                _logger.LogWarning("No task templates found for asset {AssetId} and maintenance type {MaintenanceTypeId}",
                     assetId, maintenanceTypeId);
             }
-            
+
             return result;
         }
         catch (Exception ex)
@@ -152,6 +157,7 @@ public class TaskTemplateService : ITaskTemplateService
 
     public async Task<AssetTaskTemplateDto> CreateAssetTaskTemplateAsync(CreateAssetTaskTemplateDto createDto)
     {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         var template = new AssetTaskTemplate
         {
             AssetId = createDto.AssetId,
@@ -166,7 +172,8 @@ public class TaskTemplateService : ITaskTemplateService
             SafetyRequirements = createDto.SafetyRequirements,
             RequiredTools = createDto.RequiredTools,
             RequiredParts = createDto.RequiredParts,
-            IsActive = createDto.IsActive
+            IsActive = createDto.IsActive,
+            TenantId = tenantId
         };
 
         await _assetTaskTemplateRepository.AddAsync(template);
@@ -177,10 +184,7 @@ public class TaskTemplateService : ITaskTemplateService
 
     public async Task<AssetTaskTemplateDto> UpdateAssetTaskTemplateAsync(Guid id, UpdateAssetTaskTemplateDto updateDto)
     {
-        var template = await _assetTaskTemplateRepository.GetByIdAsync(id);
-        if (template == null)
-            throw new KeyNotFoundException($"Asset task template {id} not found");
-
+        var template = await _assetTaskTemplateRepository.GetByIdAsync(id) ?? throw new KeyNotFoundException($"Asset task template {id} not found");
         template.TaskName = updateDto.TaskName;
         template.Description = updateDto.Description;
         template.Sequence = updateDto.Sequence;
@@ -223,6 +227,7 @@ public class TaskTemplateService : ITaskTemplateService
 
     public async Task<AssetTypeTaskTemplateDto> CreateAssetTypeTaskTemplateAsync(CreateAssetTypeTaskTemplateDto createDto)
     {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         var template = new AssetTypeTaskTemplate
         {
             AssetTypeId = createDto.AssetTypeId,
@@ -237,7 +242,8 @@ public class TaskTemplateService : ITaskTemplateService
             SafetyRequirements = createDto.SafetyRequirements,
             RequiredTools = createDto.RequiredTools,
             RequiredParts = createDto.RequiredParts,
-            IsActive = createDto.IsActive
+            IsActive = createDto.IsActive,
+            TenantId = tenantId
         };
 
         await _assetTypeTaskTemplateRepository.AddAsync(template);
@@ -248,10 +254,7 @@ public class TaskTemplateService : ITaskTemplateService
 
     public async Task<AssetTypeTaskTemplateDto> UpdateAssetTypeTaskTemplateAsync(Guid id, UpdateAssetTypeTaskTemplateDto updateDto)
     {
-        var template = await _assetTypeTaskTemplateRepository.GetByIdAsync(id);
-        if (template == null)
-            throw new KeyNotFoundException($"Asset type task template {id} not found");
-
+        var template = await _assetTypeTaskTemplateRepository.GetByIdAsync(id) ?? throw new KeyNotFoundException($"Asset type task template {id} not found");
         template.TaskName = updateDto.TaskName;
         template.Description = updateDto.Description;
         template.Sequence = updateDto.Sequence;
@@ -291,7 +294,7 @@ public class TaskTemplateService : ITaskTemplateService
         var templates = await _maintenanceTaskTemplateRepository.GetByMaintenanceTypeIdAsync(maintenanceTypeId);
         return templates.Select(MapToMaintenanceTaskTemplateDto);
     }
-    
+
     public async Task<IEnumerable<MaintenanceTaskTemplateDto>> GetAllMaintenanceTaskTemplatesAsync()
     {
         var templates = await _maintenanceTaskTemplateRepository.GetAllAsync();
@@ -300,6 +303,7 @@ public class TaskTemplateService : ITaskTemplateService
 
     public async Task<MaintenanceTaskTemplateDto> CreateMaintenanceTaskTemplateAsync(CreateMaintenanceTaskTemplateDto createDto)
     {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         var template = new MaintenanceTaskTemplate
         {
             MaintenanceTypeId = createDto.MaintenanceTypeId,
@@ -311,7 +315,8 @@ public class TaskTemplateService : ITaskTemplateService
             AssignedTechnicianId = createDto.AssignedTechnicianId,
             Instructions = createDto.Instructions,
             SafetyRequirements = createDto.SafetyRequirements,
-            IsActive = createDto.IsActive
+            IsActive = createDto.IsActive,
+            TenantId = tenantId
         };
 
         await _maintenanceTaskTemplateRepository.AddAsync(template);
@@ -322,10 +327,7 @@ public class TaskTemplateService : ITaskTemplateService
 
     public async Task<MaintenanceTaskTemplateDto> UpdateMaintenanceTaskTemplateAsync(Guid id, UpdateMaintenanceTaskTemplateDto updateDto)
     {
-        var template = await _maintenanceTaskTemplateRepository.GetByIdAsync(id);
-        if (template == null)
-            throw new KeyNotFoundException($"Maintenance task template {id} not found");
-
+        var template = await _maintenanceTaskTemplateRepository.GetByIdAsync(id) ?? throw new KeyNotFoundException($"Maintenance task template {id} not found");
         template.TaskName = updateDto.TaskName;
         template.Description = updateDto.Description;
         template.Sequence = updateDto.Sequence;
@@ -352,7 +354,7 @@ public class TaskTemplateService : ITaskTemplateService
 
     #region Helper Methods
 
-    private WorkOrderTaskDto MapAssetTaskTemplateToDto(AssetTaskTemplate template)
+    private static WorkOrderTaskDto MapAssetTaskTemplateToDto(AssetTaskTemplate template)
     {
         return new WorkOrderTaskDto
         {
@@ -370,7 +372,7 @@ public class TaskTemplateService : ITaskTemplateService
         };
     }
 
-    private WorkOrderTaskDto MapAssetTypeTaskTemplateToDto(AssetTypeTaskTemplate template)
+    private static WorkOrderTaskDto MapAssetTypeTaskTemplateToDto(AssetTypeTaskTemplate template)
     {
         return new WorkOrderTaskDto
         {
@@ -388,7 +390,7 @@ public class TaskTemplateService : ITaskTemplateService
         };
     }
 
-    private WorkOrderTaskDto MapMaintenanceTaskTemplateToDto(MaintenanceTaskTemplate template)
+    private static WorkOrderTaskDto MapMaintenanceTaskTemplateToDto(MaintenanceTaskTemplate template)
     {
         return new WorkOrderTaskDto
         {

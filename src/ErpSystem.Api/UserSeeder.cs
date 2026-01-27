@@ -28,7 +28,7 @@ public static class UserSeeder
             }
 
             // Create admin user
-            await CreateUserIfNotExistsAsync(userManager, logger, "admin", "admin@default.com", "Admin123!", 
+            await CreateUserIfNotExistsAsync(userManager, logger, "admin", "admin@default.com", "Admin123!",
                 "System", "Administrator", "+233123456789", defaultTenant.Id, Constants.Roles.SuperAdmin);
 
             // Create manager user  
@@ -51,13 +51,13 @@ public static class UserSeeder
     private static async Task CreateUserIfNotExistsAsync(
         UserManager<ApplicationUser> userManager,
         ILogger logger,
-        string username, 
-        string email, 
+        string username,
+        string email,
         string password,
-        string firstName, 
+        string firstName,
         string lastName,
         string phoneNumber,
-        Guid tenantId, 
+        Guid tenantId,
         string roleName)
     {
         var existingUser = await userManager.FindByNameAsync(username);
@@ -90,7 +90,7 @@ public static class UserSeeder
             var roleResult = await userManager.AddToRoleAsync(user, roleName);
             if (roleResult.Succeeded)
             {
-                logger.LogInformation("✅ Created test user: {Username} ({Email}) with role {Role}", 
+                logger.LogInformation("✅ Created test user: {Username} ({Email}) with role {Role}",
                     username, email, roleName);
             }
             else

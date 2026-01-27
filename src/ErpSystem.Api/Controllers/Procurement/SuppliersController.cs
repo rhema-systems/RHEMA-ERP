@@ -1,10 +1,10 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces.Procurement;
-using System.ComponentModel.DataAnnotations;
-using ErpSystem.Core.DTOs.Common;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Procurement;
 
@@ -240,7 +240,7 @@ public class SuppliersController : ControllerBase
             await _supplierRepository.CreateSupplierAsync(supplier);
 
             // Return the created supplier as detailed DTO
-            return CreatedAtAction(nameof(GetSupplier), new { id = supplier.Id }, 
+            return CreatedAtAction(nameof(GetSupplier), new { id = supplier.Id },
                 await GetSupplierDetailDto(supplier.Id));
         }
         catch (Exception ex)
@@ -502,7 +502,7 @@ public class SuppliersController : ControllerBase
     /// </summary>
     [HttpPost("{supplierId}/contacts")]
     public async Task<ActionResult<SupplierContactDto>> CreateSupplierContact(
-        Guid supplierId, 
+        Guid supplierId,
         [FromBody] CreateSupplierContactDto createDto)
     {
         try
@@ -550,7 +550,7 @@ public class SuppliersController : ControllerBase
                 Notes = contact.Notes
             };
 
-            return CreatedAtAction(nameof(GetSupplierContacts), 
+            return CreatedAtAction(nameof(GetSupplierContacts),
                 new { supplierId = supplierId }, contactDto);
         }
         catch (Exception ex)
@@ -567,7 +567,10 @@ public class SuppliersController : ControllerBase
     private async Task<SupplierDetailDto> GetSupplierDetailDto(Guid supplierId)
     {
         var supplier = await _supplierRepository.GetSupplierByIdAsync(supplierId);
-        if (supplier == null) return null!;
+        if (supplier == null)
+        {
+            return null!;
+        }
 
         var contacts = await _supplierContactRepository.GetContactsBySupplierId(supplier.Id);
         var catalog = await _supplierItemCatalogRepository.GetCatalogBySupplierId(supplier.Id);

@@ -1,11 +1,11 @@
 using AutoMapper;
-using Microsoft.Extensions.Logging;
+using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Maintenance;
-using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Api.Services.Maintenance;
 
@@ -49,11 +49,7 @@ public class MaintenanceAssetCategoryService : IMaintenanceAssetCategoryService
             // Validate parent category if specified
             if (createDto.ParentCategoryId.HasValue)
             {
-                var parentCategory = await _categoryRepository.GetByIdAsync(createDto.ParentCategoryId.Value);
-                if (parentCategory == null)
-                {
-                    throw new ArgumentException($"Parent category with ID {createDto.ParentCategoryId} not found");
-                }
+                var parentCategory = await _categoryRepository.GetByIdAsync(createDto.ParentCategoryId.Value) ?? throw new ArgumentException($"Parent category with ID {createDto.ParentCategoryId} not found");
             }
 
             var category = _mapper.Map<MaintenanceAssetCategory>(createDto);
@@ -79,11 +75,7 @@ public class MaintenanceAssetCategoryService : IMaintenanceAssetCategoryService
         {
             _logger.LogInformation("Updating maintenance asset category: {CategoryId}", id);
 
-            var existingCategory = await _categoryRepository.GetByIdAsync(id);
-            if (existingCategory == null)
-            {
-                throw new ArgumentException($"Category with ID {id} not found");
-            }
+            var existingCategory = await _categoryRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Category with ID {id} not found");
 
             // Validate code uniqueness
             if (!await IsCategoryCodeUniqueAsync(updateDto.Code, id))
@@ -94,11 +86,7 @@ public class MaintenanceAssetCategoryService : IMaintenanceAssetCategoryService
             // Validate parent category if specified
             if (updateDto.ParentCategoryId.HasValue)
             {
-                var parentCategory = await _categoryRepository.GetByIdAsync(updateDto.ParentCategoryId.Value);
-                if (parentCategory == null)
-                {
-                    throw new ArgumentException($"Parent category with ID {updateDto.ParentCategoryId} not found");
-                }
+                var parentCategory = await _categoryRepository.GetByIdAsync(updateDto.ParentCategoryId.Value) ?? throw new ArgumentException($"Parent category with ID {updateDto.ParentCategoryId} not found");
 
                 // Ensure no circular reference
                 if (await WouldCreateCircularReference(id, updateDto.ParentCategoryId.Value))
@@ -128,11 +116,7 @@ public class MaintenanceAssetCategoryService : IMaintenanceAssetCategoryService
         {
             _logger.LogInformation("Deleting maintenance asset category: {CategoryId}", id);
 
-            var category = await _categoryRepository.GetByIdAsync(id);
-            if (category == null)
-            {
-                throw new ArgumentException($"Category with ID {id} not found");
-            }
+            var category = await _categoryRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Category with ID {id} not found");
 
             // Check for child categories - using the generic repository method since GetByParentCategoryIdAsync doesn't exist
             var allCategories = await _categoryRepository.GetAllAsync();
@@ -167,10 +151,10 @@ public class MaintenanceAssetCategoryService : IMaintenanceAssetCategoryService
         {
             var category = await _categoryRepository.FirstOrDefaultAsync(
                 c => c.Id == id && c.TenantId == _currentUserProvider.TenantId,
-                c => c.ParentCategory, 
+                c => c.ParentCategory,
                 c => c.ChildCategories,
                 c => c.Assets);
-                
+
             return category != null ? _mapper.Map<MaintenanceAssetCategoryDto>(category) : null;
         }
         catch (Exception ex)
@@ -187,7 +171,7 @@ public class MaintenanceAssetCategoryService : IMaintenanceAssetCategoryService
             // For now, return all categories to make the frontend work
             // TODO: Implement proper tenant filtering when authentication is fixed
             var categories = await _categoryRepository.GetAllAsync(
-                c => c.ParentCategory, 
+                c => c.ParentCategory,
                 c => c.ChildCategories,
                 c => c.Assets);
             return _mapper.Map<IEnumerable<MaintenanceAssetCategoryDto>>(categories);
@@ -230,12 +214,7 @@ public class MaintenanceAssetCategoryService : IMaintenanceAssetCategoryService
     {
         try
         {
-            var category = await _categoryRepository.GetByIdAsync(categoryId);
-            if (category == null)
-            {
-                throw new ArgumentException($"Category with ID {categoryId} not found");
-            }
-
+            var category = await _categoryRepository.GetByIdAsync(categoryId) ?? throw new ArgumentException($"Category with ID {categoryId} not found");
             var assets = await _assetRepository.GetByAssetCategoryIdAsync(categoryId);
             var allCategories = await _categoryRepository.GetAllAsync();
             var childCategories = allCategories.Where(c => c.ParentCategoryId == categoryId);
@@ -267,12 +246,12 @@ public class MaintenanceAssetCategoryService : IMaintenanceAssetCategoryService
         {
             // Since GetCategoryHierarchyAsync doesn't exist, we'll implement it using GetAllAsync
             var allCategories = await _categoryRepository.GetAllAsync(c => c.ParentCategory, c => c.ChildCategories, c => c.Assets);
-            
+
             // Filter by parent ID if specified
-            var filteredCategories = parentId.HasValue 
+            var filteredCategories = parentId.HasValue
                 ? allCategories.Where(c => c.ParentCategoryId == parentId.Value)
                 : allCategories.Where(c => c.ParentCategoryId == null);
-                
+
             return _mapper.Map<IEnumerable<MaintenanceAssetCategoryDto>>(filteredCategories);
         }
         catch (Exception ex)
@@ -304,7 +283,9 @@ public class MaintenanceAssetCategoryService : IMaintenanceAssetCategoryService
         while (currentId != Guid.Empty)
         {
             if (currentId == categoryId)
+            {
                 return true;
+            }
 
             var parent = await _categoryRepository.GetByIdAsync(currentId);
             currentId = parent?.ParentCategoryId ?? Guid.Empty;

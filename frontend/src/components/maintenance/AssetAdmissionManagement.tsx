@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,16 +28,27 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import assetAdmissionService, { 
-  AssetAdmission, 
-  CreateAdmissionRequest, 
+import assetAdmissionService, {
+  AssetAdmission,
+  CreateAdmissionRequest,
   CreateDischargeRequest,
   AssetDischarge
 } from '@/services/assetAdmissionService';
 import maintenanceApiService, { Asset } from '@/services/maintenanceApiService';
+import assetConditionService, {
+  AssetConditionChecklistTemplateDto,
+  AssetConditionRecordDto,
+  CreateAssetConditionRecordDto,
+  SubmitAssetConditionItemDto
+} from '@/services/assetConditionService';
 import { ClientOnly } from '@/components/ClientOnly';
+import { Switch } from '@/components/ui/switch';
+import { ClipboardCheck, CheckCircle, XCircle } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 
 export default function AssetAdmissionManagement() {
+  const { toast } = useToast();
+  const searchParams = useSearchParams();
   const [admissions, setAdmissions] = useState<AssetAdmission[]>([]);
   const [discharges, setDischarges] = useState<AssetDischarge[]>([]);
   const [filteredAdmissions, setFilteredAdmissions] = useState<AssetAdmission[]>([]);
@@ -44,14 +56,25 @@ export default function AssetAdmissionManagement() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'admissions' | 'discharges'>('admissions');
-  
+
   // Dialog states
   const [isAdmissionDialogOpen, setIsAdmissionDialogOpen] = useState(false);
   const [isDischargeDialogOpen, setIsDischargeDialogOpen] = useState(false);
   const [selectedAdmission, setSelectedAdmission] = useState<AssetAdmission | null>(null);
   const [selectedDischarge, setSelectedDischarge] = useState<AssetDischarge | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  
+
+  // Condition Inspection states
+  const [isConditionDialogOpen, setIsConditionDialogOpen] = useState(false);
+  const [conditionTemplates, setConditionTemplates] = useState<AssetConditionChecklistTemplateDto[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<AssetConditionChecklistTemplateDto | null>(null);
+  const [currentInspection, setCurrentInspection] = useState<AssetConditionRecordDto | null>(null);
+  const [inspectionType, setInspectionType] = useState<'Admission' | 'Discharge'>('Admission');
+  const [itemResponses, setItemResponses] = useState<Record<string, SubmitAssetConditionItemDto>>({});
+  const [existingAdmissionRecord, setExistingAdmissionRecord] = useState<AssetConditionRecordDto | null>(null);
+  const [existingDischargeRecord, setExistingDischargeRecord] = useState<AssetConditionRecordDto | null>(null);
+  const [isSubmittingInspection, setIsSubmittingInspection] = useState(false);
+
   // Data from services
   const [assets, setAssets] = useState<Asset[]>([]);
   const [workOrders, setWorkOrders] = useState<any[]>([]);
@@ -61,10 +84,12 @@ export default function AssetAdmissionManagement() {
     totalCompleted: 0,
     averageStayDays: 0
   });
+  const [initialFilter, setInitialFilter] = useState<{ assetId?: string; workOrderId?: string; jobCardId?: string } | null>(null);
 
   // Form states
   const [newAdmission, setNewAdmission] = useState({
     assetId: '',
+    jobCardId: '',
     workOrderId: '',
     admissionType: 'Scheduled' as const,
     assetConditionOnAdmission: 'Good' as const,
@@ -106,12 +131,12 @@ export default function AssetAdmissionManagement() {
       try {
         const [assetsResponse, admissionsResponse, dischargesResponse, statsResponse, workOrdersResponse] = await Promise.all([
           maintenanceApiService.getAssets(),
-          assetAdmissionService.getAdmissions(),
+          assetAdmissionService.getAdmissions(initialFilter || {}),
           assetAdmissionService.getDischarges(),
           assetAdmissionService.getAdmissionStats(),
           maintenanceApiService.getWorkOrders().catch(() => ({ items: [] }))
         ]);
-        
+
         setAssets(assetsResponse.items || []);
         setAdmissions(admissionsResponse.items || []);
         setDischarges(dischargesResponse.items || []);
@@ -129,16 +154,49 @@ export default function AssetAdmissionManagement() {
         setLoadingData(false);
       }
     };
-    
+
     loadData();
-  }, []);
+  }, [initialFilter]);
+
+  // Apply initial query-parameter-based filters and form defaults
+  useEffect(() => {
+    const assetId = searchParams.get('assetId') || undefined;
+    const workOrderId = searchParams.get('workOrderId') || undefined;
+    const jobCardId = searchParams.get('jobCardId') || undefined;
+    const view = searchParams.get('view');
+
+    // Pre-select view mode if provided
+    if (view === 'discharges') {
+      setViewMode('discharges');
+    }
+
+    // Capture initial filter so that the first data load can use it
+    if (assetId || workOrderId || jobCardId) {
+      setInitialFilter({ assetId, workOrderId, jobCardId });
+    }
+
+    // If an assetId is supplied, default the form asset
+    if (assetId) {
+      setNewAdmission(prev => ({ ...prev, assetId }));
+    }
+
+    // If a workOrderId is supplied, default the form work order
+    if (workOrderId) {
+      setNewAdmission(prev => ({ ...prev, workOrderId }));
+    }
+
+    // If a jobCardId is supplied, default the form job card
+    if (jobCardId) {
+      setNewAdmission(prev => ({ ...prev, jobCardId }));
+    }
+  }, [searchParams]);
 
   // Filter admissions based on search and filters
   useEffect(() => {
     let filtered = admissions;
 
     if (searchTerm) {
-      filtered = filtered.filter(admission => 
+      filtered = filtered.filter(admission =>
         admission.assetName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         admission.admissionNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
         admission.assetNumber.toLowerCase().includes(searchTerm.toLowerCase())
@@ -166,6 +224,7 @@ export default function AssetAdmissionManagement() {
 
       const createRequest: CreateAdmissionRequest = {
         assetId: newAdmission.assetId,
+        jobCardId: newAdmission.jobCardId || undefined,
         workOrderId: newAdmission.workOrderId || undefined,
         admissionType: newAdmission.admissionType,
         assetConditionOnAdmission: newAdmission.assetConditionOnAdmission,
@@ -181,10 +240,10 @@ export default function AssetAdmissionManagement() {
       };
 
       await assetAdmissionService.createAdmission(createRequest);
-      
+
       // Refresh admissions list
       await refreshData();
-      
+
       setIsAdmissionDialogOpen(false);
       resetAdmissionForm();
     } catch (error) {
@@ -215,10 +274,10 @@ export default function AssetAdmissionManagement() {
       };
 
       await assetAdmissionService.createDischarge(createRequest);
-      
+
       // Refresh data
       await refreshData();
-      
+
       setIsDischargeDialogOpen(false);
       resetDischargeForm();
     } catch (error) {
@@ -233,7 +292,7 @@ export default function AssetAdmissionManagement() {
         assetAdmissionService.getDischarges(),
         assetAdmissionService.getAdmissionStats()
       ]);
-      
+
       setAdmissions(admissionsResponse.items || []);
       setDischarges(dischargesResponse.items || []);
       setFilteredAdmissions(admissionsResponse.items || []);
@@ -246,6 +305,7 @@ export default function AssetAdmissionManagement() {
   const resetAdmissionForm = () => {
     setNewAdmission({
       assetId: '',
+      jobCardId: '',
       workOrderId: '',
       admissionType: 'Scheduled',
       assetConditionOnAdmission: 'Good',
@@ -281,6 +341,200 @@ export default function AssetAdmissionManagement() {
       warrantyDays: 0,
       warrantyTerms: ''
     });
+  };
+
+  // Condition Inspection handlers
+  const handleOpenConditionInspection = async (admission: AssetAdmission, type: 'Admission' | 'Discharge') => {
+    setSelectedAdmission(admission);
+    setInspectionType(type);
+    setItemResponses({});
+    setSelectedTemplate(null);
+    setCurrentInspection(null);
+    setExistingAdmissionRecord(null);
+    setExistingDischargeRecord(null);
+
+    try {
+      // Check for existing records
+      const [admissionRecord, dischargeRecord] = await Promise.all([
+        assetConditionService.getAdmissionRecordForAdmission(admission.id),
+        assetConditionService.getDischargeRecordForAdmission(admission.id)
+      ]);
+      setExistingAdmissionRecord(admissionRecord);
+      setExistingDischargeRecord(dischargeRecord);
+
+      // Get templates for the asset's category first
+      const asset = assets.find(a => a.id === admission.assetId);
+      let templates: AssetConditionChecklistTemplateDto[] = [];
+      if (asset?.assetCategoryId) {
+        templates = await assetConditionService.getTemplatesByAssetCategory(asset.assetCategoryId);
+        setConditionTemplates(templates);
+      } else {
+        // Get all active templates as fallback
+        templates = await assetConditionService.getAllTemplates(false);
+        setConditionTemplates(templates);
+      }
+
+      // If showing an existing record, load it
+      if (type === 'Admission' && admissionRecord) {
+        setCurrentInspection(admissionRecord);
+        // Find and set the template used in the record
+        const template = templates.find(t => t.id === admissionRecord.templateId);
+        if (template) {
+          setSelectedTemplate(template);
+        }
+        // Populate responses
+        const responses: Record<string, SubmitAssetConditionItemDto> = {};
+        admissionRecord.itemResults.forEach(result => {
+          responses[result.checklistItemId] = {
+            checklistItemId: result.checklistItemId,
+            isPresent: result.isPresent,
+            textValue: result.textValue,
+            numericValue: result.numericValue,
+            selectedOption: result.selectedOption,
+            comment: result.comment
+          };
+        });
+        setItemResponses(responses);
+      } else if (type === 'Discharge' && dischargeRecord) {
+        setCurrentInspection(dischargeRecord);
+        // Find and set the template used in the record
+        const template = templates.find(t => t.id === dischargeRecord.templateId);
+        if (template) {
+          setSelectedTemplate(template);
+        }
+        const responses: Record<string, SubmitAssetConditionItemDto> = {};
+        dischargeRecord.itemResults.forEach(result => {
+          responses[result.checklistItemId] = {
+            checklistItemId: result.checklistItemId,
+            isPresent: result.isPresent,
+            textValue: result.textValue,
+            numericValue: result.numericValue,
+            selectedOption: result.selectedOption,
+            comment: result.comment
+          };
+        });
+        setItemResponses(responses);
+      } else {
+        // No existing record - auto-select default template
+        const defaultTemplate = templates.find(t => t.isDefault) || templates[0];
+        if (defaultTemplate) {
+          setSelectedTemplate(defaultTemplate);
+        }
+      }
+    } catch (err) {
+      console.error('Error loading condition inspection data:', err);
+    }
+
+    setIsConditionDialogOpen(true);
+  };
+
+  const handleStartInspection = async () => {
+    if (!selectedAdmission || !selectedTemplate) return;
+
+    try {
+      setIsSubmittingInspection(true);
+      const dto: CreateAssetConditionRecordDto = {
+        assetId: selectedAdmission.assetId,
+        templateId: selectedTemplate.id,
+        inspectionType: inspectionType,
+        admissionId: selectedAdmission.id,
+        generalNotes: ''
+      };
+
+      const record = await assetConditionService.startConditionInspection(dto);
+      setCurrentInspection(record);
+
+      // Initialize responses
+      const responses: Record<string, SubmitAssetConditionItemDto> = {};
+      selectedTemplate.checklistItems.forEach(item => {
+        responses[item.id] = {
+          checklistItemId: item.id,
+          isPresent: undefined,
+          textValue: '',
+          numericValue: undefined,
+          selectedOption: '',
+          comment: ''
+        };
+      });
+      setItemResponses(responses);
+    } catch (err) {
+      console.error('Error starting inspection:', err);
+    } finally {
+      setIsSubmittingInspection(false);
+    }
+  };
+
+  const handleSubmitItemResponse = async (itemId: string) => {
+    if (!currentInspection) return;
+
+    const response = itemResponses[itemId];
+    if (!response) return;
+
+    try {
+      await assetConditionService.submitItemResult(currentInspection.id, response);
+    } catch (err) {
+      console.error('Error submitting item response:', err);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!currentInspection) {
+      setIsConditionDialogOpen(false);
+      return;
+    }
+
+    try {
+      setIsSubmittingInspection(true);
+
+      // Submit all responses to save them as draft
+      for (const itemId of Object.keys(itemResponses)) {
+        const response = itemResponses[itemId];
+        // Only submit if there's actual data
+        if (response.isPresent !== undefined || response.textValue || response.numericValue !== undefined || response.selectedOption || response.comment) {
+          await assetConditionService.submitItemResult(currentInspection.id, response);
+        }
+      }
+
+      toast({
+        title: 'Draft Saved',
+        description: 'Your inspection draft has been saved. You can resume it later.',
+      });
+
+      setIsConditionDialogOpen(false);
+    } catch (err) {
+      console.error('Error saving draft:', err);
+      toast({
+        title: 'Error',
+        description: 'Failed to save draft. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSubmittingInspection(false);
+    }
+  };
+
+  const handleCompleteInspection = async () => {
+    if (!currentInspection) return;
+
+    try {
+      setIsSubmittingInspection(true);
+
+      // Submit all responses
+      for (const itemId of Object.keys(itemResponses)) {
+        await assetConditionService.submitItemResult(currentInspection.id, itemResponses[itemId]);
+      }
+
+      // Complete the inspection
+      await assetConditionService.completeInspection(currentInspection.id, { generalNotes: '' });
+
+      setIsConditionDialogOpen(false);
+      setCurrentInspection(null);
+      setItemResponses({});
+    } catch (err) {
+      console.error('Error completing inspection:', err);
+    } finally {
+      setIsSubmittingInspection(false);
+    }
   };
 
   const getStatusBadge = (status: AssetAdmission['status']) => {
@@ -412,7 +666,7 @@ export default function AssetAdmissionManagement() {
             Discharges
           </Button>
         </div>
-        
+
         <div className="flex items-center space-x-2">
           <ClientOnly>
             <Dialog open={isAdmissionDialogOpen} onOpenChange={setIsAdmissionDialogOpen}>
@@ -448,12 +702,12 @@ export default function AssetAdmissionManagement() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="workOrderId">Work Order (Optional)</Label>
-                      <Select value={newAdmission.workOrderId} onValueChange={(value) => setNewAdmission(prev => ({ ...prev, workOrderId: value }))}>
+                      <Select value={newAdmission.workOrderId || "none"} onValueChange={(value) => setNewAdmission(prev => ({ ...prev, workOrderId: value === "none" ? "" : value }))}>
                         <SelectTrigger>
                           <SelectValue placeholder="Select work order" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">None</SelectItem>
+                          <SelectItem value="none">None</SelectItem>
                           {workOrders.map((wo) => (
                             <SelectItem key={wo.id} value={wo.id}>
                               {wo.workOrderNumber} - {wo.title}
@@ -463,7 +717,7 @@ export default function AssetAdmissionManagement() {
                       </Select>
                     </div>
                   </div>
-                  
+
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="admissionType">Admission Type</Label>
@@ -711,19 +965,40 @@ export default function AssetAdmissionManagement() {
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
-                        
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleOpenConditionInspection(admission, 'Admission')}
+                          title="Admission Condition Checklist"
+                        >
+                          <ClipboardCheck className="h-4 w-4" />
+                        </Button>
+
                         {admission.status === 'Active' && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setNewDischarge(prev => ({ ...prev, admissionId: admission.id }));
-                              setIsDischargeDialogOpen(true);
-                            }}
-                            className="bg-green-50 hover:bg-green-100"
-                          >
-                            Discharge
-                          </Button>
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleOpenConditionInspection(admission, 'Discharge')}
+                              title="Discharge Condition Checklist"
+                              className="bg-orange-50 hover:bg-orange-100"
+                            >
+                              <ClipboardCheck className="h-4 w-4 mr-1" />
+                              Check
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setNewDischarge(prev => ({ ...prev, admissionId: admission.id }));
+                                setIsDischargeDialogOpen(true);
+                              }}
+                              className="bg-green-50 hover:bg-green-100"
+                            >
+                              Discharge
+                            </Button>
+                          </>
                         )}
                       </div>
                     </TableCell>
@@ -809,7 +1084,7 @@ export default function AssetAdmissionManagement() {
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
-                        
+
                         {!discharge.certificateGenerated && (
                           <Button
                             size="sm"
@@ -1006,6 +1281,271 @@ export default function AssetAdmissionManagement() {
                 Discharge Asset
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </ClientOnly>
+
+      {/* Condition Inspection Dialog */}
+      <ClientOnly>
+        <Dialog open={isConditionDialogOpen} onOpenChange={setIsConditionDialogOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <ClipboardCheck className="h-5 w-5" />
+                {inspectionType} Condition Inspection
+              </DialogTitle>
+              <DialogDescription>
+                {selectedAdmission && `Asset: ${selectedAdmission.assetName} (${selectedAdmission.assetNumber})`}
+              </DialogDescription>
+            </DialogHeader>
+
+            {/* Template Selection - only show if no inspection started */}
+            {!currentInspection && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Select Checklist Template</Label>
+                  <Select
+                    value={selectedTemplate?.id || ''}
+                    onValueChange={(value) => setSelectedTemplate(conditionTemplates.find(t => t.id === value) || null)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a checklist template" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {conditionTemplates.map(template => (
+                        <SelectItem key={template.id} value={template.id}>
+                          {template.name} ({template.itemCount} items)
+                          {template.isDefault && ' - Default'}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {selectedTemplate && (
+                  <div className="p-4 border rounded-lg bg-muted/30">
+                    <h4 className="font-medium mb-2">{selectedTemplate.name}</h4>
+                    <p className="text-sm text-muted-foreground mb-2">{selectedTemplate.description}</p>
+                    <div className="text-sm">
+                      <span className="font-medium">{selectedTemplate.itemCount}</span> items to check
+                    </div>
+                  </div>
+                )}
+
+                {/* Show existing records info */}
+                {existingAdmissionRecord && inspectionType === 'Admission' && (
+                  <div className={`p-4 border rounded-lg ${existingAdmissionRecord.status === 'Completed' ? 'bg-green-50' : 'bg-yellow-50'}`}>
+                    <div className={`flex items-center gap-2 ${existingAdmissionRecord.status === 'Completed' ? 'text-green-700' : 'text-yellow-700'}`}>
+                      {existingAdmissionRecord.status === 'Completed' ? (
+                        <>
+                          <CheckCircle className="h-5 w-5" />
+                          <span>Admission inspection completed on {new Date(existingAdmissionRecord.inspectionDate).toLocaleDateString()}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Clock className="h-5 w-5" />
+                          <span>Draft inspection in progress - started on {new Date(existingAdmissionRecord.inspectionDate).toLocaleDateString()}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {existingDischargeRecord && inspectionType === 'Discharge' && (
+                  <div className={`p-4 border rounded-lg ${existingDischargeRecord.status === 'Completed' ? 'bg-green-50' : 'bg-yellow-50'}`}>
+                    <div className={`flex items-center gap-2 ${existingDischargeRecord.status === 'Completed' ? 'text-green-700' : 'text-yellow-700'}`}>
+                      {existingDischargeRecord.status === 'Completed' ? (
+                        <>
+                          <CheckCircle className="h-5 w-5" />
+                          <span>Discharge inspection completed on {new Date(existingDischargeRecord.inspectionDate).toLocaleDateString()}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Clock className="h-5 w-5" />
+                          <span>Draft inspection in progress - started on {new Date(existingDischargeRecord.inspectionDate).toLocaleDateString()}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Show Resume button for in-progress inspections */}
+                {((inspectionType === 'Admission' && existingAdmissionRecord?.status === 'InProgress') ||
+                  (inspectionType === 'Discharge' && existingDischargeRecord?.status === 'InProgress')) ? (
+                  <Button
+                    onClick={() => {
+                      const record = inspectionType === 'Admission' ? existingAdmissionRecord : existingDischargeRecord;
+                      if (record) {
+                        setCurrentInspection(record);
+                        // Find and set the template
+                        const template = conditionTemplates.find(t => t.id === record.templateId);
+                        if (template) {
+                          setSelectedTemplate(template);
+                        }
+                        // Populate item responses from the saved record
+                        const responses: Record<string, SubmitAssetConditionItemDto> = {};
+                        record.itemResults.forEach(result => {
+                          responses[result.checklistItemId] = {
+                            checklistItemId: result.checklistItemId,
+                            isPresent: result.isPresent,
+                            textValue: result.textValue,
+                            numericValue: result.numericValue,
+                            selectedOption: result.selectedOption,
+                            comment: result.comment
+                          };
+                        });
+                        setItemResponses(responses);
+                      }
+                    }}
+                    className="w-full bg-yellow-600 hover:bg-yellow-700"
+                  >
+                    Resume Draft Inspection
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={handleStartInspection}
+                    disabled={!selectedTemplate || isSubmittingInspection ||
+                      (inspectionType === 'Admission' && existingAdmissionRecord?.status === 'Completed') ||
+                      (inspectionType === 'Discharge' && existingDischargeRecord?.status === 'Completed')}
+                    className="w-full"
+                  >
+                    {isSubmittingInspection ? 'Starting...' : 'Start New Inspection'}
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {/* Inspection Form - show checklist items */}
+            {currentInspection && selectedTemplate && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between p-3 border rounded-lg bg-blue-50">
+                  <div>
+                    <span className="font-medium">Inspection #{currentInspection.inspectionNumber}</span>
+                    <span className="text-sm text-muted-foreground ml-4">
+                      Status: {currentInspection.status}
+                    </span>
+                  </div>
+                  <Badge>
+                    {Object.keys(itemResponses).filter(k => itemResponses[k].isPresent !== undefined || itemResponses[k].textValue || itemResponses[k].numericValue !== undefined || itemResponses[k].selectedOption).length}
+                    /{selectedTemplate.checklistItems.length} completed
+                  </Badge>
+                </div>
+
+                <div className="space-y-3 max-h-[400px] overflow-y-auto">
+                  {selectedTemplate.checklistItems.map((item, index) => (
+                    <div key={item.id} className="p-4 border rounded-lg">
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <span className="font-medium">{index + 1}. {item.itemName}</span>
+                          {item.isRequired && <Badge variant="destructive" className="ml-2 text-xs">Required</Badge>}
+                          {item.requiresPhoto && <Badge variant="outline" className="ml-2 text-xs">📷</Badge>}
+                        </div>
+                        <Badge variant="outline">{item.category}</Badge>
+                      </div>
+                      {item.helpText && (
+                        <p className="text-sm text-muted-foreground mb-3">{item.helpText}</p>
+                      )}
+
+                      {/* Response input based on item type */}
+                      {item.itemType === 'Boolean' && (
+                        <div className="flex items-center gap-4">
+                          <Button
+                            size="sm"
+                            variant={itemResponses[item.id]?.isPresent === true ? 'default' : 'outline'}
+                            onClick={() => setItemResponses(prev => ({
+                              ...prev,
+                              [item.id]: { ...prev[item.id], checklistItemId: item.id, isPresent: true }
+                            }))}
+                            className="flex items-center gap-2"
+                          >
+                            <CheckCircle className="h-4 w-4" /> Present
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={itemResponses[item.id]?.isPresent === false ? 'destructive' : 'outline'}
+                            onClick={() => setItemResponses(prev => ({
+                              ...prev,
+                              [item.id]: { ...prev[item.id], checklistItemId: item.id, isPresent: false }
+                            }))}
+                            className="flex items-center gap-2"
+                          >
+                            <XCircle className="h-4 w-4" /> Absent
+                          </Button>
+                        </div>
+                      )}
+
+                      {item.itemType === 'Text' && (
+                        <Textarea
+                          value={itemResponses[item.id]?.textValue || ''}
+                          onChange={(e) => setItemResponses(prev => ({
+                            ...prev,
+                            [item.id]: { ...prev[item.id], checklistItemId: item.id, textValue: e.target.value }
+                          }))}
+                          placeholder="Enter description..."
+                          rows={2}
+                        />
+                      )}
+
+                      {item.itemType === 'Numeric' && (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            value={itemResponses[item.id]?.numericValue ?? ''}
+                            onChange={(e) => setItemResponses(prev => ({
+                              ...prev,
+                              [item.id]: { ...prev[item.id], checklistItemId: item.id, numericValue: parseFloat(e.target.value) || undefined }
+                            }))}
+                            placeholder={`${item.minValue ?? 0} - ${item.maxValue ?? 100}`}
+                            className="w-32"
+                          />
+                          {item.unit && <span className="text-sm text-muted-foreground">{item.unit}</span>}
+                        </div>
+                      )}
+
+                      {item.itemType === 'Choice' && item.choiceOptions && (
+                        <Select
+                          value={itemResponses[item.id]?.selectedOption || ''}
+                          onValueChange={(value) => setItemResponses(prev => ({
+                            ...prev,
+                            [item.id]: { ...prev[item.id], checklistItemId: item.id, selectedOption: value }
+                          }))}
+                        >
+                          <SelectTrigger className="w-48">
+                            <SelectValue placeholder="Select option" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {item.choiceOptions.map(opt => (
+                              <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+
+                      {/* Comment field for all types */}
+                      <div className="mt-2">
+                        <Input
+                          placeholder="Add comment (optional)"
+                          value={itemResponses[item.id]?.comment || ''}
+                          onChange={(e) => setItemResponses(prev => ({
+                            ...prev,
+                            [item.id]: { ...prev[item.id], checklistItemId: item.id, comment: e.target.value }
+                          }))}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <DialogFooter>
+                  <Button variant="outline" onClick={handleSaveDraft} disabled={isSubmittingInspection}>
+                    {isSubmittingInspection ? 'Saving...' : 'Save Draft'}
+                  </Button>
+                  <Button onClick={handleCompleteInspection} disabled={isSubmittingInspection}>
+                    {isSubmittingInspection ? 'Submitting...' : 'Complete Inspection'}
+                  </Button>
+                </DialogFooter>
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       </ClientOnly>

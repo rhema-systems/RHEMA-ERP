@@ -1,6 +1,6 @@
-using Microsoft.EntityFrameworkCore;
-using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Interfaces;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories;
 

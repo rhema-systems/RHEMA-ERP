@@ -2,12 +2,12 @@ using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Configuration;
 
 namespace ErpSystem.Data.Caching;
 
@@ -21,7 +21,7 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
     private readonly QueryCachingOptions _options;
 
     public QueryResultCachingInterceptor(
-        IServiceProvider serviceProvider, 
+        IServiceProvider serviceProvider,
         ILogger<QueryResultCachingInterceptor> logger,
         Microsoft.Extensions.Options.IOptions<QueryCachingOptions> options)
     {
@@ -31,9 +31,9 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
     }
 
     public override async ValueTask<DbDataReader> ReaderExecutedAsync(
-        DbCommand command, 
-        CommandExecutedEventData eventData, 
-        DbDataReader result, 
+        DbCommand command,
+        CommandExecutedEventData eventData,
+        DbDataReader result,
         CancellationToken cancellationToken = default)
     {
         if (!_options.EnableQueryCaching || !ShouldCacheQuery(command))
@@ -45,7 +45,7 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
         {
             using var scope = _serviceProvider.CreateScope();
             var cache = scope.ServiceProvider.GetService<IDistributedCache>();
-            
+
             if (cache != null)
             {
                 await CacheQueryResultAsync(command, result, cache, cancellationToken);
@@ -60,9 +60,9 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
     }
 
     public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
-        DbCommand command, 
-        CommandEventData eventData, 
-        InterceptionResult<DbDataReader> result, 
+        DbCommand command,
+        CommandEventData eventData,
+        InterceptionResult<DbDataReader> result,
         CancellationToken cancellationToken = default)
     {
         if (!_options.EnableQueryCaching || !ShouldCacheQuery(command))
@@ -74,7 +74,7 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
         {
             using var scope = _serviceProvider.CreateScope();
             var cache = scope.ServiceProvider.GetService<IDistributedCache>();
-            
+
             if (cache != null)
             {
                 var cachedResult = await GetCachedQueryResultAsync(command, cache, cancellationToken);
@@ -96,10 +96,16 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
     private bool ShouldCacheQuery(DbCommand command)
     {
         var sql = command.CommandText?.ToUpper();
-        if (string.IsNullOrEmpty(sql)) return false;
+        if (string.IsNullOrEmpty(sql))
+        {
+            return false;
+        }
 
         // Only cache SELECT queries
-        if (!sql.TrimStart().StartsWith("SELECT")) return false;
+        if (!sql.TrimStart().StartsWith("SELECT"))
+        {
+            return false;
+        }
 
         // Don't cache queries with non-deterministic functions
         var nonCacheablePatterns = new[]
@@ -121,7 +127,7 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
         }
 
         // Don't cache queries with temp tables or variables
-        if (sql.Contains("#") || sql.Contains("@"))
+        if (sql.Contains('#') || sql.Contains('@'))
         {
             return false;
         }
@@ -129,7 +135,7 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
         // Check against excluded tables
         foreach (var excludedTable in _options.ExcludedTables)
         {
-            if (sql.Contains(excludedTable.ToUpper()))
+            if (sql.Contains(excludedTable, StringComparison.CurrentCultureIgnoreCase))
             {
                 return false;
             }
@@ -139,13 +145,13 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
     }
 
     private async Task<DbDataReader?> GetCachedQueryResultAsync(
-        DbCommand command, 
-        IDistributedCache cache, 
+        DbCommand command,
+        IDistributedCache cache,
         CancellationToken cancellationToken)
     {
         var cacheKey = GenerateCacheKey(command);
         var cachedData = await cache.GetStringAsync(cacheKey, cancellationToken);
-        
+
         if (string.IsNullOrEmpty(cachedData))
         {
             return null;
@@ -162,17 +168,17 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
     }
 
     private async Task CacheQueryResultAsync(
-        DbCommand command, 
-        DbDataReader reader, 
-        IDistributedCache cache, 
+        DbCommand command,
+        DbDataReader reader,
+        IDistributedCache cache,
         CancellationToken cancellationToken)
     {
         var cacheKey = GenerateCacheKey(command);
         var queryResult = await ConvertReaderToCachedResult(reader);
-        
+
         if (queryResult.Rows.Count > _options.MaxRowsToCache)
         {
-            _logger.LogDebug("Skipping cache for large result set ({RowCount} rows) for query: {Query}", 
+            _logger.LogDebug("Skipping cache for large result set ({RowCount} rows) for query: {Query}",
                 queryResult.Rows.Count, SanitizeQuery(command.CommandText));
             return;
         }
@@ -185,7 +191,7 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
         };
 
         await cache.SetStringAsync(cacheKey, serialized, options, cancellationToken);
-        _logger.LogDebug("Cached query result ({RowCount} rows) for: {Query}", 
+        _logger.LogDebug("Cached query result ({RowCount} rows) for: {Query}",
             queryResult.Rows.Count, SanitizeQuery(command.CommandText));
     }
 
@@ -194,10 +200,10 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
         var keyBuilder = new StringBuilder();
         keyBuilder.Append(_options.CacheKeyPrefix);
         keyBuilder.Append("query:");
-        
+
         // Add command text
         keyBuilder.Append(command.CommandText);
-        
+
         // Add parameters
         foreach (DbParameter parameter in command.Parameters)
         {
@@ -213,7 +219,7 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
         return $"{_options.CacheKeyPrefix}query:{hash}";
     }
 
-    private async Task<CachedQueryResult> ConvertReaderToCachedResult(DbDataReader reader)
+    private static async Task<CachedQueryResult> ConvertReaderToCachedResult(DbDataReader reader)
     {
         var result = new CachedQueryResult
         {
@@ -233,7 +239,7 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
         {
             var row = new object[reader.FieldCount];
             reader.GetValues(row);
-            
+
             // Convert DBNull to null for JSON serialization
             for (int i = 0; i < row.Length; i++)
             {
@@ -242,7 +248,7 @@ public class QueryResultCachingInterceptor : DbCommandInterceptor
                     row[i] = null;
                 }
             }
-            
+
             rows.Add(row);
         }
 
@@ -333,7 +339,7 @@ public class CachedDataReader : DbDataReader
 
     public override int GetOrdinal(string name)
     {
-        return _cachedResult.Columns.FindIndex(c => 
+        return _cachedResult.Columns.FindIndex(c =>
             string.Equals(c, name, StringComparison.OrdinalIgnoreCase));
     }
 
@@ -389,7 +395,7 @@ public class CachedDataReader : DbDataReader
 
         var row = _cachedResult.Rows[_currentRowIndex];
         var copyCount = Math.Min(values.Length, row.Length);
-        
+
         for (int i = 0; i < copyCount; i++)
         {
             values[i] = row[i] ?? DBNull.Value;
@@ -473,7 +479,7 @@ public class QueryCacheManager : IQueryCacheManager
     private readonly QueryCachingOptions _options;
 
     public QueryCacheManager(
-        IDistributedCache cache, 
+        IDistributedCache cache,
         ILogger<QueryCacheManager> logger,
         Microsoft.Extensions.Options.IOptions<QueryCachingOptions> options)
     {
@@ -489,7 +495,7 @@ public class QueryCacheManager : IQueryCacheManager
             // This would typically require a Redis-specific implementation
             // For now, log the invalidation request
             _logger.LogInformation("Query cache invalidation requested for pattern: {Pattern}", pattern);
-            
+
             // Implementation would depend on the cache provider
             // For Redis: scan keys and delete matching patterns
             await Task.CompletedTask;
@@ -554,7 +560,7 @@ public static class QueryCachingExtensions
     /// Add query result caching services
     /// </summary>
     public static IServiceCollection AddQueryResultCaching(
-        this IServiceCollection services, 
+        this IServiceCollection services,
         IConfiguration configuration)
     {
         // Configure options
@@ -572,7 +578,7 @@ public static class QueryCachingExtensions
     /// Add query result caching interceptor to DbContext options
     /// </summary>
     public static DbContextOptionsBuilder AddQueryResultCachingInterceptor(
-        this DbContextOptionsBuilder optionsBuilder, 
+        this DbContextOptionsBuilder optionsBuilder,
         IServiceProvider serviceProvider)
     {
         var interceptor = serviceProvider.GetRequiredService<QueryResultCachingInterceptor>();

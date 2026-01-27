@@ -22,7 +22,7 @@ public class MaintenanceContractorDto
     public string? InsuranceInfo { get; set; }
     public DateTime CreatedDate { get; set; }
     public DateTime? LastModifiedDate { get; set; }
-    
+
     // Calculated fields
     public int ActiveWorkOrders { get; set; }
     public int CompletedWorkOrders { get; set; }
@@ -38,20 +38,20 @@ public class CreateMaintenanceContractorDto
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(50)]
     public string? ContractorCode { get; set; }
-    
+
     [StringLength(1000)]
     public string? Description { get; set; }
-    
+
     public string ContactInfo { get; set; } = "{}";
     public string Capabilities { get; set; } = "[]";
     public string ServiceAreas { get; set; } = "[]";
-    
+
     [StringLength(20)]
     public string Status { get; set; } = "Active";
-    
+
     public string? LicenseInfo { get; set; }
     public string? InsuranceInfo { get; set; }
 }
@@ -64,20 +64,20 @@ public class UpdateMaintenanceContractorDto
     [Required]
     [StringLength(100)]
     public string Name { get; set; } = string.Empty;
-    
+
     [StringLength(50)]
     public string? ContractorCode { get; set; }
-    
+
     [StringLength(1000)]
     public string? Description { get; set; }
-    
+
     public string ContactInfo { get; set; } = "{}";
     public string Capabilities { get; set; } = "[]";
     public string ServiceAreas { get; set; } = "[]";
-    
+
     [StringLength(20)]
     public string Status { get; set; } = string.Empty;
-    
+
     public string? LicenseInfo { get; set; }
     public string? InsuranceInfo { get; set; }
 }
@@ -112,12 +112,12 @@ public class AssignWorkOrderToContractorDto
 {
     [Required]
     public Guid ContractorId { get; set; }
-    
+
     [Required]
     public Guid WorkOrderId { get; set; }
-    
+
     public decimal? EstimatedCost { get; set; }
-    
+
     [StringLength(1000)]
     public string? Notes { get; set; }
 }
@@ -129,20 +129,20 @@ public class UpdateContractorWorkOrderDto
 {
     public DateTime? StartedDate { get; set; }
     public DateTime? CompletedDate { get; set; }
-    
+
     [StringLength(20)]
     public string Status { get; set; } = string.Empty;
-    
+
     public decimal? ActualCost { get; set; }
-    
+
     [StringLength(2000)]
     public string? WorkPerformed { get; set; }
-    
+
     public string? PartsUsed { get; set; }
-    
+
     [Range(1, 5)]
     public int? QualityRating { get; set; }
-    
+
     [StringLength(1000)]
     public string? Notes { get; set; }
 }
@@ -174,7 +174,7 @@ public class ContractorInvoiceDto
     public DateTime? ApprovedDate { get; set; }
     public DateTime? PaidDate { get; set; }
     public string? ApprovedByName { get; set; }
-    
+
     // Calculated fields
     public int DaysOverdue { get; set; }
     public bool IsOverdue { get; set; }
@@ -188,27 +188,27 @@ public class CreateContractorInvoiceDto
 {
     [Required]
     public Guid ContractorId { get; set; }
-    
+
     public Guid? WorkOrderId { get; set; }
-    
+
     [Required]
     [StringLength(50)]
     public string InvoiceNumber { get; set; } = string.Empty;
-    
+
     [Required]
     public DateTime InvoiceDate { get; set; }
-    
+
     public DateTime? DueDate { get; set; }
-    
+
     [Required]
     [Range(0.01, double.MaxValue)]
     public decimal TotalAmount { get; set; }
-    
+
     public decimal? TaxAmount { get; set; }
-    
+
     [StringLength(1000)]
     public string? Description { get; set; }
-    
+
     public string LineItems { get; set; } = "[]";
     public string? AttachmentPaths { get; set; }
 }
@@ -221,21 +221,21 @@ public class UpdateContractorInvoiceDto
     [Required]
     [StringLength(50)]
     public string InvoiceNumber { get; set; } = string.Empty;
-    
+
     [Required]
     public DateTime InvoiceDate { get; set; }
-    
+
     public DateTime? DueDate { get; set; }
-    
+
     [Required]
     [Range(0.01, double.MaxValue)]
     public decimal TotalAmount { get; set; }
-    
+
     public decimal? TaxAmount { get; set; }
-    
+
     [StringLength(1000)]
     public string? Description { get; set; }
-    
+
     public string LineItems { get; set; } = "[]";
     public string? AttachmentPaths { get; set; }
 }
@@ -248,7 +248,7 @@ public class ProcessContractorInvoiceDto
     [Required]
     [StringLength(20)]
     public string Action { get; set; } = string.Empty; // Approve, Reject
-    
+
     [StringLength(1000)]
     public string? Comments { get; set; }
 }
@@ -288,34 +288,34 @@ public class CreateContractorExpenseDto
 {
     [Required]
     public Guid ContractorInvoiceId { get; set; }
-    
+
     public Guid? WorkOrderId { get; set; }
-    
+
     [Required]
     [StringLength(50)]
     public string ExpenseType { get; set; } = string.Empty;
-    
+
     [Required]
     [StringLength(200)]
     public string Description { get; set; } = string.Empty;
-    
+
     [Required]
     [Range(0.01, double.MaxValue)]
     public decimal Amount { get; set; }
-    
+
     [Required]
     public DateTime ExpenseDate { get; set; }
-    
+
     public decimal? Quantity { get; set; }
-    
+
     [StringLength(20)]
     public string? Unit { get; set; }
-    
+
     public decimal? UnitRate { get; set; }
-    
+
     [StringLength(500)]
     public string? ReceiptPath { get; set; }
-    
+
     [StringLength(500)]
     public string? Notes { get; set; }
 }
@@ -328,28 +328,28 @@ public class UpdateContractorExpenseDto
     [Required]
     [StringLength(50)]
     public string ExpenseType { get; set; } = string.Empty;
-    
+
     [Required]
     [StringLength(200)]
     public string Description { get; set; } = string.Empty;
-    
+
     [Required]
     [Range(0.01, double.MaxValue)]
     public decimal Amount { get; set; }
-    
+
     [Required]
     public DateTime ExpenseDate { get; set; }
-    
+
     public decimal? Quantity { get; set; }
-    
+
     [StringLength(20)]
     public string? Unit { get; set; }
-    
+
     public decimal? UnitRate { get; set; }
-    
+
     [StringLength(500)]
     public string? ReceiptPath { get; set; }
-    
+
     [StringLength(500)]
     public string? Notes { get; set; }
 }
@@ -362,7 +362,7 @@ public class ProcessContractorExpenseDto
     [Required]
     [StringLength(20)]
     public string Action { get; set; } = string.Empty; // Approve, Reject
-    
+
     [StringLength(500)]
     public string? Comments { get; set; }
 }
@@ -400,34 +400,34 @@ public class CreateContractorPerformanceReviewDto
 {
     [Required]
     public Guid ContractorId { get; set; }
-    
+
     public Guid? WorkOrderId { get; set; }
-    
+
     [Required]
     public DateTime ReviewDate { get; set; }
-    
+
     [Required]
     [Range(1, 5)]
     public int OverallRating { get; set; }
-    
+
     [Range(1, 5)]
     public int? QualityRating { get; set; }
-    
+
     [Range(1, 5)]
     public int? TimelinessRating { get; set; }
-    
+
     [Range(1, 5)]
     public int? CommunicationRating { get; set; }
-    
+
     [Range(1, 5)]
     public int? CostRating { get; set; }
-    
+
     [StringLength(2000)]
     public string? Comments { get; set; }
-    
+
     [StringLength(1000)]
     public string? Recommendations { get; set; }
-    
+
     public bool WouldRecommend { get; set; } = true;
 }
 

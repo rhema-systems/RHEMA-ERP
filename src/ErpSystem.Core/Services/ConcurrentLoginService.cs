@@ -1,9 +1,9 @@
-using Microsoft.Extensions.Logging;
+using System.Security.Cryptography;
+using System.Text;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
-using System.Security.Cryptography;
-using System.Text;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services;
 
@@ -40,7 +40,7 @@ public class ConcurrentLoginService : IConcurrentLoginService
                 var activeSessionCount = await GetActiveSessionCountAsync(userId);
                 if (activeSessionCount > 0)
                 {
-                    _logger.LogInformation("Blocking login for user {UserId} - {ActiveSessions} active session(s) found", 
+                    _logger.LogInformation("Blocking login for user {UserId} - {ActiveSessions} active session(s) found",
                         userId, activeSessionCount);
                     return false;
                 }
@@ -61,7 +61,7 @@ public class ConcurrentLoginService : IConcurrentLoginService
     {
         try
         {
-            _logger.LogInformation("EnforceConcurrentLoginPolicyAsync called for user {UserId} with policy {Policy}, currentToken provided: {HasToken}", 
+            _logger.LogInformation("EnforceConcurrentLoginPolicyAsync called for user {UserId} with policy {Policy}, currentToken provided: {HasToken}",
                 userId, preventConcurrentLogin, !string.IsNullOrEmpty(currentRefreshToken));
 
             if (preventConcurrentLogin != PreventConcurrentLogin.LogoutFromAllDevices)
@@ -72,8 +72,8 @@ public class ConcurrentLoginService : IConcurrentLoginService
 
             // Get all active refresh tokens for the user
             var refreshTokens = await _unitOfWork.Repository<RefreshToken>()
-                .FindAsync(rt => rt.UserId == userId && 
-                              !rt.IsRevoked && 
+                .FindAsync(rt => rt.UserId == userId &&
+                              !rt.IsRevoked &&
                               rt.ExpiresAt > DateTime.UtcNow &&
                               !rt.IsDeleted);
 
@@ -81,18 +81,18 @@ public class ConcurrentLoginService : IConcurrentLoginService
             _logger.LogInformation("Found {ActiveTokenCount} active tokens for user {UserId}", activeTokens.Count, userId);
 
             var tokensToRevoke = activeTokens.ToList();
-            
+
             // Exclude the current token if provided (the one we just created for this login)
             if (!string.IsNullOrEmpty(currentRefreshToken))
             {
                 var currentTokenHash = HashToken(currentRefreshToken);
-                _logger.LogInformation("Current token hash calculated. Looking for tokens to exclude with hash: {HashPrefix}...", 
+                _logger.LogInformation("Current token hash calculated. Looking for tokens to exclude with hash: {HashPrefix}...",
                     currentTokenHash.Length > 10 ? currentTokenHash[..10] : currentTokenHash);
-                
+
                 var originalCount = tokensToRevoke.Count;
                 tokensToRevoke = tokensToRevoke.Where(rt => rt.TokenHash != currentTokenHash).ToList();
-                
-                _logger.LogInformation("Excluded current token. Tokens to revoke: {ToRevokeCount} (was {OriginalCount})", 
+
+                _logger.LogInformation("Excluded current token. Tokens to revoke: {ToRevokeCount} (was {OriginalCount})",
                     tokensToRevoke.Count, originalCount);
             }
 
@@ -100,9 +100,9 @@ public class ConcurrentLoginService : IConcurrentLoginService
             var revokedCount = 0;
             foreach (var token in tokensToRevoke)
             {
-                _logger.LogInformation("Revoking token {TokenId} (Hash: {HashPrefix}...) for user {UserId}", 
+                _logger.LogInformation("Revoking token {TokenId} (Hash: {HashPrefix}...) for user {UserId}",
                     token.Id, token.TokenHash.Length > 10 ? token.TokenHash[..10] : token.TokenHash, userId);
-                
+
                 token.IsRevoked = true;
                 token.RevokedAt = DateTime.UtcNow;
                 token.RevokedBy = null; // System revocation
@@ -115,7 +115,7 @@ public class ConcurrentLoginService : IConcurrentLoginService
             if (revokedCount > 0)
             {
                 await _unitOfWork.SaveChangesAsync();
-                _logger.LogInformation("Successfully revoked {RevokedCount} active sessions for user {UserId} due to concurrent login policy", 
+                _logger.LogInformation("Successfully revoked {RevokedCount} active sessions for user {UserId} due to concurrent login policy",
                     revokedCount, userId);
             }
             else
@@ -137,8 +137,8 @@ public class ConcurrentLoginService : IConcurrentLoginService
         try
         {
             var activeTokenCount = await _unitOfWork.Repository<RefreshToken>()
-                .CountAsync(rt => rt.UserId == userId && 
-                                !rt.IsRevoked && 
+                .CountAsync(rt => rt.UserId == userId &&
+                                !rt.IsRevoked &&
                                 rt.ExpiresAt > DateTime.UtcNow &&
                                 !rt.IsDeleted);
 
@@ -181,7 +181,7 @@ public class ConcurrentLoginService : IConcurrentLoginService
     /// <summary>
     /// Hash a token using SHA256 (same method as RefreshTokenService)
     /// </summary>
-    private string HashToken(string token)
+    private static string HashToken(string token)
     {
         using var sha256 = SHA256.Create();
         var hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(token));

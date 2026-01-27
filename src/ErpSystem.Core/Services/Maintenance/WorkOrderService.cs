@@ -1,11 +1,12 @@
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
-using Microsoft.Extensions.Logging;
-using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Services;
 using ErpSystem.Shared;
-using ErpSystem.Core.Entities.Maintenance;
+using Microsoft.Extensions.Logging;
 using WorkOrderTaskDtoFull = ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto;
 
 namespace ErpSystem.Core.Services.Maintenance;
@@ -26,6 +27,9 @@ public class WorkOrderService : IWorkOrderService
     private readonly ICurrentUserService _currentUserService;
     private readonly IQualityControlService _qualityControlService;
     private readonly ITaskTemplateService _taskTemplateService;
+    private readonly IMaintenanceStaffScheduleRepository _scheduleRepository;
+    private readonly IMaintenanceExpenseRepository _expenseRepository;
+    private readonly IUserService _userService;
     private readonly ILogger<WorkOrderService> _logger;
     private readonly IUnitOfWork _unitOfWork;
 
@@ -41,6 +45,9 @@ public class WorkOrderService : IWorkOrderService
         ICurrentUserService currentUserService,
         IQualityControlService qualityControlService,
         ITaskTemplateService taskTemplateService,
+        IMaintenanceStaffScheduleRepository scheduleRepository,
+        IMaintenanceExpenseRepository expenseRepository,
+        IUserService userService,
         ILogger<WorkOrderService> logger,
         IUnitOfWork unitOfWork)
     {
@@ -55,6 +62,9 @@ public class WorkOrderService : IWorkOrderService
         _currentUserService = currentUserService;
         _qualityControlService = qualityControlService;
         _taskTemplateService = taskTemplateService;
+        _scheduleRepository = scheduleRepository;
+        _expenseRepository = expenseRepository;
+        _userService = userService;
         _logger = logger;
         _unitOfWork = unitOfWork;
     }
@@ -68,20 +78,22 @@ public class WorkOrderService : IWorkOrderService
     {
         try
         {
-            _logger.LogInformation("Starting work order {WorkOrderId} by technician {TechnicianId}", 
+            _logger.LogInformation("Starting work order {WorkOrderId} by technician {TechnicianId}",
                 workOrderId, technicianId);
 
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {workOrderId} not found");
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
 
             // Validate work order can be started
             if (workOrder.Status != "Assigned" && workOrder.Status != "Approved")
+            {
                 throw new InvalidOperationException($"Cannot start work order in {workOrder.Status} status");
+            }
 
             // Validate technician is assigned
             if (workOrder.AssignedTechnicianId != technicianId)
+            {
                 throw new UnauthorizedAccessException("Technician is not assigned to this work order");
+            }
 
             var result = new WorkOrderStartResult
             {
@@ -90,6 +102,24 @@ public class WorkOrderService : IWorkOrderService
                 StartedAt = DateTime.UtcNow,
                 Success = true
             };
+
+            // Validate vehicle availability before starting
+            var (vehiclesAvailable, unavailableVehicles) = await ValidateVehicleAvailabilityAsync(workOrderId);
+            if (!vehiclesAvailable)
+            {
+                result.Success = false;
+                result.WarningMessages.Add("Cannot start work order: Some vehicles are not available.");
+                foreach (var vehicle in unavailableVehicles)
+                {
+                    result.WarningMessages.Add($"  - {vehicle}");
+                }
+                result.WarningMessages.Add("Please assign different vehicles before starting this work order.");
+
+                _logger.LogWarning("Work order {WorkOrderId} cannot start due to unavailable vehicles: {Vehicles}",
+                    workOrderId, string.Join(", ", unavailableVehicles));
+
+                return result;
+            }
 
             // Check parts availability first
             var availabilityCheck = await _inventoryService.CheckPartsAvailabilityAsync(workOrderId);
@@ -112,7 +142,7 @@ public class WorkOrderService : IWorkOrderService
                         result.PartsAllocated = allocationResult.SuccessfulAllocations;
                         result.SuccessMessages.Add($"Successfully allocated {allocationResult.SuccessfulAllocations} parts");
                     }
-                    
+
                     if (allocationResult.FailedAllocationCount > 0)
                     {
                         result.WarningMessages.Add($"Failed to allocate {allocationResult.FailedAllocationCount} parts");
@@ -126,6 +156,9 @@ public class WorkOrderService : IWorkOrderService
                 }
             }
 
+            // Update vehicle status to Maintenance for assigned vehicles
+            await UpdateVehicleStatusOnWorkOrderStartAsync(workOrderId);
+
             // Update work order status
             workOrder.Status = "InProgress";
             workOrder.ActualStartDate = result.StartedAt;
@@ -135,7 +168,7 @@ public class WorkOrderService : IWorkOrderService
             result.NewStatus = workOrder.Status;
             result.SuccessMessages.Add("Work order started successfully");
 
-            _logger.LogInformation("Work order {WorkOrderId} started successfully by technician {TechnicianId}", 
+            _logger.LogInformation("Work order {WorkOrderId} started successfully by technician {TechnicianId}",
                 workOrderId, technicianId);
 
             return result;
@@ -155,19 +188,18 @@ public class WorkOrderService : IWorkOrderService
     {
         try
         {
-            _logger.LogInformation("Completing work order {WorkOrderId} by user {CompletedById}", 
+            _logger.LogInformation("Completing work order {WorkOrderId} by user {CompletedById}",
                 completionDto.WorkOrderId, completedById);
 
-            var workOrder = await _workOrderRepository.GetByIdAsync(completionDto.WorkOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {completionDto.WorkOrderId} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(completionDto.WorkOrderId) ?? throw new ArgumentException($"Work order {completionDto.WorkOrderId} not found");
             if (workOrder.Status != "InProgress")
+            {
                 throw new InvalidOperationException($"Cannot complete work order in {workOrder.Status} status");
+            }
 
             // Perform quality control validation before completion
             var qualityValidation = await _qualityControlService.ValidateWorkOrderCompletionAsync(completionDto.WorkOrderId);
-            
+
             var result = new WorkOrderCompletionResult
             {
                 WorkOrderId = completionDto.WorkOrderId,
@@ -183,7 +215,7 @@ public class WorkOrderService : IWorkOrderService
                 result.Success = false;
                 result.WarningMessages.AddRange(qualityValidation.ValidationFailures);
                 result.WarningMessages.Add("Work order cannot be completed until quality control requirements are met");
-                
+
                 // If inspection officer approval is required, set appropriate status
                 if (qualityValidation.RequiresInspectionOfficerApproval)
                 {
@@ -193,7 +225,7 @@ public class WorkOrderService : IWorkOrderService
                     await _unitOfWork.SaveChangesAsync();
                     result.WarningMessages.Add("Work order requires inspection officer approval before completion");
                 }
-                
+
                 return result;
             }
 
@@ -207,15 +239,15 @@ public class WorkOrderService : IWorkOrderService
                 {
                     var consumptionResult = await _inventoryService.ConsumeWorkOrderPartsAsync(
                         completionDto.WorkOrderId, completionDto.PartsConsumed, completedById);
-                    
+
                     result.PartsConsumed = consumptionResult.SuccessfulConsumptions;
                     result.TotalPartsCost = consumptionResult.ConsumedParts.Sum(p => p.TotalCost);
-                    
+
                     if (consumptionResult.SuccessfulConsumptions > 0)
                     {
                         result.SuccessMessages.Add($"Successfully consumed {consumptionResult.SuccessfulConsumptions} parts");
                     }
-                    
+
                     if (consumptionResult.FailedConsumptions > 0)
                     {
                         result.WarningMessages.Add($"Failed to consume {consumptionResult.FailedConsumptions} parts");
@@ -236,14 +268,14 @@ public class WorkOrderService : IWorkOrderService
                 {
                     var returnResult = await _inventoryService.ReturnWorkOrderPartsAsync(
                         completionDto.WorkOrderId, completionDto.PartsReturned, completedById);
-                    
+
                     result.PartsReturned = returnResult.SuccessfulReturns;
-                    
+
                     if (returnResult.SuccessfulReturns > 0)
                     {
                         result.SuccessMessages.Add($"Successfully returned {returnResult.SuccessfulReturns} parts");
                     }
-                    
+
                     if (returnResult.FailedReturns > 0)
                     {
                         result.WarningMessages.Add($"Failed to return {returnResult.FailedReturns} parts");
@@ -260,6 +292,27 @@ public class WorkOrderService : IWorkOrderService
             // Calculate total costs
             var actualCost = workOrder.Labor.Sum(l => l.TotalCost) + result.TotalPartsCost;
 
+            // Release vehicles back to Active status
+            await UpdateVehicleStatusOnWorkOrderCompleteAsync(completionDto.WorkOrderId);
+
+            // Ensure any active staff schedules for this work order are marked as completed
+            var staffSchedules = await _scheduleRepository.GetByWorkOrderIdAsync(completionDto.WorkOrderId);
+            if (staffSchedules != null)
+            {
+                var now = DateTime.UtcNow;
+                foreach (var schedule in staffSchedules.Where(s => s.Status == "Scheduled" || s.Status == "InProgress"))
+                {
+                    schedule.Status = "Completed";
+                    if (!schedule.ActualEndTime.HasValue)
+                    {
+                        schedule.ActualEndTime = now;
+                    }
+
+                    schedule.UpdatedAt = now;
+                    await _scheduleRepository.UpdateAsync(schedule);
+                }
+            }
+
             // Update work order completion
             workOrder.Status = "Completed";
             workOrder.ActualCompletionDate = result.CompletionDate;
@@ -268,11 +321,19 @@ public class WorkOrderService : IWorkOrderService
             workOrder.ActualHours = completionDto.ActualHours ?? workOrder.Labor.Sum(l => l.Hours);
 
             if (!string.IsNullOrEmpty(completionDto.FailureCode))
+            {
                 workOrder.FailureCode = completionDto.FailureCode;
+            }
+
             if (!string.IsNullOrEmpty(completionDto.CauseCode))
+            {
                 workOrder.CauseCode = completionDto.CauseCode;
+            }
+
             if (!string.IsNullOrEmpty(completionDto.ActionCode))
+            {
                 workOrder.ActionCode = completionDto.ActionCode;
+            }
 
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
@@ -312,12 +373,11 @@ public class WorkOrderService : IWorkOrderService
         {
             _logger.LogInformation("Pausing work order {WorkOrderId} by user {UserId}", workOrderId, userId);
 
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {workOrderId} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
             if (workOrder.Status != "InProgress")
+            {
                 throw new InvalidOperationException($"Cannot pause work order in {workOrder.Status} status");
+            }
 
             var result = new WorkOrderStatusChangeResult
             {
@@ -348,7 +408,7 @@ public class WorkOrderService : IWorkOrderService
                     {
                         var returnResult = await _inventoryService.ReturnWorkOrderPartsAsync(
                             workOrderId, allocatedParts, userId);
-                        
+
                         result.SuccessMessages.Add($"Returned {returnResult.SuccessfulReturns} allocated parts");
                         result.PartsReturned = returnResult.SuccessfulReturns;
                     }
@@ -387,12 +447,11 @@ public class WorkOrderService : IWorkOrderService
         {
             _logger.LogInformation("Resuming work order {WorkOrderId} by user {UserId}", workOrderId, userId);
 
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {workOrderId} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
             if (workOrder.Status != "OnHold")
+            {
                 throw new InvalidOperationException($"Cannot resume work order in {workOrder.Status} status");
+            }
 
             var result = new WorkOrderStatusChangeResult
             {
@@ -415,7 +474,7 @@ public class WorkOrderService : IWorkOrderService
                         result.SuccessMessages.Add($"Re-allocated {allocationResult.SuccessfulAllocations} parts");
                         result.PartsAllocated = allocationResult.SuccessfulAllocations;
                     }
-                    
+
                     if (allocationResult.FailedAllocationCount > 0)
                     {
                         result.WarningMessages.Add($"Failed to re-allocate {allocationResult.FailedAllocationCount} parts");
@@ -456,12 +515,11 @@ public class WorkOrderService : IWorkOrderService
     {
         try
         {
-            var task = await _taskRepository.GetByIdAsync(taskDto.TaskId);
-            if (task == null)
-                throw new ArgumentException($"Task {taskDto.TaskId} not found");
-
+            var task = await _taskRepository.GetByIdAsync(taskDto.TaskId) ?? throw new ArgumentException($"Task {taskDto.TaskId} not found");
             if (task.Status == "Completed")
+            {
                 throw new InvalidOperationException("Task is already completed");
+            }
 
             var result = new TaskCompletionResult
             {
@@ -479,6 +537,48 @@ public class WorkOrderService : IWorkOrderService
             task.ActualHours = taskDto.ActualHours;
 
             await _taskRepository.UpdateAsync(task);
+
+            // Create WorkOrderLabor record to track technician hours and cost
+            if (task.AssignedTechnicianId.HasValue && task.ActualHours > 0)
+            {
+                try
+                {
+                    var technician = await _employeeRepository.GetByIdAsync(task.AssignedTechnicianId.Value);
+                    if (technician != null)
+                    {
+                        var hourlyRate = 0m; // Default rate - would need to be configured per employee
+                                             // TODO: Add HourlyRate property to Employee entity or fetch from a rate table
+
+                        var laborRecord = new WorkOrderLabor
+                        {
+                            Id = Guid.NewGuid(),
+                            WorkOrderId = task.WorkOrderId,
+                            TechnicianId = task.AssignedTechnicianId.Value,
+                            StartTime = task.StartedAt ?? result.CompletionDate.AddHours(-task.ActualHours),
+                            EndTime = result.CompletionDate,
+                            Hours = task.ActualHours,
+                            HourlyRate = hourlyRate,
+                            TotalCost = (decimal)task.ActualHours * hourlyRate,
+                            Notes = $"Task: {task.TaskName}",
+                            LaborType = "Regular",
+                            TenantId = task.TenantId,
+                            CreatedAt = DateTime.UtcNow
+                        };
+
+                        var laborRepo = _unitOfWork.Repository<WorkOrderLabor>();
+                        await laborRepo.AddAsync(laborRecord);
+
+                        _logger.LogInformation("Created labor record for technician {TechnicianId} - {Hours} hours on task {TaskId}",
+                            task.AssignedTechnicianId.Value, task.ActualHours, task.Id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to create labor record for task {TaskId}", taskDto.TaskId);
+                    // Don't fail the task completion if labor tracking fails
+                }
+            }
+
             await _unitOfWork.SaveChangesAsync();
 
             // Check if all tasks are completed - simplified implementation
@@ -509,7 +609,7 @@ public class WorkOrderService : IWorkOrderService
     /// <summary>
     /// Completes all incomplete required tasks
     /// </summary>
-    private async Task CompleteAllTasksAsync(Guid workOrderId, Guid completedById)
+    private static async Task CompleteAllTasksAsync(Guid workOrderId, Guid completedById)
     {
         // Simplified implementation - would need to get tasks from task repository
         // For now, just return as this functionality would require proper task management
@@ -544,9 +644,9 @@ public class WorkOrderService : IWorkOrderService
             // Get task templates using the task template service with fallback logic
             var taskTemplates = await _taskTemplateService.GetTaskTemplatesForWorkOrderAsync(
                 workOrder.AssetId, workOrder.MaintenanceTypeId);
-            
+
             var tasks = new List<WorkOrderTask>();
-            
+
             if (taskTemplates.Any())
             {
                 // Create tasks from predefined templates
@@ -566,30 +666,30 @@ public class WorkOrderService : IWorkOrderService
                         CreatedAt = DateTime.UtcNow,
                         Status = "Pending"
                     };
-                    
+
                     tasks.Add(task);
                 }
-                
-                _logger.LogInformation("Using {TaskCount} predefined task templates from {Source} for work order {WorkOrderId}", 
+
+                _logger.LogInformation("Using {TaskCount} predefined task templates from {Source} for work order {WorkOrderId}",
                     tasks.Count, taskTemplates.First().Source, workOrder.Id);
             }
             else
             {
                 // Fallback to generic tasks if no templates found
-                _logger.LogWarning("No predefined task templates found for asset {AssetId} and maintenance type {MaintenanceTypeId}, using generic fallback", 
+                _logger.LogWarning("No predefined task templates found for asset {AssetId} and maintenance type {MaintenanceTypeId}, using generic fallback",
                     workOrder.AssetId, workOrder.MaintenanceTypeId);
-                    
+
                 tasks = await GenerateGenericFallbackTasks(workOrder);
             }
-            
+
             // Add tasks to repository
             foreach (var task in tasks)
             {
                 await _taskRepository.AddAsync(task);
             }
-            
+
             await _unitOfWork.SaveChangesAsync();
-            _logger.LogInformation("Created {TaskCount} tasks for work order {WorkOrderId}", 
+            _logger.LogInformation("Created {TaskCount} tasks for work order {WorkOrderId}",
                 tasks.Count, workOrder.Id);
         }
         catch (Exception ex)
@@ -598,7 +698,7 @@ public class WorkOrderService : IWorkOrderService
             // Don't throw - task creation failure shouldn't prevent work order creation
         }
     }
-    
+
     /// <summary>
     /// Generates generic fallback tasks when no predefined templates are available
     /// </summary>
@@ -606,7 +706,7 @@ public class WorkOrderService : IWorkOrderService
     {
         var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(workOrder.MaintenanceTypeId);
         var asset = await _assetRepository.GetByIdAsync(workOrder.AssetId);
-        
+
         return new List<WorkOrderTask>
         {
             new WorkOrderTask
@@ -663,13 +763,29 @@ public class WorkOrderService : IWorkOrderService
         try
         {
             // Log current user information for debugging
-            _logger.LogInformation("Creating work order - Current User ID: {UserId}, Employee ID: {EmployeeId}, Tenant ID: {TenantId}", 
+            _logger.LogInformation("Creating work order - Current User ID: {UserId}, Employee ID: {EmployeeId}, Tenant ID: {TenantId}",
                 _currentUserService.UserId, _currentUserService.EmployeeId, _currentUserService.TenantId);
-            
+
             // Log the incoming DTO for debugging
             _logger.LogDebug("CreateWorkOrderDto: Title={Title}, AssetId={AssetId}, WorkOrderTypeId={WorkOrderTypeId}, MaintenanceTypeId={MaintenanceTypeId}, PriorityLevelId={PriorityLevelId}",
                 createDto.Title, createDto.AssetId, createDto.WorkOrderTypeId, createDto.MaintenanceTypeId, createDto.PriorityLevelId);
-            
+
+            // Determine RequestedById - use current user's employee ID, or fall back to assigned technician for background service context
+            Guid? requestedById = _currentUserService.EmployeeId;
+            if (!requestedById.HasValue || requestedById.Value == Guid.Empty)
+            {
+                // Try user ID
+                if (_currentUserService.UserId != null && Guid.TryParse(_currentUserService.UserId, out var userId) && userId != Guid.Empty)
+                {
+                    requestedById = userId;
+                }
+                // Fall back to assigned technician (for background service context)
+                else if (createDto.AssignedTechnicianId.HasValue && createDto.AssignedTechnicianId.Value != Guid.Empty)
+                {
+                    requestedById = createDto.AssignedTechnicianId.Value;
+                }
+            }
+
             var workOrder = new WorkOrder
             {
                 Title = createDto.Title,
@@ -678,14 +794,15 @@ public class WorkOrderService : IWorkOrderService
                 WorkOrderTypeId = createDto.WorkOrderTypeId,
                 MaintenanceTypeId = createDto.MaintenanceTypeId,
                 PriorityLevelId = createDto.PriorityLevelId,
-                TenantId = _currentUserService.TenantId ?? Guid.Empty,
+                TenantId = createDto.TenantId ?? _currentUserService.TenantId ?? Guid.Empty,
                 WorkOrderNumber = await GenerateWorkOrderNumberAsync(),
-                RequestedById = _currentUserService.EmployeeId ?? 
-                    ((_currentUserService.UserId != null && Guid.TryParse(_currentUserService.UserId, out var userId)) ? userId : Guid.Empty),
+                RequestedById = requestedById ?? Guid.Empty,
                 AssignedTechnicianId = createDto.AssignedTechnicianId, // Assign technician if provided
                 AssignedTeamId = createDto.AssignedTeamId, // Assign team if provided
                 JobCardId = createDto.JobCardId, // Link to job card if generated from one
+                MaintenanceScheduleId = createDto.MaintenanceScheduleId, // Link to maintenance schedule if auto-generated
                 Status = "Draft",
+                MaintenanceLocation = createDto.MaintenanceLocation ?? "Internal",
                 RequestedStartDate = createDto.RequestedStartDate,
                 RequestedCompletionDate = createDto.RequestedCompletionDate,
                 EstimatedHours = createDto.EstimatedHours,
@@ -695,20 +812,20 @@ public class WorkOrderService : IWorkOrderService
                 RequiresLockout = createDto.RequiresLockout,
                 RequiresConfinedSpaceEntry = createDto.RequiresConfinedSpaceEntry
             };
-            
+
             _logger.LogDebug("Work Order entity created: Id={Id}, Number={Number}, RequestedById={RequestedById}, TenantId={TenantId}",
                 workOrder.Id, workOrder.WorkOrderNumber, workOrder.RequestedById, workOrder.TenantId);
 
             await _workOrderRepository.AddAsync(workOrder);
             _logger.LogDebug("Work order added to repository, saving changes...");
-            
+
             await _unitOfWork.SaveChangesAsync();
             _logger.LogInformation("Work order {WorkOrderNumber} (ID: {Id}) created successfully", workOrder.WorkOrderNumber, workOrder.Id);
-            
+
             // Generate default tasks based on maintenance type and asset
             await CreateDefaultTasksAsync(workOrder);
-            
-            return MapToWorkOrderDto(workOrder);
+
+            return await MapToWorkOrderDtoAsync(workOrder);
         }
         catch (Exception ex)
         {
@@ -724,24 +841,36 @@ public class WorkOrderService : IWorkOrderService
     {
         try
         {
-            var workOrder = await _workOrderRepository.GetByIdAsync(id);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {id} not found");
+            var workOrder = await _workOrderRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Work order {id} not found");
 
             // Manual mapping
             workOrder.Title = updateDto.Title;
             workOrder.Description = updateDto.Description;
-            
+
             // Only update these fields if provided
             if (updateDto.WorkOrderTypeId.HasValue)
+            {
                 workOrder.WorkOrderTypeId = updateDto.WorkOrderTypeId.Value;
+            }
+
             if (updateDto.MaintenanceTypeId.HasValue)
+            {
                 workOrder.MaintenanceTypeId = updateDto.MaintenanceTypeId.Value;
+            }
+
             if (updateDto.PriorityLevelId.HasValue)
+            {
                 workOrder.PriorityLevelId = updateDto.PriorityLevelId.Value;
-            
+            }
+
             workOrder.AssignedTechnicianId = updateDto.AssignedTechnicianId;
             workOrder.AssignedTeamId = updateDto.AssignedTeamId;
+
+            if (!string.IsNullOrEmpty(updateDto.MaintenanceLocation))
+            {
+                workOrder.MaintenanceLocation = updateDto.MaintenanceLocation;
+            }
+
             workOrder.RequestedStartDate = updateDto.RequestedStartDate;
             workOrder.RequestedCompletionDate = updateDto.RequestedCompletionDate;
             workOrder.EstimatedHours = updateDto.EstimatedHours;
@@ -754,7 +883,7 @@ public class WorkOrderService : IWorkOrderService
 
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
-            return MapToWorkOrderDto(workOrder);
+            return await MapToWorkOrderDtoAsync(workOrder);
         }
         catch (Exception ex)
         {
@@ -788,7 +917,7 @@ public class WorkOrderService : IWorkOrderService
         try
         {
             var workOrder = await _workOrderRepository.GetByIdAsync(id);
-            return workOrder == null ? null : MapToWorkOrderDto(workOrder);
+            return workOrder == null ? null : await MapToWorkOrderDtoAsync(workOrder);
         }
         catch (Exception ex)
         {
@@ -805,7 +934,7 @@ public class WorkOrderService : IWorkOrderService
         try
         {
             var workOrder = await _workOrderRepository.GetByWorkOrderNumberAsync(workOrderNumber);
-            return workOrder == null ? null : MapToWorkOrderDto(workOrder);
+            return workOrder == null ? null : await MapToWorkOrderDtoAsync(workOrder);
         }
         catch (Exception ex)
         {
@@ -824,14 +953,14 @@ public class WorkOrderService : IWorkOrderService
             // Simplified implementation - in a real implementation, this would use proper paging
             var allWorkOrders = await _workOrderRepository.GetAllAsync();
             var filteredWorkOrders = allWorkOrders.Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize);
-            
+
             var workOrderDtos = new List<WorkOrderListDto>();
             foreach (var workOrder in filteredWorkOrders)
             {
                 var dto = await MapToWorkOrderListDtoAsync(workOrder);
                 workOrderDtos.Add(dto);
             }
-            
+
             return new PagedResult<WorkOrderListDto>
             {
                 Items = workOrderDtos,
@@ -854,18 +983,15 @@ public class WorkOrderService : IWorkOrderService
     {
         try
         {
-            var workOrder = await _workOrderRepository.GetByIdAsync(id);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {id} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Work order {id} not found");
             workOrder.Status = status;
             // Note: Notes functionality would need to be implemented via WorkOrderComment entity
-            
+
             workOrder.UpdatedAt = DateTime.UtcNow;
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
-            
-            return MapToWorkOrderDto(workOrder);
+
+            return await MapToWorkOrderDtoAsync(workOrder);
         }
         catch (Exception ex)
         {
@@ -881,30 +1007,23 @@ public class WorkOrderService : IWorkOrderService
     {
         try
         {
-            var workOrder = await _workOrderRepository.GetByIdAsync(id);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {id} not found");
+            var workOrder = await _workOrderRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Work order {id} not found");
 
             // Validate technician exists and can be assigned to maintenance if provided
             if (technicianId.HasValue)
             {
-                var technician = await _employeeRepository.GetByIdAsync(technicianId.Value);
-                if (technician == null)
-                {
-                    throw new ArgumentException($"Technician with ID {technicianId.Value} not found in HR system");
-                }
-                
+                var technician = await _employeeRepository.GetByIdAsync(technicianId.Value) ?? throw new ArgumentException($"Technician with ID {technicianId.Value} not found in HR system");
                 if (!technician.IsActive)
                 {
                     throw new InvalidOperationException($"Technician {technician.FirstName} {technician.LastName} is not active");
                 }
-                
+
                 if (!technician.CanBeAssignedToMaintenance)
                 {
                     throw new InvalidOperationException($"Employee {technician.FirstName} {technician.LastName} is not qualified for maintenance assignments");
                 }
-                
-                _logger.LogInformation("Assigning work order {WorkOrderId} to technician {TechnicianName} (ID: {TechnicianId})", 
+
+                _logger.LogInformation("Assigning work order {WorkOrderId} to technician {TechnicianName} (ID: {TechnicianId})",
                     id, $"{technician.FirstName} {technician.LastName}", technicianId.Value);
             }
 
@@ -912,10 +1031,10 @@ public class WorkOrderService : IWorkOrderService
             workOrder.AssignedTeamId = teamId;
             workOrder.Status = "Assigned";
             workOrder.UpdatedAt = DateTime.UtcNow;
-            
+
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
-            return MapToWorkOrderDto(workOrder);
+            return await MapToWorkOrderDtoAsync(workOrder);
         }
         catch (Exception ex)
         {
@@ -931,21 +1050,18 @@ public class WorkOrderService : IWorkOrderService
     {
         try
         {
-            var workOrder = await _workOrderRepository.GetByIdAsync(id);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {id} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Work order {id} not found");
             workOrder.Status = "Approved";
             workOrder.ApprovedById = (_currentUserService.UserId != null && Guid.TryParse(_currentUserService.UserId, out var userId2)) ? userId2 : Guid.Empty;
             workOrder.ApprovedAt = DateTime.UtcNow;
-            
+
             // Note: Approval notes would need to be implemented via WorkOrderComment entity
-            
+
             workOrder.UpdatedAt = DateTime.UtcNow;
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
-            
-            return MapToWorkOrderDto(workOrder);
+
+            return await MapToWorkOrderDtoAsync(workOrder);
         }
         catch (Exception ex)
         {
@@ -961,17 +1077,32 @@ public class WorkOrderService : IWorkOrderService
     {
         try
         {
-            var workOrder = await _workOrderRepository.GetByIdAsync(id);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {id} not found");
+            var workOrder = await _workOrderRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Work order {id} not found");
+
+            // Validate vehicle availability before starting
+            var (vehiclesAvailable, unavailableVehicles) = await ValidateVehicleAvailabilityAsync(id);
+            if (!vehiclesAvailable)
+            {
+                var errorMessage = $"Cannot start work order: Some vehicles are not available. " +
+                    string.Join(", ", unavailableVehicles) + ". " +
+                    "Please assign different vehicles before starting this work order.";
+
+                _logger.LogWarning("Work order {WorkOrderId} cannot start due to unavailable vehicles: {Vehicles}",
+                    id, string.Join(", ", unavailableVehicles));
+
+                throw new InvalidOperationException(errorMessage);
+            }
+
+            // Update vehicle status to InUse for assigned vehicles
+            await UpdateVehicleStatusOnWorkOrderStartAsync(id);
 
             workOrder.Status = "InProgress";
             workOrder.ActualStartDate = DateTime.UtcNow;
             workOrder.UpdatedAt = DateTime.UtcNow;
-            
+
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
-            return MapToWorkOrderDto(workOrder);
+            return await MapToWorkOrderDtoAsync(workOrder);
         }
         catch (Exception ex)
         {
@@ -987,9 +1118,28 @@ public class WorkOrderService : IWorkOrderService
     {
         try
         {
-            var workOrder = await _workOrderRepository.GetByIdAsync(id);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {id} not found");
+            var workOrder = await _workOrderRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Work order {id} not found");
+
+            // Release vehicles back to Active status
+            await UpdateVehicleStatusOnWorkOrderCompleteAsync(id);
+
+            // Ensure any active staff schedules for this work order are marked as completed
+            var staffSchedules = await _scheduleRepository.GetByWorkOrderIdAsync(id);
+            if (staffSchedules != null)
+            {
+                var now = DateTime.UtcNow;
+                foreach (var schedule in staffSchedules.Where(s => s.Status == "Scheduled" || s.Status == "InProgress"))
+                {
+                    schedule.Status = "Completed";
+                    if (!schedule.ActualEndTime.HasValue)
+                    {
+                        schedule.ActualEndTime = now;
+                    }
+
+                    schedule.UpdatedAt = now;
+                    await _scheduleRepository.UpdateAsync(schedule);
+                }
+            }
 
             workOrder.Status = "Completed";
             workOrder.ActualCompletionDate = DateTime.UtcNow;
@@ -999,10 +1149,10 @@ public class WorkOrderService : IWorkOrderService
             workOrder.CauseCode = completeDto.CauseCode;
             workOrder.ActionCode = completeDto.ActionCode;
             workOrder.UpdatedAt = DateTime.UtcNow;
-            
+
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
-            return MapToWorkOrderDto(workOrder);
+            return await MapToWorkOrderDtoAsync(workOrder);
         }
         catch (Exception ex)
         {
@@ -1019,9 +1169,9 @@ public class WorkOrderService : IWorkOrderService
         try
         {
             var allWorkOrders = await _workOrderRepository.GetAllAsync();
-            var overdueWorkOrders = allWorkOrders.Where(wo => 
-                wo.RequestedCompletionDate < DateTime.UtcNow && 
-                wo.Status != "Completed" && 
+            var overdueWorkOrders = allWorkOrders.Where(wo =>
+                wo.RequestedCompletionDate < DateTime.UtcNow &&
+                wo.Status != "Completed" &&
                 wo.Status != "Cancelled");
             var results = new List<WorkOrderListDto>();
             foreach (var workOrder in overdueWorkOrders)
@@ -1047,9 +1197,9 @@ public class WorkOrderService : IWorkOrderService
         {
             var allWorkOrders = await _workOrderRepository.GetAllAsync();
             var dueDate = DateTime.UtcNow.AddDays(days);
-            var workOrdersDue = allWorkOrders.Where(wo => 
-                wo.RequestedCompletionDate <= dueDate && 
-                wo.Status != "Completed" && 
+            var workOrdersDue = allWorkOrders.Where(wo =>
+                wo.RequestedCompletionDate <= dueDate &&
+                wo.Status != "Completed" &&
                 wo.Status != "Cancelled");
             var results = new List<WorkOrderListDto>();
             foreach (var workOrder in workOrdersDue)
@@ -1143,7 +1293,7 @@ public class WorkOrderService : IWorkOrderService
         try
         {
             _logger.LogInformation("Getting work order metrics from {StartDate} to {EndDate}", startDate, endDate);
-            
+
             // Mock implementation - would calculate actual metrics from database
             var metrics = new ErpSystem.Core.DTOs.Maintenance.WorkOrderMetricsDto
             {
@@ -1156,7 +1306,7 @@ public class WorkOrderService : IWorkOrderService
                 TotalCost = 0m,
                 TypeBreakdown = new List<ErpSystem.Core.DTOs.Maintenance.WorkOrderTypeMetricDto>()
             };
-            
+
             return metrics;
         }
         catch (Exception ex)
@@ -1192,10 +1342,7 @@ public class WorkOrderService : IWorkOrderService
     {
         try
         {
-            var parentWorkOrder = await _workOrderRepository.GetByIdAsync(parentId);
-            if (parentWorkOrder == null)
-                throw new ArgumentException($"Parent work order {parentId} not found");
-
+            var parentWorkOrder = await _workOrderRepository.GetByIdAsync(parentId) ?? throw new ArgumentException($"Parent work order {parentId} not found");
             var childWorkOrder = new WorkOrder
             {
                 Title = createDto.Title,
@@ -1223,7 +1370,7 @@ public class WorkOrderService : IWorkOrderService
 
             await _workOrderRepository.AddAsync(childWorkOrder);
             await _unitOfWork.SaveChangesAsync();
-            return MapToWorkOrderDto(childWorkOrder);
+            return await MapToWorkOrderDtoAsync(childWorkOrder);
         }
         catch (Exception ex)
         {
@@ -1291,8 +1438,99 @@ public class WorkOrderService : IWorkOrderService
 
     #region Helper Mapping Methods
 
-    private WorkOrderDto MapToWorkOrderDto(WorkOrder workOrder)
+    private async Task<WorkOrderDto> MapToWorkOrderDtoAsync(WorkOrder workOrder)
     {
+        // Get assigned technician name
+        string? assignedTechnicianName = null;
+        if (workOrder.AssignedTechnicianId.HasValue)
+        {
+            try
+            {
+                var technician = await _employeeRepository.GetByIdAsync(workOrder.AssignedTechnicianId.Value);
+                if (technician != null)
+                {
+                    assignedTechnicianName = $"{technician.FirstName} {technician.LastName}";
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not load technician {TechnicianId}", workOrder.AssignedTechnicianId.Value);
+            }
+        }
+
+        // Get asset information including category
+        string? assetName = null;
+        string? assetCategory = null;
+        if (workOrder.AssetId != Guid.Empty)
+        {
+            try
+            {
+                var asset = await _assetRepository.GetByIdAsync(workOrder.AssetId);
+                if (asset != null)
+                {
+                    assetName = asset.Name;
+                    // Asset category comes from navigation property if loaded
+                    assetCategory = asset.AssetCategory?.Name ?? asset.AssetCategory?.AssetType;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not load asset {AssetId}", workOrder.AssetId);
+            }
+        }
+
+        // Build labor list with technician information
+        var laborDtos = new List<WorkOrderLaborDto>();
+        if (workOrder.Labor != null)
+        {
+            foreach (var labor in workOrder.Labor)
+            {
+                var laborDto = new WorkOrderLaborDto
+                {
+                    Id = labor.Id,
+                    WorkOrderId = labor.WorkOrderId,
+                    TechnicianId = labor.TechnicianId,
+                    StartTime = labor.StartTime,
+                    EndTime = labor.EndTime,
+                    Hours = labor.Hours,
+                    HourlyRate = labor.HourlyRate,
+                    TotalCost = labor.TotalCost,
+                    Notes = labor.Notes,
+                    LaborType = labor.LaborType ?? "Regular",
+                    CreatedAt = labor.CreatedAt,
+                    UpdatedAt = labor.UpdatedAt
+                };
+
+                // Look up technician information from ApplicationUser
+                try
+                {
+                    _logger.LogInformation("Looking up technician with ID: {TechnicianId} for labor record {LaborId}", labor.TechnicianId, labor.Id);
+                    var user = await _userService.GetUserByIdAsync(labor.TechnicianId);
+                    if (user != null)
+                    {
+                        _logger.LogInformation("Found user: {UserId}, FirstName: {FirstName}, LastName: {LastName}, UserName: {UserName}",
+                            user.Id, user.FirstName, user.LastName, user.UserName);
+                        laborDto.Technician = new ErpSystem.Core.DTOs.HR.EmployeeDto
+                        {
+                            Id = user.Id,
+                            FullName = $"{user.FirstName} {user.LastName}",
+                            EmployeeNumber = user.UserName ?? string.Empty
+                        };
+                    }
+                    else
+                    {
+                        _logger.LogWarning("No user found for TechnicianId: {TechnicianId}", labor.TechnicianId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error looking up technician {TechnicianId} for labor record", labor.TechnicianId);
+                }
+
+                laborDtos.Add(laborDto);
+            }
+        }
+
         return new WorkOrderDto
         {
             Id = workOrder.Id,
@@ -1302,6 +1540,7 @@ public class WorkOrderService : IWorkOrderService
             JobCardId = workOrder.JobCardId,
             JobCardNumber = workOrder.JobCard?.JobCardNumber,
             Status = workOrder.Status,
+            MaintenanceLocation = workOrder.MaintenanceLocation ?? "Internal",
             AssetId = workOrder.AssetId,
             WorkOrderTypeId = workOrder.WorkOrderTypeId,
             MaintenanceTypeId = workOrder.MaintenanceTypeId,
@@ -1383,12 +1622,56 @@ public class WorkOrderService : IWorkOrderService
                 EstimatedHours = t.EstimatedHours,
                 ActualHours = t.ActualHours,
                 IsRequired = t.IsRequired,
+                PhotoPath = t.PhotoPath,
                 AssignedTechnicianId = t.AssignedTechnicianId,
                 StartedAt = t.StartedAt,
                 CompletedAt = t.CompletedAt,
                 CompletionNotes = t.CompletionNotes,
                 CreatedAt = t.CreatedAt
             }).ToList() ?? new List<WorkOrderTaskDtoFull>(),
+            Parts = workOrder.Parts?.Select(p => new WorkOrderPartDto
+            {
+                Id = p.Id,
+                WorkOrderId = p.WorkOrderId,
+                InventoryItemId = p.InventoryItemId,
+                ItemCode = p.ItemCode,
+                ItemName = p.ItemName,
+                Description = p.Description,
+                QuantityRequired = p.QuantityRequired,
+                QuantityAllocated = p.QuantityAllocated,
+                QuantityUsed = p.QuantityUsed,
+                QuantityReturned = p.QuantityReturned,
+                UnitCost = p.UnitCost,
+                TotalCost = p.TotalCost,
+                SerialNumber = p.SerialNumber,
+                LotNumber = p.LotNumber,
+                Status = p.Status,
+                AllocationId = p.AllocationId,
+                AllocatedAt = p.AllocatedAt,
+                PickedAt = p.PickedAt,
+                UsedAt = p.UsedAt,
+                Notes = p.Notes,
+                CreatedAt = p.CreatedAt,
+                UpdatedAt = p.UpdatedAt
+            }).ToList() ?? new List<WorkOrderPartDto>(),
+            Labor = laborDtos,
+            Tools = workOrder.Tools?.Select(t => new WorkOrderToolDto
+            {
+                Id = t.Id,
+                WorkOrderId = t.WorkOrderId,
+                ToolId = t.ToolId,
+                IsRequired = t.IsRequired,
+                IsAllocated = t.IsAllocated,
+                AllocationDate = t.AllocationDate,
+                CheckoutId = t.CheckoutId,
+                Notes = t.Notes,
+                CreatedAt = t.CreatedAt,
+                UpdatedAt = t.UpdatedAt
+            }).ToList() ?? new List<WorkOrderToolDto>(),
+            // Add loaded string values for frontend
+            AssignedTechnicianName = assignedTechnicianName ?? string.Empty,
+            AssetName = assetName ?? string.Empty,
+            AssetCategory = assetCategory ?? string.Empty,
             CreatedAt = workOrder.CreatedAt,
             UpdatedAt = workOrder.UpdatedAt
         };
@@ -1410,7 +1693,7 @@ public class WorkOrderService : IWorkOrderService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Could not load technician {TechnicianId} for work order {WorkOrderId}", 
+                _logger.LogWarning(ex, "Could not load technician {TechnicianId} for work order {WorkOrderId}",
                     workOrder.AssignedTechnicianId.Value, workOrder.Id);
                 assignedTechnicianName = "Unknown Technician";
             }
@@ -1430,7 +1713,7 @@ public class WorkOrderService : IWorkOrderService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not load asset {AssetId} for work order {WorkOrderId}", 
+            _logger.LogWarning(ex, "Could not load asset {AssetId} for work order {WorkOrderId}",
                 workOrder.AssetId, workOrder.Id);
         }
 
@@ -1446,7 +1729,7 @@ public class WorkOrderService : IWorkOrderService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not load work order type {WorkOrderTypeId} for work order {WorkOrderId}", 
+            _logger.LogWarning(ex, "Could not load work order type {WorkOrderTypeId} for work order {WorkOrderId}",
                 workOrder.WorkOrderTypeId, workOrder.Id);
         }
 
@@ -1462,7 +1745,7 @@ public class WorkOrderService : IWorkOrderService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not load maintenance type {MaintenanceTypeId} for work order {WorkOrderId}", 
+            _logger.LogWarning(ex, "Could not load maintenance type {MaintenanceTypeId} for work order {WorkOrderId}",
                 workOrder.MaintenanceTypeId, workOrder.Id);
         }
 
@@ -1480,7 +1763,7 @@ public class WorkOrderService : IWorkOrderService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not load priority level {PriorityLevelId} for work order {WorkOrderId}", 
+            _logger.LogWarning(ex, "Could not load priority level {PriorityLevelId} for work order {WorkOrderId}",
                 workOrder.PriorityLevelId, workOrder.Id);
         }
 
@@ -1494,6 +1777,7 @@ public class WorkOrderService : IWorkOrderService
             JobCardNumber = workOrder.JobCard?.JobCardNumber,
             AssetId = workOrder.AssetId,
             Status = workOrder.Status,
+            MaintenanceLocation = workOrder.MaintenanceLocation ?? "Internal",
             AssetName = assetName,
             AssetNumber = assetNumber,
             WorkOrderTypeId = workOrder.WorkOrderTypeId,
@@ -1536,11 +1820,11 @@ public class WorkOrderService : IWorkOrderService
         {
             var allWorkOrders = await _workOrderRepository.GetAllAsync();
             var dueDate = DateTime.UtcNow.AddDays(days);
-            var workOrdersDue = allWorkOrders.Where(wo => 
-                wo.RequestedCompletionDate <= dueDate && 
-                wo.Status != "Completed" && 
+            var workOrdersDue = allWorkOrders.Where(wo =>
+                wo.RequestedCompletionDate <= dueDate &&
+                wo.Status != "Completed" &&
                 wo.Status != "Cancelled");
-            
+
             var results = new List<WorkOrderListDto>();
             foreach (var workOrder in workOrdersDue)
             {
@@ -1566,12 +1850,12 @@ public class WorkOrderService : IWorkOrderService
             var today = DateTime.Today;
             var tomorrow = today.AddDays(1);
             var allWorkOrders = await _workOrderRepository.GetAllAsync();
-            var todaysWorkOrders = allWorkOrders.Where(wo => 
-                wo.RequestedStartDate >= today && 
+            var todaysWorkOrders = allWorkOrders.Where(wo =>
+                wo.RequestedStartDate >= today &&
                 wo.RequestedStartDate < tomorrow &&
-                wo.Status != "Completed" && 
+                wo.Status != "Completed" &&
                 wo.Status != "Cancelled");
-            
+
             var results = new List<WorkOrderListDto>();
             foreach (var workOrder in todaysWorkOrders)
             {
@@ -1596,16 +1880,13 @@ public class WorkOrderService : IWorkOrderService
     {
         try
         {
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {workOrderId} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
             workOrder.Status = "Cancelled";
             workOrder.CompletionNotes = reason;
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
 
-            return MapToWorkOrderDto(workOrder);
+            return await MapToWorkOrderDtoAsync(workOrder);
         }
         catch (Exception ex)
         {
@@ -1621,16 +1902,14 @@ public class WorkOrderService : IWorkOrderService
     {
         try
         {
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {workOrderId} not found");
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
 
             // Note: This is a simplified implementation - in reality you'd want to validate priority
             // and possibly map from string to appropriate PriorityLevelId
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
 
-            return MapToWorkOrderDto(workOrder);
+            return await MapToWorkOrderDtoAsync(workOrder);
         }
         catch (Exception ex)
         {
@@ -1646,15 +1925,12 @@ public class WorkOrderService : IWorkOrderService
     {
         try
         {
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {workOrderId} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
             workOrder.RequestedStartDate = newScheduledDate;
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
 
-            return MapToWorkOrderDto(workOrder);
+            return await MapToWorkOrderDtoAsync(workOrder);
         }
         catch (Exception ex)
         {
@@ -1671,11 +1947,11 @@ public class WorkOrderService : IWorkOrderService
         try
         {
             var results = new List<WorkOrderDto>();
-            
+
             // This is a placeholder implementation
             // In a real implementation, you'd load the schedule and create work orders based on it
             _logger.LogWarning("CreateWorkOrdersFromScheduleAsync is not fully implemented");
-            
+
             return results;
         }
         catch (Exception ex)
@@ -1689,9 +1965,9 @@ public class WorkOrderService : IWorkOrderService
     /// Updates a work order task status with user tracking
     /// </summary>
     public async Task<ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto?> UpdateTaskStatusAsync(
-        Guid taskId, 
-        string status, 
-        double? actualHours = null, 
+        Guid taskId,
+        string status,
+        double? actualHours = null,
         string? completionNotes = null)
     {
         try
@@ -1749,7 +2025,7 @@ public class WorkOrderService : IWorkOrderService
                 taskId, status);
 
             // Map to DTO and include technician information
-            var technician = task.AssignedTechnicianId.HasValue 
+            var technician = task.AssignedTechnicianId.HasValue
                 ? await _employeeRepository.GetByIdAsync(task.AssignedTechnicianId.Value)
                 : null;
 
@@ -1764,6 +2040,7 @@ public class WorkOrderService : IWorkOrderService
                 EstimatedHours = task.EstimatedHours,
                 ActualHours = task.ActualHours,
                 IsRequired = task.IsRequired,
+                PhotoPath = task.PhotoPath,
                 AssignedTechnicianId = task.AssignedTechnicianId,
                 StartedAt = task.StartedAt,
                 CompletedAt = task.CompletedAt,
@@ -1784,5 +2061,330 @@ public class WorkOrderService : IWorkOrderService
         }
     }
 
+    /// <summary>
+    /// Updates a work order task photo path
+    /// </summary>
+    public async Task<WorkOrderTaskDtoFull?> UpdateTaskPhotoAsync(Guid taskId, string? photoPath)
+    {
+        try
+        {
+            var task = await _taskRepository.GetByIdAsync(taskId);
+            if (task == null)
+            {
+                _logger.LogWarning("Task {TaskId} not found for photo update", taskId);
+                return null;
+            }
+
+            var currentUserId = _currentUserService.UserId;
+
+            _logger.LogInformation(
+                "Updating task {TaskId} photo by user {UserId}",
+                taskId, currentUserId);
+
+            task.PhotoPath = photoPath;
+            task.UpdatedAt = DateTime.UtcNow;
+            task.UpdatedBy = currentUserId ?? "System";
+
+            await _taskRepository.UpdateAsync(task);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation("Task {TaskId} photo updated successfully", taskId);
+
+            // Map to DTO and include technician information
+            var technician = task.AssignedTechnicianId.HasValue
+                ? await _employeeRepository.GetByIdAsync(task.AssignedTechnicianId.Value)
+                : null;
+
+            return new WorkOrderTaskDtoFull
+            {
+                Id = task.Id,
+                WorkOrderId = task.WorkOrderId,
+                TaskName = task.TaskName,
+                Description = task.Description,
+                Sequence = task.Sequence,
+                Status = task.Status,
+                EstimatedHours = task.EstimatedHours,
+                ActualHours = task.ActualHours,
+                IsRequired = task.IsRequired,
+                PhotoPath = task.PhotoPath,
+                AssignedTechnicianId = task.AssignedTechnicianId,
+                StartedAt = task.StartedAt,
+                CompletedAt = task.CompletedAt,
+                CompletionNotes = task.CompletionNotes,
+                CreatedAt = task.CreatedAt,
+                AssignedTechnician = technician != null ? new ErpSystem.Core.DTOs.HR.EmployeeDto
+                {
+                    Id = technician.Id,
+                    FullName = $"{technician.FirstName} {technician.LastName}",
+                    EmployeeNumber = technician.EmployeeNumber
+                } : null
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating task {TaskId} photo", taskId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Validates that all assigned vehicles are available (Active status)
+    /// </summary>
+    private async Task<(bool IsValid, List<string> UnavailableVehicles)> ValidateVehicleAvailabilityAsync(Guid workOrderId)
+    {
+        try
+        {
+            // Get all schedules and expenses for this work order
+            var schedules = await _scheduleRepository.GetByWorkOrderIdAsync(workOrderId);
+            var expenses = await _expenseRepository.GetByWorkOrderIdAsync(workOrderId);
+
+            // Collect all vehicle IDs from schedules and expenses
+            var vehicleIds = new List<Guid>();
+
+            // From schedules
+            vehicleIds.AddRange(schedules
+                .Where(s => s.AssignedVehicleId.HasValue)
+                .Select(s => s.AssignedVehicleId!.Value));
+
+            // From expenses
+            vehicleIds.AddRange(expenses
+                .Where(e => e.VehicleId.HasValue)
+                .Select(e => e.VehicleId!.Value));
+
+            // Remove duplicates
+            vehicleIds = vehicleIds.Distinct().ToList();
+
+            if (!vehicleIds.Any())
+            {
+                return (true, new List<string>()); // No vehicles assigned, validation passes
+            }
+
+            // Check each vehicle's availability
+            var unavailableVehicles = new List<string>();
+
+            foreach (var vehicleId in vehicleIds)
+            {
+                var vehicle = await _assetRepository.GetByIdAsync(vehicleId);
+                if (vehicle == null)
+                {
+                    unavailableVehicles.Add($"Vehicle ID {vehicleId} not found");
+                }
+                else if (vehicle.Status != ErpSystem.Core.Enums.AssetStatus.Active)
+                {
+                    var statusName = vehicle.Status.ToString();
+                    unavailableVehicles.Add($"{vehicle.Name} ({vehicle.AssetNumber}) is currently {statusName}");
+                    _logger.LogWarning("Vehicle {VehicleId} ({VehicleName}) is not available for work order {WorkOrderId}. Current status: {Status}",
+                        vehicleId, vehicle.Name, workOrderId, statusName);
+                }
+            }
+
+            bool isValid = !unavailableVehicles.Any();
+
+            if (isValid)
+            {
+                _logger.LogInformation("All {Count} vehicle(s) are available for work order {WorkOrderId}",
+                    vehicleIds.Count, workOrderId);
+            }
+            else
+            {
+                _logger.LogWarning("{Count} vehicle(s) are unavailable for work order {WorkOrderId}",
+                    unavailableVehicles.Count, workOrderId);
+            }
+
+            return (isValid, unavailableVehicles);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error validating vehicle availability for work order {WorkOrderId}", workOrderId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Updates vehicle status to InUse when work order starts
+    /// </summary>
+    private async Task UpdateVehicleStatusOnWorkOrderStartAsync(Guid workOrderId)
+    {
+        try
+        {
+            // Get all schedules and expenses for this work order
+            var schedules = await _scheduleRepository.GetByWorkOrderIdAsync(workOrderId);
+            var expenses = await _expenseRepository.GetByWorkOrderIdAsync(workOrderId);
+
+            // Collect all vehicle IDs from schedules and expenses
+            var vehicleIds = new List<Guid>();
+
+            // From schedules
+            vehicleIds.AddRange(schedules
+                .Where(s => s.AssignedVehicleId.HasValue)
+                .Select(s => s.AssignedVehicleId!.Value));
+
+            // From expenses
+            vehicleIds.AddRange(expenses
+                .Where(e => e.VehicleId.HasValue)
+                .Select(e => e.VehicleId!.Value));
+
+            // Remove duplicates
+            vehicleIds = vehicleIds.Distinct().ToList();
+
+            if (!vehicleIds.Any())
+            {
+                _logger.LogInformation("No vehicles to update for work order {WorkOrderId}", workOrderId);
+                return;
+            }
+
+            _logger.LogInformation("Found {Count} vehicle(s) to update for work order {WorkOrderId}: {VehicleIds}",
+                vehicleIds.Count, workOrderId, string.Join(", ", vehicleIds));
+
+            // Update each vehicle status to InUse
+            int updatedCount = 0;
+            foreach (var vehicleId in vehicleIds)
+            {
+                var vehicle = await _assetRepository.GetByIdAsync(vehicleId);
+                if (vehicle == null)
+                {
+                    _logger.LogWarning("Vehicle {VehicleId} not found for work order {WorkOrderId}", vehicleId, workOrderId);
+                    continue;
+                }
+
+                _logger.LogInformation("Vehicle {VehicleId} ({VehicleName}) current status: {Status}",
+                    vehicleId, vehicle.Name, vehicle.Status);
+
+                if (vehicle.Status == ErpSystem.Core.Enums.AssetStatus.Active)
+                {
+                    vehicle.Status = ErpSystem.Core.Enums.AssetStatus.InUse;
+                    vehicle.UpdatedAt = DateTime.UtcNow;
+                    await _assetRepository.UpdateAsync(vehicle);
+                    updatedCount++;
+                    _logger.LogInformation("Vehicle {VehicleId} ({VehicleName}) status updated to InUse for work order {WorkOrderId}",
+                        vehicleId, vehicle.Name, workOrderId);
+                }
+                else
+                {
+                    _logger.LogWarning("Vehicle {VehicleId} ({VehicleName}) status is {Status}, expected Active. Skipping update.",
+                        vehicleId, vehicle.Name, vehicle.Status);
+                }
+            }
+
+            if (updatedCount > 0)
+            {
+                _logger.LogInformation("Saving changes for {Count} vehicle(s)...", updatedCount);
+                await _unitOfWork.SaveChangesAsync();
+                _logger.LogInformation("{Count} vehicle(s) marked as InUse for work order {WorkOrderId}",
+                    updatedCount, workOrderId);
+            }
+            else
+            {
+                _logger.LogWarning("No vehicles were updated for work order {WorkOrderId}", workOrderId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating vehicle status for work order {WorkOrderId}. Exception: {Message}",
+                workOrderId, ex.Message);
+            // Don't throw - this shouldn't block work order start
+        }
+    }
+
+    /// <summary>
+    /// Updates vehicle status back to Active when work order completes
+    /// </summary>
+    private async Task UpdateVehicleStatusOnWorkOrderCompleteAsync(Guid workOrderId)
+    {
+        try
+        {
+            _logger.LogInformation("Starting vehicle status release for work order {WorkOrderId}", workOrderId);
+
+            // Get all schedules and expenses for this work order
+            var schedules = await _scheduleRepository.GetByWorkOrderIdAsync(workOrderId);
+            var expenses = await _expenseRepository.GetByWorkOrderIdAsync(workOrderId);
+
+            _logger.LogInformation("Found {ScheduleCount} schedules and {ExpenseCount} expenses for work order {WorkOrderId}",
+                schedules.Count(), expenses.Count(), workOrderId);
+
+            // Collect all vehicle IDs from schedules and expenses
+            var vehicleIds = new List<Guid>();
+
+            // From schedules
+            var scheduleVehicles = schedules
+                .Where(s => s.AssignedVehicleId.HasValue)
+                .Select(s => s.AssignedVehicleId!.Value)
+                .ToList();
+            vehicleIds.AddRange(scheduleVehicles);
+            _logger.LogInformation("Found {Count} vehicles from schedules: {VehicleIds}",
+                scheduleVehicles.Count, string.Join(", ", scheduleVehicles));
+
+            // From expenses
+            var expenseVehicles = expenses
+                .Where(e => e.VehicleId.HasValue)
+                .Select(e => e.VehicleId!.Value)
+                .ToList();
+            vehicleIds.AddRange(expenseVehicles);
+            _logger.LogInformation("Found {Count} vehicles from expenses: {VehicleIds}",
+                expenseVehicles.Count, string.Join(", ", expenseVehicles));
+
+            // Remove duplicates
+            vehicleIds = vehicleIds.Distinct().ToList();
+
+            if (!vehicleIds.Any())
+            {
+                _logger.LogInformation("No vehicles to release for work order {WorkOrderId}", workOrderId);
+                return;
+            }
+
+            _logger.LogInformation("Found {Count} unique vehicle(s) to release for work order {WorkOrderId}: {VehicleIds}",
+                vehicleIds.Count, workOrderId, string.Join(", ", vehicleIds));
+
+            // Update each vehicle status back to Active
+            int releasedCount = 0;
+            foreach (var vehicleId in vehicleIds)
+            {
+                var vehicle = await _assetRepository.GetByIdAsync(vehicleId);
+                if (vehicle == null)
+                {
+                    _logger.LogWarning("Vehicle {VehicleId} not found for work order {WorkOrderId}", vehicleId, workOrderId);
+                    continue;
+                }
+
+                _logger.LogInformation("Vehicle {VehicleId} ({VehicleName}) current status: {Status}",
+                    vehicleId, vehicle.Name, vehicle.Status);
+
+                if (vehicle.Status == ErpSystem.Core.Enums.AssetStatus.InUse)
+                {
+                    vehicle.Status = ErpSystem.Core.Enums.AssetStatus.Active;
+                    vehicle.UpdatedAt = DateTime.UtcNow;
+                    await _assetRepository.UpdateAsync(vehicle);
+                    releasedCount++;
+                    _logger.LogInformation("Vehicle {VehicleId} ({VehicleName}) status updated to Active after work order {WorkOrderId} completion",
+                        vehicleId, vehicle.Name, workOrderId);
+                }
+                else
+                {
+                    _logger.LogWarning("Vehicle {VehicleId} ({VehicleName}) status is {Status}, expected InUse. Skipping release.",
+                        vehicleId, vehicle.Name, vehicle.Status);
+                }
+            }
+
+            if (releasedCount > 0)
+            {
+                _logger.LogInformation("Saving changes for {Count} vehicle(s)...", releasedCount);
+                await _unitOfWork.SaveChangesAsync();
+                _logger.LogInformation("{Count} vehicle(s) marked as Active after work order {WorkOrderId} completion",
+                    releasedCount, workOrderId);
+            }
+            else
+            {
+                _logger.LogWarning("No vehicles were released for work order {WorkOrderId}", workOrderId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error releasing vehicle status for work order {WorkOrderId}. Exception: {Message}",
+                workOrderId, ex.Message);
+            // Don't throw - this shouldn't block work order completion
+        }
+    }
+
     #endregion
 }
+

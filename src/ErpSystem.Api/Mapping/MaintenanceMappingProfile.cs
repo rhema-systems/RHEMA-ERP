@@ -1,9 +1,9 @@
 using AutoMapper;
-using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Api.Controllers.Maintenance;
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Maintenance;
-using ErpSystem.Api.Controllers.Maintenance;
 
 namespace ErpSystem.Api.Mapping;
 
@@ -228,7 +228,7 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.NotificationRules, opt => opt.MapFrom(src => "")) // Default value
             .ForMember(dest => dest.SlaHours, opt => opt.MapFrom(src => src.ResponseTimeHours)) // Use response time
             .ForMember(dest => dest.AutoAssign, opt => opt.MapFrom(src => false)); // Default value
-            
+
         CreateMap<CreatePriorityLevelDto, PriorityLevel>()
             .ForMember(dest => dest.Id, opt => opt.Ignore())
             .ForMember(dest => dest.TenantId, opt => opt.Ignore())
@@ -485,8 +485,8 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.WorkOrders, opt => opt.Ignore());
 
         CreateMap<TechnicianTeamMember, TechnicianTeamMemberDto>()
-            .ForMember(dest => dest.Team, opt => opt.MapFrom(src => src.Team))
-            .ForMember(dest => dest.Technician, opt => opt.MapFrom(src => src.Technician));
+            .ForMember(dest => dest.Team, opt => opt.MapFrom(src => src.Team));
+        // TechnicianId now references ApplicationUser (Users table) instead of Employee
 
         CreateMap<CreateTechnicianTeamMemberDto, TechnicianTeamMember>()
             .ForMember(dest => dest.Id, opt => opt.Ignore())
@@ -496,8 +496,7 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.UpdatedAt, opt => opt.Ignore())
             .ForMember(dest => dest.IsDeleted, opt => opt.Ignore())
             .ForMember(dest => dest.DeletedAt, opt => opt.Ignore())
-            .ForMember(dest => dest.Team, opt => opt.Ignore())
-            .ForMember(dest => dest.Technician, opt => opt.Ignore());
+            .ForMember(dest => dest.Team, opt => opt.Ignore());
 
         CreateMap<UpdateTechnicianTeamMemberDto, TechnicianTeamMember>()
             .ForMember(dest => dest.Id, opt => opt.Ignore())
@@ -509,8 +508,7 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.UpdatedAt, opt => opt.Ignore())
             .ForMember(dest => dest.IsDeleted, opt => opt.Ignore())
             .ForMember(dest => dest.DeletedAt, opt => opt.Ignore())
-            .ForMember(dest => dest.Team, opt => opt.Ignore())
-            .ForMember(dest => dest.Technician, opt => opt.Ignore());
+            .ForMember(dest => dest.Team, opt => opt.Ignore());
 
         CreateMap<TechnicianSkill, TechnicianSkillDto>()
             .ForMember(dest => dest.UserCount, opt => opt.MapFrom(src => src.UserSkills.Count));
@@ -582,7 +580,7 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.TenantId, opt => opt.Ignore())
             .ForMember(dest => dest.AssetId, opt => opt.Ignore())
             .ForMember(dest => dest.WorkOrderId, opt => opt.Ignore())
-            .ForMember(dest => dest.DowntimeHours, opt => opt.MapFrom((src, dest) => 
+            .ForMember(dest => dest.DowntimeHours, opt => opt.MapFrom((src, dest) =>
                 src.EndTime.HasValue ? (src.EndTime.Value - src.StartTime).TotalHours : dest.DowntimeHours))
             .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())
             .ForMember(dest => dest.UpdatedAt, opt => opt.Ignore())

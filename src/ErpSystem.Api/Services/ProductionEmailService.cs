@@ -75,11 +75,11 @@ public class ProductionEmailService : IEmailService
         {
             // Get email settings from database
             var emailSettings = await _settingsService.GetEmailSettingsAsync();
-            
+
             if (emailSettings == null)
             {
                 _logger.LogWarning("No email settings configured in database. Please configure SMTP settings first.");
-                
+
                 // Fallback to development logging in development environment
                 if (_environment.IsDevelopment())
                 {
@@ -91,12 +91,12 @@ public class ProductionEmailService : IEmailService
                     _logger.LogInformation("===============================");
                     return true;
                 }
-                
+
                 return false;
             }
 
             // Validate required settings
-            if (string.IsNullOrEmpty(emailSettings.SmtpHost) || 
+            if (string.IsNullOrEmpty(emailSettings.SmtpHost) ||
                 string.IsNullOrEmpty(emailSettings.FromAddress))
             {
                 _logger.LogWarning("Incomplete email settings configuration. SMTP host and from address are required.");
@@ -127,7 +127,7 @@ public class ProductionEmailService : IEmailService
 
             // Send email
             await smtpClient.SendMailAsync(mailMessage);
-            
+
             _logger.LogInformation("Successfully sent email to {Email} with subject '{Subject}'", to, subject);
             return true;
         }
@@ -143,7 +143,7 @@ public class ProductionEmailService : IEmailService
         }
     }
 
-    private string GeneratePasswordResetEmailBody(ApplicationUser user, string resetToken, string resetUrl)
+    private static string GeneratePasswordResetEmailBody(ApplicationUser user, string resetToken, string resetUrl)
     {
         return $@"
 <!DOCTYPE html>
@@ -190,7 +190,7 @@ public class ProductionEmailService : IEmailService
 </html>";
     }
 
-    private string GenerateWelcomeEmailBody(ApplicationUser user, string temporaryPassword)
+    private static string GenerateWelcomeEmailBody(ApplicationUser user, string temporaryPassword)
     {
         return $@"
 <!DOCTYPE html>
@@ -239,7 +239,7 @@ public class ProductionEmailService : IEmailService
 </html>";
     }
 
-    private string GenerateAccountLockedEmailBody(ApplicationUser user)
+    private static string GenerateAccountLockedEmailBody(ApplicationUser user)
     {
         return $@"
 <!DOCTYPE html>
@@ -282,4 +282,321 @@ public class ProductionEmailService : IEmailService
 </body>
 </html>";
     }
+
+    #region Business Partner Registration Emails
+
+    public async Task<bool> SendRegistrationSubmittedEmailAsync(string email, string companyName, string applicationNumber)
+    {
+        try
+        {
+            var subject = "Business Partner Registration Submitted - ERP System";
+            var body = GenerateRegistrationSubmittedEmailBody(companyName, applicationNumber);
+
+            return await SendEmailAsync(email, subject, body, true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send registration submitted email to {Email}", email);
+            return false;
+        }
+    }
+
+    public async Task<bool> SendRegistrationApprovedEmailAsync(string email, string companyName, string partnerNumber)
+    {
+        try
+        {
+            var subject = "Business Partner Registration Approved - ERP System";
+            var body = GenerateRegistrationApprovedEmailBody(companyName, partnerNumber);
+
+            return await SendEmailAsync(email, subject, body, true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send registration approved email to {Email}", email);
+            return false;
+        }
+    }
+
+    public async Task<bool> SendRegistrationRejectedEmailAsync(string email, string companyName, string reason)
+    {
+        try
+        {
+            var subject = "Business Partner Registration Update - ERP System";
+            var body = GenerateRegistrationRejectedEmailBody(companyName, reason);
+
+            return await SendEmailAsync(email, subject, body, true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send registration rejected email to {Email}", email);
+            return false;
+        }
+    }
+
+    public async Task<bool> SendDocumentVerificationRequestEmailAsync(string email, string companyName, string documentType)
+    {
+        try
+        {
+            var subject = "Document Verification Required - ERP System";
+            var body = GenerateDocumentVerificationRequestEmailBody(companyName, documentType);
+
+            return await SendEmailAsync(email, subject, body, true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send document verification request email to {Email}", email);
+            return false;
+        }
+    }
+
+    public async Task<bool> SendLicenseExpiryReminderEmailAsync(string email, string companyName, string licenseType, DateTime expiryDate, int daysUntilExpiry)
+    {
+        try
+        {
+            var subject = $"License Expiry Reminder - {daysUntilExpiry} Days Remaining";
+            var body = GenerateLicenseExpiryReminderEmailBody(companyName, licenseType, expiryDate, daysUntilExpiry);
+
+            return await SendEmailAsync(email, subject, body, true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send license expiry reminder email to {Email}", email);
+            return false;
+        }
+    }
+
+    private static string GenerateRegistrationSubmittedEmailBody(string companyName, string applicationNumber)
+    {
+        return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=""utf-8"">
+    <title>Registration Submitted</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background-color: #007bff; color: white; padding: 20px; text-align: center; }}
+        .content {{ padding: 20px; background-color: #f8f9fa; }}
+        .info-box {{ background-color: #e9ecef; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+        .footer {{ padding: 20px; text-align: center; color: #6c757d; font-size: 14px; }}
+    </style>
+</head>
+<body>
+    <div class=""container"">
+        <div class=""header"">
+            <h1>✓ Registration Submitted Successfully</h1>
+        </div>
+        <div class=""content"">
+            <h2>Dear {companyName},</h2>
+            <p>Thank you for submitting your business partner registration application with our ERP System.</p>
+            <div class=""info-box"">
+                <p><strong>Application Number:</strong> {applicationNumber}</p>
+                <p><strong>Submitted Date:</strong> {DateTime.UtcNow:MMMM dd, yyyy}</p>
+            </div>
+            <p><strong>What happens next?</strong></p>
+            <ul>
+                <li>Our team will review your application and supporting documents</li>
+                <li>We may contact you if additional information is required</li>
+                <li>You will receive an email notification once the review is complete</li>
+                <li>You can track your application status in the external portal</li>
+            </ul>
+            <p>The review process typically takes 3-5 business days.</p>
+            <p>If you have any questions, please contact our procurement team.</p>
+        </div>
+        <div class=""footer"">
+            <p>This is an automated message from ERP System. Please do not reply to this email.</p>
+        </div>
+    </div>
+</body>
+</html>";
+    }
+
+    private static string GenerateRegistrationApprovedEmailBody(string companyName, string partnerNumber)
+    {
+        return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=""utf-8"">
+    <title>Registration Approved</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background-color: #28a745; color: white; padding: 20px; text-align: center; }}
+        .content {{ padding: 20px; background-color: #f8f9fa; }}
+        .success-box {{ background-color: #d4edda; border: 1px solid #c3e6cb; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+        .footer {{ padding: 20px; text-align: center; color: #6c757d; font-size: 14px; }}
+    </style>
+</head>
+<body>
+    <div class=""container"">
+        <div class=""header"">
+            <h1>🎉 Registration Approved!</h1>
+        </div>
+        <div class=""content"">
+            <h2>Congratulations {companyName}!</h2>
+            <p>We are pleased to inform you that your business partner registration has been approved.</p>
+            <div class=""success-box"">
+                <p><strong>Partner Number:</strong> {partnerNumber}</p>
+                <p><strong>Status:</strong> Active</p>
+                <p><strong>Approval Date:</strong> {DateTime.UtcNow:MMMM dd, yyyy}</p>
+            </div>
+            <p><strong>Next Steps:</strong></p>
+            <ul>
+                <li>You can now access all business partner features in the external portal</li>
+                <li>Your partner number will be used for all future transactions</li>
+                <li>Please keep your company information and documents up to date</li>
+                <li>Review and comply with our business partner terms and conditions</li>
+            </ul>
+            <p>We look forward to a successful partnership!</p>
+        </div>
+        <div class=""footer"">
+            <p>This is an automated message from ERP System. Please do not reply to this email.</p>
+        </div>
+    </div>
+</body>
+</html>";
+    }
+
+    private static string GenerateRegistrationRejectedEmailBody(string companyName, string reason)
+    {
+        return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=""utf-8"">
+    <title>Registration Update</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background-color: #ffc107; color: #333; padding: 20px; text-align: center; }}
+        .content {{ padding: 20px; background-color: #f8f9fa; }}
+        .warning-box {{ background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+        .footer {{ padding: 20px; text-align: center; color: #6c757d; font-size: 14px; }}
+    </style>
+</head>
+<body>
+    <div class=""container"">
+        <div class=""header"">
+            <h1>Registration Update</h1>
+        </div>
+        <div class=""content"">
+            <h2>Dear {companyName},</h2>
+            <p>Thank you for your interest in becoming a business partner. After careful review, we regret to inform you that we are unable to approve your registration at this time.</p>
+            <div class=""warning-box"">
+                <p><strong>Reason:</strong></p>
+                <p>{reason}</p>
+            </div>
+            <p><strong>What you can do:</strong></p>
+            <ul>
+                <li>Review the reason provided above</li>
+                <li>Address any issues or concerns mentioned</li>
+                <li>You may submit a new application once the issues are resolved</li>
+                <li>Contact our procurement team if you need clarification</li>
+            </ul>
+            <p>We appreciate your understanding and hope to work with you in the future.</p>
+        </div>
+        <div class=""footer"">
+            <p>This is an automated message from ERP System. Please do not reply to this email.</p>
+        </div>
+    </div>
+</body>
+</html>";
+    }
+
+    private static string GenerateDocumentVerificationRequestEmailBody(string companyName, string documentType)
+    {
+        return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=""utf-8"">
+    <title>Document Verification Required</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background-color: #17a2b8; color: white; padding: 20px; text-align: center; }}
+        .content {{ padding: 20px; background-color: #f8f9fa; }}
+        .info-box {{ background-color: #d1ecf1; border: 1px solid #bee5eb; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+        .footer {{ padding: 20px; text-align: center; color: #6c757d; font-size: 14px; }}
+    </style>
+</head>
+<body>
+    <div class=""container"">
+        <div class=""header"">
+            <h1>📄 Document Verification Required</h1>
+        </div>
+        <div class=""content"">
+            <h2>Dear {companyName},</h2>
+            <p>As part of our business partner registration review process, we need additional verification for one of your submitted documents.</p>
+            <div class=""info-box"">
+                <p><strong>Document Type:</strong> {documentType}</p>
+                <p><strong>Action Required:</strong> Please review and update this document</p>
+            </div>
+            <p><strong>What you need to do:</strong></p>
+            <ul>
+                <li>Log in to the external portal</li>
+                <li>Navigate to your registration application</li>
+                <li>Review the document mentioned above</li>
+                <li>Upload a clearer copy or provide additional information if needed</li>
+            </ul>
+            <p>Please complete this verification within 5 business days to avoid delays in processing your application.</p>
+        </div>
+        <div class=""footer"">
+            <p>This is an automated message from ERP System. Please do not reply to this email.</p>
+        </div>
+    </div>
+</body>
+</html>";
+    }
+
+    private static string GenerateLicenseExpiryReminderEmailBody(string companyName, string licenseType, DateTime expiryDate, int daysUntilExpiry)
+    {
+        return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=""utf-8"">
+    <title>License Expiry Reminder</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background-color: #ff6b6b; color: white; padding: 20px; text-align: center; }}
+        .content {{ padding: 20px; background-color: #f8f9fa; }}
+        .alert-box {{ background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+        .footer {{ padding: 20px; text-align: center; color: #6c757d; font-size: 14px; }}
+    </style>
+</head>
+<body>
+    <div class=""container"">
+        <div class=""header"">
+            <h1>⚠️ License Expiry Reminder</h1>
+        </div>
+        <div class=""content"">
+            <h2>Dear {companyName},</h2>
+            <p>This is a reminder that one of your business licenses is approaching its expiry date.</p>
+            <div class=""alert-box"">
+                <p><strong>License Type:</strong> {licenseType}</p>
+                <p><strong>Expiry Date:</strong> {expiryDate:MMMM dd, yyyy}</p>
+                <p><strong>Days Remaining:</strong> {daysUntilExpiry} days</p>
+            </div>
+            <p><strong>Action Required:</strong></p>
+            <ul>
+                <li>Renew your {licenseType} before {expiryDate:MMMM dd, yyyy}</li>
+                <li>Upload the renewed license document to the external portal</li>
+                <li>Ensure all license information is up to date</li>
+            </ul>
+            <p><strong>Important:</strong> Failure to renew your license may result in suspension of your business partner status and affect ongoing transactions.</p>
+            <p>Please take action as soon as possible to avoid any disruption to our partnership.</p>
+        </div>
+        <div class=""footer"">
+            <p>This is an automated message from ERP System. Please do not reply to this email.</p>
+        </div>
+    </div>
+</body>
+</html>";
+    }
+
+    #endregion
 }

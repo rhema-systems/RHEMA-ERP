@@ -35,6 +35,12 @@ public static class Constants
         public const string LDAP = "LDAP";
         public const string Local = "Local";
     }
+
+    public static class Tenants
+    {
+        public static readonly Guid DefaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        public const string DefaultTenantCode = "DEFAULT";
+    }
 }
 
 public enum AuthenticationProvider

@@ -1,7 +1,7 @@
+using ErpSystem.Core.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using ErpSystem.Core.Entities;
 
 namespace ErpSystem.Core.Services;
 
@@ -94,7 +94,7 @@ public class UserService : IUserService
         {
             user.UpdatedAt = DateTime.UtcNow;
             var result = await _userManager.UpdateAsync(user);
-            
+
             if (!result.Succeeded)
             {
                 var errors = string.Join(", ", result.Errors.Select(e => e.Description));
@@ -147,7 +147,7 @@ public class UserService : IUserService
     public async Task<IdentityResult> AddToRolesAsync(ApplicationUser user, IEnumerable<string> roles)
     {
         var validRoles = new List<string>();
-        
+
         foreach (var role in roles)
         {
             if (await _roleManager.RoleExistsAsync(role))
@@ -184,7 +184,7 @@ public class UserService : IUserService
     public async Task<IdentityResult> UpdateUserRolesAsync(ApplicationUser user, IEnumerable<string> newRoles)
     {
         var currentRoles = await GetUserRolesAsync(user);
-        
+
         // Remove roles that are no longer needed
         var rolesToRemove = currentRoles.Except(newRoles);
         var removeResult = await RemoveFromRolesAsync(user, rolesToRemove);
@@ -196,7 +196,7 @@ public class UserService : IUserService
         // Add new roles
         var rolesToAdd = newRoles.Except(currentRoles);
         var addResult = await AddToRolesAsync(user, rolesToAdd);
-        
+
         return addResult;
     }
 

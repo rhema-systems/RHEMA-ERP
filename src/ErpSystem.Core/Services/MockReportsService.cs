@@ -56,13 +56,19 @@ namespace ErpSystem.Core.Services
 
             // Apply filters
             if (!string.IsNullOrEmpty(type))
+            {
                 reports = reports.Where(r => r.Type.Equals(type, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
 
             if (!string.IsNullOrEmpty(status))
+            {
                 reports = reports.Where(r => r.Status.Equals(status, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
 
             if (favoriteOnly == true)
+            {
                 reports = reports.Where(r => r.IsFavorite).ToList();
+            }
 
             return reports;
         }
@@ -249,7 +255,9 @@ namespace ErpSystem.Core.Services
             };
 
             if (!string.IsNullOrEmpty(category))
+            {
                 templates = templates.Where(t => t.Category.Equals(category, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
 
             return templates;
         }

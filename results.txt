@@ -1,0 +1,2 @@
+Msg 207, Level 16, State 1, Server RHEMA-MICHAEL\SQL2017, Line 6
+Invalid column name 'FullName'.

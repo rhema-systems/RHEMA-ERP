@@ -1,8 +1,8 @@
-using Microsoft.EntityFrameworkCore;
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces.Procurement;
-using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Data.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.Procurement;
 
@@ -25,8 +25,10 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
     public async Task<IEnumerable<PurchaseOrder>> GetOrdersByStatusAsync(string status)
     {
         if (string.IsNullOrWhiteSpace(status))
+        {
             return new List<PurchaseOrder>();
-            
+        }
+
         return await _dbSet
             .Where(po => po.Status == status && !po.IsDeleted)
             .Include(po => po.Supplier)
@@ -38,8 +40,10 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
     public async Task<IEnumerable<PurchaseOrder>> GetOrdersBySupplierAsync(Guid supplierId)
     {
         if (supplierId == Guid.Empty)
+        {
             return new List<PurchaseOrder>();
-            
+        }
+
         return await _dbSet
             .Where(po => po.SupplierId == supplierId && !po.IsDeleted)
             .Include(po => po.Supplier)
@@ -51,8 +55,10 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
     public async Task<PurchaseOrder?> GetByOrderNumberAsync(string orderNumber)
     {
         if (string.IsNullOrWhiteSpace(orderNumber))
+        {
             return null;
-            
+        }
+
         return await _dbSet
             .Where(po => po.OrderNumber == orderNumber && !po.IsDeleted)
             .Include(po => po.Supplier)
@@ -66,8 +72,10 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
     public async Task<PurchaseOrder?> GetWithItemsAsync(Guid purchaseOrderId)
     {
         if (purchaseOrderId == Guid.Empty)
+        {
             return null;
-            
+        }
+
         return await _dbSet
             .Where(po => po.Id == purchaseOrderId && !po.IsDeleted)
             .Include(po => po.Supplier)
@@ -109,8 +117,10 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
     public async Task<IEnumerable<PurchaseOrder>> GetOrdersByDateRangeAsync(DateTime startDate, DateTime endDate)
     {
         if (startDate >= endDate)
+        {
             return new List<PurchaseOrder>();
-            
+        }
+
         return await _dbSet
             .Where(po => !po.IsDeleted &&
                         po.OrderDate >= startDate &&
@@ -125,41 +135,47 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
     {
         var currentYear = DateTime.UtcNow.Year;
         var yearPrefix = currentYear.ToString().Substring(2); // Last 2 digits of year
-        
+
         // Get all purchase orders for the current year to find max sequence
         var ordersInYear = await _dbSet
             .Where(po => po.OrderNumber.StartsWith($"PO{yearPrefix}") && !po.IsDeleted)
             .Select(po => po.OrderNumber)
             .ToListAsync();
-            
+
         int nextSequence = 1;
         if (ordersInYear.Any())
         {
             // Parse all sequence numbers and find the maximum
             var maxSequence = ordersInYear
-                .Select(on => {
+                .Select(on =>
+                {
                     var sequencePart = on.Substring(4); // Remove "PO" + year prefix
                     if (int.TryParse(sequencePart, out int seq))
+                    {
                         return seq;
+                    }
+
                     return 0;
                 })
                 .Max();
-            
+
             nextSequence = maxSequence + 1;
         }
-        
+
         return $"PO{yearPrefix}{nextSequence:D4}"; // Format as PO24NNNN
     }
 
     public async Task<decimal> GetTotalOrderValueBySupplierAsync(Guid supplierId, DateTime startDate, DateTime endDate)
     {
         if (supplierId == Guid.Empty)
+        {
             return 0;
-            
+        }
+
         return await _dbSet
-            .Where(po => po.SupplierId == supplierId && 
+            .Where(po => po.SupplierId == supplierId &&
                         !po.IsDeleted &&
-                        po.OrderDate >= startDate && 
+                        po.OrderDate >= startDate &&
                         po.OrderDate <= endDate)
             .SumAsync(po => po.TotalAmount);
     }
@@ -167,7 +183,7 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
     public async Task<IEnumerable<PurchaseOrder>> GetOrdersRequiringApprovalAsync()
     {
         return await _dbSet
-            .Where(po => po.Status == "Draft" && 
+            .Where(po => po.Status == "Draft" &&
                         !po.IsDeleted &&
                         po.TotalAmount > 1000) // Orders over $1000 need approval
             .Include(po => po.Supplier)
@@ -176,7 +192,7 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
             .OrderByDescending(po => po.OrderDate)
             .ToListAsync();
     }
-    
+
     /// <summary>
     /// Gets purchase orders by priority (based on required date)
     /// </summary>
@@ -192,7 +208,7 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
             .ThenByDescending(po => po.TotalAmount)
             .ToListAsync();
     }
-    
+
     public async Task<ErpSystem.Core.DTOs.Common.PagedResult<PurchaseOrder>> GetPurchaseOrdersAsync(int page, int pageSize, string? search = null, string? status = null, Guid? supplierId = null, DateTime? startDate = null, DateTime? endDate = null)
     {
         var query = _dbSet.Where(po => !po.IsDeleted)
@@ -200,43 +216,43 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
             .Include(po => po.Items)
             .Include(po => po.RequestedBy)
             .AsQueryable();
-            
+
         // Apply filters
         if (!string.IsNullOrWhiteSpace(search))
         {
             search = search.ToLower();
-            query = query.Where(po => po.OrderNumber.ToLower().Contains(search) ||
-                                    (po.Supplier != null && po.Supplier.Name.ToLower().Contains(search)));
+            query = query.Where(po => po.OrderNumber.Contains(search, StringComparison.CurrentCultureIgnoreCase) ||
+                                    (po.Supplier != null && po.Supplier.Name.Contains(search, StringComparison.CurrentCultureIgnoreCase)));
         }
-        
+
         if (!string.IsNullOrWhiteSpace(status))
         {
             query = query.Where(po => po.Status == status);
         }
-        
+
         if (supplierId.HasValue && supplierId.Value != Guid.Empty)
         {
             query = query.Where(po => po.SupplierId == supplierId.Value);
         }
-        
+
         if (startDate.HasValue)
         {
             query = query.Where(po => po.OrderDate >= startDate.Value);
         }
-        
+
         if (endDate.HasValue)
         {
             query = query.Where(po => po.OrderDate <= endDate.Value);
         }
-        
+
         var totalCount = await query.CountAsync();
-        
+
         var items = await query
             .OrderByDescending(po => po.OrderDate)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync();
-            
+
         return new ErpSystem.Core.DTOs.Common.PagedResult<PurchaseOrder>
         {
             Items = items,
@@ -245,12 +261,14 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
             PageSize = pageSize
         };
     }
-    
+
     public async Task<PurchaseOrder?> GetPurchaseOrderByIdAsync(Guid id)
     {
         if (id == Guid.Empty)
+        {
             return null;
-            
+        }
+
         return await _dbSet
             .Where(po => po.Id == id && !po.IsDeleted)
             .Include(po => po.Supplier)
@@ -261,18 +279,18 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
             .Include(po => po.ApprovedBy)
             .FirstOrDefaultAsync();
     }
-    
+
     public async Task<PurchaseOrder> CreatePurchaseOrderAsync(PurchaseOrder purchaseOrder)
     {
         return await AddAsync(purchaseOrder);
     }
-    
+
     public async Task<PurchaseOrder> UpdatePurchaseOrderAsync(PurchaseOrder purchaseOrder)
     {
         await UpdateAsync(purchaseOrder);
         return purchaseOrder;
     }
-    
+
     public async Task UpdateStatusAsync(Guid purchaseOrderId, string status)
     {
         var purchaseOrder = await GetByIdAsync(purchaseOrderId);
@@ -282,12 +300,12 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
             await UpdateAsync(purchaseOrder);
         }
     }
-    
+
     public async Task<IEnumerable<PurchaseOrder>> GetPurchaseOrdersBySupplierId(Guid supplierId)
     {
         return await GetOrdersBySupplierAsync(supplierId);
     }
-    
+
     public async Task<IEnumerable<PurchaseOrder>> GetPurchaseOrdersByStatus(string status)
     {
         return await GetOrdersByStatusAsync(status);
@@ -301,8 +319,10 @@ public class PurchaseOrderItemRepository : GenericRepository<PurchaseOrderItem>,
     public async Task<IEnumerable<PurchaseOrderItem>> GetItemsByOrderAsync(Guid purchaseOrderId)
     {
         if (purchaseOrderId == Guid.Empty)
+        {
             return new List<PurchaseOrderItem>();
-            
+        }
+
         return await _dbSet
             .Where(poi => poi.PurchaseOrderId == purchaseOrderId && !poi.IsDeleted)
             .Include(poi => poi.PurchaseOrder)
@@ -327,8 +347,10 @@ public class PurchaseOrderItemRepository : GenericRepository<PurchaseOrderItem>,
     public async Task<IEnumerable<PurchaseOrderItem>> GetItemsByInventoryItemAsync(Guid inventoryItemId)
     {
         if (inventoryItemId == Guid.Empty)
+        {
             return new List<PurchaseOrderItem>();
-            
+        }
+
         return await _dbSet
             .Where(poi => poi.InventoryItemId == inventoryItemId && !poi.IsDeleted)
             .Include(poi => poi.PurchaseOrder)
@@ -340,8 +362,10 @@ public class PurchaseOrderItemRepository : GenericRepository<PurchaseOrderItem>,
     public async Task<IEnumerable<PurchaseOrderItem>> GetItemsBySupplierAsync(Guid supplierId)
     {
         if (supplierId == Guid.Empty)
+        {
             return new List<PurchaseOrderItem>();
-            
+        }
+
         return await _dbSet
             .Where(poi => poi.PurchaseOrder.SupplierId == supplierId && !poi.IsDeleted)
             .Include(poi => poi.PurchaseOrder)
@@ -362,28 +386,30 @@ public class PurchaseOrderItemRepository : GenericRepository<PurchaseOrderItem>,
             .OrderBy(poi => poi.ExpectedDeliveryDate)
             .ToListAsync();
     }
-    
+
     public async Task<IEnumerable<PurchaseOrderItem>> GetItemsByPurchaseOrderIdAsync(Guid purchaseOrderId)
     {
         return await GetItemsByOrderAsync(purchaseOrderId);
     }
-    
+
     public async Task<PurchaseOrderItem> CreateItemAsync(PurchaseOrderItem item)
     {
         return await AddAsync(item);
     }
-    
+
     public async Task<PurchaseOrderItem> UpdateItemAsync(PurchaseOrderItem item)
     {
         await UpdateAsync(item);
         return item;
     }
-    
+
     public async Task<PurchaseOrderItem?> GetItemByIdAsync(Guid itemId)
     {
         if (itemId == Guid.Empty)
+        {
             return null;
-            
+        }
+
         return await _dbSet
             .Where(poi => poi.Id == itemId && !poi.IsDeleted)
             .Include(poi => poi.PurchaseOrder)
@@ -398,8 +424,10 @@ public class PurchaseOrderReceiptRepository : GenericRepository<PurchaseOrderRec
     public async Task<IEnumerable<PurchaseOrderReceipt>> GetReceiptsByOrderAsync(Guid purchaseOrderId)
     {
         if (purchaseOrderId == Guid.Empty)
+        {
             return new List<PurchaseOrderReceipt>();
-            
+        }
+
         return await _dbSet
             .Where(por => por.PurchaseOrderId == purchaseOrderId && !por.IsDeleted)
             .Include(por => por.PurchaseOrder)
@@ -414,8 +442,10 @@ public class PurchaseOrderReceiptRepository : GenericRepository<PurchaseOrderRec
     public async Task<IEnumerable<PurchaseOrderReceipt>> GetReceiptsByDateRangeAsync(DateTime startDate, DateTime endDate)
     {
         if (startDate >= endDate)
+        {
             return new List<PurchaseOrderReceipt>();
-            
+        }
+
         return await _dbSet
             .Where(por => !por.IsDeleted &&
                          por.ReceiptDate >= startDate &&
@@ -430,8 +460,10 @@ public class PurchaseOrderReceiptRepository : GenericRepository<PurchaseOrderRec
     public async Task<PurchaseOrderReceipt?> GetByReceiptNumberAsync(string receiptNumber)
     {
         if (string.IsNullOrWhiteSpace(receiptNumber))
+        {
             return null;
-            
+        }
+
         return await _dbSet
             .Where(por => por.ReceiptNumber == receiptNumber && !por.IsDeleted)
             .Include(por => por.PurchaseOrder)
@@ -445,8 +477,10 @@ public class PurchaseOrderReceiptRepository : GenericRepository<PurchaseOrderRec
     public async Task<PurchaseOrderReceipt?> GetReceiptWithItemsAsync(Guid receiptId)
     {
         if (receiptId == Guid.Empty)
+        {
             return null;
-            
+        }
+
         return await _dbSet
             .Where(por => por.Id == receiptId && !por.IsDeleted)
             .Include(por => por.PurchaseOrder)
@@ -461,8 +495,10 @@ public class PurchaseOrderReceiptRepository : GenericRepository<PurchaseOrderRec
     public async Task<IEnumerable<PurchaseOrderReceipt>> GetReceiptsByStatusAsync(string status)
     {
         if (string.IsNullOrWhiteSpace(status))
+        {
             return new List<PurchaseOrderReceipt>();
-            
+        }
+
         return await _dbSet
             .Where(por => por.Status == status && !por.IsDeleted)
             .Include(por => por.PurchaseOrder)
@@ -475,8 +511,8 @@ public class PurchaseOrderReceiptRepository : GenericRepository<PurchaseOrderRec
     public async Task<IEnumerable<PurchaseOrderReceipt>> GetReceiptsRequiringInspectionAsync()
     {
         return await _dbSet
-            .Where(por => por.RequiresInspection && 
-                         por.Status == "Received" && 
+            .Where(por => por.RequiresInspection &&
+                         por.Status == "Received" &&
                          !por.IsDeleted)
             .Include(por => por.PurchaseOrder)
                 .ThenInclude(po => po.Supplier)
@@ -489,42 +525,46 @@ public class PurchaseOrderReceiptRepository : GenericRepository<PurchaseOrderRec
     {
         var currentYear = DateTime.UtcNow.Year;
         var yearPrefix = currentYear.ToString().Substring(2); // Last 2 digits of year
-        
+
         // Get all receipts for the current year to find max sequence
         var receiptsInYear = await _dbSet
             .Where(por => por.ReceiptNumber.StartsWith($"REC{yearPrefix}") && !por.IsDeleted)
             .Select(por => por.ReceiptNumber)
             .ToListAsync();
-            
+
         int nextSequence = 1;
         if (receiptsInYear.Any())
         {
             // Parse all sequence numbers and find the maximum
             var maxSequence = receiptsInYear
-                .Select(rn => {
+                .Select(rn =>
+                {
                     var sequencePart = rn.Substring(5); // Remove "REC" + year prefix
                     if (int.TryParse(sequencePart, out int seq))
+                    {
                         return seq;
+                    }
+
                     return 0;
                 })
                 .Max();
-            
+
             nextSequence = maxSequence + 1;
         }
-        
+
         return $"REC{yearPrefix}{nextSequence:D4}"; // Format as REC24NNNN
     }
-    
+
     public async Task<IEnumerable<PurchaseOrderReceipt>> GetReceiptsByPurchaseOrderIdAsync(Guid purchaseOrderId)
     {
         return await GetReceiptsByOrderAsync(purchaseOrderId);
     }
-    
+
     public async Task<PurchaseOrderReceipt> CreateReceiptAsync(PurchaseOrderReceipt receipt)
     {
         return await AddAsync(receipt);
     }
-    
+
     public async Task<PurchaseOrderReceiptItem> CreateReceiptItemAsync(PurchaseOrderReceiptItem receiptItem)
     {
         var result = await _context.Set<PurchaseOrderReceiptItem>().AddAsync(receiptItem);
@@ -539,8 +579,10 @@ public class PurchaseOrderReceiptItemRepository : GenericRepository<PurchaseOrde
     public async Task<IEnumerable<PurchaseOrderReceiptItem>> GetItemsByReceiptAsync(Guid receiptId)
     {
         if (receiptId == Guid.Empty)
+        {
             return new List<PurchaseOrderReceiptItem>();
-            
+        }
+
         return await _dbSet
             .Where(pori => pori.ReceiptId == receiptId && !pori.IsDeleted)
             .Include(pori => pori.Receipt)
@@ -552,8 +594,10 @@ public class PurchaseOrderReceiptItemRepository : GenericRepository<PurchaseOrde
     public async Task<IEnumerable<PurchaseOrderReceiptItem>> GetItemsByOrderItemAsync(Guid purchaseOrderItemId)
     {
         if (purchaseOrderItemId == Guid.Empty)
+        {
             return new List<PurchaseOrderReceiptItem>();
-            
+        }
+
         return await _dbSet
             .Where(pori => pori.PurchaseOrderItemId == purchaseOrderItemId && !pori.IsDeleted)
             .Include(pori => pori.Receipt)
@@ -577,8 +621,10 @@ public class PurchaseOrderReceiptItemRepository : GenericRepository<PurchaseOrde
     public async Task<IEnumerable<PurchaseOrderReceiptItem>> GetItemsByQualityStatusAsync(string qualityStatus)
     {
         if (string.IsNullOrWhiteSpace(qualityStatus))
+        {
             return new List<PurchaseOrderReceiptItem>();
-            
+        }
+
         return await _dbSet
             .Where(pori => pori.QualityStatus == qualityStatus && !pori.IsDeleted)
             .Include(pori => pori.Receipt)

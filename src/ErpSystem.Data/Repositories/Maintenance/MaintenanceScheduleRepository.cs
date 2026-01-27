@@ -1,6 +1,6 @@
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.Maintenance;
 
@@ -94,11 +94,11 @@ public class MaintenanceScheduleRepository : GenericRepository<MaintenanceSchedu
     {
         var startDate = DateTime.UtcNow.Date;
         var endDate = startDate.AddDays(daysAhead);
-        
+
         return await _context.MaintenanceSchedules
-            .Where(ms => ms.IsActive && 
-                        ms.NextDueDate >= startDate && 
-                        ms.NextDueDate <= endDate && 
+            .Where(ms => ms.IsActive &&
+                        ms.NextDueDate >= startDate &&
+                        ms.NextDueDate <= endDate &&
                         !ms.IsDeleted)
             .Include(ms => ms.Asset)
             .Include(ms => ms.MaintenanceType)
@@ -136,8 +136,8 @@ public class MaintenanceScheduleRepository : GenericRepository<MaintenanceSchedu
     public async Task<bool> IsScheduleUniqueAsync(Guid assetId, Guid maintenanceTypeId, Guid? excludeId = null)
     {
         var query = _context.MaintenanceSchedules
-            .Where(ms => ms.AssetId == assetId && 
-                        ms.MaintenanceTypeId == maintenanceTypeId && 
+            .Where(ms => ms.AssetId == assetId &&
+                        ms.MaintenanceTypeId == maintenanceTypeId &&
                         !ms.IsDeleted);
 
         if (excludeId.HasValue)
@@ -176,9 +176,9 @@ public class MaintenanceScheduleRepository : GenericRepository<MaintenanceSchedu
     public async Task<IEnumerable<MaintenanceSchedule>> GetSchedulesRequiringProcessingAsync()
     {
         var cutoffDate = DateTime.UtcNow.AddHours(-1); // Don't process same schedule multiple times within an hour
-        
+
         return await _context.MaintenanceSchedules
-            .Where(ms => ms.IsActive && 
+            .Where(ms => ms.IsActive &&
                         ms.NextDueDate <= DateTime.UtcNow.AddDays(1) && // Due within next day
                         (ms.LastProcessedDate == null || ms.LastProcessedDate < cutoffDate) &&
                         !ms.IsDeleted)
@@ -204,8 +204,8 @@ public class MaintenanceScheduleRepository : GenericRepository<MaintenanceSchedu
     public async Task<IEnumerable<MaintenanceSchedule>> GetComplianceReportDataAsync(DateTime startDate, DateTime endDate)
     {
         return await _context.MaintenanceSchedules
-            .Where(ms => ms.CreatedAt >= startDate && 
-                        ms.CreatedAt <= endDate && 
+            .Where(ms => ms.CreatedAt >= startDate &&
+                        ms.CreatedAt <= endDate &&
                         !ms.IsDeleted)
             .Include(ms => ms.Asset)
             .Include(ms => ms.MaintenanceType)
@@ -229,14 +229,14 @@ public class MaintenanceScheduleRepository : GenericRepository<MaintenanceSchedu
             .GroupBy(ms => ms.IsActive ? "Active" : "Inactive")
             .ToDictionaryAsync(g => g.Key, g => g.Count());
     }
-    
+
     public async Task<IEnumerable<MaintenanceSchedule>> GetSchedulesDueForGenerationAsync()
     {
         var today = DateTime.UtcNow.Date;
         return await _context.MaintenanceSchedules
             .Where(ms => ms.IsActive && !ms.IsDeleted &&
                         ms.NextDueDate <= today &&
-                        (ms.LastGeneratedDate == null || 
+                        (ms.LastGeneratedDate == null ||
                          ms.LastGeneratedDate < ms.NextDueDate))
             .Include(ms => ms.Asset)
             .Include(ms => ms.MaintenanceType)
@@ -246,7 +246,7 @@ public class MaintenanceScheduleRepository : GenericRepository<MaintenanceSchedu
             .OrderBy(ms => ms.NextDueDate)
             .ToListAsync();
     }
-    
+
     public async Task<IEnumerable<MaintenanceSchedule>> GetByFrequencyAsync(string frequency)
     {
         return await _context.MaintenanceSchedules
@@ -259,7 +259,7 @@ public class MaintenanceScheduleRepository : GenericRepository<MaintenanceSchedu
             .OrderBy(ms => ms.NextDueDate)
             .ToListAsync();
     }
-    
+
     public async Task<IEnumerable<MaintenanceSchedule>> GetByMaintenanceTypeAsync(Guid maintenanceTypeId)
     {
         return await _context.MaintenanceSchedules
@@ -272,7 +272,7 @@ public class MaintenanceScheduleRepository : GenericRepository<MaintenanceSchedu
             .OrderBy(ms => ms.NextDueDate)
             .ToListAsync();
     }
-    
+
     public async Task<IEnumerable<MaintenanceSchedule>> GetSchedulesDueInDaysAsync(int days)
     {
         var targetDate = DateTime.UtcNow.Date.AddDays(days);
@@ -287,7 +287,7 @@ public class MaintenanceScheduleRepository : GenericRepository<MaintenanceSchedu
             .OrderBy(ms => ms.NextDueDate)
             .ToListAsync();
     }
-    
+
     public async Task UpdateNextDueDateAsync(Guid scheduleId, DateTime nextDueDate)
     {
         var schedule = await GetByIdAsync(scheduleId);
@@ -298,13 +298,103 @@ public class MaintenanceScheduleRepository : GenericRepository<MaintenanceSchedu
             await UpdateAsync(schedule);
         }
     }
-    
+
     public async Task UpdateLastGeneratedDateAsync(Guid scheduleId, DateTime lastGeneratedDate)
     {
         var schedule = await GetByIdAsync(scheduleId);
         if (schedule != null)
         {
             schedule.LastGeneratedDate = lastGeneratedDate;
+            schedule.UpdatedAt = DateTime.UtcNow;
+            await UpdateAsync(schedule);
+        }
+    }
+
+    public async Task<IEnumerable<MaintenanceSchedule>> GetSchedulesDueForRemindersAsync(int advanceDays)
+    {
+        var today = DateTime.UtcNow.Date;
+        var reminderDate = today.AddDays(advanceDays);
+
+        return await _context.MaintenanceSchedules
+            .Where(ms => ms.IsActive && !ms.IsDeleted &&
+                        ms.AdvanceNotificationDays.HasValue &&
+                        ms.NextDueDate.Date == reminderDate &&
+                        (ms.LastReminderSentDate == null ||
+                         ms.LastReminderSentDate.Value.Date < today) && // Don't send multiple reminders on same day
+                        !string.IsNullOrEmpty(ms.NotificationRecipients))
+            .Include(ms => ms.Asset)
+            .Include(ms => ms.MaintenanceType)
+            .Include(ms => ms.DefaultTechnician)
+            .Include(ms => ms.DefaultTeam)
+            .Include(ms => ms.PriorityLevel)
+            .OrderBy(ms => ms.NextDueDate)
+            .ToListAsync();
+    }
+
+    public async Task UpdateLastReminderSentDateAsync(Guid scheduleId, DateTime date)
+    {
+        var schedule = await GetByIdAsync(scheduleId);
+        if (schedule != null)
+        {
+            schedule.LastReminderSentDate = date;
+            schedule.UpdatedAt = DateTime.UtcNow;
+            await UpdateAsync(schedule);
+        }
+    }
+
+    public async Task<IEnumerable<MaintenanceSchedule>> GetSchedulesByUsageTriggersAsync()
+    {
+        return await _context.MaintenanceSchedules
+            .Where(ms => ms.IsActive && !ms.IsDeleted &&
+                        (ms.PrimaryTriggerType == "Usage" ||
+                         ms.PrimaryTriggerType == "Combined" ||
+                         ms.SecondaryTriggerType == "Usage") &&
+                        (ms.MileageTrigger.HasValue ||
+                         ms.OperatingHoursTrigger.HasValue ||
+                         ms.CycleTrigger.HasValue))
+            .Include(ms => ms.Asset)
+            .Include(ms => ms.MaintenanceType)
+            .Include(ms => ms.DefaultTechnician)
+            .Include(ms => ms.DefaultTeam)
+            .Include(ms => ms.PriorityLevel)
+            .OrderBy(ms => ms.NextDueDate)
+            .ToListAsync();
+    }
+
+    public async Task UpdateLastUsageCheckDateAsync(Guid scheduleId, DateTime date)
+    {
+        var schedule = await GetByIdAsync(scheduleId);
+        if (schedule != null)
+        {
+            schedule.LastUsageCheckDate = date;
+            schedule.UpdatedAt = DateTime.UtcNow;
+            await UpdateAsync(schedule);
+        }
+    }
+
+    public async Task<IEnumerable<MaintenanceSchedule>> GetSchedulesByConditionTriggersAsync()
+    {
+        return await _context.MaintenanceSchedules
+            .Where(ms => ms.IsActive && !ms.IsDeleted &&
+                        (ms.PrimaryTriggerType == "Condition" ||
+                         ms.PrimaryTriggerType == "Combined" ||
+                         ms.SecondaryTriggerType == "Condition") &&
+                        !string.IsNullOrEmpty(ms.ConditionCriteria))
+            .Include(ms => ms.Asset)
+            .Include(ms => ms.MaintenanceType)
+            .Include(ms => ms.DefaultTechnician)
+            .Include(ms => ms.DefaultTeam)
+            .Include(ms => ms.PriorityLevel)
+            .OrderBy(ms => ms.NextDueDate)
+            .ToListAsync();
+    }
+
+    public async Task UpdateLastConditionCheckDateAsync(Guid scheduleId, DateTime date)
+    {
+        var schedule = await GetByIdAsync(scheduleId);
+        if (schedule != null)
+        {
+            schedule.LastConditionCheckDate = date;
             schedule.UpdatedAt = DateTime.UtcNow;
             await UpdateAsync(schedule);
         }

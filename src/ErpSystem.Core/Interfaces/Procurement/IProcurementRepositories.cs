@@ -1,6 +1,6 @@
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
-using ErpSystem.Core.DTOs.Common;
 
 namespace ErpSystem.Core.Interfaces.Procurement;
 
@@ -174,6 +174,81 @@ public interface IPurchaseRequisitionItemRepository : IGenericRepository<Purchas
     Task<IEnumerable<PurchaseRequisitionItem>> GetApprovedItemsNotOrderedAsync();
     Task<IEnumerable<PurchaseRequisitionItem>> GetItemsByRequisitionIdAsync(Guid requisitionId);
     Task<PurchaseRequisitionItem> CreateItemAsync(PurchaseRequisitionItem item);
+}
+
+#endregion
+
+#region Performance Tracking Repositories
+
+/// <summary>
+/// Repository interface for supplier performance metrics
+/// </summary>
+public interface ISupplierPerformanceMetricRepository : IGenericRepository<SupplierPerformanceMetric>
+{
+    Task<SupplierPerformanceMetric?> GetByBusinessPartnerAndPeriodAsync(Guid businessPartnerId, string metricPeriod, int year, int? month, int? quarter);
+    Task<IEnumerable<SupplierPerformanceMetric>> GetByBusinessPartnerAsync(Guid businessPartnerId);
+    Task<IEnumerable<SupplierPerformanceMetric>> GetByPeriodAsync(string metricPeriod, int year, int? month = null, int? quarter = null);
+    Task<IEnumerable<SupplierPerformanceMetric>> GetTrendsAsync(Guid businessPartnerId, int numberOfPeriods);
+    Task<string> GenerateMetricNumberAsync();
+}
+
+/// <summary>
+/// Repository interface for quality incidents
+/// </summary>
+public interface IQualityIncidentRepository : IGenericRepository<QualityIncident>
+{
+    Task<IEnumerable<QualityIncident>> GetByBusinessPartnerAsync(Guid businessPartnerId);
+    Task<IEnumerable<QualityIncident>> GetByStatusAsync(string status);
+    Task<IEnumerable<QualityIncident>> GetBySeverityAsync(string severity);
+    Task<IEnumerable<QualityIncident>> GetOpenIncidentsAsync();
+    Task<IEnumerable<QualityIncident>> GetRecentIncidentsAsync(Guid businessPartnerId, int days = 90);
+    Task<QualityIncident?> GetByIncidentNumberAsync(string incidentNumber);
+    Task<string> GenerateIncidentNumberAsync();
+    Task<int> GetOpenIncidentCountAsync(Guid businessPartnerId);
+}
+
+/// <summary>
+/// Repository interface for performance reviews
+/// </summary>
+public interface IPerformanceReviewRepository : IGenericRepository<PerformanceReview>
+{
+    Task<IEnumerable<PerformanceReview>> GetByBusinessPartnerAsync(Guid businessPartnerId);
+    Task<PerformanceReview?> GetLatestReviewAsync(Guid businessPartnerId);
+    Task<IEnumerable<PerformanceReview>> GetByPeriodAsync(string reviewPeriod);
+    Task<IEnumerable<PerformanceReview>> GetByStatusAsync(string status);
+    Task<PerformanceReview?> GetByReviewNumberAsync(string reviewNumber);
+    Task<string> GenerateReviewNumberAsync();
+}
+
+#endregion
+
+#region Blacklist Appeal Repositories
+
+/// <summary>
+/// Repository interface for blacklist appeals
+/// </summary>
+public interface IBlacklistAppealRepository : IGenericRepository<BlacklistAppeal>
+{
+    Task<BlacklistAppeal?> GetByIdAsync(Guid id);
+    Task<BlacklistAppeal?> GetByAppealNumberAsync(string appealNumber);
+    Task<IEnumerable<BlacklistAppeal>> GetByBusinessPartnerAsync(Guid businessPartnerId);
+    Task<IEnumerable<BlacklistAppeal>> GetByStatusAsync(string status);
+    Task<IEnumerable<BlacklistAppeal>> GetPendingAppealsAsync();
+    Task<string> GenerateAppealNumberAsync();
+    Task<BlacklistAppeal> CreateAsync(BlacklistAppeal appeal);
+    Task<BlacklistAppeal> UpdateAsync(BlacklistAppeal appeal);
+    Task DeleteAsync(Guid id);
+}
+
+/// <summary>
+/// Repository interface for blacklist history
+/// </summary>
+public interface IBlacklistHistoryRepository : IGenericRepository<BlacklistHistory>
+{
+    Task<IEnumerable<BlacklistHistory>> GetByBusinessPartnerAsync(Guid businessPartnerId);
+    Task<IEnumerable<BlacklistHistory>> GetByActionAsync(string action);
+    Task<IEnumerable<BlacklistHistory>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
+    Task<BlacklistHistory> CreateAsync(BlacklistHistory history);
 }
 
 #endregion

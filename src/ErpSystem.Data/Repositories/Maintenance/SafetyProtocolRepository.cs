@@ -1,6 +1,6 @@
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.Maintenance;
 
@@ -48,10 +48,10 @@ public class SafetyProtocolRepository : GenericRepository<SafetyProtocol>, ISafe
     public async Task<IEnumerable<SafetyProtocol>> GetDueForReviewAsync(int daysAhead = 30)
     {
         var cutoffDate = DateTime.UtcNow.AddDays(daysAhead);
-        
+
         return await _context.SafetyProtocols
-            .Where(sp => sp.NextReviewDate <= cutoffDate && 
-                        sp.IsActive && 
+            .Where(sp => sp.NextReviewDate <= cutoffDate &&
+                        sp.IsActive &&
                         !sp.IsDeleted)
             .OrderBy(sp => sp.NextReviewDate)
             .ToListAsync();
@@ -60,7 +60,7 @@ public class SafetyProtocolRepository : GenericRepository<SafetyProtocol>, ISafe
     public async Task<IEnumerable<SafetyProtocol>> GetExpiredAsync()
     {
         var today = DateTime.UtcNow;
-        
+
         return await _context.SafetyProtocols
             .Where(sp => sp.ExpirationDate <= today && !sp.IsDeleted)
             .OrderBy(sp => sp.ExpirationDate)
@@ -113,8 +113,8 @@ public class SafetyProtocolRepository : GenericRepository<SafetyProtocol>, ISafe
     public async Task<IEnumerable<SafetyProtocol>> GetProtocolsWithLowComplianceAsync(decimal threshold = 75.0m)
     {
         return await _context.SafetyProtocols
-            .Where(sp => sp.ComplianceScore < threshold && 
-                        sp.IsActive && 
+            .Where(sp => sp.ComplianceScore < threshold &&
+                        sp.IsActive &&
                         !sp.IsDeleted)
             .OrderBy(sp => sp.ComplianceScore)
             .ToListAsync();
@@ -123,8 +123,8 @@ public class SafetyProtocolRepository : GenericRepository<SafetyProtocol>, ISafe
     public async Task<IEnumerable<SafetyProtocol>> GetProtocolsWithHighViolationsAsync(int violationThreshold = 5)
     {
         return await _context.SafetyProtocols
-            .Where(sp => sp.TotalViolations >= violationThreshold && 
-                        sp.IsActive && 
+            .Where(sp => sp.TotalViolations >= violationThreshold &&
+                        sp.IsActive &&
                         !sp.IsDeleted)
             .OrderByDescending(sp => sp.TotalViolations)
             .ToListAsync();
@@ -140,7 +140,7 @@ public class SafetyProtocolRepository : GenericRepository<SafetyProtocol>, ISafe
             await UpdateAsync(protocol);
         }
     }
-    
+
     public async Task<IEnumerable<SafetyProtocol>> GetBySeverityAsync(string severity)
     {
         return await _context.SafetyProtocols
@@ -148,7 +148,7 @@ public class SafetyProtocolRepository : GenericRepository<SafetyProtocol>, ISafe
             .OrderBy(sp => sp.Title)
             .ToListAsync();
     }
-    
+
     public async Task<IEnumerable<SafetyProtocol>> GetByRegulatoryStandardAsync(string standard)
     {
         return await _context.SafetyProtocols
@@ -156,7 +156,7 @@ public class SafetyProtocolRepository : GenericRepository<SafetyProtocol>, ISafe
             .OrderBy(sp => sp.Title)
             .ToListAsync();
     }
-    
+
     public async Task<IEnumerable<SafetyProtocol>> GetMandatoryProtocolsAsync()
     {
         return await _context.SafetyProtocols
@@ -164,29 +164,29 @@ public class SafetyProtocolRepository : GenericRepository<SafetyProtocol>, ISafe
             .OrderBy(sp => sp.Title)
             .ToListAsync();
     }
-    
+
     public async Task<IEnumerable<SafetyProtocol>> GetProtocolsDueForReviewAsync()
     {
         var today = DateTime.UtcNow.Date;
         return await _context.SafetyProtocols
-            .Where(sp => sp.NextReviewDate <= today && 
-                        sp.IsActive && 
+            .Where(sp => sp.NextReviewDate <= today &&
+                        sp.IsActive &&
                         !sp.IsDeleted)
             .OrderBy(sp => sp.NextReviewDate)
             .ToListAsync();
     }
-    
+
     public async Task<IEnumerable<SafetyProtocol>> GetOverdueProtocolsAsync()
     {
         var today = DateTime.UtcNow.Date;
         return await _context.SafetyProtocols
-            .Where(sp => sp.NextReviewDate < today && 
-                        sp.IsActive && 
+            .Where(sp => sp.NextReviewDate < today &&
+                        sp.IsActive &&
                         !sp.IsDeleted)
             .OrderBy(sp => sp.NextReviewDate)
             .ToListAsync();
     }
-    
+
     public async Task<bool> IsProtocolNameUniqueAsync(string name, Guid? excludeId = null)
     {
         var query = _context.SafetyProtocols
@@ -199,17 +199,17 @@ public class SafetyProtocolRepository : GenericRepository<SafetyProtocol>, ISafe
 
         return !await query.AnyAsync();
     }
-    
+
     public async Task<IEnumerable<SafetyProtocol>> GetMandatoryAsync()
     {
         return await GetMandatoryProtocolsAsync();
     }
-    
+
     public async Task<IEnumerable<SafetyProtocol>> GetOverdueAsync()
     {
         return await GetOverdueProtocolsAsync();
     }
-    
+
     public async Task<IEnumerable<SafetyProtocol>> GetDueForReviewAsync()
     {
         return await GetProtocolsDueForReviewAsync();

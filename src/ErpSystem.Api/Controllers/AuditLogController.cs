@@ -1,8 +1,8 @@
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Services;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using ErpSystem.Core.Services;
-using ErpSystem.Core.Entities;
-using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers;
 
@@ -26,13 +26,16 @@ public class AuditLogController : ControllerBase
     [HttpGet]
     [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
     public async Task<ActionResult<IEnumerable<AuditLogDto>>> GetAuditLogs(
-        [FromQuery] int pageNumber = 1, 
+        [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 100)
     {
         try
         {
-            if (pageSize > 500) pageSize = 500; // Limit page size for performance
-            
+            if (pageSize > 500)
+            {
+                pageSize = 500; // Limit page size for performance
+            }
+
             var auditLogs = await _auditLogService.GetAuditLogsAsync(pageNumber, pageSize);
             var auditLogDtos = auditLogs.Select(MapToDto).ToList();
 
@@ -52,13 +55,16 @@ public class AuditLogController : ControllerBase
     [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
     public async Task<ActionResult<IEnumerable<AuditLogDto>>> GetAuditLogsByUser(
         Guid userId,
-        [FromQuery] int pageNumber = 1, 
+        [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 100)
     {
         try
         {
-            if (pageSize > 500) pageSize = 500;
-            
+            if (pageSize > 500)
+            {
+                pageSize = 500;
+            }
+
             var auditLogs = await _auditLogService.GetAuditLogsByUserAsync(userId, pageNumber, pageSize);
             var auditLogDtos = auditLogs.Select(MapToDto).ToList();
 
@@ -78,13 +84,16 @@ public class AuditLogController : ControllerBase
     [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
     public async Task<ActionResult<IEnumerable<AuditLogDto>>> GetAuditLogsByResource(
         string resource,
-        [FromQuery] int pageNumber = 1, 
+        [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 100)
     {
         try
         {
-            if (pageSize > 500) pageSize = 500;
-            
+            if (pageSize > 500)
+            {
+                pageSize = 500;
+            }
+
             var auditLogs = await _auditLogService.GetAuditLogsByResourceAsync(resource, pageNumber, pageSize);
             var auditLogDtos = auditLogs.Select(MapToDto).ToList();
 
@@ -105,13 +114,16 @@ public class AuditLogController : ControllerBase
     public async Task<ActionResult<IEnumerable<AuditLogDto>>> GetAuditLogsByDateRange(
         [FromQuery] DateTime from,
         [FromQuery] DateTime to,
-        [FromQuery] int pageNumber = 1, 
+        [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 100)
     {
         try
         {
-            if (pageSize > 500) pageSize = 500;
-            
+            if (pageSize > 500)
+            {
+                pageSize = 500;
+            }
+
             var auditLogs = await _auditLogService.GetAuditLogsByDateRangeAsync(from, to, pageNumber, pageSize);
             var auditLogDtos = auditLogs.Select(MapToDto).ToList();
 

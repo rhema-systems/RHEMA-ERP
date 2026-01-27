@@ -1,8 +1,9 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
+using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
-using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Services.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -12,13 +13,16 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 public class JobCardController : ControllerBase
 {
     private readonly IJobCardService _jobCardService;
+    private readonly IMaintenanceNotificationService _notificationService;
     private readonly ILogger<JobCardController> _logger;
 
     public JobCardController(
         IJobCardService jobCardService,
+        IMaintenanceNotificationService notificationService,
         ILogger<JobCardController> logger)
     {
         _jobCardService = jobCardService;
+        _notificationService = notificationService;
         _logger = logger;
     }
 
@@ -47,7 +51,9 @@ public class JobCardController : ControllerBase
         try
         {
             if (pageSize > 100)
+            {
                 pageSize = 100;
+            }
 
             var filter = new JobCardFilterDto
             {
@@ -89,7 +95,9 @@ public class JobCardController : ControllerBase
         {
             var jobCard = await _jobCardService.GetJobCardByIdAsync(id);
             if (jobCard == null)
+            {
                 return NotFound($"Job card with ID {id} not found");
+            }
 
             return Ok(jobCard);
         }
@@ -110,7 +118,9 @@ public class JobCardController : ControllerBase
         {
             var jobCard = await _jobCardService.GetJobCardByNumberAsync(jobCardNumber);
             if (jobCard == null)
+            {
                 return NotFound($"Job card with number {jobCardNumber} not found");
+            }
 
             return Ok(jobCard);
         }
@@ -130,7 +140,9 @@ public class JobCardController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var jobCard = await _jobCardService.CreateJobCardAsync(createDto);
             return CreatedAtAction(nameof(GetJobCard), new { id = jobCard.Id }, jobCard);
@@ -159,7 +171,9 @@ public class JobCardController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var jobCard = await _jobCardService.UpdateJobCardAsync(id, updateDto);
             return Ok(jobCard);
@@ -222,9 +236,22 @@ public class JobCardController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var jobCard = await _jobCardService.SubmitJobCardAsync(id, submitDto);
+
+            // Notify approvers when job card is submitted
+            try
+            {
+                await _notificationService.NotifyJobCardSubmittedAsync(id);
+            }
+            catch (Exception notifEx)
+            {
+                _logger.LogWarning(notifEx, "Failed to send job card submission notification for {JobCardId}", id);
+            }
+
             return Ok(jobCard);
         }
         catch (ArgumentException ex)
@@ -255,9 +282,33 @@ public class JobCardController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var jobCard = await _jobCardService.ProcessApprovalAsync(id, approvalDto);
+
+            // Send notification based on approval action
+            try
+            {
+                if (approvalDto.Action?.Equals("Approve", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    await _notificationService.NotifyJobCardApprovedAsync(id);
+                }
+                else if (approvalDto.Action?.Equals("Reject", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    await _notificationService.NotifyJobCardRejectedAsync(id, approvalDto.Comments);
+                }
+                else if (approvalDto.Action?.Equals("RequestChanges", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    await _notificationService.NotifyJobCardChangesRequestedAsync(id, approvalDto.Comments);
+                }
+            }
+            catch (Exception notifEx)
+            {
+                _logger.LogWarning(notifEx, "Failed to send job card approval notification for {JobCardId}", id);
+            }
+
             return Ok(jobCard);
         }
         catch (ArgumentException ex)
@@ -336,7 +387,9 @@ public class JobCardController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var comment = await _jobCardService.AddCommentAsync(id, commentDto);
             return Created($"/api/maintenance/job-cards/{id}/comments/{comment.Id}", comment);
@@ -396,7 +449,9 @@ public class JobCardController : ControllerBase
         try
         {
             if (pageSize > 100)
+            {
                 pageSize = 100;
+            }
 
             var filter = new JobCardFilterDto
             {
@@ -510,14 +565,16 @@ public class JobCardController : ControllerBase
     /// </summary>
     [HttpPost("{id:guid}/documents")]
     public async Task<ActionResult<JobCardDocumentDto>> UploadDocument(
-        Guid id, 
-        IFormFile file, 
+        Guid id,
+        IFormFile file,
         [FromForm] string documentType = "General")
     {
         try
         {
             if (file == null || file.Length == 0)
+            {
                 return BadRequest("No file provided");
+            }
 
             using var stream = file.OpenReadStream();
             var document = await _jobCardService.UploadDocumentAsync(id, stream, file.FileName, documentType);
@@ -714,8 +771,10 @@ public class JobCardController : ControllerBase
         {
             var certificate = await _jobCardService.GetCertificateByIdAsync(certificateId);
             if (certificate == null)
+            {
                 return NotFound($"Certificate with ID {certificateId} not found");
-            
+            }
+
             return Ok(certificate);
         }
         catch (Exception ex)

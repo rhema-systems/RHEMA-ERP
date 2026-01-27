@@ -1,5 +1,5 @@
-using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Api.Services.Workflow;
@@ -42,12 +42,7 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
 
     public async Task<WorkflowDefinition> UpdateWorkflowDefinitionAsync(Guid id, UpdateWorkflowDefinitionDto updateDto)
     {
-        var existingDefinition = await _coreService.GetDefinitionAsync(id);
-        if (existingDefinition == null)
-        {
-            throw new InvalidOperationException($"Workflow definition with ID {id} not found");
-        }
-
+        var existingDefinition = await _coreService.GetDefinitionAsync(id) ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
         existingDefinition.Name = updateDto.Name;
         existingDefinition.Description = updateDto.Description;
 
@@ -77,28 +72,28 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
         var definition = await _coreService.GetDefinitionAsync(workflowDefinitionId);
         if (definition == null)
         {
-        return new WorkflowValidationResult
-        {
-            IsValid = false,
-            Errors = new List<WorkflowValidationError> 
-            { 
-                new WorkflowValidationError 
-                { 
-                    Code = "NOT_FOUND", 
-                    Message = $"Workflow definition with ID {workflowDefinitionId} not found" 
-                } 
+            return new WorkflowValidationResult
+            {
+                IsValid = false,
+                Errors = new List<WorkflowValidationError>
+            {
+                new WorkflowValidationError
+                {
+                    Code = "NOT_FOUND",
+                    Message = $"Workflow definition with ID {workflowDefinitionId} not found"
+                }
             }
-        };
+            };
         }
 
         var (isValid, errors) = await _coreService.ValidateDefinitionAsync(definition);
         return new WorkflowValidationResult
         {
             IsValid = isValid,
-            Errors = errors.Select(e => new WorkflowValidationError 
-            { 
-                Code = "VALIDATION_ERROR", 
-                Message = e 
+            Errors = errors.Select(e => new WorkflowValidationError
+            {
+                Code = "VALIDATION_ERROR",
+                Message = e
             }).ToList()
         };
     }
@@ -117,11 +112,7 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
 
     public async Task DeleteWorkflowDefinitionAsync(Guid id)
     {
-        var definition = await _coreService.GetDefinitionAsync(id);
-        if (definition == null)
-        {
-            throw new InvalidOperationException($"Workflow definition with ID {id} not found");
-        }
+        var definition = await _coreService.GetDefinitionAsync(id) ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
 
         // For now, just deactivate instead of deleting
         await _coreService.DeactivateDefinitionAsync(id);

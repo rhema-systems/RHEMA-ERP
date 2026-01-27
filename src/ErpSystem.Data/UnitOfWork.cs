@@ -1,8 +1,8 @@
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Data.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using ErpSystem.Core.Interfaces;
-using ErpSystem.Core.Entities;
-using ErpSystem.Data.Repositories;
 
 namespace ErpSystem.Data;
 
@@ -12,6 +12,7 @@ public class UnitOfWork : IUnitOfWork
     private readonly Dictionary<Type, object> _repositories;
     private IDbContextTransaction? _transaction;
     private bool _disposed = false;
+    private bool _useExecutionStrategy = false;
 
     public UnitOfWork(ApplicationDbContext context)
     {
@@ -35,7 +36,7 @@ public class UnitOfWork : IUnitOfWork
         {
             throw new InvalidOperationException("Transaction is already started");
         }
-        
+
         _transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
     }
 
@@ -53,13 +54,21 @@ public class UnitOfWork : IUnitOfWork
         }
         catch
         {
-            await RollbackAsync(cancellationToken);
+            // Rollback only if transaction is still active
+            if (_transaction != null)
+            {
+                await _transaction.RollbackAsync(cancellationToken);
+            }
             throw;
         }
         finally
         {
-            await _transaction.DisposeAsync();
-            _transaction = null;
+            // Dispose transaction if it still exists
+            if (_transaction != null)
+            {
+                await _transaction.DisposeAsync();
+                _transaction = null;
+            }
         }
     }
 
@@ -84,13 +93,20 @@ public class UnitOfWork : IUnitOfWork
     public IGenericRepository<T> Repository<T>() where T : BaseEntity
     {
         var type = typeof(T);
-        
-        if (!_repositories.ContainsKey(type))
+
+        if (!_repositories.TryGetValue(type, out object? value))
         {
-            _repositories[type] = new GenericRepository<T>(_context);
+            value = new GenericRepository<T>(_context);
+            _repositories[type] = value;
         }
-        
-        return (IGenericRepository<T>)_repositories[type];
+
+        return (IGenericRepository<T>)value;
+    }
+
+    public async Task ExecuteInStrategyAsync(Func<Task> operation, CancellationToken cancellationToken = default)
+    {
+        var strategy = _context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(operation);
     }
 
     protected virtual void Dispose(bool disposing)

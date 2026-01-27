@@ -21,7 +21,7 @@ public class OeeAnalysisRequest : AssetAnalyticsBaseRequest
     /// Optional asset type filter
     /// </summary>
     public string? AssetType { get; set; }
-    
+
     /// <summary>
     /// Include detailed breakdown components
     /// </summary>
@@ -48,7 +48,7 @@ public class ReliabilityMetricsRequest : AssetAnalyticsBaseRequest
     /// Include failure mode analysis
     /// </summary>
     public bool IncludeFailureModes { get; set; } = true;
-    
+
     /// <summary>
     /// Include trend analysis
     /// </summary>
@@ -154,17 +154,17 @@ public class PerformanceMetricsRequest : AssetAnalyticsBaseRequest
     /// Include OEE breakdown
     /// </summary>
     public bool IncludeOeeBreakdown { get; set; } = true;
-    
+
     /// <summary>
     /// Include reliability metrics
     /// </summary>
     public bool IncludeReliabilityMetrics { get; set; } = true;
-    
+
     /// <summary>
     /// Include cost metrics
     /// </summary>
     public bool IncludeCostMetrics { get; set; } = true;
-    
+
     /// <summary>
     /// Include quality metrics
     /// </summary>
@@ -326,7 +326,7 @@ public class AssetBenchmarkComparisonDto
     public Dictionary<string, ComparisonMetricDto> Comparisons { get; set; } = new();
     public string OverallPerformance { get; set; } = string.Empty;
     public List<string> RecommendedActions { get; set; } = new();
-    
+
     // Additional properties for service compatibility
     public string IndustryType { get; set; } = string.Empty;
     public DateTime AnalysisPeriodStart { get; set; }
@@ -422,7 +422,7 @@ public class AssetRootCauseAnalysisDto
     public List<RootCauseFactorDto> RootCauses { get; set; } = new();
     public List<string> RecommendedActions { get; set; } = new();
     public double ConfidenceScore { get; set; }
-    
+
     // Additional property for service compatibility
     public DateTime IncidentDate { get; set; }
 }
@@ -471,7 +471,7 @@ public class AssetCostEfficiencyDto
     public string EfficiencyRating { get; set; } = string.Empty;
     public List<string> CostOptimizationAreas { get; set; } = new();
     public decimal PotentialSavings { get; set; }
-    
+
     // Additional properties for service compatibility
     public DateTime AnalysisPeriodStart { get; set; }
     public DateTime AnalysisPeriodEnd { get; set; }
@@ -489,7 +489,7 @@ public class MaintenanceReturnOnInvestmentDto
     public double ROIPercentage { get; set; }
     public int PaybackPeriodMonths { get; set; }
     public List<ROIContributionDto> Contributions { get; set; } = new();
-    
+
     // Additional properties for service compatibility
     public DateTime AnalysisPeriodStart { get; set; }
     public DateTime AnalysisPeriodEnd { get; set; }
@@ -524,7 +524,7 @@ public class AssetEnvironmentalImpactDto
     public double EnvironmentalScore { get; set; }
     public List<EnvironmentalMetricDto> Metrics { get; set; } = new();
     public List<string> ImprovementRecommendations { get; set; } = new();
-    
+
     // Additional properties for service compatibility
     public DateTime AnalysisPeriodStart { get; set; }
     public DateTime AnalysisPeriodEnd { get; set; }
@@ -616,7 +616,7 @@ public class MaintenanceAlertDto
     public bool IsAcknowledged { get; set; }
     public Guid? AssetId { get; set; }
     public string AssetName { get; set; } = string.Empty;
-    
+
     // Additional properties for service compatibility
     public string Title { get; set; } = string.Empty;
     public string Severity { get; set; } = string.Empty;
@@ -634,7 +634,7 @@ public class TopIssueDto
     public double AverageCost { get; set; }
     public double TotalCost { get; set; }
     public int AffectedAssets { get; set; }
-    
+
     // Additional properties for service compatibility
     public string Issue { get; set; } = string.Empty;
     public int Frequency { get; set; }
@@ -833,7 +833,7 @@ public class AssetPerformanceReportDto
     public double MeanTimeBetweenFailures { get; set; }
     public double MeanTimeToRepair { get; set; }
     public List<MaintenanceHistoryItemDto> MaintenanceHistory { get; set; } = new();
-    
+
     // Additional properties for service compatibility
     public string ReportPeriod { get; set; } = string.Empty;
     public int PlannedWorkOrders { get; set; }
@@ -861,7 +861,7 @@ public class MaintenanceCostAnalysisDto
     public List<CostByAssetDto> CostByAsset { get; set; } = new();
     public List<CostByMonthDto> CostByMonth { get; set; } = new();
     public List<CostByCategoryDto> CostByCategory { get; set; } = new();
-    
+
     // Additional properties for service compatibility
     public string ReportPeriod { get; set; } = string.Empty;
     public decimal TotalMaintenanceCost { get; set; }
@@ -887,7 +887,7 @@ public class UpcomingMaintenanceDto
     public string? AssignedTechnicianName { get; set; }
     public string Priority { get; set; } = string.Empty;
     public int DaysUntilDue { get; set; }
-    
+
     // Additional property for service compatibility
     public DateTime DueDate { get; set; }
 }
@@ -899,13 +899,43 @@ public class UpcomingMaintenanceDto
 /// </summary>
 public class MaintenanceHistoryItemDto
 {
-    public DateTime Date { get; set; }
-    public string WorkOrderNumber { get; set; } = string.Empty;
+    public Guid Id { get; set; }
+    public string WorkOrderId { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public decimal Cost { get; set; }
+    public string AssetId { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public string Location { get; set; } = string.Empty;
+    public string Technician { get; set; } = string.Empty;
+    public DateTime StartDate { get; set; }
+    public DateTime CompletedDate { get; set; }
     public string Status { get; set; } = string.Empty;
-    public double Duration { get; set; }
+    public string Priority { get; set; } = string.Empty;
+    public decimal Cost { get; set; }
+    public double LaborHours { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public List<string> PartsUsed { get; set; } = new();
+    public string Notes { get; set; } = string.Empty;
+    public int Rating { get; set; }
+    public double Downtime { get; set; }
+    public string Category { get; set; } = string.Empty;
+
+    // Keep legacy properties for backward compatibility
+    public DateTime Date
+    {
+        get => CompletedDate;
+        set => CompletedDate = value;
+    }
+    public string WorkOrderNumber
+    {
+        get => WorkOrderId;
+        set => WorkOrderId = value;
+    }
+    public double Duration
+    {
+        get => LaborHours;
+        set => LaborHours = value;
+    }
 }
 
 /// <summary>
@@ -993,28 +1023,28 @@ public class OeeAnalysisResponse
     public string AssetName { get; set; } = string.Empty;
     public DateTime StartDate { get; set; }
     public DateTime EndDate { get; set; }
-    
+
     // Core OEE Components
     public double Availability { get; set; }
     public double Performance { get; set; }
     public double Quality { get; set; }
     public double OeeScore { get; set; }
-    
+
     // Performance Category
     public string PerformanceCategory { get; set; } = string.Empty; // WorldClass, Good, Fair, Poor
-    
+
     // Benchmarks
     public double IndustryBenchmark { get; set; }
     public double WorldClassBenchmark { get; set; }
-    
+
     // Loss Analysis
     public OeeLossAnalysisDto? LossAnalysis { get; set; }
-    
+
     // Trend Information
     public double PreviousPeriodOee { get; set; }
     public double TrendChange { get; set; }
     public string TrendDirection { get; set; } = string.Empty;
-    
+
     // Recommendations
     public List<string> ImprovementRecommendations { get; set; } = new();
 }
@@ -1049,20 +1079,20 @@ public class AssetPerformanceDashboardResponse
     public DateTime DashboardDate { get; set; }
     public DateTime PeriodStart { get; set; }
     public DateTime PeriodEnd { get; set; }
-    
+
     // Fleet Summary
     public FleetSummaryDto FleetSummary { get; set; } = new();
-    
+
     // Asset Metrics
     public List<AssetPerformanceMetricsDto> AssetMetrics { get; set; } = new();
-    
+
     // Top/Bottom Performers
     public List<AssetPerformanceMetricsDto> TopPerformers { get; set; } = new();
     public List<AssetPerformanceMetricsDto> BottomPerformers { get; set; } = new();
-    
+
     // Critical Alerts
     public List<PerformanceAlertDto> CriticalAlerts { get; set; } = new();
-    
+
     // Trends
     public PerformanceTrendsDto Trends { get; set; } = new();
 }
@@ -1119,20 +1149,20 @@ public class BenchmarkComparisonResponse
     public string AssetName { get; set; } = string.Empty;
     public string BenchmarkCategory { get; set; } = string.Empty;
     public DateTime ComparisonDate { get; set; }
-    
+
     // Performance vs Benchmark
     public Dictionary<string, BenchmarkMetricDto> Metrics { get; set; } = new();
-    
+
     // Overall Assessment
     public string OverallRating { get; set; } = string.Empty;
     public double OverallScore { get; set; }
     public int IndustryPercentileRank { get; set; }
-    
+
     // Insights
     public List<string> StrengthAreas { get; set; } = new();
     public List<string> ImprovementAreas { get; set; } = new();
     public List<string> ActionableInsights { get; set; } = new();
-    
+
     // ROI Projections
     public decimal EstimatedAnnualSavings { get; set; }
     public int PaybackPeriodMonths { get; set; }
@@ -1190,17 +1220,17 @@ public class AssetPerformancePredictionDto
     public string AssetName { get; set; } = string.Empty;
     public DateTime PredictionDate { get; set; }
     public int PredictionHorizonDays { get; set; }
-    
+
     // Predicted Values
     public double PredictedOee { get; set; }
     public double PredictedAvailability { get; set; }
     public decimal PredictedMaintenanceCost { get; set; }
-    
+
     // Prediction Quality
     public double ConfidenceLevel { get; set; }
     public List<string> RiskFactors { get; set; } = new();
     public List<string> Recommendations { get; set; } = new();
-    
+
     // Additional property for service compatibility
     public double PredictedPerformance { get; set; }
 }

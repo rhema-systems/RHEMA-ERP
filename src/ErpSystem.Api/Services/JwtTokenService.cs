@@ -1,9 +1,9 @@
-using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using ErpSystem.Core.Entities;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.IdentityModel.Tokens;
 
 namespace ErpSystem.Api.Services
 {
@@ -30,7 +30,7 @@ namespace ErpSystem.Api.Services
         {
             return await GenerateTokenAsync(user, null);
         }
-        
+
         public async Task<string> GenerateTokenAsync(ApplicationUser user, string sessionId)
         {
             var jwtSettings = _configuration.GetSection("JwtSettings");
@@ -42,15 +42,16 @@ namespace ErpSystem.Api.Services
                 new System.Security.Claims.Claim(ClaimTypes.Name, user.UserName ?? ""),
                 new System.Security.Claims.Claim(ClaimTypes.Email, user.Email ?? ""),
                 new System.Security.Claims.Claim("tenant_id", user.TenantId.ToString()),
-                new System.Security.Claims.Claim("jti", Guid.NewGuid().ToString())
+                new System.Security.Claims.Claim("jti", Guid.NewGuid().ToString()),
+                new System.Security.Claims.Claim("auth_provider", user.AuthenticationProvider.ToString())
             };
-            
+
             // Add EmployeeId claim if user is linked to an employee
             if (user.EmployeeId.HasValue)
             {
                 claims.Add(new System.Security.Claims.Claim("employee_id", user.EmployeeId.ToString()!));
             }
-            
+
             // Add session ID claim if provided
             if (!string.IsNullOrEmpty(sessionId))
             {
@@ -109,7 +110,7 @@ namespace ErpSystem.Api.Services
             var tokenHandler = new JwtSecurityTokenHandler();
             var principal = tokenHandler.ValidateToken(token, tokenValidationParameters, out var securityToken);
 
-            if (securityToken is not JwtSecurityToken jwtSecurityToken || 
+            if (securityToken is not JwtSecurityToken jwtSecurityToken ||
                 !jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase))
             {
                 throw new SecurityTokenException("Invalid token");

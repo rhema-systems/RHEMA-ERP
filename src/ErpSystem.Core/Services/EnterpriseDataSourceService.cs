@@ -27,7 +27,7 @@ namespace ErpSystem.Core.Services
             {
                 var dataSources = await _dataSourceRepository.GetDataSourcesByTenantAsync(tenantId);
                 var result = dataSources.Select(MapToDto).ToList();
-                
+
                 _logger.LogDebug("Retrieved {Count} data sources for tenant {TenantId}", result.Count, tenantId);
                 return result;
             }
@@ -121,7 +121,7 @@ namespace ErpSystem.Core.Services
 
                 await _dataSourceRepository.AddAsync(dataSource);
                 await _unitOfWork.SaveChangesAsync();
-                
+
                 _logger.LogInformation("Created data source {DataSourceId} for tenant {TenantId}", dataSource.Id, tenantId);
                 return MapToDto(dataSource);
             }
@@ -155,27 +155,50 @@ namespace ErpSystem.Core.Services
 
                 // Update properties
                 if (!string.IsNullOrEmpty(updateDto.Description))
+                {
                     dataSource.Description = updateDto.Description;
+                }
+
                 if (!string.IsNullOrEmpty(updateDto.Host))
+                {
                     dataSource.Host = updateDto.Host;
+                }
+
                 if (updateDto.Port.HasValue)
+                {
                     dataSource.Port = updateDto.Port;
+                }
+
                 if (!string.IsNullOrEmpty(updateDto.DatabaseName))
+                {
                     dataSource.DatabaseName = updateDto.DatabaseName;
+                }
+
                 if (!string.IsNullOrEmpty(updateDto.Username))
+                {
                     dataSource.Username = updateDto.Username;
+                }
+
                 if (!string.IsNullOrEmpty(updateDto.Password))
+                {
                     dataSource.EncryptedPassword = EncryptPassword(updateDto.Password);
+                }
+
                 if (updateDto.AdditionalSettings != null)
+                {
                     dataSource.AdditionalSettings = System.Text.Json.JsonSerializer.Serialize(updateDto.AdditionalSettings);
+                }
+
                 if (updateDto.IsActive.HasValue)
+                {
                     dataSource.IsActive = updateDto.IsActive.Value;
+                }
 
                 dataSource.UpdatedAt = DateTime.UtcNow;
 
                 await _dataSourceRepository.UpdateAsync(dataSource);
                 await _unitOfWork.SaveChangesAsync();
-                
+
                 _logger.LogInformation("Updated data source {DataSourceId} for tenant {TenantId}", dataSourceId, tenantId);
                 return MapToDto(dataSource);
             }
@@ -217,14 +240,14 @@ namespace ErpSystem.Core.Services
             var startTime = DateTime.UtcNow;
             try
             {
-                _logger.LogInformation("Testing connection to {Host}:{Port} database {Database} as {Username}", 
+                _logger.LogInformation("Testing connection to {Host}:{Port} database {Database} as {Username}",
                     testDto.Host, testDto.Port, testDto.DatabaseName, testDto.Username);
-                
+
                 var connectionString = BuildConnectionString(testDto);
                 var connectionInfo = await TestDatabaseConnectionAsync(connectionString, testDto.Type);
-                
+
                 var responseTime = DateTime.UtcNow - startTime;
-                
+
                 return new ConnectionTestResult
                 {
                     IsSuccess = true,
@@ -237,7 +260,7 @@ namespace ErpSystem.Core.Services
             {
                 var responseTime = DateTime.UtcNow - startTime;
                 _logger.LogError(ex, "Error testing connection to {Host}:{Port}", testDto.Host, testDto.Port);
-                
+
                 return new ConnectionTestResult
                 {
                     IsSuccess = false,
@@ -266,7 +289,7 @@ namespace ErpSystem.Core.Services
                 }
 
                 _logger.LogInformation("Testing connection for data source {DataSourceId} ({Name})", dataSourceId, dataSource.Name);
-                
+
                 // Build connection string from data source
                 var testDto = new TestConnectionDto
                 {
@@ -277,12 +300,12 @@ namespace ErpSystem.Core.Services
                     Username = dataSource.Username,
                     Password = DecryptPassword(dataSource.EncryptedPassword)
                 };
-                
+
                 var connectionString = BuildConnectionString(testDto);
                 var connectionInfo = await TestDatabaseConnectionAsync(connectionString, testDto.Type);
-                
+
                 var responseTime = DateTime.UtcNow - startTime;
-                
+
                 // Update connection test status in database
                 await _dataSourceRepository.UpdateConnectionStatusAsync(dataSourceId, true);
                 await _unitOfWork.SaveChangesAsync();
@@ -299,7 +322,7 @@ namespace ErpSystem.Core.Services
             {
                 var responseTime = DateTime.UtcNow - startTime;
                 _logger.LogError(ex, "Error testing connection for data source {DataSourceId}", dataSourceId);
-                
+
                 // Update connection status to failed
                 try
                 {
@@ -310,7 +333,7 @@ namespace ErpSystem.Core.Services
                 {
                     _logger.LogError(updateEx, "Failed to update connection status for data source {DataSourceId}", dataSourceId);
                 }
-                
+
                 return new ConnectionTestResult
                 {
                     IsSuccess = false,
@@ -375,7 +398,7 @@ namespace ErpSystem.Core.Services
             }
         }
 
-        private string BuildConnectionString(TestConnectionDto dto)
+        private static string BuildConnectionString(TestConnectionDto dto)
         {
             switch (dto.Type)
             {
@@ -388,7 +411,7 @@ namespace ErpSystem.Core.Services
             }
         }
 
-        private async Task<Dictionary<string, object>> TestDatabaseConnectionAsync(string connectionString, DataSourceType type)
+        private static async Task<Dictionary<string, object>> TestDatabaseConnectionAsync(string connectionString, DataSourceType type)
         {
             switch (type)
             {
@@ -438,7 +461,7 @@ namespace ErpSystem.Core.Services
 
             // Get Tables - First collect table info, then get columns separately
             var tableInfoList = new List<(string SchemaName, string TableName, int RowCount)>();
-            
+
             const string tablesQuery = @"
                 SELECT 
                     TABLE_SCHEMA as SchemaName,
@@ -452,17 +475,17 @@ namespace ErpSystem.Core.Services
             {
                 cmd.CommandText = tablesQuery;
                 await using var reader = await cmd.ExecuteReaderAsync();
-                
+
                 while (await reader.ReadAsync())
                 {
                     var schemaName = reader.GetString(0);
                     var tableName = reader.GetString(1);
                     var rowCount = reader.GetInt32(2); // Now it's always 0
-                    
+
                     tableInfoList.Add((schemaName, tableName, rowCount));
                 }
             }
-            
+
             // Now get columns for each table (after the reader is closed)
             foreach (var (schemaName, tableName, rowCount) in tableInfoList)
             {
@@ -477,7 +500,7 @@ namespace ErpSystem.Core.Services
 
             // Get Views - First collect view info, then get columns separately
             var viewInfoList = new List<(string SchemaName, string ViewName)>();
-            
+
             const string viewsQuery = @"
                 SELECT 
                     TABLE_SCHEMA as SchemaName,
@@ -490,16 +513,16 @@ namespace ErpSystem.Core.Services
             {
                 cmd.CommandText = viewsQuery;
                 await using var reader = await cmd.ExecuteReaderAsync();
-                
+
                 while (await reader.ReadAsync())
                 {
                     var schemaName = reader.GetString(0);
                     var viewName = reader.GetString(1);
-                    
+
                     viewInfoList.Add((schemaName, viewName));
                 }
             }
-            
+
             // Now get columns for each view (after the reader is closed)
             foreach (var (schemaName, viewName) in viewInfoList)
             {
@@ -513,7 +536,7 @@ namespace ErpSystem.Core.Services
 
             // Get Stored Procedures - First collect procedure info, then get parameters separately
             var procedureInfoList = new List<(string SchemaName, string ProcedureName)>();
-            
+
             const string proceduresQuery = @"
                 SELECT 
                     ROUTINE_SCHEMA as SchemaName,
@@ -526,16 +549,16 @@ namespace ErpSystem.Core.Services
             {
                 cmd.CommandText = proceduresQuery;
                 await using var reader = await cmd.ExecuteReaderAsync();
-                
+
                 while (await reader.ReadAsync())
                 {
                     var schemaName = reader.GetString(0);
                     var procedureName = reader.GetString(1);
-                    
+
                     procedureInfoList.Add((schemaName, procedureName));
                 }
             }
-            
+
             // Now get parameters for each stored procedure (after the reader is closed)
             foreach (var (schemaName, procedureName) in procedureInfoList)
             {
@@ -555,10 +578,10 @@ namespace ErpSystem.Core.Services
             };
         }
 
-        private async Task<List<ColumnInfo>> GetTableColumnsAsync(Microsoft.Data.SqlClient.SqlConnection conn, string schemaName, string tableName)
+        private static async Task<List<ColumnInfo>> GetTableColumnsAsync(Microsoft.Data.SqlClient.SqlConnection conn, string schemaName, string tableName)
         {
             var columns = new List<ColumnInfo>();
-            
+
             const string columnsQuery = @"
                 SELECT 
                     c.COLUMN_NAME,
@@ -584,7 +607,7 @@ namespace ErpSystem.Core.Services
             cmd.CommandText = columnsQuery;
             cmd.Parameters.AddWithValue("@SchemaName", schemaName);
             cmd.Parameters.AddWithValue("@TableName", tableName);
-            
+
             await using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
@@ -599,14 +622,14 @@ namespace ErpSystem.Core.Services
                     Scale = reader.IsDBNull(5) ? null : reader.GetInt32(5)
                 });
             }
-            
+
             return columns;
         }
 
-        private async Task<List<ColumnInfo>> GetViewColumnsAsync(Microsoft.Data.SqlClient.SqlConnection conn, string schemaName, string viewName)
+        private static async Task<List<ColumnInfo>> GetViewColumnsAsync(Microsoft.Data.SqlClient.SqlConnection conn, string schemaName, string viewName)
         {
             var columns = new List<ColumnInfo>();
-            
+
             const string columnsQuery = @"
                 SELECT 
                     COLUMN_NAME,
@@ -623,7 +646,7 @@ namespace ErpSystem.Core.Services
             cmd.CommandText = columnsQuery;
             cmd.Parameters.AddWithValue("@SchemaName", schemaName);
             cmd.Parameters.AddWithValue("@ViewName", viewName);
-            
+
             await using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
@@ -638,14 +661,14 @@ namespace ErpSystem.Core.Services
                     Scale = reader.IsDBNull(5) ? null : reader.GetInt32(5)
                 });
             }
-            
+
             return columns;
         }
 
-        private async Task<List<ParameterInfo>> GetProcedureParametersAsync(Microsoft.Data.SqlClient.SqlConnection conn, string schemaName, string procedureName)
+        private static async Task<List<ParameterInfo>> GetProcedureParametersAsync(Microsoft.Data.SqlClient.SqlConnection conn, string schemaName, string procedureName)
         {
             var parameters = new List<ParameterInfo>();
-            
+
             const string parametersQuery = @"
                 SELECT 
                     PARAMETER_NAME,
@@ -659,7 +682,7 @@ namespace ErpSystem.Core.Services
             cmd.CommandText = parametersQuery;
             cmd.Parameters.AddWithValue("@SchemaName", schemaName);
             cmd.Parameters.AddWithValue("@ProcedureName", procedureName);
-            
+
             await using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
@@ -670,7 +693,7 @@ namespace ErpSystem.Core.Services
                     IsOutput = reader.GetString(2).Contains("OUT")
                 });
             }
-            
+
             return parameters;
         }
 
@@ -714,10 +737,12 @@ namespace ErpSystem.Core.Services
             };
         }
 
-        private Dictionary<string, object>? ParseAdditionalSettings(string? settingsJson)
+        private static Dictionary<string, object>? ParseAdditionalSettings(string? settingsJson)
         {
             if (string.IsNullOrEmpty(settingsJson))
+            {
                 return null;
+            }
 
             try
             {
@@ -729,24 +754,32 @@ namespace ErpSystem.Core.Services
             }
         }
 
-        private ConnectionStatus DetermineConnectionStatus(DataSource dataSource)
+        private static ConnectionStatus DetermineConnectionStatus(DataSource dataSource)
         {
             if (!dataSource.LastConnectionTest.HasValue)
+            {
                 return ConnectionStatus.Unknown;
+            }
 
             if (dataSource.LastConnectionSuccess == true)
+            {
                 return ConnectionStatus.Connected;
+            }
 
             if (dataSource.LastConnectionSuccess == false)
+            {
                 return ConnectionStatus.Error;
+            }
 
             return ConnectionStatus.Unknown;
         }
 
-        private string? EncryptPassword(string? password)
+        private static string? EncryptPassword(string? password)
         {
             if (string.IsNullOrEmpty(password))
+            {
                 return null;
+            }
 
             // TODO: Implement proper encryption
             // For now, just encode as base64 (NOT SECURE - implement proper encryption)
@@ -756,7 +789,9 @@ namespace ErpSystem.Core.Services
         private string? DecryptPassword(string? encryptedPassword)
         {
             if (string.IsNullOrEmpty(encryptedPassword))
+            {
                 return null;
+            }
 
             try
             {
@@ -775,13 +810,13 @@ namespace ErpSystem.Core.Services
         {
             return await RetrieveDatabaseSchemaAsync(connectionString, DataSourceType.SqlServer);
         }
-        
+
         public async Task<DataSourceSchemaDto> GetSampleSchemaAsync()
         {
             return await Task.FromResult(GetSampleSchema());
         }
-        
-        private DataSourceSchemaDto GetSampleSchema()
+
+        private static DataSourceSchemaDto GetSampleSchema()
         {
             // Return a comprehensive sample schema for demonstration
             return new DataSourceSchemaDto

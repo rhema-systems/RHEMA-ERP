@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Plus, Search, Eye, Edit, Calendar, AlertCircle, Settings, History, MapPin, Trash2 } from 'lucide-react';
+import { Plus, Search, Eye, Edit, Calendar, AlertCircle, Settings, History, MapPin } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -29,6 +30,9 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { useRouter } from 'next/navigation';
+
+import { format } from 'date-fns';
 
 interface Asset {
   id: string;
@@ -64,7 +68,9 @@ interface MaintenanceHistory {
 
 
 export default function AssetsPage() {
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
   const { toast } = useToast();
+  const searchParams = useSearchParams();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [filteredAssets, setFilteredAssets] = useState<Asset[]>([]);
   const [maintenanceHistory, setMaintenanceHistory] = useState<MaintenanceHistory[]>([]);
@@ -77,7 +83,7 @@ export default function AssetsPage() {
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [assetTypes, setAssetTypes] = useState<Array<{id: string, name: string, description?: string}>>([]);
-  
+
   const [newAsset, setNewAsset] = useState({
     name: '',
     assetNumber: '',
@@ -102,8 +108,12 @@ export default function AssetsPage() {
       return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD format
     } catch {
       return '';
+  const router = useRouter();
+
     }
   };
+
+  const router = useRouter();
 
   // Helper function to map backend assets to frontend format
   const mapAssets = (rawAssets: any[]) => {
@@ -115,6 +125,29 @@ export default function AssetsPage() {
       console.log('First asset WarrantyEndDate:', rawAssets[0].warrantyEndDate || rawAssets[0].WarrantyEndDate);
     }
     return rawAssets.map((asset: any) => {
+      // Backend usually sends enum.ToString(): "Active", "Maintenance", "OutOfService", etc.
+      const rawStatus: string = asset.status || asset.Status || 'Active';
+      let mappedStatus: Asset['status'];
+
+      switch (rawStatus) {
+        case 'Active':
+        case 'InUse':
+          mappedStatus = 'Operational';
+          break;
+        case 'Maintenance':
+          mappedStatus = 'Under Maintenance';
+          break;
+        case 'OutOfService':
+        case 'Retired':
+        case 'Disposed':
+        case 'Inactive':
+          mappedStatus = 'Out of Service';
+          break;
+        default:
+          mappedStatus = 'Operational';
+          break;
+      }
+
       const mapped = {
         ...asset,
         assetNumber: asset.assetNumber || asset.AssetNumber || 'N/A',
@@ -130,7 +163,7 @@ export default function AssetsPage() {
         location: asset.location || asset.Location || '',
         description: asset.description || asset.Description || '',
         name: asset.name || asset.Name || '',
-        status: asset.status || asset.Status || 'Operational',
+        status: mappedStatus,
         criticality: asset.criticality || asset.Criticality || 'Medium',
         condition: asset.condition || asset.Condition || 'Good'
       };
@@ -146,44 +179,44 @@ export default function AssetsPage() {
       try {
         const token = localStorage.getItem('authToken');
         const [assetsResponse, historyResponse, categoriesResponse] = await Promise.all([
-          fetch('http://localhost:5000/api/maintenance/assets', {
+          fetch(`${API_URL}/maintenance/assets`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'
             }
           }),
-          fetch('http://localhost:5000/api/maintenance/assets/history', {
+          fetch(`${API_URL}/maintenance/assets/history`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'
             }
           }),
-          fetch('http://localhost:5000/api/maintenance/asset-categories', {
+          fetch(`${API_URL}/maintenance/asset-categories`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'
             }
           })
         ]);
-        
+
         if (assetsResponse.ok) {
           const assetsData = await assetsResponse.json();
           const rawAssets = assetsData.data || assetsData.items || assetsData || [];
           setAssets(mapAssets(rawAssets));
         }
-        
+
         if (historyResponse.ok) {
           const historyData = await historyResponse.json();
           setMaintenanceHistory(historyData.data || historyData.items || historyData || []);
         }
-        
+
         console.log('Asset categories response status:', categoriesResponse.status);
-        
+
         if (categoriesResponse.ok) {
           const categoriesData = await categoriesResponse.json();
           console.log('Asset categories loaded from API:', categoriesData);
           console.log('Number of asset categories:', categoriesData?.length || 0);
-          
+
           if (categoriesData && categoriesData.length > 0) {
             setAssetTypes(categoriesData);
             console.log('Asset categories set successfully');
@@ -204,7 +237,7 @@ export default function AssetsPage() {
         console.error('Failed to load assets data:', error);
         setAssets([]);
         setMaintenanceHistory([]);
-        
+
         // Add some default asset types for testing if API fails
         console.warn('Using fallback asset types for testing');
         setAssetTypes([
@@ -221,12 +254,41 @@ export default function AssetsPage() {
     loadAssetsData();
   }, []);
 
+  // Handle opening asset from URL parameter and initial category filter
+  useEffect(() => {
+    const assetId = searchParams.get('id');
+    const categoryParam = searchParams.get('category');
+
+    // If a specific asset ID is provided, open its details dialog once assets are loaded
+    if (assetId && assets.length > 0 && !isViewDialogOpen) {
+      const asset = assets.find(a => a.id === assetId);
+      if (asset) {
+        console.log('Opening asset from URL:', asset);
+        setSelectedAsset(asset);
+        setIsViewDialogOpen(true);
+      } else {
+        console.warn('Asset not found with ID:', assetId);
+        toast({
+          title: 'Asset not found',
+          description: 'The requested asset could not be found.',
+          variant: 'destructive'
+        });
+      }
+    }
+
+    // If a category is provided in the URL, use it to pre-filter the grid
+    if (categoryParam && categoryFilter === 'all') {
+      console.log('Applying initial category filter from URL:', categoryParam);
+      setCategoryFilter(categoryParam);
+    }
+  }, [assets, searchParams, isViewDialogOpen, toast, categoryFilter]);
+
   // Filter assets
   useEffect(() => {
     let filtered = assets;
 
     if (searchTerm) {
-      filtered = filtered.filter(asset => 
+      filtered = filtered.filter(asset =>
         asset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         asset.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
         asset.manufacturer.toLowerCase().includes(searchTerm.toLowerCase())
@@ -249,7 +311,7 @@ export default function AssetsPage() {
       // Find the selected asset type
       const selectedType = assetTypes.find(type => type.name === newAsset.category);
       const typeId = selectedType?.id || assetTypes[0]?.id;
-      
+
       // Log debugging info
       console.log('Creating asset with data:', {
         newAsset,
@@ -257,7 +319,7 @@ export default function AssetsPage() {
         typeId,
         assetTypes: assetTypes.slice(0, 3) // Log first 3 types
       });
-      
+
       // Validate required fields
       if (!newAsset.name?.trim()) {
         toast({
@@ -267,7 +329,7 @@ export default function AssetsPage() {
         });
         return;
       }
-      
+
       if (!typeId) {
         toast({
           title: "Validation Error",
@@ -276,7 +338,7 @@ export default function AssetsPage() {
         });
         return;
       }
-      
+
       // Validate that we have actual asset types from the API
       if (assetTypes.length === 0) {
         toast({
@@ -286,12 +348,12 @@ export default function AssetsPage() {
         });
         return;
       }
-      
+
       const token = localStorage.getItem('authToken');
-      
+
       // Basic API connectivity test
       try {
-        const testResponse = await fetch('http://localhost:5000/api/maintenance/assets', {
+        const testResponse = await fetch(`${API_URL}/maintenance/assets`, {
           method: 'GET',
           headers: {
             'Authorization': token ? `Bearer ${token}` : '',
@@ -316,7 +378,7 @@ export default function AssetsPage() {
         });
         return;
       }
-      
+
       const payload = {
         name: newAsset.name.trim(),
         assetNumber: newAsset.assetNumber?.trim() || '', // Use form value or empty for auto-generation
@@ -332,12 +394,12 @@ export default function AssetsPage() {
         warrantyEndDate: newAsset.warrantyExpiry || null,
         currentValue: newAsset.value || null
       };
-      
+
       console.log('Sending payload:', payload);
       console.log('Token available:', !!token);
-      console.log('Request URL:', 'http://localhost:5000/api/maintenance/assets');
-      
-      const response = await fetch('http://localhost:5000/api/maintenance/assets', {
+      console.log('Request URL:', `${API_URL}/maintenance/assets`);
+
+      const response = await fetch(`${API_URL}/maintenance/assets`, {
         method: 'POST',
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
@@ -345,7 +407,7 @@ export default function AssetsPage() {
         },
         body: JSON.stringify(payload)
       });
-      
+
       if (!response.ok) {
         let errorDetails;
         let errorJson = null;
@@ -360,7 +422,7 @@ export default function AssetsPage() {
         } catch (e) {
           errorDetails = 'Could not read error response';
         }
-        
+
         const errorInfo = {
           status: response.status,
           statusText: response.statusText,
@@ -368,13 +430,13 @@ export default function AssetsPage() {
           token: token ? `Token present (${token.substring(0, 20)}...)` : 'No token found',
           payload: JSON.stringify(payload, null, 2)
         };
-        
+
         console.error('Asset creation failed:');
         console.error('Status:', response.status);
         console.error('Status Text:', response.statusText);
         console.error('Error Details:', errorDetails);
         console.error('Payload:', payload);
-        
+
         // Try to parse error details for more specific message
         let userMessage = `Failed to create asset: ${response.status} ${response.statusText}`;
         if (errorDetails && errorDetails.includes('AssetCategory')) {
@@ -382,7 +444,7 @@ export default function AssetsPage() {
         } else if (errorDetails && errorDetails.includes('unique')) {
           userMessage = 'Asset number already exists. Please use a different number.';
         }
-        
+
         toast({
           title: "Error",
           description: userMessage,
@@ -390,21 +452,21 @@ export default function AssetsPage() {
         });
         throw new Error(userMessage);
       }
-      
+
       // Refresh the list
-      const assetsResponse = await fetch('http://localhost:5000/api/maintenance/assets', {
+      const assetsResponse = await fetch(`${API_URL}/maintenance/assets`, {
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json'
         }
       });
-      
+
       if (assetsResponse.ok) {
         const assetsData = await assetsResponse.json();
         const rawAssets = assetsData.data || assetsData.items || assetsData || [];
         setAssets(mapAssets(rawAssets));
       }
-      
+
       setIsCreateDialogOpen(false);
       setNewAsset({
         name: '',
@@ -446,10 +508,10 @@ export default function AssetsPage() {
 
   const handleUpdateAsset = async () => {
     if (!selectedAsset?.id) return;
-    
+
     try {
       const token = localStorage.getItem('authToken');
-      const response = await fetch(`http://localhost:5000/api/maintenance/assets/${selectedAsset.id}`, {
+      const response = await fetch(`${API_URL}/maintenance/assets/${selectedAsset.id}`, {
         method: 'PUT',
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
@@ -470,25 +532,25 @@ export default function AssetsPage() {
           currentValue: newAsset.value || null
         })
       });
-      
+
       if (!response.ok) {
         throw new Error('Failed to update asset');
       }
-      
+
       // Refresh the list
-      const assetsResponse = await fetch('http://localhost:5000/api/maintenance/assets', {
+      const assetsResponse = await fetch(`${API_URL}/maintenance/assets`, {
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json'
         }
       });
-      
+
       if (assetsResponse.ok) {
         const assetsData = await assetsResponse.json();
         const rawAssets = assetsData.data || assetsData.items || assetsData || [];
         setAssets(mapAssets(rawAssets));
       }
-      
+
       setIsEditDialogOpen(false);
       setSelectedAsset(null);
       setNewAsset({
@@ -512,29 +574,29 @@ export default function AssetsPage() {
 
   const handleDeleteAsset = async (id: string) => {
     if (!confirm('Are you sure you want to delete this asset?')) return;
-    
+
     try {
       const token = localStorage.getItem('authToken');
-      const response = await fetch(`http://localhost:5000/api/maintenance/assets/${id}`, {
+      const response = await fetch(`${API_URL}/maintenance/assets/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json'
         }
       });
-      
+
       if (!response.ok) {
         throw new Error('Failed to delete asset');
       }
-      
+
       // Refresh the list
-      const assetsResponse = await fetch('http://localhost:5000/api/maintenance/assets', {
+      const assetsResponse = await fetch(`${API_URL}/maintenance/assets`, {
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
           'Content-Type': 'application/json'
         }
       });
-      
+
       if (assetsResponse.ok) {
         const assetsData = await assetsResponse.json();
         const rawAssets = assetsData.data || assetsData.items || assetsData || [];
@@ -594,9 +656,18 @@ export default function AssetsPage() {
     return maintenanceHistory.filter(record => record.assetId === assetId);
   };
 
-  const isMaintenanceOverdue = (nextMaintenanceDate: string) => {
+  const formatDate = (value: string | Date | null | undefined) => {
+    if (!value) return '';
+    const d = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    return format(d, 'MMM dd, yyyy');
+  };
+
+  const isMaintenanceOverdue = (nextMaintenanceDate: string | Date | null | undefined) => {
     if (!nextMaintenanceDate) return false;
-    return new Date(nextMaintenanceDate) < new Date();
+    const d = nextMaintenanceDate instanceof Date ? nextMaintenanceDate : new Date(nextMaintenanceDate);
+    if (Number.isNaN(d.getTime())) return false;
+    return d < new Date();
   };
 
   return (
@@ -627,7 +698,7 @@ export default function AssetsPage() {
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
-      
+
       <div className="flex items-center justify-between">
         <div></div>
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
@@ -670,7 +741,7 @@ export default function AssetsPage() {
               </div>
               <div className="grid grid-cols-1 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="category">Asset Type</Label>
+                  <Label htmlFor="category">Asset Category</Label>
                   <Select value={newAsset.category} onValueChange={(value) => setNewAsset(prev => ({ ...prev, category: value }))}>
                     <SelectTrigger>
                       <SelectValue />
@@ -792,7 +863,7 @@ export default function AssetsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        
+
         {/* Edit Asset Dialog */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
           <DialogContent className="max-w-2xl">
@@ -820,7 +891,7 @@ export default function AssetsPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="edit-category">Asset Type</Label>
+                  <Label htmlFor="edit-category">Asset Category</Label>
                   <Select value={newAsset.category} onValueChange={(value) => setNewAsset(prev => ({ ...prev, category: value }))}>
                     <SelectTrigger>
                       <SelectValue />
@@ -1023,13 +1094,13 @@ export default function AssetsPage() {
               </div>
             </div>
             <div className="space-y-1">
-              <Label htmlFor="category-filter" className="text-sm">Asset Type</Label>
+              <Label htmlFor="category-filter" className="text-sm">Asset Category</Label>
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                 <SelectTrigger className="w-[140px]">
-                  <SelectValue placeholder="All Asset Types" />
+                  <SelectValue placeholder="All Asset Categories" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Asset Types</SelectItem>
+                  <SelectItem value="all">All Asset Categories</SelectItem>
                   {assetTypes.map((type) => (
                     <SelectItem key={type.id} value={type.name}>
                       {type.name}
@@ -1104,12 +1175,18 @@ export default function AssetsPage() {
                   <TableCell>
                     <div className="text-sm">
                       {asset.nextMaintenanceDate ? (
-                        <div className={isMaintenanceOverdue(asset.nextMaintenanceDate) ? 'text-red-600 font-medium' : ''}>
-                          {new Date(asset.nextMaintenanceDate).toLocaleDateString()}
-                          {isMaintenanceOverdue(asset.nextMaintenanceDate) && (
-                            <div className="text-xs">Overdue</div>
-                          )}
-                        </div>
+                        (() => {
+                          const next = new Date(asset.nextMaintenanceDate);
+                          const overdue = isMaintenanceOverdue(next);
+                          return (
+                            <div className={overdue ? 'text-red-600 font-medium' : ''}>
+                              {formatDate(next)}
+                              {overdue && (
+                                <div className="text-xs">Overdue</div>
+                              )}
+                            </div>
+                          );
+                        })()
                       ) : (
                         'Not scheduled'
                       )}
@@ -1130,17 +1207,17 @@ export default function AssetsPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleEditAsset(asset)}
+                        onClick={() => router.push(`/maintenance/asset-admission?assetId=${asset.id}`)}
+                        className="text-xs"
                       >
-                        <Edit className="h-4 w-4" />
+                        Admit
                       </Button>
                       <Button
                         size="sm"
                         variant="outline"
-                        className="text-red-600 hover:text-red-700"
-                        onClick={() => handleDeleteAsset(asset.id)}
+                        onClick={() => handleEditAsset(asset)}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Edit className="h-4 w-4" />
                       </Button>
                     </div>
                   </TableCell>
@@ -1162,13 +1239,15 @@ export default function AssetsPage() {
           </DialogHeader>
           {selectedAsset && (
             <Tabs defaultValue="details" className="space-y-4">
-              <TabsList>
-                <TabsTrigger value="details">Asset Details</TabsTrigger>
-                <TabsTrigger value="history">Maintenance History</TabsTrigger>
-                <TabsTrigger value="schedule">Maintenance Schedule</TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="details" className="space-y-4">
+              <div className="h-[60vh] flex flex-col">
+                <TabsList>
+                  <TabsTrigger value="details">Asset Details</TabsTrigger>
+                  <TabsTrigger value="schedule">Maintenance Schedule</TabsTrigger>
+                  <TabsTrigger value="history">Maintenance History</TabsTrigger>
+                </TabsList>
+
+                <div className="flex-1 overflow-y-auto mt-2">
+                <TabsContent value="details" className="space-y-4">
                 <div className="grid grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <div>
@@ -1208,15 +1287,15 @@ export default function AssetsPage() {
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Asset Value</Label>
                       <p className="text-sm">
-                        {selectedAsset.currentValue 
-                          ? `$${selectedAsset.currentValue.toLocaleString()}` 
+                        {selectedAsset.currentValue
+                          ? `$${selectedAsset.currentValue.toLocaleString()}`
                           : 'N/A'
                         }
                       </p>
                     </div>
                   </div>
                 </div>
-                
+
                 <div className="border-t pt-4">
                   <h4 className="text-sm font-medium mb-4">Technical Information</h4>
                   <div className="grid grid-cols-3 gap-4">
@@ -1241,8 +1320,8 @@ export default function AssetsPage() {
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Purchase Date</Label>
                       <p className="text-sm">
-                        {selectedAsset.purchaseDate 
-                          ? new Date(selectedAsset.purchaseDate).toLocaleDateString()
+                        {selectedAsset.purchaseDate
+                          ? formatDate(selectedAsset.purchaseDate)
                           : 'Not specified'
                         }
                       </p>
@@ -1250,8 +1329,8 @@ export default function AssetsPage() {
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Warranty Expiry</Label>
                       <p className="text-sm">
-                        {selectedAsset.warrantyExpiry 
-                          ? new Date(selectedAsset.warrantyExpiry).toLocaleDateString()
+                        {selectedAsset.warrantyExpiry
+                          ? formatDate(selectedAsset.warrantyExpiry)
                           : 'Not specified'
                         }
                       </p>
@@ -1259,8 +1338,8 @@ export default function AssetsPage() {
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Last Maintenance</Label>
                       <p className="text-sm">
-                        {selectedAsset.lastMaintenanceDate 
-                          ? new Date(selectedAsset.lastMaintenanceDate).toLocaleDateString()
+                        {selectedAsset.lastMaintenanceDate
+                          ? formatDate(selectedAsset.lastMaintenanceDate)
                           : 'Never'
                         }
                       </p>
@@ -1268,7 +1347,32 @@ export default function AssetsPage() {
                   </div>
                 </div>
               </TabsContent>
-              
+
+              <TabsContent value="schedule">
+                <div className="space-y-4">
+                  <h4 className="text-sm font-medium">Maintenance Schedule</h4>
+                  <div className="border rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-sm">Next Scheduled Maintenance</p>
+                        <p className="text-sm text-muted-foreground">
+                          {selectedAsset.nextMaintenanceDate
+                            ? formatDate(selectedAsset.nextMaintenanceDate)
+                            : 'Not scheduled'
+                          }
+                        </p>
+                      </div>
+                      <div className="flex space-x-2">
+                        <Button size="sm" variant="outline">
+                          <Calendar className="h-4 w-4 mr-2" />
+                          Schedule Maintenance
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
+
               <TabsContent value="history">
                 <div className="space-y-4">
                   <h4 className="text-sm font-medium">Maintenance History</h4>
@@ -1279,7 +1383,7 @@ export default function AssetsPage() {
                           <div>
                             <p className="font-medium text-sm">{record.description}</p>
                             <div className="flex items-center space-x-4 mt-2 text-xs text-muted-foreground">
-                              <span>{new Date(record.date).toLocaleDateString()}</span>
+                              <span>{formatDate(record.date)}</span>
                               <span>{record.type}</span>
                               <span>{record.technician}</span>
                               <span>WO: {record.workOrderId}</span>
@@ -1300,31 +1404,8 @@ export default function AssetsPage() {
                   </div>
                 </div>
               </TabsContent>
-              
-              <TabsContent value="schedule">
-                <div className="space-y-4">
-                  <h4 className="text-sm font-medium">Maintenance Schedule</h4>
-                  <div className="border rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-sm">Next Scheduled Maintenance</p>
-                        <p className="text-sm text-muted-foreground">
-                          {selectedAsset.nextMaintenanceDate 
-                            ? new Date(selectedAsset.nextMaintenanceDate).toLocaleDateString()
-                            : 'Not scheduled'
-                          }
-                        </p>
-                      </div>
-                      <div className="flex space-x-2">
-                        <Button size="sm" variant="outline">
-                          <Calendar className="h-4 w-4 mr-2" />
-                          Schedule Maintenance
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </TabsContent>
+              </div>
+            </div>
             </Tabs>
           )}
           <DialogFooter>

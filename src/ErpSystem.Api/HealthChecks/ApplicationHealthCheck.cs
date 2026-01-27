@@ -1,8 +1,8 @@
-using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Microsoft.Extensions.Options;
-using ErpSystem.Web.Configuration;
 using ErpSystem.Core.Services;
 using ErpSystem.Data;
+using ErpSystem.Web.Configuration;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 
 namespace ErpSystem.Web.HealthChecks
 {
@@ -23,7 +23,7 @@ namespace ErpSystem.Web.HealthChecks
         }
 
         public async Task<HealthCheckResult> CheckHealthAsync(
-            HealthCheckContext context, 
+            HealthCheckContext context,
             CancellationToken cancellationToken = default)
         {
             var healthCheckData = new Dictionary<string, object>
@@ -38,25 +38,25 @@ namespace ErpSystem.Web.HealthChecks
             {
                 // Check critical services
                 await CheckCriticalServicesAsync(healthCheckData, cancellationToken);
-                
+
                 // Check module status
                 await CheckModuleStatusAsync(healthCheckData, cancellationToken);
-                
+
                 // Check configuration validity
                 await CheckConfigurationAsync(healthCheckData, cancellationToken);
 
                 return HealthCheckResult.Healthy(
-                    $"{_applicationOptions.ApplicationName} v{_applicationOptions.Version} is healthy", 
+                    $"{_applicationOptions.ApplicationName} v{_applicationOptions.Version} is healthy",
                     healthCheckData);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Application health check failed");
-                
+
                 healthCheckData["error"] = ex.Message;
                 return HealthCheckResult.Unhealthy(
-                    $"{_applicationOptions.ApplicationName} health check failed: {ex.Message}", 
-                    ex, 
+                    $"{_applicationOptions.ApplicationName} health check failed: {ex.Message}",
+                    ex,
                     healthCheckData);
             }
         }
@@ -114,7 +114,7 @@ namespace ErpSystem.Web.HealthChecks
                 {
                     var canConnect = await dbContext.Database.CanConnectAsync(cancellationToken);
                     serviceStatus["Database"] = canConnect ? "Healthy" : "Cannot connect";
-                    
+
                     if (!canConnect)
                     {
                         throw new InvalidOperationException("Database connection failed");
@@ -138,7 +138,7 @@ namespace ErpSystem.Web.HealthChecks
         private async Task CheckModuleStatusAsync(Dictionary<string, object> data, CancellationToken cancellationToken)
         {
             using var scope = _serviceProvider.CreateScope();
-            
+
             try
             {
                 var moduleOptions = scope.ServiceProvider.GetService<IOptions<ModuleOptions>>()?.Value;
@@ -155,7 +155,7 @@ namespace ErpSystem.Web.HealthChecks
                         ["WorkflowEngine"] = new { Enabled = moduleOptions.WorkflowEngine.Enabled, Name = moduleOptions.WorkflowEngine.DisplayName }
                     };
 
-                    var enabledCount = new[] 
+                    var enabledCount = new[]
                     {
                         moduleOptions.Finance.Enabled,
                         moduleOptions.HR.Enabled,
@@ -182,17 +182,17 @@ namespace ErpSystem.Web.HealthChecks
         private async Task CheckConfigurationAsync(Dictionary<string, object> data, CancellationToken cancellationToken)
         {
             using var scope = _serviceProvider.CreateScope();
-            
+
             try
             {
                 var validationService = scope.ServiceProvider.GetService<Configuration.IConfigurationValidationService>();
                 if (validationService != null)
                 {
                     var validationResult = await validationService.ValidateConfigurationAsync();
-                    
+
                     data["configuration_valid"] = validationResult.IsValid;
                     data["configuration_message"] = validationResult.Message;
-                    
+
                     if (!validationResult.IsValid)
                     {
                         data["configuration_errors"] = validationResult.Errors;

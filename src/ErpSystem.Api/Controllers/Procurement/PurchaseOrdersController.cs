@@ -1,10 +1,11 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using ErpSystem.Core.DTOs.Procurement;
-using ErpSystem.Core.Entities.Procurement;
-using ErpSystem.Core.Interfaces.Procurement;
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Procurement;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Procurement;
 
@@ -20,6 +21,9 @@ public class PurchaseOrdersController : ControllerBase
     private readonly IPurchaseOrderItemRepository _purchaseOrderItemRepository;
     private readonly IPurchaseOrderReceiptRepository _purchaseOrderReceiptRepository;
     private readonly ISupplierRepository _supplierRepository;
+    private readonly IProcurementBudgetService _budgetService;
+    private readonly IProcurementBudgetRepository _budgetRepository;
+    private readonly IProcurementPlanItemRepository _planItemRepository;
     private readonly ILogger<PurchaseOrdersController> _logger;
 
     public PurchaseOrdersController(
@@ -27,12 +31,18 @@ public class PurchaseOrdersController : ControllerBase
         IPurchaseOrderItemRepository purchaseOrderItemRepository,
         IPurchaseOrderReceiptRepository purchaseOrderReceiptRepository,
         ISupplierRepository supplierRepository,
+        IProcurementBudgetService budgetService,
+        IProcurementBudgetRepository budgetRepository,
+        IProcurementPlanItemRepository planItemRepository,
         ILogger<PurchaseOrdersController> logger)
     {
         _purchaseOrderRepository = purchaseOrderRepository;
         _purchaseOrderItemRepository = purchaseOrderItemRepository;
         _purchaseOrderReceiptRepository = purchaseOrderReceiptRepository;
         _supplierRepository = supplierRepository;
+        _budgetService = budgetService;
+        _budgetRepository = budgetRepository;
+        _planItemRepository = planItemRepository;
         _logger = logger;
     }
 
@@ -201,6 +211,22 @@ public class PurchaseOrdersController : ControllerBase
             if (supplier == null)
             {
                 return BadRequest($"Supplier with ID {createDto.SupplierId} not found");
+            }
+
+            // BLACKLIST ENFORCEMENT: Check if supplier is blacklisted
+            if (supplier.IsBlacklisted)
+            {
+                var message = $"Cannot create purchase order. Supplier '{supplier.Name}' is blacklisted.";
+                if (!string.IsNullOrEmpty(supplier.BlacklistReason))
+                {
+                    message += $" Reason: {supplier.BlacklistReason}";
+                }
+                if (supplier.BlacklistExpiryDate.HasValue)
+                {
+                    message += $" Blacklist expires on: {supplier.BlacklistExpiryDate.Value:yyyy-MM-dd}";
+                }
+                _logger.LogWarning("Attempted to create purchase order for blacklisted supplier {SupplierId}", createDto.SupplierId);
+                return BadRequest(message);
             }
 
             // Generate purchase order number
@@ -377,7 +403,7 @@ public class PurchaseOrdersController : ControllerBase
     /// </summary>
     [HttpPost("{id}/receive")]
     public async Task<ActionResult<PurchaseOrderReceiptDto>> ReceivePurchaseOrder(
-        Guid id, 
+        Guid id,
         [FromBody] ReceivePurchaseOrderDto receiveDto)
     {
         try
@@ -460,12 +486,15 @@ public class PurchaseOrdersController : ControllerBase
             // Check if purchase order is fully received
             var items = await _purchaseOrderItemRepository.GetItemsByPurchaseOrderIdAsync(id);
             var fullyReceived = items.All(item => item.ReceivedQuantity >= item.OrderedQuantity);
-            
+
             if (fullyReceived)
             {
                 await _purchaseOrderRepository.UpdateStatusAsync(id, "Received");
                 purchaseOrder.ReceivedDate = DateTime.UtcNow;
                 await _purchaseOrderRepository.UpdatePurchaseOrderAsync(purchaseOrder);
+
+                // Move committed budget to utilized when PO is fully received
+                await UtilizeBudgetForPurchaseOrderAsync(purchaseOrder);
             }
             else
             {
@@ -571,7 +600,10 @@ public class PurchaseOrdersController : ControllerBase
     private async Task<PurchaseOrderDetailDto> GetPurchaseOrderDetailDto(Guid purchaseOrderId)
     {
         var purchaseOrder = await _purchaseOrderRepository.GetPurchaseOrderByIdAsync(purchaseOrderId);
-        if (purchaseOrder == null) return null!;
+        if (purchaseOrder == null)
+        {
+            return null!;
+        }
 
         var items = await _purchaseOrderItemRepository.GetItemsByPurchaseOrderIdAsync(purchaseOrderId);
         var receipts = await _purchaseOrderReceiptRepository.GetReceiptsByPurchaseOrderIdAsync(purchaseOrderId);
@@ -646,6 +678,49 @@ public class PurchaseOrdersController : ControllerBase
                 SupplierName = purchaseOrder.Supplier?.Name ?? ""
             }).ToList()
         };
+    }
+
+    #endregion
+
+    #region Private Helper Methods
+
+    /// <summary>
+    /// Moves committed budget to utilized when PO is fully received
+    /// </summary>
+    private async Task UtilizeBudgetForPurchaseOrderAsync(PurchaseOrder purchaseOrder)
+    {
+        try
+        {
+            // Find the plan item linked to this PO to get category and plan info
+            var planItems = await _planItemRepository.GetAllAsync();
+            var planItem = planItems.FirstOrDefault(pi => pi.PurchaseOrderId == purchaseOrder.Id);
+
+            if (planItem == null)
+            {
+                _logger.LogWarning("No plan item found for PO {PONumber}, skipping budget utilization", purchaseOrder.OrderNumber);
+                return;
+            }
+
+            // Find budget linked to the plan
+            var budgets = await _budgetRepository.GetByPlanIdAsync(planItem.ProcurementPlanId);
+            var budget = budgets.FirstOrDefault(b => b.Status == "Active" || b.Status == "Approved");
+
+            if (budget == null)
+            {
+                _logger.LogWarning("No budget found for plan {PlanId}, skipping budget utilization", planItem.ProcurementPlanId);
+                return;
+            }
+
+            // Move from committed to utilized
+            await _budgetService.UtilizeCommittedBudgetAsync(budget.Id, purchaseOrder.TotalAmount, planItem.ItemCategory);
+            _logger.LogInformation("Utilized {Amount} from budget {BudgetCode} for PO {PONumber}, category: {Category}",
+                purchaseOrder.TotalAmount, budget.BudgetCode, purchaseOrder.OrderNumber, planItem.ItemCategory ?? "N/A");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to utilize budget for PO {PONumber}: {ErrorMessage}", purchaseOrder.OrderNumber, ex.Message);
+            // Don't fail the PO receiving if budget utilization fails
+        }
     }
 
     #endregion

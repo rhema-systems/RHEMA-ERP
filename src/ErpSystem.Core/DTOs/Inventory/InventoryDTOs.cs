@@ -53,22 +53,22 @@ public class CreateInventoryItemDto
 {
     [Required]
     public string ItemCode { get; set; } = string.Empty;
-    
+
     [Required]
     public string Name { get; set; } = string.Empty;
-    
+
     public string? Description { get; set; }
-    
+
     [Required]
     public Guid CategoryId { get; set; }
-    
+
     public string? Brand { get; set; }
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
-    
+
     [Required]
     public string UnitOfMeasure { get; set; } = "EA";
-    
+
     public ItemType ItemType { get; set; } = ItemType.StockItem;
     public ItemStatus Status { get; set; } = ItemStatus.Active;
     public decimal StandardCost { get; set; }
@@ -112,18 +112,18 @@ public class CreateStockMovementDto
 {
     [Required]
     public Guid InventoryItemId { get; set; }
-    
+
     [Required]
     public string MovementType { get; set; } = string.Empty;
-    
+
     [Required]
     public decimal Quantity { get; set; }
-    
+
     public decimal UnitCost { get; set; }
-    
+
     [Required]
     public ReferenceType ReferenceType { get; set; } = ReferenceType.Manual;
-    
+
     public string? ReferenceNumber { get; set; }
     public Guid? ReferenceId { get; set; }
     public Guid? LocationId { get; set; }
@@ -131,7 +131,7 @@ public class CreateStockMovementDto
     public string? SerialNumber { get; set; }
     public string? LotNumber { get; set; }
     public DateTime? ExpirationDate { get; set; }
-    
+
     [Required]
     public Guid ProcessedById { get; set; }
 }
@@ -189,18 +189,18 @@ public class AllocateInventoryDto
 {
     [Required]
     public Guid InventoryItemId { get; set; }
-    
+
     [Required]
     public decimal Quantity { get; set; }
-    
+
     [Required]
     public string ReferenceNumber { get; set; } = string.Empty;
-    
+
     public string? ReferenceType { get; set; }
     public Guid? ReferenceId { get; set; }
     public DateTime? RequiredDate { get; set; }
     public string? Notes { get; set; }
-    
+
     [Required]
     public Guid UserId { get; set; }
 }
@@ -353,7 +353,7 @@ public class CreatePurchaseOrderDto
 {
     [Required]
     public string SupplierName { get; set; } = string.Empty;
-    
+
     public string? SupplierAddress { get; set; }
     public string? ContactPerson { get; set; }
     public string? ContactPhone { get; set; }
@@ -364,10 +364,10 @@ public class CreatePurchaseOrderDto
     public string? Notes { get; set; }
     public Guid? DeliveryWarehouseId { get; set; }
     public string? DeliveryAddress { get; set; }
-    
+
     [Required]
     public Guid RequestedById { get; set; }
-    
+
     [Required]
     public List<CreatePurchaseOrderItemDto> Items { get; set; } = new();
 }
@@ -379,15 +379,15 @@ public class CreatePurchaseOrderItemDto
 {
     [Required]
     public Guid InventoryItemId { get; set; }
-    
+
     public string? SupplierItemCode { get; set; }
-    
+
     [Required]
     public decimal OrderedQuantity { get; set; }
-    
+
     [Required]
     public decimal UnitPrice { get; set; }
-    
+
     public DateTime? ExpectedDeliveryDate { get; set; }
     public string? Notes { get; set; }
 }
@@ -438,17 +438,17 @@ public class ReceivePurchaseOrderDto
 {
     [Required]
     public Guid PurchaseOrderId { get; set; }
-    
+
     public string? DeliveryNote { get; set; }
     public string? CarrierName { get; set; }
     public string? TrackingNumber { get; set; }
-    
+
     [Required]
     public Guid ReceivedById { get; set; }
-    
+
     public Guid? InspectedById { get; set; }
     public string? Notes { get; set; }
-    
+
     [Required]
     public List<ReceivePurchaseOrderItemDto> Items { get; set; } = new();
 }
@@ -460,10 +460,10 @@ public class ReceivePurchaseOrderItemDto
 {
     [Required]
     public Guid PurchaseOrderItemId { get; set; }
-    
+
     [Required]
     public decimal ReceivedQuantity { get; set; }
-    
+
     public decimal AcceptedQuantity { get; set; }
     public decimal RejectedQuantity { get; set; }
     public Guid? LocationId { get; set; }

@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories
 {
@@ -118,11 +118,15 @@ namespace ErpSystem.Data.Repositories
         public virtual async Task<IEnumerable<T>> GetPagedAsync<TKey>(int page, int pageSize, Expression<Func<T, TKey>> orderBy, bool descending = false)
         {
             var query = _dbSet.Where(e => !e.IsDeleted);
-            
+
             if (descending)
+            {
                 query = query.OrderByDescending(orderBy);
+            }
             else
+            {
                 query = query.OrderBy(orderBy);
+            }
 
             return await query
                 .Skip((page - 1) * pageSize)
@@ -133,11 +137,15 @@ namespace ErpSystem.Data.Repositories
         public virtual async Task<IEnumerable<T>> GetPagedAsync<TKey>(int page, int pageSize, Expression<Func<T, bool>> predicate, Expression<Func<T, TKey>> orderBy, bool descending = false)
         {
             var query = _dbSet.Where(predicate).Where(e => !e.IsDeleted);
-            
+
             if (descending)
+            {
                 query = query.OrderByDescending(orderBy);
+            }
             else
+            {
                 query = query.OrderBy(orderBy);
+            }
 
             return await query
                 .Skip((page - 1) * pageSize)
@@ -218,6 +226,28 @@ namespace ErpSystem.Data.Repositories
             await DeleteRangeAsync(entities);
         }
 
+        // Hard delete operations (permanent removal from database)
+        public virtual async Task HardDeleteAsync(T entity)
+        {
+            // Use raw SQL to bypass EF tracking and soft delete interception
+            var tableName = _context.Model.FindEntityType(typeof(T))?.GetTableName();
+            await _context.Database.ExecuteSqlRawAsync($"DELETE FROM [{tableName}] WHERE Id = {{0}}", entity.Id);
+        }
+
+        public virtual async Task HardDeleteRangeAsync(IEnumerable<T> entities)
+        {
+            var entityList = entities.ToList();
+            if (!entityList.Any())
+            {
+                return;
+            }
+
+            // Use raw SQL to bypass EF tracking and soft delete interception
+            var tableName = _context.Model.FindEntityType(typeof(T))?.GetTableName();
+            var ids = string.Join(",", entityList.Select(e => $"'{e.Id}'"));
+            await _context.Database.ExecuteSqlRawAsync($"DELETE FROM [{tableName}] WHERE Id IN ({ids})");
+        }
+
 
         // Advanced querying
         public virtual IQueryable<T> GetQueryable()
@@ -239,7 +269,7 @@ namespace ErpSystem.Data.Repositories
         {
             return await _dbSet.Where(predicate).Where(e => !e.IsDeleted).Select(projection).ToListAsync();
         }
-        
+
         // Unit of work
         public virtual async Task<int> SaveChangesAsync()
         {

@@ -15,12 +15,15 @@ export interface ConfirmationDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   title: string
-  description?: string
+  description?: React.ReactNode
   confirmText?: string
   cancelText?: string
   variant?: "default" | "destructive"
-  onConfirm: () => void
+  onConfirm: () => void | Promise<void>
   isLoading?: boolean
+  confirmDisabled?: boolean
+  maxWidth?: string
+  children?: React.ReactNode
 }
 
 export function ConfirmationDialog({
@@ -32,10 +35,13 @@ export function ConfirmationDialog({
   cancelText = "Cancel",
   variant = "default",
   onConfirm,
-  isLoading = false
+  isLoading = false,
+  confirmDisabled = false,
+  maxWidth = "425px",
+  children
 }: ConfirmationDialogProps) {
-  const handleConfirm = () => {
-    onConfirm()
+  const handleConfirm = async () => {
+    await onConfirm()
     if (!isLoading) {
       onOpenChange(false)
     }
@@ -43,7 +49,7 @@ export function ConfirmationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className={`sm:max-w-[${maxWidth}]`} style={{ maxWidth }}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {variant === "destructive" && (
@@ -52,11 +58,24 @@ export function ConfirmationDialog({
             {title}
           </DialogTitle>
           {description && (
-            <DialogDescription>
-              {description}
-            </DialogDescription>
+            typeof description === 'string' ? (
+              <DialogDescription>
+                {description}
+              </DialogDescription>
+            ) : (
+              <DialogDescription asChild>
+                <div className="text-sm text-muted-foreground">
+                  {description}
+                </div>
+              </DialogDescription>
+            )
           )}
         </DialogHeader>
+        {children && (
+          <div className="py-4">
+            {children}
+          </div>
+        )}
         <DialogFooter>
           <Button
             variant="outline"
@@ -68,7 +87,7 @@ export function ConfirmationDialog({
           <Button
             variant={variant === "destructive" ? "destructive" : "default"}
             onClick={handleConfirm}
-            disabled={isLoading}
+            disabled={isLoading || confirmDisabled}
           >
             {confirmText}
           </Button>

@@ -1,8 +1,8 @@
-using Microsoft.Extensions.Logging;
 using ErpSystem.Core.Entities.Workflow;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Services;
-using ErpSystem.Core.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Workflow;
 
@@ -43,11 +43,7 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
         }
 
         // Ensure entity type exists
-        var entityType = await _workflowEntityTypeRepository.GetByIdAsync(definition.EntityTypeId);
-        if (entityType == null)
-        {
-            throw new InvalidOperationException($"Entity type with ID {definition.EntityTypeId} not found");
-        }
+        var entityType = await _workflowEntityTypeRepository.GetByIdAsync(definition.EntityTypeId) ?? throw new InvalidOperationException($"Entity type with ID {definition.EntityTypeId} not found");
 
         // Check for duplicate name
         var existingDefinition = await _workflowDefinitionRepository.GetByNameAsync(definition.Name, definition.TenantId, cancellationToken);
@@ -74,11 +70,7 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
     {
         _logger.LogInformation("Updating workflow definition: {Id}", definition.Id);
 
-        var existingDefinition = await _workflowDefinitionRepository.GetWithDetailsAsync(definition.Id, cancellationToken);
-        if (existingDefinition == null)
-        {
-            throw new InvalidOperationException($"Workflow definition with ID {definition.Id} not found");
-        }
+        var existingDefinition = await _workflowDefinitionRepository.GetWithDetailsAsync(definition.Id, cancellationToken) ?? throw new InvalidOperationException($"Workflow definition with ID {definition.Id} not found");
 
         // Check if definition is being used by active instances
         var activeInstances = await _workflowDefinitionRepository.GetByIdAsync(definition.Id);
@@ -126,11 +118,7 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
     {
         _logger.LogInformation("Activating workflow definition: {Id}", definitionId);
 
-        var definition = await _workflowDefinitionRepository.GetWithDetailsAsync(definitionId, cancellationToken);
-        if (definition == null)
-        {
-            throw new InvalidOperationException($"Workflow definition with ID {definitionId} not found");
-        }
+        var definition = await _workflowDefinitionRepository.GetWithDetailsAsync(definitionId, cancellationToken) ?? throw new InvalidOperationException($"Workflow definition with ID {definitionId} not found");
 
         // Validate before activation
         var validationResult = await ValidateDefinitionAsync(definition, cancellationToken);
@@ -152,12 +140,7 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
     {
         _logger.LogInformation("Deactivating workflow definition: {Id}", definitionId);
 
-        var definition = await _workflowDefinitionRepository.GetByIdAsync(definitionId);
-        if (definition == null)
-        {
-            throw new InvalidOperationException($"Workflow definition with ID {definitionId} not found");
-        }
-
+        var definition = await _workflowDefinitionRepository.GetByIdAsync(definitionId) ?? throw new InvalidOperationException($"Workflow definition with ID {definitionId} not found");
         definition.IsActive = false;
         definition.UpdatedAt = DateTime.UtcNow;
 
@@ -213,7 +196,7 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
     private async Task ValidateWorkflowStructureAsync(WorkflowDefinition definition, List<string> errors, CancellationToken cancellationToken)
     {
         var steps = definition.Steps.ToList();
-        
+
         // Must have at least one step
         if (!steps.Any())
         {
@@ -244,7 +227,7 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
             .Where(g => g.Count() > 1)
             .Select(g => g.Key)
             .ToList();
-        
+
         if (duplicateNames.Any())
         {
             errors.Add($"Duplicate step names found: {string.Join(", ", duplicateNames)}");
@@ -275,7 +258,7 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
         }
     }
 
-    private async Task ValidateTransitionsAsync(WorkflowDefinition definition, List<string> errors, CancellationToken cancellationToken)
+    private static async Task ValidateTransitionsAsync(WorkflowDefinition definition, List<string> errors, CancellationToken cancellationToken)
     {
         var allTransitions = definition.Steps.SelectMany(s => s.OutgoingTransitions ?? Enumerable.Empty<WorkflowTransition>()).ToList();
         var stepIds = definition.Steps.Select(s => s.Id).ToHashSet();

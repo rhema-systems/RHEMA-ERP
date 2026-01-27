@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -44,7 +44,9 @@ public class TechniciansController : ControllerBase
         try
         {
             if (pageSize > 100)
+            {
                 pageSize = 100;
+            }
 
             var filter = new TechnicianFilterDto
             {
@@ -149,7 +151,9 @@ public class TechniciansController : ControllerBase
         {
             var technician = await _technicianService.GetTechnicianByIdAsync(id);
             if (technician == null)
+            {
                 return NotFound($"Technician with ID {id} not found in HR module");
+            }
 
             return Ok(technician);
         }
@@ -274,7 +278,10 @@ public class TechniciansController : ControllerBase
         {
             var result = await _technicianService.GetTechnicianWithSkillsAsync(id);
             if (result == null)
+            {
                 return NotFound($"Technician with ID {id} not found");
+            }
+
             return Ok(result);
         }
         catch (Exception ex)

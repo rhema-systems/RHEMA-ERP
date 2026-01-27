@@ -1,0 +1,17 @@
+services:
+  openldap:
+    image: osixia/openldap:1.5.0
+    container_name: erp-openldap
+    environment:
+      LDAP_ORGANISATION: "ERP Company"
+      LDAP_DOMAIN: "erp.company.local"
+      LDAP_ADMIN_PASSWORD: "adminpassword"
+      LDAP_TLS: "false"
+    ports:
+      - "389:389"
+      - "636:636"
+    volumes:
+      - ldap-data:/var/lib/ldap
+      - ldap-config:/etc/ldap/slapd.d
+      - ./init-ldap.ldif:/container/service/slapd/assets/config/bootstrap/ldif/init-ldap.ldif:ro
+    restart: unless-stopped

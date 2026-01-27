@@ -1,10 +1,10 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using ErpSystem.Core.Interfaces;
-using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Entities.HR.Performance;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Core.Entities.HR;
 

@@ -1,6 +1,6 @@
+using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.DTOs.Maintenance;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Maintenance;
@@ -50,7 +50,7 @@ public class MobileMaintenanceService : IMobileMaintenanceService
 
             // Get technician's assigned work orders
             var allWorkOrders = await _workOrderService.GetWorkOrdersByTechnicianAsync(technicianId);
-            
+
             // Filter by status if provided
             if (!string.IsNullOrEmpty(status))
             {
@@ -74,7 +74,7 @@ public class MobileMaintenanceService : IMobileMaintenanceService
             foreach (var wo in pagedWorkOrders)
             {
                 var asset = await _assetService.GetAssetByIdAsync(wo.AssetId);
-                
+
                 mobileWorkOrders.Add(new MobileWorkOrderSummaryDto
                 {
                     Id = wo.Id,
@@ -116,7 +116,10 @@ public class MobileMaintenanceService : IMobileMaintenanceService
         try
         {
             var workOrder = await _workOrderService.GetWorkOrderByIdAsync(workOrderId);
-            if (workOrder == null) return null;
+            if (workOrder == null)
+            {
+                return null;
+            }
 
             var asset = await _assetService.GetAssetByIdAsync(workOrder.AssetId);
             var workLogs = await GetWorkOrderLogsAsync(workOrderId);
@@ -160,7 +163,7 @@ public class MobileMaintenanceService : IMobileMaintenanceService
     {
         try
         {
-            _logger.LogInformation("Updating work order {WorkOrderId} status to {Status} from mobile", 
+            _logger.LogInformation("Updating work order {WorkOrderId} status to {Status} from mobile",
                 workOrderId, updateDto.Status);
 
             // Update work order status
@@ -241,7 +244,7 @@ public class MobileMaintenanceService : IMobileMaintenanceService
     {
         try
         {
-            _logger.LogInformation("Uploading {Count} photos for work order {WorkOrderId}", 
+            _logger.LogInformation("Uploading {Count} photos for work order {WorkOrderId}",
                 photos.Count, workOrderId);
 
             var uploadedPhotoIds = new List<string>();
@@ -289,7 +292,10 @@ public class MobileMaintenanceService : IMobileMaintenanceService
         try
         {
             var asset = await _assetService.GetAssetByIdAsync(assetId);
-            if (asset == null) return null;
+            if (asset == null)
+            {
+                return null;
+            }
 
             var lastMaintenance = await GetAssetLastMaintenanceDateAsync(assetId);
             var nextMaintenance = await GetAssetNextMaintenanceDateAsync(assetId);
@@ -321,7 +327,7 @@ public class MobileMaintenanceService : IMobileMaintenanceService
     {
         try
         {
-            _logger.LogInformation("Searching assets - QR: {QrCode}, Tag: {AssetTag}, Search: {Search}", 
+            _logger.LogInformation("Searching assets - QR: {QrCode}, Tag: {AssetTag}, Search: {Search}",
                 qrCode, assetTag, search);
 
             var assets = await _assetService.GetAllAssetsAsync();
@@ -340,7 +346,7 @@ public class MobileMaintenanceService : IMobileMaintenanceService
             }
             else if (!string.IsNullOrEmpty(search))
             {
-                filteredAssets = assets.Where(a => 
+                filteredAssets = assets.Where(a =>
                     a.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ||
                     (a.Description != null && a.Description.Contains(search, StringComparison.OrdinalIgnoreCase)) ||
                     (a.Location != null && a.Location.Contains(search, StringComparison.OrdinalIgnoreCase)));
@@ -420,14 +426,14 @@ public class MobileMaintenanceService : IMobileMaintenanceService
             var allSchedules = await _scheduleService.GetActiveSchedulesAsync();
             var schedules = allSchedules.Where(s => s.AssignedTechnicianId == technicianId &&
                 s.NextScheduledDate >= startDate && s.NextScheduledDate <= endDate).ToList();
-            
+
             var events = new List<MobileScheduleEventDto>();
             var totalTime = TimeSpan.Zero;
 
             foreach (var schedule in schedules)
             {
                 var asset = await _assetService.GetAssetByIdAsync(schedule.AssetId);
-                
+
                 var eventDto = new MobileScheduleEventDto
                 {
                     WorkOrderId = Guid.NewGuid(), // Placeholder since schedule doesn't have WorkOrderId
@@ -470,7 +476,7 @@ public class MobileMaintenanceService : IMobileMaintenanceService
             var locationVerified = await VerifyLocationAsync(checkInDto.WorkOrderId, checkInDto.Latitude, checkInDto.Longitude);
 
             // Record check-in
-            await RecordCheckInAsync(checkInDto.WorkOrderId, userId, checkInDto.Timestamp, checkInDto.Notes, 
+            await RecordCheckInAsync(checkInDto.WorkOrderId, userId, checkInDto.Timestamp, checkInDto.Notes,
                 checkInDto.Latitude, checkInDto.Longitude);
 
             return new MobileCheckInResultDto
@@ -503,7 +509,7 @@ public class MobileMaintenanceService : IMobileMaintenanceService
             var totalDuration = checkOutDto.Timestamp - (checkInTime ?? checkOutDto.Timestamp);
 
             // Record check-out
-            await RecordCheckOutAsync(checkOutDto.WorkOrderId, userId, checkOutDto.Timestamp, 
+            await RecordCheckOutAsync(checkOutDto.WorkOrderId, userId, checkOutDto.Timestamp,
                 checkOutDto.CompletionNotes, totalDuration);
 
             return new MobileCheckOutResultDto
@@ -610,7 +616,7 @@ public class MobileMaintenanceService : IMobileMaintenanceService
 
             // Get work orders for the period
             var workOrders = await GetTechnicianWorkOrdersAsync(userId, 1, 1000, null, null);
-            
+
             // Get required reference data
             var assets = await GetRelevantAssetsAsync(userId, startDate, endDate);
             var schedule = await GetTechnicianScheduleAsync(userId, startDate, endDate);
@@ -650,57 +656,60 @@ public class MobileMaintenanceService : IMobileMaintenanceService
 
     #region Helper Methods
 
-    private async Task<int> GetWorkOrderPhotoCountAsync(Guid workOrderId)
+    private static async Task<int> GetWorkOrderPhotoCountAsync(Guid workOrderId)
     {
         // Mock implementation - would count photos in actual storage
-            return new Random().Next(0, 5);
+        return new Random().Next(0, 5);
     }
 
-    private bool DetermineIfCheckInRequired(string priority, string type)
+    private static bool DetermineIfCheckInRequired(string priority, string type)
     {
         // Require check-in for high priority or certain types
         return priority == "High" || priority == "Critical" || type == "Emergency";
     }
 
-    private async Task<List<MobileWorkLogDto>> GetWorkOrderLogsAsync(Guid workOrderId)
+    private static async Task<List<MobileWorkLogDto>> GetWorkOrderLogsAsync(Guid workOrderId)
     {
         // Mock implementation - would get actual work logs
         return new List<MobileWorkLogDto>();
     }
 
-    private async Task<List<MobilePartsDto>> GetWorkOrderRequiredPartsAsync(Guid workOrderId)
+    private static async Task<List<MobilePartsDto>> GetWorkOrderRequiredPartsAsync(Guid workOrderId)
     {
         // Mock implementation - would get required parts
         return new List<MobilePartsDto>();
     }
 
-    private async Task<MobileCheckInStatusDto?> GetWorkOrderCheckInStatusAsync(Guid workOrderId)
+    private static async Task<MobileCheckInStatusDto?> GetWorkOrderCheckInStatusAsync(Guid workOrderId)
     {
         // Mock implementation - would check current check-in status
         return null;
     }
 
-    private async Task<List<string>> GetWorkOrderRequiredSkillsAsync(Guid workOrderId)
+    private static async Task<List<string>> GetWorkOrderRequiredSkillsAsync(Guid workOrderId)
     {
         // Mock implementation - would get required skills
         return new List<string> { "Electrical", "Mechanical" };
     }
 
-    private async Task<List<string>> GetWorkOrderSafetyRequirementsAsync(Guid workOrderId)
+    private static async Task<List<string>> GetWorkOrderSafetyRequirementsAsync(Guid workOrderId)
     {
         // Mock implementation - would get safety requirements
         return new List<string> { "Safety glasses required", "Lock-out tag-out procedure" };
     }
 
-    private MobileAssetInfoDto CreateMobileAssetInfo(MaintenanceAssetDto? asset)
+    private static MobileAssetInfoDto CreateMobileAssetInfo(MaintenanceAssetDto? asset)
     {
-        if (asset == null) return new MobileAssetInfoDto();
+        if (asset == null)
+        {
+            return new MobileAssetInfoDto();
+        }
 
         return new MobileAssetInfoDto
         {
             Id = asset.Id,
             Name = asset.Name,
-                AssetTag = asset.AssetNumber ?? string.Empty,
+            AssetTag = asset.AssetNumber ?? string.Empty,
             Location = asset.Location ?? string.Empty
         };
     }
@@ -713,31 +722,31 @@ public class MobileMaintenanceService : IMobileMaintenanceService
         return syncId;
     }
 
-    private async Task<Guid> CreateWorkLogAsync(CreateWorkLogDto workLogRequest)
+    private static async Task<Guid> CreateWorkLogAsync(CreateWorkLogDto workLogRequest)
     {
         // Mock implementation - would create actual work log
         return Guid.NewGuid();
     }
 
-    private async Task<string> ProcessAndSavePhotoAsync(Guid workOrderId, FileUploadDto photo, string? description, Guid userId)
+    private static async Task<string> ProcessAndSavePhotoAsync(Guid workOrderId, FileUploadDto photo, string? description, Guid userId)
     {
         // Mock implementation - would compress, save photo, and return photo ID
         return Guid.NewGuid().ToString();
     }
 
-    private async Task<DateTime?> GetAssetLastMaintenanceDateAsync(Guid assetId)
+    private static async Task<DateTime?> GetAssetLastMaintenanceDateAsync(Guid assetId)
     {
         // Mock implementation
         return DateTime.UtcNow.AddDays(-new Random().Next(1, 30));
     }
 
-    private async Task<DateTime?> GetAssetNextMaintenanceDateAsync(Guid assetId)
+    private static async Task<DateTime?> GetAssetNextMaintenanceDateAsync(Guid assetId)
     {
         // Mock implementation
         return DateTime.UtcNow.AddDays(new Random().Next(1, 60));
     }
 
-    private Dictionary<string, object> CreateAssetSpecifications(MaintenanceAssetDto asset)
+    private static Dictionary<string, object> CreateAssetSpecifications(MaintenanceAssetDto asset)
     {
         // Mock implementation - would extract actual specifications
         return new Dictionary<string, object>
@@ -748,43 +757,45 @@ public class MobileMaintenanceService : IMobileMaintenanceService
         };
     }
 
-    private async Task<List<string>> GetAssetDocumentsAsync(Guid assetId)
+    private static async Task<List<string>> GetAssetDocumentsAsync(Guid assetId)
     {
         // Mock implementation
         return new List<string>();
     }
 
-    private async Task<List<string>> GetAssetPhotosAsync(Guid assetId)
+    private static async Task<List<string>> GetAssetPhotosAsync(Guid assetId)
     {
         // Mock implementation
         return new List<string>();
     }
 
-    private async Task<string> VerifyLocationAsync(Guid workOrderId, double? latitude, double? longitude)
+    private static async Task<string> VerifyLocationAsync(Guid workOrderId, double? latitude, double? longitude)
     {
         if (!latitude.HasValue || !longitude.HasValue)
+        {
             return "Location not provided";
+        }
 
         // Mock implementation - would verify against asset location
         return "Location verified";
     }
 
-    private async Task RecordCheckInAsync(Guid workOrderId, Guid userId, DateTime timestamp, string? notes, 
+    private async Task RecordCheckInAsync(Guid workOrderId, Guid userId, DateTime timestamp, string? notes,
         double? latitude, double? longitude)
     {
         // Mock implementation - would record check-in in database
         _logger.LogInformation("Recorded check-in for work order {WorkOrderId}", workOrderId);
     }
 
-    private async Task RecordCheckOutAsync(Guid workOrderId, Guid userId, DateTime timestamp, 
+    private async Task RecordCheckOutAsync(Guid workOrderId, Guid userId, DateTime timestamp,
         string? notes, TimeSpan duration)
     {
         // Mock implementation - would record check-out in database
-        _logger.LogInformation("Recorded check-out for work order {WorkOrderId}, duration: {Duration}", 
+        _logger.LogInformation("Recorded check-out for work order {WorkOrderId}, duration: {Duration}",
             workOrderId, duration);
     }
 
-    private async Task<DateTime?> GetCheckInTimeAsync(Guid workOrderId, Guid userId)
+    private static async Task<DateTime?> GetCheckInTimeAsync(Guid workOrderId, Guid userId)
     {
         // Mock implementation - would get actual check-in time
         return DateTime.UtcNow.AddHours(-2);
@@ -796,7 +807,7 @@ public class MobileMaintenanceService : IMobileMaintenanceService
         _logger.LogInformation("Processing {Count} pending uploads", uploads.Count);
     }
 
-    private async Task<List<MobileUpdateDto>> GetServerUpdatesSinceAsync(Guid userId, DateTime lastSync)
+    private static async Task<List<MobileUpdateDto>> GetServerUpdatesSinceAsync(Guid userId, DateTime lastSync)
     {
         // Mock implementation - would get actual server updates
         return new List<MobileUpdateDto>();
@@ -808,31 +819,31 @@ public class MobileMaintenanceService : IMobileMaintenanceService
         _logger.LogInformation("Processing {Count} conflict resolutions", resolutions.Count);
     }
 
-    private async Task<int> GetPendingUploadsCountAsync(Guid userId)
+    private static async Task<int> GetPendingUploadsCountAsync(Guid userId)
     {
         // Mock implementation
         return new Random().Next(0, 5);
     }
 
-    private async Task<DateTime?> GetLastSyncTimeAsync(Guid userId)
+    private static async Task<DateTime?> GetLastSyncTimeAsync(Guid userId)
     {
         // Mock implementation
         return DateTime.UtcNow.AddMinutes(-new Random().Next(5, 120));
     }
 
-    private async Task<int> GetConflictsCountAsync(Guid userId)
+    private static async Task<int> GetConflictsCountAsync(Guid userId)
     {
         // Mock implementation
         return 0;
     }
 
-    private async Task<List<MobileAssetSummaryDto>> GetRelevantAssetsAsync(Guid userId, DateTime startDate, DateTime endDate)
+    private static async Task<List<MobileAssetSummaryDto>> GetRelevantAssetsAsync(Guid userId, DateTime startDate, DateTime endDate)
     {
         // Mock implementation - would get assets relevant to user's work orders
         return new List<MobileAssetSummaryDto>();
     }
 
-    private async Task<List<MobileSafetyProtocolSummaryDto>> GetRelevantSafetyProtocolsAsync(Guid userId)
+    private static async Task<List<MobileSafetyProtocolSummaryDto>> GetRelevantSafetyProtocolsAsync(Guid userId)
     {
         // Mock implementation - would get relevant safety protocols
         return new List<MobileSafetyProtocolSummaryDto>();

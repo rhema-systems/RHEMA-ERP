@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text.Json;
-using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.Interfaces;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Middleware;
 
@@ -274,7 +274,7 @@ public class ErrorResponse
     public string TraceId { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; }
     public Dictionary<string, string[]>? Errors { get; set; }
-    
+
     // Development-only properties
     public string? DeveloperMessage { get; set; }
     public string? StackTrace { get; set; }

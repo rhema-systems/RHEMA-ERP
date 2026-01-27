@@ -1,8 +1,8 @@
-using Microsoft.AspNetCore.Identity;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Shared;
 using ErpSystem.Shared.Interfaces;
+using Microsoft.AspNetCore.Identity;
 
 namespace ErpSystem.Core.Entities;
 
@@ -33,10 +33,10 @@ public class ApplicationUser : IdentityUser<Guid>, IAuditable
 
     public DateTime? LastLoginDate { get; set; }
     public string? ProfilePictureUrl { get; set; }
-    
+
     // Employee Link - Links this user account to an Employee record
     public Guid? EmployeeId { get; set; }
-    
+
     // Two-Factor Authentication
     [StringLength(32)]
     public string? AuthenticatorKey { get; set; }
@@ -44,31 +44,31 @@ public class ApplicationUser : IdentityUser<Guid>, IAuditable
     // Navigation properties
     public virtual ICollection<ApplicationUserRole> UserRoles { get; set; } = new List<ApplicationUserRole>();
     public virtual ICollection<UserTenant> UserTenants { get; set; } = new List<UserTenant>();
-    
+
     // Helper properties for accessing tenant information
     [NotMapped]
     public UserTenant? DefaultTenant => UserTenants.FirstOrDefault(ut => ut.IsDefault && !ut.IsDeleted && ut.Status == UserTenantStatus.Active);
-    
+
     [NotMapped]
     public IEnumerable<Tenant> AccessibleTenants => UserTenants
-        .Where(ut => !ut.IsDeleted && 
-                    ut.Status == UserTenantStatus.Active && 
+        .Where(ut => !ut.IsDeleted &&
+                    ut.Status == UserTenantStatus.Active &&
                     (ut.ExpiresAt == null || ut.ExpiresAt > DateTime.UtcNow))
         .Select(ut => ut.Tenant);
-    
+
     // Additional helper properties for different access states
     [NotMapped]
     public IEnumerable<UserTenant> ActiveTenantRelationships => UserTenants
         .Where(ut => !ut.IsDeleted && ut.Status == UserTenantStatus.Active && (ut.ExpiresAt == null || ut.ExpiresAt > DateTime.UtcNow));
-    
+
     [NotMapped]
     public IEnumerable<UserTenant> SuspendedTenantRelationships => UserTenants
         .Where(ut => !ut.IsDeleted && ut.Status == UserTenantStatus.Suspended);
-    
+
     [NotMapped]
     public IEnumerable<UserTenant> AllTenantRelationships => UserTenants
         .Where(ut => !ut.IsDeleted); // Excludes only soft-deleted relationships
-    
+
     // Primary tenant relationship
     public Guid TenantId { get; set; }
     public virtual Tenant Tenant { get; set; } = null!;
@@ -106,41 +106,41 @@ public class UserTenant : BaseEntity, IAuditable
 {
     [Required]
     public Guid UserId { get; set; }
-    
+
     [Required]
     public Guid TenantId { get; set; }
-    
+
     // Access level within this tenant
     public UserTenantAccessLevel AccessLevel { get; set; } = UserTenantAccessLevel.Standard;
-    
+
     // Current status of user access to this tenant
     public UserTenantStatus Status { get; set; } = UserTenantStatus.Active;
-    
+
     // Is this the user's default tenant?
     public bool IsDefault { get; set; } = false;
-    
+
     // When the user was granted access to this tenant
     public DateTime GrantedAt { get; set; } = DateTime.UtcNow;
-    
+
     // When the user's access expires (optional)
     public DateTime? ExpiresAt { get; set; }
-    
+
     // When the user was suspended from this tenant (optional)
     public DateTime? SuspendedAt { get; set; }
-    
+
     // When the user was reactivated in this tenant (optional)
     public DateTime? ReactivatedAt { get; set; }
-    
+
     // Who granted access
     public string? GrantedBy { get; set; }
-    
+
     // Who suspended/reactivated access
     public string? StatusChangedBy { get; set; }
-    
+
     // Additional metadata
     [StringLength(500)]
     public string? Notes { get; set; }
-    
+
     // Navigation properties
     public virtual ApplicationUser User { get; set; } = null!;
     public virtual Tenant Tenant { get; set; } = null!;
@@ -151,13 +151,13 @@ public enum UserTenantAccessLevel
 {
     // Standard user access
     Standard = 0,
-    
+
     // Elevated access (can manage some tenant settings)
     Elevated = 1,
-    
+
     // Admin access (full tenant management)
     Admin = 2,
-    
+
     // Read-only access (view only)
     ReadOnly = 3
 }
@@ -167,16 +167,16 @@ public enum UserTenantStatus
 {
     // User has active access to the tenant
     Active = 0,
-    
+
     // User access is temporarily suspended
     Suspended = 1,
-    
+
     // User access is permanently revoked (soft delete alternative)
     Revoked = 2,
-    
+
     // User access is pending approval
     Pending = 3,
-    
+
     // User access has expired
     Expired = 4
 }

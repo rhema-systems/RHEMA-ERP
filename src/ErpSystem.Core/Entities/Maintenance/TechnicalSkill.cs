@@ -112,7 +112,7 @@ public class TechnicalSkill : TenantEntity
     // Aliases for service compatibility
     [NotMapped]
     public DateTime CreatedDate => CreatedAt;
-    
+
     [NotMapped]
     public DateTime? LastModifiedDate => UpdatedAt;
 
@@ -208,7 +208,7 @@ public class TechnicianSkillAssignment : TenantEntity
     /// Days until skill certification expires
     /// </summary>
     [NotMapped]
-    public int DaysUntilExpiration => ExpirationDate.HasValue ? 
+    public int DaysUntilExpiration => ExpirationDate.HasValue ?
         (int)(ExpirationDate.Value - DateTime.UtcNow).TotalDays : -1;
 
     // Navigation properties

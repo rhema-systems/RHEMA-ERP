@@ -1,5 +1,5 @@
-using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.Workflow;
@@ -12,19 +12,19 @@ public interface IWorkflowEngine
     /// <summary>
     /// Starts a new workflow instance for the specified entity
     /// </summary>
-    Task<WorkflowInstance> StartWorkflowAsync(string workflowName, Guid entityId, Guid initiatedById, 
+    Task<WorkflowInstance> StartWorkflowAsync(string workflowName, Guid entityId, Guid initiatedById,
         object? dataContext = null);
 
     /// <summary>
     /// Continues execution of a workflow instance
     /// </summary>
-    Task<WorkflowExecutionResult> ExecuteNextStepAsync(Guid workflowInstanceId, Guid userId, 
+    Task<WorkflowExecutionResult> ExecuteNextStepAsync(Guid workflowInstanceId, Guid userId,
         object? stepData = null);
 
     /// <summary>
     /// Processes a specific step in a workflow instance
     /// </summary>
-    Task<WorkflowExecutionResult> ProcessStepAsync(Guid workflowStepInstanceId, Guid userId, 
+    Task<WorkflowExecutionResult> ProcessStepAsync(Guid workflowStepInstanceId, Guid userId,
         WorkflowStepAction action, object? resultData = null, string? comments = null);
 
     /// <summary>
@@ -35,7 +35,7 @@ public interface IWorkflowEngine
     /// <summary>
     /// Evaluates workflow conditions and determines possible transitions
     /// </summary>
-    Task<IEnumerable<WorkflowTransition>> GetAvailableTransitionsAsync(Guid workflowInstanceId, 
+    Task<IEnumerable<WorkflowTransition>> GetAvailableTransitionsAsync(Guid workflowInstanceId,
         object? dataContext = null);
 
     /// <summary>
@@ -149,7 +149,7 @@ public interface IWorkflowStepService
     /// <summary>
     /// Reassigns a step instance to a different user
     /// </summary>
-    Task ReassignStepAsync(Guid stepInstanceId, Guid newAssignedToId, Guid reassignedById, 
+    Task ReassignStepAsync(Guid stepInstanceId, Guid newAssignedToId, Guid reassignedById,
         string? reason = null);
 
     /// <summary>
@@ -176,19 +176,19 @@ public interface IWorkflowApprovalService
     /// <summary>
     /// Creates an approval request
     /// </summary>
-    Task<WorkflowApproval> CreateApprovalAsync(Guid stepInstanceId, Guid approverId, 
+    Task<WorkflowApproval> CreateApprovalAsync(Guid stepInstanceId, Guid approverId,
         string? approverRole = null, DateTime? dueDate = null);
 
     /// <summary>
     /// Processes an approval decision
     /// </summary>
-    Task<WorkflowApproval> ProcessApprovalAsync(Guid approvalId, Guid userId, 
+    Task<WorkflowApproval> ProcessApprovalAsync(Guid approvalId, Guid userId,
         WorkflowApprovalAction action, string? comments = null);
 
     /// <summary>
     /// Delegates an approval to another user
     /// </summary>
-    Task<WorkflowApproval> DelegateApprovalAsync(Guid approvalId, Guid delegateToId, 
+    Task<WorkflowApproval> DelegateApprovalAsync(Guid approvalId, Guid delegateToId,
         Guid delegatedById, string? reason = null);
 
     /// <summary>

@@ -1,8 +1,8 @@
+using System.Diagnostics;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Models;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
-using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services;
 
@@ -170,7 +170,7 @@ public class FileStorageMigrationService : IFileStorageMigrationService
             {
                 await MigrateFile(fileInfo, sourceStorage, destinationStorage, options);
                 result.MigratedFiles++;
-                
+
                 _logger.LogDebug("Successfully migrated file: {FilePath}", fileInfo.FilePath);
             }
             catch (Exception ex)
@@ -178,7 +178,7 @@ public class FileStorageMigrationService : IFileStorageMigrationService
                 result.FailedFiles++;
                 var errorMessage = $"Failed to migrate {fileInfo.FilePath}: {ex.Message}";
                 errors.Add(errorMessage);
-                
+
                 _logger.LogError(ex, "Failed to migrate file: {FilePath}", fileInfo.FilePath);
 
                 if (!options.ContinueOnError)
@@ -208,13 +208,13 @@ public class FileStorageMigrationService : IFileStorageMigrationService
 
         // For now, we can't directly stream between storage providers without implementing
         // a temporary buffer or streaming mechanism. This is a simplified implementation.
-        
+
         // Note: In a real implementation, you'd want to:
         // 1. Stream the file from source to destination without loading it entirely into memory
         // 2. Handle large files efficiently
         // 3. Implement retry logic
         // 4. Add progress reporting
-        
+
         throw new NotImplementedException(
             "Direct file migration between storage providers is not yet implemented. " +
             "This would require streaming files from source to destination storage. " +
@@ -286,11 +286,13 @@ public class FileStorageMigrationService : IFileStorageMigrationService
         return filteredFiles;
     }
 
-    private bool IsMatch(string fileName, string pattern)
+    private static bool IsMatch(string fileName, string pattern)
     {
         // Simple pattern matching - can be enhanced with proper regex
         if (pattern == "*.*" || pattern == "*")
+        {
             return true;
+        }
 
         if (pattern.StartsWith("*."))
         {
@@ -301,14 +303,14 @@ public class FileStorageMigrationService : IFileStorageMigrationService
         return fileName.Equals(pattern, StringComparison.OrdinalIgnoreCase);
     }
 
-    private string ExtractCategoryFromPath(string filePath)
+    private static string ExtractCategoryFromPath(string filePath)
     {
         // Extract category from path structure like "category/tenant/date/file.ext"
         var segments = filePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
         return segments.Length > 0 ? segments[0] : "general";
     }
 
-    private string? ExtractTenantIdFromPath(string filePath)
+    private static string? ExtractTenantIdFromPath(string filePath)
     {
         // Extract tenant ID from path structure like "category/tenant/date/file.ext"
         var segments = filePath.Split('/', StringSplitOptions.RemoveEmptyEntries);

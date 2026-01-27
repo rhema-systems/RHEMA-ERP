@@ -1,8 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using ErpSystem.Core.Interfaces;
-using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Core.Entities.Procurement;
 
@@ -91,6 +91,15 @@ public class Supplier : TenantEntity
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
+
+    // Blacklist Information
+    public bool IsBlacklisted { get; set; } = false;
+
+    [MaxLength(1000)]
+    public string? BlacklistReason { get; set; }
+
+    public DateTime? BlacklistDate { get; set; }
+    public DateTime? BlacklistExpiryDate { get; set; }
 
     // Dates
     public DateTime? LastOrderDate { get; set; }

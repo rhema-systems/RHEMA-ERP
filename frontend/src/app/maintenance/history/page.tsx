@@ -35,7 +35,7 @@ import { format, subDays, subMonths } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 interface MaintenanceHistoryItem {
-  id: number;
+  id: string; // Changed from number to string (Guid)
   workOrderId: string;
   title: string;
   type: string;
@@ -75,7 +75,14 @@ export default function MaintenanceHistoryPage() {
     const loadMaintenanceHistory = async () => {
       setLoading(true);
       try {
-        const response = await fetch('/api/maintenance/history');
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+        const token = localStorage.getItem('authToken');
+        const response = await fetch(`${API_URL}/maintenance/history`, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': token ? `Bearer ${token}` : ''
+          }
+        });
         if (response.ok) {
           const data = await response.json();
           setMaintenanceHistoryData(data);
@@ -128,7 +135,7 @@ export default function MaintenanceHistoryPage() {
     }
 
     setFilteredData(filtered);
-  }, [searchTerm, typeFilter, statusFilter, categoryFilter, technicianFilter, dateRange]);
+  }, [maintenanceHistoryData, searchTerm, typeFilter, statusFilter, categoryFilter, technicianFilter, dateRange]);
 
   const getTypeBadge = (type: string) => {
     const colors = {

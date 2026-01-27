@@ -1,7 +1,7 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
-using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;

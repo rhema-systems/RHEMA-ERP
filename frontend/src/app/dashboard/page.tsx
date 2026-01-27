@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { DollarSign, ShoppingCart, Users, Package, Settings, BarChart3 } from 'lucide-react';
 import { DashboardLayout } from '../../components/layout/dashboard-layout';
@@ -19,6 +20,7 @@ import { dashboardService } from '../../services/dashboard';
 import { useAuth } from '../../hooks/use-auth';
 import { cn } from '../../lib/utils';
 import { useIsClient, generateTrendData } from '../../lib/ssr-utils';
+import { authService } from '../../services/auth';
 
 // Utility function for formatting currency
 const formatCurrency = (value: number) => {
@@ -31,10 +33,22 @@ const formatCurrency = (value: number) => {
 };
 
 export default function Dashboard() {
+  const router = useRouter();
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<'classic' | 'enhanced'>('enhanced');
   const [showRealTime, setShowRealTime] = useState(true);
   const isClient = useIsClient();
+
+  // Redirect external users (Local authentication) to external portal
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const storedUser = authService.getStoredUser();
+    if (storedUser?.authenticationProvider === 'Local') {
+      console.log('External user detected on internal dashboard, redirecting to external portal');
+      router.push('/external-portal');
+    }
+  }, [router]);
 
   // Fetch dashboard data
   const { data: stats, isLoading: statsLoading } = useQuery({

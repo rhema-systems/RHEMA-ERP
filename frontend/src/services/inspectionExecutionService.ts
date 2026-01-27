@@ -95,78 +95,8 @@ export interface WorkOrderInfo {
   actualHours?: number;
 }
 
-// Mock data for fallback
-const mockInspections: InspectionExecution[] = [
-  {
-    id: '1',
-    workOrderId: 'WO-2024-001',
-    workOrderNumber: 'WO-2024-001',
-    workOrderTitle: 'Vehicle Fleet Maintenance - Unit 42',
-    assetId: 'FLEET-042',
-    assetName: 'Ford Transit Van 42',
-    assetLocation: 'Main Parking Lot',
-    checklistId: '1',
-    checklist: {
-      id: '1',
-      name: 'Vehicle Preventive Maintenance Checklist',
-      description: 'Standard checklist for vehicle preventive maintenance',
-      workOrderType: 'Preventive',
-      assetCategory: 'Vehicle',
-      maintenanceType: 'Scheduled',
-      isMandatory: true,
-      isActive: true,
-      minimumPassingScore: 85,
-      version: 1,
-      items: [],
-      createdDate: '2024-01-01',
-      createdBy: 'System Administrator'
-    },
-    inspectorId: 'INSP-001',
-    inspectorName: 'John Smith',
-    scheduledDate: '2024-01-20T10:00:00Z',
-    startedDate: '2024-01-20T10:15:00Z',
-    completedDate: '2024-01-20T11:30:00Z',
-    status: 'Completed',
-    overallResult: 'Pass',
-    overallScore: 92,
-    itemResponses: [
-      {
-        itemId: '1-1',
-        result: 'Pass',
-        comments: 'Engine oil changed with 5W-30 synthetic oil, 4.2L capacity',
-        inspectedAt: '2024-01-20T10:20:00Z',
-        inspectedBy: 'INSP-001'
-      },
-      {
-        itemId: '1-2',
-        result: 'Pass',
-        comments: 'OEM oil filter installed and properly torqued',
-        inspectedAt: '2024-01-20T10:25:00Z',
-        inspectedBy: 'INSP-001'
-      }
-    ],
-    generalNotes: 'Vehicle maintenance completed successfully. All systems operating normally.',
-    regulatoryCompliance: {
-      isRegulatory: false,
-      complianceStandards: [],
-      certificationRequired: false,
-      auditTrailRequired: true,
-      nextInspectionDue: '2024-07-20'
-    },
-    attachments: [],
-    signatures: [
-      {
-        type: 'Inspector',
-        signedBy: 'John Smith',
-        signedAt: '2024-01-20T11:30:00Z',
-        required: true
-      }
-    ],
-    workflowStatus: 'Completed',
-    createdAt: '2024-01-20T09:00:00Z',
-    updatedAt: '2024-01-20T11:30:00Z'
-  }
-];
+// Mock data for fallback (empty - no mock data)
+const mockInspections: InspectionExecution[] = [];
 
 const mockWorkOrders: WorkOrderInfo[] = [
   {
@@ -227,8 +157,25 @@ class InspectionExecutionService {
   async getWorkOrderById(workOrderId: string): Promise<WorkOrderInfo | null> {
     try {
       if (this.useBackend) {
-        const response = await apiService.request<WorkOrderInfo>(`/work-orders/${workOrderId}`);
-        return response;
+        const response = await apiService.request<any>(`/maintenance/quality-control/inspection-by-workorder/${workOrderId}`);
+        // Map the response to WorkOrderInfo format
+        if (response && response.workOrder) {
+          return {
+            id: response.workOrder.id,
+            workOrderNumber: response.workOrder.workOrderNumber,
+            title: response.workOrder.title,
+            description: response.workOrder.description,
+            assetId: response.workOrder.assetId,
+            assetName: response.workOrder.assetName,
+            assetLocation: response.workOrder.assetLocation,
+            workOrderType: response.workOrder.workOrderType,
+            maintenanceType: response.workOrder.maintenanceType,
+            status: response.workOrder.status,
+            priority: response.workOrder.priority,
+            completedDate: response.workOrder.completedDate
+          };
+        }
+        return null;
       }
     } catch (error) {
       console.warn('Backend unavailable, using mock data:', error);
@@ -394,21 +341,14 @@ class InspectionExecutionService {
   }
 
   async getActiveInspections(inspectorId?: string): Promise<InspectionExecution[]> {
-    try {
-      if (this.useBackend) {
-        const queryString = inspectorId ? `?inspectorId=${inspectorId}` : '';
-        const response = await apiService.request<InspectionExecution[]>(`/inspections/active${queryString}`);
-        return response;
-      }
-    } catch (error) {
-      console.warn('Backend unavailable, using mock data:', error);
+    if (this.useBackend) {
+      const queryString = inspectorId ? `?inspectorId=${inspectorId}` : '';
+      const response = await apiService.request<InspectionExecution[]>(`/inspections/active${queryString}`);
+      return response;
     }
-
-    // Return mock data as fallback
-    return mockInspections.filter(inspection => 
-      (inspection.status === 'Scheduled' || inspection.status === 'In Progress') &&
-      (!inspectorId || inspection.inspectorId === inspectorId)
-    );
+    
+    // No mock data fallback - return empty array
+    return [];
   }
 
   calculateInspectionScore(checklist: QualityChecklist, itemResponses: ChecklistItemResponse[]): number {

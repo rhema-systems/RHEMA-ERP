@@ -1,8 +1,8 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using ErpSystem.Core.DTOs.Maintenance;
-using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -84,7 +84,9 @@ public class MaintenanceDashboardController : ControllerBase
             var end = endDate ?? DateTime.Today;
 
             if (start > end)
+            {
                 return BadRequest("Start date cannot be after end date");
+            }
 
             var kpis = await _analyticsService.GetMaintenanceKPIsAsync(start, end);
             return Ok(kpis);
@@ -198,7 +200,9 @@ public class MaintenanceDashboardController : ControllerBase
         try
         {
             if (days < 1 || days > 365)
+            {
                 return BadRequest("Days parameter must be between 1 and 365");
+            }
 
             var upcomingMaintenance = await GetUpcomingMaintenanceForDaysAsync(days);
             return Ok(upcomingMaintenance);
@@ -297,7 +301,7 @@ public class MaintenanceDashboardController : ControllerBase
         {
             // In a real implementation, this would clear cache and recalculate metrics
             _logger.LogInformation("Dashboard refresh requested by user {UserId}", _currentUserService.UserId);
-            
+
             var dashboard = await _analyticsService.GetDashboardDataAsync();
             return Ok(dashboard);
         }
@@ -326,7 +330,7 @@ public class MaintenanceDashboardController : ControllerBase
         {
             var daysOverdue = (DateTime.Now - workOrder.ScheduledEndDate!.Value).Days;
             var severity = daysOverdue > 7 ? "Critical" : daysOverdue > 3 ? "Warning" : "Info";
-            
+
             var alert = new MaintenanceAlertDto
             {
                 Id = Guid.NewGuid(),
@@ -421,7 +425,7 @@ public class MaintenanceDashboardController : ControllerBase
     {
         var endDate = DateTime.Today.AddDays(days);
         var preventiveReport = await _analyticsService.GetPreventiveMaintenanceReportAsync(DateTime.Today, endDate);
-        
+
         // TODO: PreventiveMaintenanceReportDto doesn't have UpcomingMaintenance property
         // For now, return empty list until the DTO is updated
         return new List<UpcomingMaintenanceDto>();
@@ -442,13 +446,19 @@ public class MaintenanceDashboardController : ControllerBase
         {
             var hasEmergencyWork = asset.Status == "Emergency";
             var hasOverdueWork = asset.Status == "Overdue";
-            
+
             if (hasEmergencyWork)
+            {
                 criticalAssets++;
+            }
             else if (hasOverdueWork)
+            {
                 warningAssets++;
+            }
             else
+            {
                 healthyAssets++;
+            }
         }
 
         var totalAssets = healthyAssets + warningAssets + criticalAssets + offlineAssets;
@@ -474,7 +484,7 @@ public class MaintenanceDashboardController : ControllerBase
         var userId = !string.IsNullOrEmpty(userIdString) && Guid.TryParse(userIdString, out var parsedUserId) ? parsedUserId : Guid.Empty;
         var workOrders = await _workOrderService.GetWorkOrdersByTechnicianAsync(userId); // Placeholder
         var preventiveReport = await _analyticsService.GetPreventiveMaintenanceReportAsync(startDate, endDate);
-        
+
         return new MaintenanceEfficiencyDto
         {
             PlannedWorkPercentage = preventiveReport.ComplianceRate,
@@ -487,7 +497,7 @@ public class MaintenanceDashboardController : ControllerBase
         };
     }
 
-    private async Task<CriticalSystemStatusDto> GetCriticalSystemStatusAsync()
+    private static async Task<CriticalSystemStatusDto> GetCriticalSystemStatusAsync()
     {
         // This would query for assets marked as critical systems
         var criticalSystems = new List<CriticalSystemDto>

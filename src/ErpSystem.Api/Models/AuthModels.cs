@@ -40,7 +40,7 @@ namespace ErpSystem.Api.Models
         public string? TenantCode { get; set; }
 
         public bool RememberMe { get; set; } = false;
-        
+
         /// <summary>
         /// Two-factor authentication code (6 digits)
         /// </summary>
@@ -71,12 +71,12 @@ namespace ErpSystem.Api.Models
         public string? RefreshToken { get; set; }
         public DateTime? ExpiresAt { get; set; }
         public UserInfo? User { get; set; }
-        
+
         /// <summary>
         /// Indicates if two-factor authentication is required to complete login
         /// </summary>
         public bool RequiresTwoFactor { get; set; }
-        
+
         /// <summary>
         /// Temporary token used for 2FA verification (when RequiresTwoFactor is true)
         /// </summary>
@@ -91,17 +91,20 @@ namespace ErpSystem.Api.Models
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
         public string? PhoneNumber { get; set; }
-        
+
         // Current session tenant info
         public Guid? CurrentTenantId { get; set; }
         public string? CurrentTenantCode { get; set; }
         public string? CurrentTenantName { get; set; }
-        
+
         // All accessible tenants
         public List<UserTenantInfo> AccessibleTenants { get; set; } = new();
-        
+
         public bool IsActive { get; set; }
         public List<string> Roles { get; set; } = new();
+
+        // Authentication provider (Local or LDAP)
+        public string AuthenticationProvider { get; set; } = "Local";
     }
 
     public class RegisterRequest

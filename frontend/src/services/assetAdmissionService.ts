@@ -140,7 +140,7 @@ export interface PagedResult<T> {
 
 class AssetAdmissionService {
   private getAuthHeaders() {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('authToken');
     return {
       'Authorization': token ? `Bearer ${token}` : '',
       'Content-Type': 'application/json'
@@ -235,18 +235,20 @@ class AssetAdmissionService {
     return response.data;
   }
 
-  async getDischargesByAdmission(admissionId: string): Promise<AssetDischarge> {
+  async getDischargesByAdmission(admissionId: string): Promise<AssetDischarge[]> {
     const response = await axios.get(`${API_URL}/maintenance/asset-discharges/by-admission/${admissionId}`, {
       headers: this.getAuthHeaders()
     });
     return response.data;
   }
 
-  async generateCompletionCertificate(dischargeId: string): Promise<{ certificatePath: string }> {
+  async generateCompletionCertificate(dischargeId: string): Promise<{ certificateNumber: string }> {
     const response = await axios.post(`${API_URL}/maintenance/asset-discharges/${dischargeId}/generate-certificate`, {}, {
       headers: this.getAuthHeaders()
     });
-    return response.data;
+
+    const cert = response.data as { certificateNumber: string };
+    return { certificateNumber: cert.certificateNumber };
   }
 
   // Photo and Document Management
@@ -256,7 +258,7 @@ class AssetAdmissionService {
 
     const response = await axios.post(`${API_URL}/maintenance/asset-admissions/${admissionId}/photos`, formData, {
       headers: {
-        'Authorization': localStorage.getItem('token') ? `Bearer ${localStorage.getItem('token')}` : '',
+        'Authorization': localStorage.getItem('authToken') ? `Bearer ${localStorage.getItem('authToken')}` : '',
         'Content-Type': 'multipart/form-data'
       }
     });
@@ -269,7 +271,7 @@ class AssetAdmissionService {
 
     const response = await axios.post(`${API_URL}/maintenance/asset-discharges/${dischargeId}/photos`, formData, {
       headers: {
-        'Authorization': localStorage.getItem('token') ? `Bearer ${localStorage.getItem('token')}` : '',
+        'Authorization': localStorage.getItem('authToken') ? `Bearer ${localStorage.getItem('authToken')}` : '',
         'Content-Type': 'multipart/form-data'
       }
     });
@@ -293,7 +295,7 @@ class AssetAdmissionService {
   async getDowntimeReport(assetId?: string, fromDate?: string, toDate?: string): Promise<{
     totalDowntimeHours: number;
     averageDowntimeHours: number;
-    downtimeByAsset: Array<{ assetName: string; downtimeHours: number }>;
+    downtimeByAsset: Array<{ assetId: string; assetName: string; assetNumber: string; downtimeHours: number; averageDowntimeHours: number; incidentCount: number }>;
   }> {
     const params: any = {};
     if (assetId) params.assetId = assetId;
@@ -304,7 +306,25 @@ class AssetAdmissionService {
       params,
       headers: this.getAuthHeaders()
     });
-    return response.data;
+
+    const raw = response.data as {
+      totalDowntimeHours: number;
+      averageDowntimeHours: number;
+      downtimeByAsset: Array<{ assetId: string; assetName: string; assetNumber: string; totalDowntimeHours: number; averageDowntimeHours: number; incidentCount: number }>;
+    };
+
+    return {
+      totalDowntimeHours: raw.totalDowntimeHours,
+      averageDowntimeHours: raw.averageDowntimeHours,
+      downtimeByAsset: raw.downtimeByAsset.map(item => ({
+        assetId: item.assetId,
+        assetName: item.assetName,
+        assetNumber: item.assetNumber,
+        downtimeHours: item.totalDowntimeHours,
+        averageDowntimeHours: item.averageDowntimeHours,
+        incidentCount: item.incidentCount
+      }))
+    };
   }
 }
 

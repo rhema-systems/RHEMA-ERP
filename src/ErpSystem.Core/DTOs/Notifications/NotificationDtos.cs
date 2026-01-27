@@ -13,22 +13,21 @@ namespace ErpSystem.Core.DTOs.Notifications
         public Dictionary<string, object>? Metadata { get; set; }
         public string? IconUrl { get; set; }
         public DateTime? ExpiresAt { get; set; }
+        public string? EntityType { get; set; }
+        public Guid? EntityId { get; set; }
     }
 
     public class CreateNotificationDto
     {
-        public List<Guid>? UserIds { get; set; }
-        public List<string>? UserRoles { get; set; }
+        public Guid RecipientId { get; set; }
         public string Type { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
-        public string Severity { get; set; } = "info";
+        public string Priority { get; set; } = "Normal"; // Low, Normal, High, Critical
+        public string EntityType { get; set; } = string.Empty; // e.g., "JobCard", "WorkOrder", "PurchaseOrder"
+        public Guid EntityId { get; set; } // ID of the entity that triggered this notification
         public string? ActionUrl { get; set; }
         public Dictionary<string, object>? Metadata { get; set; }
-        public string? IconUrl { get; set; }
-        public DateTime? ExpiresAt { get; set; }
-        public bool SendPush { get; set; } = true;
-        public bool SendEmail { get; set; } = false;
     }
 
     public class PagedResult<T>

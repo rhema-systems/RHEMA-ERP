@@ -1,6 +1,6 @@
-using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 
 namespace ErpSystem.Api.Hubs
 {
@@ -22,23 +22,23 @@ namespace ErpSystem.Api.Hubs
                 var tenantId = Context.User?.FindFirst("tenant_id")?.Value;
                 var userName = Context.User?.FindFirst(ClaimTypes.Name)?.Value;
 
-                _logger.LogInformation("SignalR connection attempt - ConnectionId: {ConnectionId}, UserId: {UserId}, TenantId: {TenantId}, UserName: {UserName}", 
+                _logger.LogInformation("SignalR connection attempt - ConnectionId: {ConnectionId}, UserId: {UserId}, TenantId: {TenantId}, UserName: {UserName}",
                     Context.ConnectionId, userId, tenantId, userName);
 
                 if (!string.IsNullOrEmpty(userId) && !string.IsNullOrEmpty(tenantId))
                 {
                     // Add user to tenant-specific group
                     await Groups.AddToGroupAsync(Context.ConnectionId, $"Tenant_{tenantId}");
-                    
+
                     // Add user to user-specific group for personal notifications
                     await Groups.AddToGroupAsync(Context.ConnectionId, $"User_{userId}");
 
-                    _logger.LogInformation("User {UserId} ({UserName}) from tenant {TenantId} successfully connected to dashboard hub with ConnectionId {ConnectionId}", 
+                    _logger.LogInformation("User {UserId} ({UserName}) from tenant {TenantId} successfully connected to dashboard hub with ConnectionId {ConnectionId}",
                         userId, userName, tenantId, Context.ConnectionId);
                 }
                 else
                 {
-                    _logger.LogWarning("SignalR connection missing required claims - UserId: {UserId}, TenantId: {TenantId}, ConnectionId: {ConnectionId}", 
+                    _logger.LogWarning("SignalR connection missing required claims - UserId: {UserId}, TenantId: {TenantId}, ConnectionId: {ConnectionId}",
                         userId, tenantId, Context.ConnectionId);
                 }
 
@@ -61,12 +61,12 @@ namespace ErpSystem.Api.Hubs
 
                 if (exception != null)
                 {
-                    _logger.LogWarning(exception, "SignalR disconnection with exception - ConnectionId: {ConnectionId}, UserId: {UserId}, Exception: {ExceptionMessage}", 
+                    _logger.LogWarning(exception, "SignalR disconnection with exception - ConnectionId: {ConnectionId}, UserId: {UserId}, Exception: {ExceptionMessage}",
                         Context.ConnectionId, userId, exception.Message);
                 }
                 else
                 {
-                    _logger.LogInformation("SignalR clean disconnection - ConnectionId: {ConnectionId}, UserId: {UserId} ({UserName})", 
+                    _logger.LogInformation("SignalR clean disconnection - ConnectionId: {ConnectionId}, UserId: {UserId} ({UserName})",
                         Context.ConnectionId, userId, userName);
                 }
 

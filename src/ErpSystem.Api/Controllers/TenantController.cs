@@ -1,9 +1,9 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
-using ErpSystem.Core.Entities;
 using ErpSystem.Shared;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers;
 
@@ -19,7 +19,7 @@ public class TenantController : ControllerBase
     private readonly ILdapAuthenticationService _ldapAuthenticationService;
 
     public TenantController(
-        ITenantService tenantService, 
+        ITenantService tenantService,
         ILogger<TenantController> logger,
         IAuditLogService auditLogService,
         ICurrentUserService currentUserService,
@@ -136,24 +136,24 @@ public class TenantController : ControllerBase
                 Code = request.Code,
                 Description = request.Description,
                 Status = status,
-                
+
                 // Contact Information
                 Domain = request.Domain,
                 ContactEmail = request.ContactEmail,
                 ContactPhone = request.ContactPhone,
                 Address = request.Address,
-                
+
                 // Branding
                 LogoUrl = request.LogoUrl,
                 PrimaryColor = request.PrimaryColor,
                 SecondaryColor = request.SecondaryColor,
                 FaviconUrl = request.FaviconUrl,
                 CoverImageUrl = request.CoverImageUrl,
-                
+
                 // Subscription
                 SubscriptionStartDate = request.SubscriptionStartDate,
                 SubscriptionEndDate = request.SubscriptionEndDate,
-                
+
                 // LDAP Configuration
                 LdapServer = request.LdapServer,
                 LdapPort = request.LdapPort,
@@ -161,11 +161,11 @@ public class TenantController : ControllerBase
                 LdapBindDn = request.LdapBindDn,
                 LdapBindPassword = request.LdapBindPassword,
                 LdapEnabled = request.LdapEnabled,
-                
+
                 // Default tenant settings
                 IsDefaultForPublicUsers = request.IsDefaultForPublicUsers,
                 IsDefaultForInternalUsers = request.IsDefaultForInternalUsers,
-                
+
                 // Feature flags
                 AllowSelfRegistration = request.AllowSelfRegistration,
                 PublicRegistrationDomains = request.PublicRegistrationDomains,
@@ -184,10 +184,10 @@ public class TenantController : ControllerBase
                 var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
                 var currentUsername = _currentUserService.UserName;
                 var currentTenantId = _currentUserService.TenantId;
-                
-                _logger.LogInformation("DEBUG: Attempting to log tenant creation. UserId: {UserId}, Username: {Username}, TenantId: {TenantId}, IsAuthenticated: {IsAuth}", 
+
+                _logger.LogInformation("DEBUG: Attempting to log tenant creation. UserId: {UserId}, Username: {Username}, TenantId: {TenantId}, IsAuthenticated: {IsAuth}",
                     currentUserId, currentUsername, currentTenantId, _currentUserService.IsAuthenticated);
-                
+
                 await _auditLogService.LogUserActionAsync(
                     currentUserId ?? Guid.Empty,
                     currentUsername ?? "Unknown",
@@ -198,7 +198,7 @@ public class TenantController : ControllerBase
                     new { Name = tenant.Name, Code = tenant.Code, Domain = tenant.Domain },
                     GetClientIpAddress(),
                     GetUserAgent());
-                    
+
                 _logger.LogInformation("DEBUG: Tenant creation audit log completed successfully");
             }
             catch (Exception logEx)
@@ -236,42 +236,42 @@ public class TenantController : ControllerBase
             }
 
             // Capture old values for audit logging
-            var oldValues = new 
+            var oldValues = new
             {
                 // Core fields
                 Name = existingTenant.Name,
                 Description = existingTenant.Description,
                 Status = existingTenant.Status.ToString(),
                 IsActive = existingTenant.Status == TenantStatus.Active,
-                
+
                 // Contact Information
                 Domain = existingTenant.Domain,
                 ContactEmail = existingTenant.ContactEmail,
                 ContactPhone = existingTenant.ContactPhone,
                 Address = existingTenant.Address,
-                
+
                 // Branding
                 LogoUrl = existingTenant.LogoUrl,
                 PrimaryColor = existingTenant.PrimaryColor,
                 SecondaryColor = existingTenant.SecondaryColor,
                 FaviconUrl = existingTenant.FaviconUrl,
                 CoverImageUrl = existingTenant.CoverImageUrl,
-                
+
                 // Subscription
                 SubscriptionStartDate = existingTenant.SubscriptionStartDate,
                 SubscriptionEndDate = existingTenant.SubscriptionEndDate,
-                
+
                 // LDAP Configuration
                 LdapServer = existingTenant.LdapServer,
                 LdapPort = existingTenant.LdapPort,
                 LdapBaseDn = existingTenant.LdapBaseDn,
                 LdapBindDn = existingTenant.LdapBindDn,
                 LdapEnabled = existingTenant.LdapEnabled,
-                
+
                 // Default tenant settings
                 IsDefaultForPublicUsers = existingTenant.IsDefaultForPublicUsers,
                 IsDefaultForInternalUsers = existingTenant.IsDefaultForInternalUsers,
-                
+
                 // Feature flags
                 AllowSelfRegistration = existingTenant.AllowSelfRegistration,
                 PublicRegistrationDomains = existingTenant.PublicRegistrationDomains,
@@ -294,24 +294,24 @@ public class TenantController : ControllerBase
             existingTenant.Name = request.Name;
             existingTenant.Description = request.Description;
             existingTenant.Status = status;
-            
+
             // Contact Information
             existingTenant.Domain = request.Domain;
             existingTenant.ContactEmail = request.ContactEmail;
             existingTenant.ContactPhone = request.ContactPhone;
             existingTenant.Address = request.Address;
-            
+
             // Branding
             existingTenant.LogoUrl = request.LogoUrl;
             existingTenant.PrimaryColor = request.PrimaryColor;
             existingTenant.SecondaryColor = request.SecondaryColor;
             existingTenant.FaviconUrl = request.FaviconUrl;
             existingTenant.CoverImageUrl = request.CoverImageUrl;
-            
+
             // Subscription
             existingTenant.SubscriptionStartDate = request.SubscriptionStartDate;
             existingTenant.SubscriptionEndDate = request.SubscriptionEndDate;
-            
+
             // LDAP Configuration
             existingTenant.LdapServer = request.LdapServer;
             existingTenant.LdapPort = request.LdapPort;
@@ -319,11 +319,11 @@ public class TenantController : ControllerBase
             existingTenant.LdapBindDn = request.LdapBindDn;
             existingTenant.LdapBindPassword = request.LdapBindPassword;
             existingTenant.LdapEnabled = request.LdapEnabled;
-            
+
             // Default tenant settings
             existingTenant.IsDefaultForPublicUsers = request.IsDefaultForPublicUsers;
             existingTenant.IsDefaultForInternalUsers = request.IsDefaultForInternalUsers;
-            
+
             // Feature flags
             existingTenant.AllowSelfRegistration = request.AllowSelfRegistration;
             existingTenant.PublicRegistrationDomains = request.PublicRegistrationDomains;
@@ -338,42 +338,42 @@ public class TenantController : ControllerBase
             // Log audit trail for tenant update
             try
             {
-                var newValues = new 
+                var newValues = new
                 {
                     // Core fields
                     Name = request.Name,
                     Description = request.Description,
                     Status = request.Status,
                     IsActive = request.IsActive,
-                    
+
                     // Contact Information
                     Domain = request.Domain,
                     ContactEmail = request.ContactEmail,
                     ContactPhone = request.ContactPhone,
                     Address = request.Address,
-                    
+
                     // Branding
                     LogoUrl = request.LogoUrl,
                     PrimaryColor = request.PrimaryColor,
                     SecondaryColor = request.SecondaryColor,
                     FaviconUrl = request.FaviconUrl,
                     CoverImageUrl = request.CoverImageUrl,
-                    
+
                     // Subscription
                     SubscriptionStartDate = request.SubscriptionStartDate,
                     SubscriptionEndDate = request.SubscriptionEndDate,
-                    
+
                     // LDAP Configuration
                     LdapServer = request.LdapServer,
                     LdapPort = request.LdapPort,
                     LdapBaseDn = request.LdapBaseDn,
                     LdapBindDn = request.LdapBindDn,
                     LdapEnabled = request.LdapEnabled,
-                    
+
                     // Default tenant settings
                     IsDefaultForPublicUsers = request.IsDefaultForPublicUsers,
                     IsDefaultForInternalUsers = request.IsDefaultForInternalUsers,
-                    
+
                     // Feature flags
                     AllowSelfRegistration = request.AllowSelfRegistration,
                     PublicRegistrationDomains = request.PublicRegistrationDomains,
@@ -478,7 +478,7 @@ public class TenantController : ControllerBase
                     Message = "LDAP server is required"
                 });
             }
-            
+
             if (!request.LdapPort.HasValue || request.LdapPort <= 0)
             {
                 return Ok(new TestLdapResultDto
@@ -487,7 +487,7 @@ public class TenantController : ControllerBase
                     Message = "Valid LDAP port is required"
                 });
             }
-            
+
             // Create a temporary tenant object with the test settings
             var testTenant = new Tenant
             {
@@ -498,10 +498,10 @@ public class TenantController : ControllerBase
                 LdapBindDn = request.LdapBindDn,
                 LdapBindPassword = request.LdapBindPassword
             };
-            
+
             // Use the LDAP authentication service to test the connection
             var result = await _ldapAuthenticationService.TestConnectionAsync(testTenant);
-            
+
             return Ok(new TestLdapResultDto
             {
                 Success = result.Success,
@@ -577,24 +577,24 @@ public class TenantController : ControllerBase
             Status = tenant.Status.ToString(),
             CreatedAt = tenant.CreatedAt,
             UpdatedAt = tenant.UpdatedAt ?? tenant.CreatedAt,
-            
+
             // Contact Information
             Domain = tenant.Domain,
             ContactEmail = tenant.ContactEmail,
             ContactPhone = tenant.ContactPhone,
             Address = tenant.Address,
-            
+
             // Branding
             LogoUrl = tenant.LogoUrl,
             PrimaryColor = tenant.PrimaryColor,
             SecondaryColor = tenant.SecondaryColor,
             FaviconUrl = tenant.FaviconUrl,
             CoverImageUrl = tenant.CoverImageUrl,
-            
+
             // Subscription
             SubscriptionStartDate = tenant.SubscriptionStartDate,
             SubscriptionEndDate = tenant.SubscriptionEndDate,
-            
+
             // LDAP Configuration
             LdapServer = tenant.LdapServer,
             LdapPort = tenant.LdapPort,
@@ -602,11 +602,11 @@ public class TenantController : ControllerBase
             LdapBindDn = tenant.LdapBindDn,
             LdapBindPassword = tenant.LdapBindPassword,
             LdapEnabled = tenant.LdapEnabled,
-            
+
             // Default tenant settings
             IsDefaultForPublicUsers = tenant.IsDefaultForPublicUsers,
             IsDefaultForInternalUsers = tenant.IsDefaultForInternalUsers,
-            
+
             // Feature flags
             AllowSelfRegistration = tenant.AllowSelfRegistration,
             PublicRegistrationDomains = tenant.PublicRegistrationDomains,
@@ -646,24 +646,24 @@ public class TenantDto
     public string Status { get; set; } = "Active";
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
-    
+
     // Contact Information
     public string? Domain { get; set; }
     public string? ContactEmail { get; set; }
     public string? ContactPhone { get; set; }
     public string? Address { get; set; }
-    
+
     // Branding
     public string? LogoUrl { get; set; }
     public string? PrimaryColor { get; set; }
     public string? SecondaryColor { get; set; }
     public string? FaviconUrl { get; set; }
     public string? CoverImageUrl { get; set; }
-    
+
     // Subscription
     public DateTime? SubscriptionStartDate { get; set; }
     public DateTime? SubscriptionEndDate { get; set; }
-    
+
     // LDAP Configuration
     public string? LdapServer { get; set; }
     public int? LdapPort { get; set; }
@@ -671,11 +671,11 @@ public class TenantDto
     public string? LdapBindDn { get; set; }
     public string? LdapBindPassword { get; set; }
     public bool LdapEnabled { get; set; } = false;
-    
+
     // Default tenant settings
     public bool IsDefaultForPublicUsers { get; set; } = false;
     public bool IsDefaultForInternalUsers { get; set; } = false;
-    
+
     // Feature flags
     public bool AllowSelfRegistration { get; set; } = false;
     public string? PublicRegistrationDomains { get; set; }
@@ -693,24 +693,24 @@ public class CreateTenantRequest
     public string Code { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string Status { get; set; } = "Active";
-    
+
     // Contact Information
     public string? Domain { get; set; }
     public string? ContactEmail { get; set; }
     public string? ContactPhone { get; set; }
     public string? Address { get; set; }
-    
+
     // Branding
     public string? LogoUrl { get; set; }
     public string? PrimaryColor { get; set; }
     public string? SecondaryColor { get; set; }
     public string? FaviconUrl { get; set; }
     public string? CoverImageUrl { get; set; }
-    
+
     // Subscription
     public DateTime? SubscriptionStartDate { get; set; }
     public DateTime? SubscriptionEndDate { get; set; }
-    
+
     // LDAP Configuration
     public string? LdapServer { get; set; }
     public int? LdapPort { get; set; }
@@ -718,11 +718,11 @@ public class CreateTenantRequest
     public string? LdapBindDn { get; set; }
     public string? LdapBindPassword { get; set; }
     public bool LdapEnabled { get; set; } = false;
-    
+
     // Default tenant settings
     public bool IsDefaultForPublicUsers { get; set; } = false;
     public bool IsDefaultForInternalUsers { get; set; } = false;
-    
+
     // Feature flags
     public bool AllowSelfRegistration { get; set; } = false;
     public string? PublicRegistrationDomains { get; set; }
@@ -755,24 +755,24 @@ public class UpdateTenantRequest
     public string? Description { get; set; }
     public bool IsActive { get; set; } = true;
     public string Status { get; set; } = "Active";
-    
+
     // Contact Information
     public string? Domain { get; set; }
     public string? ContactEmail { get; set; }
     public string? ContactPhone { get; set; }
     public string? Address { get; set; }
-    
+
     // Branding
     public string? LogoUrl { get; set; }
     public string? PrimaryColor { get; set; }
     public string? SecondaryColor { get; set; }
     public string? FaviconUrl { get; set; }
     public string? CoverImageUrl { get; set; }
-    
+
     // Subscription
     public DateTime? SubscriptionStartDate { get; set; }
     public DateTime? SubscriptionEndDate { get; set; }
-    
+
     // LDAP Configuration
     public string? LdapServer { get; set; }
     public int? LdapPort { get; set; }
@@ -780,11 +780,11 @@ public class UpdateTenantRequest
     public string? LdapBindDn { get; set; }
     public string? LdapBindPassword { get; set; }
     public bool LdapEnabled { get; set; } = false;
-    
+
     // Default tenant settings
     public bool IsDefaultForPublicUsers { get; set; } = false;
     public bool IsDefaultForInternalUsers { get; set; } = false;
-    
+
     // Feature flags
     public bool AllowSelfRegistration { get; set; } = false;
     public string? PublicRegistrationDomains { get; set; }

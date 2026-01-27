@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
 using ErpSystem.Core.Entities.HR;
-using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.HR;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories
 {
@@ -96,8 +96,8 @@ namespace ErpSystem.Data.Repositories
             return await _dbSet
                 .Include(e => e.Department)
                 .Include(e => e.Position)
-                .Where(e => e.IsActive && 
-                           !e.IsDeleted && 
+                .Where(e => e.IsActive &&
+                           !e.IsDeleted &&
                            (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation) &&
                            e.Department.DepartmentType == DepartmentType.Maintenance)
                 .OrderBy(e => e.LastName)
@@ -108,7 +108,9 @@ namespace ErpSystem.Data.Repositories
         public async Task<IEnumerable<Employee>> SearchEmployeesAsync(string searchTerm)
         {
             if (string.IsNullOrWhiteSpace(searchTerm))
+            {
                 return await GetActiveEmployeesAsync();
+            }
 
             searchTerm = searchTerm.ToLower();
 
@@ -117,11 +119,11 @@ namespace ErpSystem.Data.Repositories
                 .Include(e => e.Position)
                 .Include(e => e.Section)
                 .Where(e => !e.IsDeleted && (
-                    e.FirstName.ToLower().Contains(searchTerm) ||
+                    e.FirstName.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase) ||
                     e.LastName.ToLower().Contains(searchTerm) ||
-                    e.EmployeeNumber.ToLower().Contains(searchTerm) ||
+                    e.EmployeeNumber.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase) ||
                     e.EmailAddress.ToLower().Contains(searchTerm) ||
-                    (e.FirstName + " " + e.LastName).ToLower().Contains(searchTerm)))
+                    (e.FirstName + " " + e.LastName).Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase)))
                 .OrderBy(e => e.LastName)
                 .ThenBy(e => e.FirstName)
                 .ToListAsync();
@@ -169,8 +171,8 @@ namespace ErpSystem.Data.Repositories
             return await _dbSet
                 .Include(e => e.Department)
                 .Include(e => e.Position)
-                .Where(e => e.IsActive && 
-                           !e.IsDeleted && 
+                .Where(e => e.IsActive &&
+                           !e.IsDeleted &&
                            e.StaffStatus == StaffStatus.Active &&
                            e.Department.DepartmentType == DepartmentType.Maintenance)
                 .OrderBy(e => e.LastName)
@@ -200,10 +202,28 @@ namespace ErpSystem.Data.Repositories
                 .ToListAsync();
         }
 
+        public async Task<Employee?> GetByApplicationUserIdAsync(Guid applicationUserId)
+        {
+            // Query ApplicationUser table via the context's IdentityUsers table
+            var context = _context as ApplicationDbContext;
+            if (context == null)
+            {
+                return null;
+            }
+
+            var user = await context.Users.FirstOrDefaultAsync(u => u.Id == applicationUserId);
+            if (user?.EmployeeId == null)
+            {
+                return null;
+            }
+
+            return await GetByIdWithDetailsAsync(user.EmployeeId.Value);
+        }
+
         public async Task<string> GenerateEmployeeNumberAsync()
         {
             var currentYear = DateTime.Now.Year.ToString();
-            
+
             // Get all employee numbers for the current year to find max sequence
             var employeeNumbersInYear = await _dbSet
                 .Where(e => e.EmployeeNumber.StartsWith(currentYear) && !e.IsDeleted)
@@ -215,13 +235,17 @@ namespace ErpSystem.Data.Repositories
             {
                 // Parse all sequence numbers and find the maximum
                 var maxSequence = employeeNumbersInYear
-                    .Select(empNum => {
-                        if (empNum.Length > 4 && int.TryParse(empNum.Substring(4), out var seq))
+                    .Select(empNum =>
+                    {
+                        if (empNum.Length > 4 && int.TryParse(empNum.AsSpan(4), out var seq))
+                        {
                             return seq;
+                        }
+
                         return 0;
                     })
                     .Max();
-                
+
                 nextSequence = maxSequence + 1;
             }
 

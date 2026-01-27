@@ -1,12 +1,12 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Maintenance;
-using System.Collections.Generic;
-using System;
-using System.Threading.Tasks;
-using System.Linq;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Maintenance;
 
@@ -39,7 +39,9 @@ public class MaintenanceAssetsController : ControllerBase
         try
         {
             if (pageSize > 100)
+            {
                 pageSize = 100;
+            }
 
             var result = await _maintenanceAssetService.GetAssetsPagedAsync(page, pageSize, searchTerm, categoryId);
             return Ok(result);
@@ -61,7 +63,9 @@ public class MaintenanceAssetsController : ControllerBase
         {
             var asset = await _maintenanceAssetService.GetAssetByIdAsync(id);
             if (asset == null)
+            {
                 return NotFound($"Asset with ID {id} not found");
+            }
 
             return Ok(asset);
         }
@@ -81,7 +85,9 @@ public class MaintenanceAssetsController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var newAsset = await _maintenanceAssetService.CreateAssetAsync(createDto);
             return CreatedAtAction(nameof(GetAsset), new { id = newAsset.Id }, newAsset);
@@ -106,7 +112,9 @@ public class MaintenanceAssetsController : ControllerBase
         try
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
             var updatedAsset = await _maintenanceAssetService.UpdateAssetAsync(id, updateDto);
             return Ok(updatedAsset);
@@ -221,6 +229,24 @@ public class MaintenanceAssetsController : ControllerBase
     }
 
     /// <summary>
+    /// Gets available vehicles (assets with category AssetType="Vehicle" and Status=Active)
+    /// </summary>
+    [HttpGet("available-vehicles")]
+    public async Task<ActionResult<IEnumerable<MaintenanceAssetDto>>> GetAvailableVehicles()
+    {
+        try
+        {
+            var vehicles = await _maintenanceAssetService.GetAvailableVehiclesAsync();
+            return Ok(vehicles);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving available vehicles");
+            return StatusCode(500, "An error occurred while retrieving available vehicles");
+        }
+    }
+
+    /// <summary>
     /// Gets asset hierarchy for a given root asset
     /// </summary>
     [HttpGet("{rootAssetId:guid}/hierarchy")]
@@ -265,7 +291,9 @@ public class MaintenanceAssetsController : ControllerBase
         try
         {
             if (operatingHours < 0)
+            {
                 return BadRequest("Operating hours cannot be negative");
+            }
 
             await _maintenanceAssetService.UpdateAssetOperatingHoursAsync(assetId, operatingHours);
             return NoContent();
@@ -290,7 +318,9 @@ public class MaintenanceAssetsController : ControllerBase
         try
         {
             if (mileage < 0)
+            {
                 return BadRequest("Mileage cannot be negative");
+            }
 
             await _maintenanceAssetService.UpdateAssetMileageAsync(assetId, mileage);
             return NoContent();
@@ -333,7 +363,9 @@ public class MaintenanceAssetsController : ControllerBase
         try
         {
             if (string.IsNullOrEmpty(assetNumber))
+            {
                 return BadRequest("Asset number is required");
+            }
 
             var isUnique = await _maintenanceAssetService.IsAssetNumberUniqueAsync(assetNumber, excludeId);
             return Ok(new { isUnique });

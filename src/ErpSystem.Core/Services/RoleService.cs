@@ -1,7 +1,7 @@
+using ErpSystem.Core.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using ErpSystem.Core.Entities;
 
 namespace ErpSystem.Core.Services;
 
@@ -56,7 +56,7 @@ public class RoleService : IRoleService
         {
             role.Id = Guid.NewGuid();
             role.CreatedAt = DateTime.UtcNow;
-            
+
             var result = await _roleManager.CreateAsync(role);
             if (!result.Succeeded)
             {
@@ -116,7 +116,7 @@ public class RoleService : IRoleService
             var usersInRole = await GetUsersInRoleAsync(role.Name!);
             if (usersInRole.Any())
             {
-                _logger.LogWarning("Cannot delete role {RoleName} as it still has {UserCount} users assigned", 
+                _logger.LogWarning("Cannot delete role {RoleName} as it still has {UserCount} users assigned",
                     role.Name, usersInRole.Count());
                 throw new InvalidOperationException($"Cannot delete role '{role.Name}' as it still has users assigned to it.");
             }

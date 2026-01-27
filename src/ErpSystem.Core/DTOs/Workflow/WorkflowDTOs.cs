@@ -65,32 +65,32 @@ public class WorkflowStepConfigurationDto
     /// Auto-assignment rules based on conditions
     /// </summary>
     public List<WorkflowAssignmentRuleDto>? AssignmentRules { get; set; }
-    
+
     /// <summary>
     /// Approval configuration for approval steps
     /// </summary>
     public WorkflowApprovalConfigDto? ApprovalConfig { get; set; }
-    
+
     /// <summary>
     /// Quality control configuration for quality check steps
     /// </summary>
     public WorkflowQualityConfigDto? QualityConfig { get; set; }
-    
+
     /// <summary>
     /// Notification configuration
     /// </summary>
     public WorkflowNotificationConfigDto? NotificationConfig { get; set; }
-    
+
     /// <summary>
     /// Escalation rules
     /// </summary>
     public List<WorkflowEscalationRuleDto>? EscalationRules { get; set; }
-    
+
     /// <summary>
     /// Custom form fields for data collection
     /// </summary>
     public List<WorkflowFormFieldDto>? FormFields { get; set; }
-    
+
     /// <summary>
     /// Skip conditions - when this step should be skipped
     /// </summary>
@@ -106,22 +106,22 @@ public class WorkflowConditionDto
     /// Type of condition (Expression, Script, Rule)
     /// </summary>
     public WorkflowConditionType ConditionType { get; set; }
-    
+
     /// <summary>
     /// Condition expression or script
     /// </summary>
     public string Expression { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// Variables and their expected values
     /// </summary>
     public Dictionary<string, object>? Variables { get; set; }
-    
+
     /// <summary>
     /// Logical operator for combining multiple conditions
     /// </summary>
     public WorkflowLogicalOperator LogicalOperator { get; set; } = WorkflowLogicalOperator.And;
-    
+
     /// <summary>
     /// Child conditions for complex logical expressions
     /// </summary>
@@ -137,27 +137,27 @@ public class WorkflowAssignmentRuleDto
     /// Condition that must be met for this assignment rule
     /// </summary>
     public WorkflowConditionDto? Condition { get; set; }
-    
+
     /// <summary>
     /// Assignment type (User, Role, Dynamic)
     /// </summary>
     public WorkflowAssignmentType AssignmentType { get; set; }
-    
+
     /// <summary>
     /// Target user ID (for User assignment type)
     /// </summary>
     public Guid? UserId { get; set; }
-    
+
     /// <summary>
     /// Target role (for Role assignment type)
     /// </summary>
     public string? Role { get; set; }
-    
+
     /// <summary>
     /// Dynamic assignment expression (for Dynamic assignment type)
     /// </summary>
     public string? DynamicExpression { get; set; }
-    
+
     /// <summary>
     /// Priority of this assignment rule (higher number = higher priority)
     /// </summary>
@@ -173,22 +173,22 @@ public class WorkflowApprovalConfigDto
     /// Type of approval (Single, Multiple, Consensus, Majority)
     /// </summary>
     public WorkflowApprovalType ApprovalType { get; set; }
-    
+
     /// <summary>
     /// Required approvers based on conditions
     /// </summary>
     public List<WorkflowAssignmentRuleDto> ApproverRules { get; set; } = new();
-    
+
     /// <summary>
     /// Minimum number of approvals required
     /// </summary>
     public int MinApprovalsRequired { get; set; } = 1;
-    
+
     /// <summary>
     /// Auto-approval conditions
     /// </summary>
     public WorkflowConditionDto? AutoApprovalCondition { get; set; }
-    
+
     /// <summary>
     /// Rejection handling
     /// </summary>
@@ -204,12 +204,12 @@ public class WorkflowQualityConfigDto
     /// Quality checks to perform
     /// </summary>
     public List<WorkflowQualityCheckDto> QualityChecks { get; set; } = new();
-    
+
     /// <summary>
     /// Required inspection officer assignment rules
     /// </summary>
     public List<WorkflowAssignmentRuleDto>? InspectionOfficerRules { get; set; }
-    
+
     /// <summary>
     /// Auto-pass conditions
     /// </summary>
@@ -261,17 +261,17 @@ public class WorkflowEscalationRuleDto
     /// Condition that triggers escalation
     /// </summary>
     public WorkflowConditionDto TriggerCondition { get; set; } = null!;
-    
+
     /// <summary>
     /// Delay before escalation (in hours)
     /// </summary>
     public double DelayHours { get; set; }
-    
+
     /// <summary>
     /// Escalation targets
     /// </summary>
     public List<WorkflowAssignmentRuleDto> EscalationTargets { get; set; } = new();
-    
+
     /// <summary>
     /// Action to take on escalation
     /// </summary>

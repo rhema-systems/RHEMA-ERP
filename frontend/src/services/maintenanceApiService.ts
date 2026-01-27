@@ -31,16 +31,25 @@ export interface WorkOrderType {
   color?: string;
   icon?: string;
   isActive: boolean;
+  requiresApproval?: boolean;
+  defaultPriority?: number;
 }
 
 export interface PriorityLevel {
   id: string;
   name: string;
-  level: number;
+  code: string;
   description?: string;
-  color?: string;
-  responseTimeHours: number;
+  level: number;
   isActive: boolean;
+  color?: string;
+  icon?: string;
+  responseTime: number;
+  escalationTime: number;
+  requiresApproval?: boolean;
+  notificationRules?: string;
+  slaHours: number;
+  autoAssign: boolean;
 }
 
 export interface Employee {
@@ -68,6 +77,76 @@ export interface WorkOrderTask {
   actualHours: number;
   completedAt?: string;
   isRequired: boolean;
+  photoPath?: string;
+}
+
+export interface WorkOrderPart {
+  id: string;
+  workOrderId: string;
+  inventoryItemId: string;
+  itemCode: string;
+  itemName: string;
+  description?: string;
+  quantityRequired: number;
+  quantityAllocated: number;
+  quantityUsed: number;
+  quantityReturned: number;
+  unitCost: number;
+  totalCost: number;
+  serialNumber?: string;
+  lotNumber?: string;
+  status: string;
+  allocationId?: string;
+  allocatedAt?: string;
+  pickedAt?: string;
+  usedAt?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface WorkOrderLabor {
+  id: string;
+  workOrderId: string;
+  technicianId: string;
+  startTime?: string;
+  endTime?: string;
+  hours: number;
+  hourlyRate: number;
+  totalCost: number;
+  notes?: string;
+  laborType?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface WorkOrderTool {
+  id: string;
+  workOrderId: string;
+  toolId: string;
+  toolCode?: string;
+  toolName?: string;
+  description?: string;
+  category?: string;
+  currentLocation?: string;
+  isRequired: boolean;
+  isAllocated: boolean;
+  allocationDate?: string;
+  checkoutId?: string;
+  isCheckedOut?: boolean;
+  checkoutDate?: string;
+  expectedReturnDate?: string;
+  actualReturnDate?: string;
+  checkoutStatus?: string;
+  checkedOutById?: string;
+  checkedOutByName?: string;
+  dailyRentalRate?: number;
+  requiresCertification?: boolean;
+  requiresTraining?: boolean;
+  safetyNotes?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface WorkOrder {
@@ -94,6 +173,9 @@ export interface WorkOrder {
   actualCost?: number;
   completionNotes?: string;
   tasks?: WorkOrderTask[];
+  parts?: WorkOrderPart[];
+  labor?: WorkOrderLabor[];
+  tools?: WorkOrderTool[];
 }
 
 export interface JobCard {
@@ -106,6 +188,81 @@ export interface JobCard {
   status: string;
   requestedDate: string;
   approvalStatus: string;
+}
+
+export interface MaintenanceStaffSchedule {
+  id?: string;
+  technicianId: string;
+  technicianName?: string;
+  technicianFullName?: string;
+  startDateTime: string;
+  endDateTime: string;
+  scheduleType: string;
+  status: string;
+  workOrderId?: string;
+  workOrderNumber?: string;
+  jobCardId?: string;
+  jobCardNumber?: string;
+  teamId?: string;
+  teamName?: string;
+  workLocation?: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
+  requiresTravel: boolean;
+  departureTime?: string;
+  arrivalTime?: string;
+  estimatedTravelMinutes?: number;
+  actualTravelMinutes?: number;
+  assignedVehicleId?: string;
+  vehicleName?: string;
+  transportationType?: string;
+  notes?: string;
+  actualStartTime?: string;
+  actualEndTime?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  assignedVehicleName?: string;
+}
+
+export interface MaintenanceExpense {
+  id?: string;
+  workOrderId: string;
+  workOrderNumber?: string;
+  scheduleId?: string;
+  technicianId?: string;
+  technicianName?: string;
+  expenseType: string;
+  description: string;
+  amount: number;
+  expenseDate: string;
+  mileageDriven?: number;
+  mileageRate?: number;
+  // Vehicle tracking - backend uses vehicleId/vehicleName
+  vehicleId?: string;
+  vehicleName?: string;
+  vehicleUsed?: string; // Kept for backward compatibility, maps to vehicleId
+  // Receipt and documentation - backend uses referenceNumber
+  referenceNumber?: string;
+  receiptNumber?: string; // Kept for backward compatibility, maps to referenceNumber
+  receiptPath?: string;
+  // Vendor - backend uses vendorName
+  vendorName?: string;
+  vendor?: string; // Kept for backward compatibility, maps to vendorName
+  paymentMethod?: string;
+  category?: string;
+  status: string;
+  approvedBy?: string;
+  approvedById?: string;
+  approvedDate?: string;
+  approvalNotes?: string;
+  // Location - backend uses location field
+  location?: string;
+  notes?: string; // Kept for backward compatibility, maps to location
+  isApproved?: boolean;
+  approvedByName?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface PagedResult<T> {
@@ -204,6 +361,16 @@ class MaintenanceApiService {
 
   async getAssetById(id: string): Promise<Asset> {
     return await apiService.request<Asset>(`/maintenance/assets/${id}`);
+  }
+
+  async getAvailableVehicles(): Promise<Asset[]> {
+    try {
+      // Use the proper backend endpoint that filters by AssetType="Vehicle" in the database
+      return await apiService.request<Asset[]>('/maintenance/assets/available-vehicles');
+    } catch (error) {
+      console.error('Error fetching available vehicles:', error);
+      return [];
+    }
   }
 
   // Work Order Types
@@ -387,6 +554,199 @@ class MaintenanceApiService {
 
   async getWorkOrdersDueSoon(days: number = 7): Promise<WorkOrder[]> {
     return await apiService.request<WorkOrder[]>(`/maintenance/work-orders/due-soon?days=${days}`);
+  }
+
+  // Staff Schedules
+  async getStaffSchedulesByWorkOrder(workOrderId: string): Promise<MaintenanceStaffSchedule[]> {
+    return await apiService.request<MaintenanceStaffSchedule[]>(
+      `/maintenance/staff-schedules/by-workorder/${workOrderId}`
+    );
+  }
+
+  async getStaffSchedulesByTechnician(technicianId: string): Promise<MaintenanceStaffSchedule[]> {
+    return await apiService.request<MaintenanceStaffSchedule[]>(
+      `/maintenance/staff-schedules/by-technician/${technicianId}`
+    );
+  }
+
+  async getStaffSchedulesByDateRange(startDate: string, endDate: string): Promise<MaintenanceStaffSchedule[]> {
+    return await apiService.request<MaintenanceStaffSchedule[]>(
+      `/maintenance/staff-schedules/by-date-range?startDate=${startDate}&endDate=${endDate}`
+    );
+  }
+
+  async getStaffScheduleById(id: string): Promise<MaintenanceStaffSchedule> {
+    return await apiService.request<MaintenanceStaffSchedule>(
+      `/maintenance/staff-schedules/${id}`
+    );
+  }
+
+  async createStaffSchedule(schedule: Partial<MaintenanceStaffSchedule>): Promise<MaintenanceStaffSchedule> {
+    return await apiService.request<MaintenanceStaffSchedule>(
+      '/maintenance/staff-schedules',
+      {
+        method: 'POST',
+        body: JSON.stringify(schedule)
+      }
+    );
+  }
+
+  async updateStaffSchedule(id: string, schedule: Partial<MaintenanceStaffSchedule>): Promise<MaintenanceStaffSchedule> {
+    return await apiService.request<MaintenanceStaffSchedule>(
+      `/maintenance/staff-schedules/${id}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(schedule)
+      }
+    );
+  }
+
+  async deleteStaffSchedule(id: string): Promise<void> {
+    await apiService.request<void>(
+      `/maintenance/staff-schedules/${id}`,
+      {
+        method: 'DELETE'
+      }
+    );
+  }
+
+  async startStaffSchedule(id: string): Promise<MaintenanceStaffSchedule> {
+    return await apiService.request<MaintenanceStaffSchedule>(
+      `/maintenance/staff-schedules/${id}/start`,
+      {
+        method: 'POST'
+      }
+    );
+  }
+
+  async completeStaffSchedule(id: string): Promise<MaintenanceStaffSchedule> {
+    return await apiService.request<MaintenanceStaffSchedule>(
+      `/maintenance/staff-schedules/${id}/complete`,
+      {
+        method: 'POST'
+      }
+    );
+  }
+
+  // Expenses
+  async getExpensesByWorkOrder(workOrderId: string): Promise<MaintenanceExpense[]> {
+    return await apiService.request<MaintenanceExpense[]>(
+      `/maintenance/expenses/by-workorder/${workOrderId}`
+    );
+  }
+
+  async getExpensesByTechnician(technicianId: string): Promise<MaintenanceExpense[]> {
+    return await apiService.request<MaintenanceExpense[]>(
+      `/maintenance/expenses/by-technician/${technicianId}`
+    );
+  }
+
+  async getPendingExpenses(): Promise<MaintenanceExpense[]> {
+    return await apiService.request<MaintenanceExpense[]>(
+      '/maintenance/expenses/pending'
+    );
+  }
+
+  async getTotalExpensesByWorkOrder(workOrderId: string): Promise<number> {
+    const response = await apiService.request<{ workOrderId: string; totalAmount: number }>(
+      `/maintenance/expenses/total-by-workorder/${workOrderId}`
+    );
+    return response.totalAmount ?? 0;
+  }
+
+  async getExpenseById(id: string): Promise<MaintenanceExpense> {
+    return await apiService.request<MaintenanceExpense>(
+      `/maintenance/expenses/${id}`
+    );
+  }
+
+  async createExpense(expense: Partial<MaintenanceExpense>): Promise<MaintenanceExpense> {
+    return await apiService.request<MaintenanceExpense>(
+      '/maintenance/expenses',
+      {
+        method: 'POST',
+        body: JSON.stringify(expense)
+      }
+    );
+  }
+
+  async updateExpense(id: string, expense: Partial<MaintenanceExpense>): Promise<MaintenanceExpense> {
+    return await apiService.request<MaintenanceExpense>(
+      `/maintenance/expenses/${id}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(expense)
+      }
+    );
+  }
+
+  async deleteExpense(id: string): Promise<void> {
+    await apiService.request<void>(
+      `/maintenance/expenses/${id}`,
+      {
+        method: 'DELETE'
+      }
+    );
+  }
+
+  async approveExpense(id: string, approvalNotes?: string): Promise<MaintenanceExpense> {
+    return await apiService.request<MaintenanceExpense>(
+      `/maintenance/expenses/${id}/approve`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ approvalNotes })
+      }
+    );
+  }
+
+  async uploadExpenseReceipt(file: File): Promise<{ filePath: string; fileName: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const token = localStorage.getItem('authToken');
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+    const response = await fetch(`${baseUrl}/maintenance/expenses/upload-receipt`, {
+      method: 'POST',
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Upload failed' }));
+      throw new Error(error.message || 'Failed to upload receipt');
+    }
+
+    return await response.json();
+  }
+
+  async uploadTaskPhoto(taskId: string, file: File): Promise<{ filePath: string; fileName: string; task: WorkOrderTask }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const token = localStorage.getItem('authToken');
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+    const response = await fetch(`${baseUrl}/maintenance/work-orders/tasks/${taskId}/photo`, {
+      method: 'POST',
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Upload failed' }));
+      throw new Error(error.message || 'Failed to upload task photo');
+    }
+
+    return await response.json();
+  }
+
+  async deleteTaskPhoto(taskId: string): Promise<void> {
+    await apiService.request<void>(`/maintenance/work-orders/tasks/${taskId}/photo`, {
+      method: 'DELETE'
+    });
   }
 }
 

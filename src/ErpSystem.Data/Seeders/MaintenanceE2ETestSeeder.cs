@@ -15,7 +15,7 @@ public class MaintenanceE2ETestSeeder
 {
     private readonly ApplicationDbContext _context;
     private readonly ILogger<MaintenanceE2ETestSeeder> _logger;
-    
+
     // Master data IDs for easy reference
     private Guid _defaultTenantId;
     private Guid _vehicleCategoryId;
@@ -30,7 +30,7 @@ public class MaintenanceE2ETestSeeder
     private Guid _lowPriorityId;
     private Guid _preventiveWorkOrderTypeId;
     private Guid _correctiveWorkOrderTypeId;
-    
+
     // User/Employee IDs
     private Guid _fleetManagerId;
     private Guid _maintenanceSupervisorId;
@@ -39,12 +39,12 @@ public class MaintenanceE2ETestSeeder
     private Guid _juniorTechnicianId;
     private Guid _qualityInspectorId;
     private Guid _serviceAdvisorId;
-    
+
     // Asset IDs
     private Guid _deliveryTruckId;
     private Guid _forkliftId;
     private Guid _generatorId;
-    
+
     // Inventory Part IDs
     private Guid _engineOilPartId;
     private Guid _oilFilterPartId;
@@ -63,29 +63,29 @@ public class MaintenanceE2ETestSeeder
     {
         // Use predictable GUIDs for easy reference
         _defaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-        
+
         // Categories
         _vehicleCategoryId = Guid.Parse("00000001-0000-0000-0000-000000000001");
         _equipmentCategoryId = Guid.Parse("00000001-0000-0000-0000-000000000002");
-        
+
         // Maintenance Types
         _preventiveMaintenanceTypeId = Guid.Parse("00000002-0000-0000-0000-000000000001");
         _correctiveMaintenanceTypeId = Guid.Parse("00000002-0000-0000-0000-000000000002");
         _emergencyMaintenanceTypeId = Guid.Parse("00000002-0000-0000-0000-000000000003");
-        
+
         // Asset Types
         _vehicleAssetTypeId = Guid.Parse("00000003-0000-0000-0000-000000000001");
         _equipmentAssetTypeId = Guid.Parse("00000003-0000-0000-0000-000000000002");
-        
+
         // Priority Levels
         _highPriorityId = Guid.Parse("00000004-0000-0000-0000-000000000001");
         _mediumPriorityId = Guid.Parse("00000004-0000-0000-0000-000000000002");
         _lowPriorityId = Guid.Parse("00000004-0000-0000-0000-000000000003");
-        
+
         // Work Order Types
         _preventiveWorkOrderTypeId = Guid.Parse("00000005-0000-0000-0000-000000000001");
         _correctiveWorkOrderTypeId = Guid.Parse("00000005-0000-0000-0000-000000000002");
-        
+
         // Employees (will be created or linked to existing)
         _fleetManagerId = Guid.Parse("00000006-0000-0000-0000-000000000001");
         _maintenanceSupervisorId = Guid.Parse("00000006-0000-0000-0000-000000000002");
@@ -94,12 +94,12 @@ public class MaintenanceE2ETestSeeder
         _juniorTechnicianId = Guid.Parse("00000006-0000-0000-0000-000000000005");
         _qualityInspectorId = Guid.Parse("00000006-0000-0000-0000-000000000006");
         _serviceAdvisorId = Guid.Parse("00000006-0000-0000-0000-000000000007");
-        
+
         // Assets
         _deliveryTruckId = Guid.Parse("00000007-0000-0000-0000-000000000001");
         _forkliftId = Guid.Parse("00000007-0000-0000-0000-000000000002");
         _generatorId = Guid.Parse("00000007-0000-0000-0000-000000000003");
-        
+
         // Inventory Parts
         _engineOilPartId = Guid.Parse("00000008-0000-0000-0000-000000000001");
         _oilFilterPartId = Guid.Parse("00000008-0000-0000-0000-000000000002");
@@ -113,53 +113,53 @@ public class MaintenanceE2ETestSeeder
         try
         {
             _logger.LogInformation("Starting E2E Maintenance Test Data Seeding...");
-            
+
             var baseDate = DateTime.UtcNow;
 
             // 1. HR Employees (Technicians, Inspectors, Managers)
             await SeedHREmployeesAsync(baseDate);
             await _context.SaveChangesAsync();
-            
+
             // 2. Inventory Parts
             await SeedInventoryPartsAsync(baseDate);
             await _context.SaveChangesAsync();
-            
+
             // 3. Asset Categories
             await SeedAssetCategoriesAsync(baseDate);
             await _context.SaveChangesAsync();
-            
+
             // 4. Asset Types
             await SeedAssetTypesAsync(baseDate);
             await _context.SaveChangesAsync();
-            
+
             // 5. Maintenance Assets
             await SeedMaintenanceAssetsAsync(baseDate);
             await _context.SaveChangesAsync();
-            
+
             // 6. Maintenance Types
             await SeedMaintenanceTypesAsync(baseDate);
             await _context.SaveChangesAsync();
-            
+
             // 7. Priority Levels
             await SeedPriorityLevelsAsync(baseDate);
             await _context.SaveChangesAsync();
-            
+
             // 8. Work Order Types
             await SeedWorkOrderTypesAsync(baseDate);
             await _context.SaveChangesAsync();
-            
+
             // 9. Task Templates
             await SeedTaskTemplatesAsync(baseDate);
             await _context.SaveChangesAsync();
-            
+
             // 10. Quality Checklists
             await SeedQualityChecklistsAsync(baseDate);
             await _context.SaveChangesAsync();
-            
+
             // 11. Inspection Templates
             await SeedInspectionTemplatesAsync(baseDate);
             await _context.SaveChangesAsync();
-            
+
             // 12. Technician Records (link employees to maintenance)
             await SeedTechniciansAsync(baseDate);
             await _context.SaveChangesAsync();
@@ -182,7 +182,7 @@ public class MaintenanceE2ETestSeeder
         var maintenanceDeptId = Guid.Parse("00000009-0000-0000-0000-000000000001");
         var fleetDeptId = Guid.Parse("00000009-0000-0000-0000-000000000002");
         var qcDeptId = Guid.Parse("00000009-0000-0000-0000-000000000003");
-        
+
         var managerPosId = Guid.Parse("0000000A-0000-0000-0000-000000000001");
         var supervisorPosId = Guid.Parse("0000000A-0000-0000-0000-000000000002");
         var technicianPosId = Guid.Parse("0000000A-0000-0000-0000-000000000003");
@@ -203,7 +203,7 @@ public class MaintenanceE2ETestSeeder
                 CreatedBy = "System"
             });
         }
-        
+
         if (!await _context.Departments.AnyAsync(d => d.Id == fleetDeptId))
         {
             await _context.Departments.AddAsync(new Department
@@ -218,7 +218,7 @@ public class MaintenanceE2ETestSeeder
                 CreatedBy = "System"
             });
         }
-        
+
         if (!await _context.Departments.AnyAsync(d => d.Id == qcDeptId))
         {
             await _context.Departments.AddAsync(new Department
@@ -233,7 +233,7 @@ public class MaintenanceE2ETestSeeder
                 CreatedBy = "System"
             });
         }
-        
+
         await _context.SaveChangesAsync();
 
         // Seed Positions
@@ -252,7 +252,7 @@ public class MaintenanceE2ETestSeeder
                 CreatedBy = "System"
             });
         }
-        
+
         if (!await _context.EmployeePositions.AnyAsync(p => p.Id == supervisorPosId))
         {
             await _context.EmployeePositions.AddAsync(new EmployeePosition
@@ -268,7 +268,7 @@ public class MaintenanceE2ETestSeeder
                 CreatedBy = "System"
             });
         }
-        
+
         if (!await _context.EmployeePositions.AnyAsync(p => p.Id == technicianPosId))
         {
             await _context.EmployeePositions.AddAsync(new EmployeePosition
@@ -284,7 +284,7 @@ public class MaintenanceE2ETestSeeder
                 CreatedBy = "System"
             });
         }
-        
+
         if (!await _context.EmployeePositions.AnyAsync(p => p.Id == inspectorPosId))
         {
             await _context.EmployeePositions.AddAsync(new EmployeePosition
@@ -300,7 +300,7 @@ public class MaintenanceE2ETestSeeder
                 CreatedBy = "System"
             });
         }
-        
+
         await _context.SaveChangesAsync();
 
         var employees = new[]
@@ -364,7 +364,7 @@ public class MaintenanceE2ETestSeeder
                 CreatedBy = "System"
             });
         }
-        
+
         if (!await _context.InventoryCategories.AnyAsync(c => c.Id == filtersCategoryId))
         {
             await _context.InventoryCategories.AddAsync(new InventoryCategory
@@ -378,7 +378,7 @@ public class MaintenanceE2ETestSeeder
                 CreatedBy = "System"
             });
         }
-        
+
         if (!await _context.InventoryCategories.AnyAsync(c => c.Id == fluidsCategoryId))
         {
             await _context.InventoryCategories.AddAsync(new InventoryCategory
@@ -392,7 +392,7 @@ public class MaintenanceE2ETestSeeder
                 CreatedBy = "System"
             });
         }
-        
+
         if (!await _context.InventoryCategories.AnyAsync(c => c.Id == ignitionCategoryId))
         {
             await _context.InventoryCategories.AddAsync(new InventoryCategory
@@ -406,7 +406,7 @@ public class MaintenanceE2ETestSeeder
                 CreatedBy = "System"
             });
         }
-        
+
         await _context.SaveChangesAsync();
 
         var parts = new[]
@@ -628,7 +628,7 @@ public class MaintenanceE2ETestSeeder
     private async Task SeedTaskTemplatesAsync(DateTime baseDate)
     {
         _logger.LogInformation("Seeding Task Templates...");
-        
+
         var templates = new[]
         {
             new { Name = "Engine Oil Change", Seq = 1, Duration = 0.5 },
@@ -641,9 +641,9 @@ public class MaintenanceE2ETestSeeder
 
         foreach (var tmpl in templates)
         {
-            var exists = await _context.MaintenanceTaskTemplates.AnyAsync(t => 
+            var exists = await _context.MaintenanceTaskTemplates.AnyAsync(t =>
                 t.TaskName == tmpl.Name && t.MaintenanceTypeId == _preventiveMaintenanceTypeId);
-                
+
             if (!exists)
             {
                 await _context.MaintenanceTaskTemplates.AddAsync(new MaintenanceTaskTemplate
@@ -721,29 +721,29 @@ public class MaintenanceE2ETestSeeder
 
         var technicians = new[]
         {
-            new { 
-                EmployeeId = _seniorTechnicianId, 
+            new {
+                EmployeeId = _seniorTechnicianId,
                 Number = "EMP004",
-                FirstName = "David", 
+                FirstName = "David",
                 LastName = "Senior",
                 Email = "david.senior@company.com",
                 Phone = "+1234567004",
                 Dept = "Maintenance",
                 Position = "Senior Technician",
-                Specialization = "Diesel Mechanics", 
+                Specialization = "Diesel Mechanics",
                 CertLevel = "Level 3",
                 ExpLevel = "Senior"
             },
-            new { 
-                EmployeeId = _juniorTechnicianId, 
+            new {
+                EmployeeId = _juniorTechnicianId,
                 Number = "EMP005",
-                FirstName = "Emily", 
+                FirstName = "Emily",
                 LastName = "Junior",
                 Email = "emily.junior@company.com",
                 Phone = "+1234567005",
                 Dept = "Maintenance",
                 Position = "Junior Technician",
-                Specialization = "General Mechanics", 
+                Specialization = "General Mechanics",
                 CertLevel = "Level 1",
                 ExpLevel = "Junior"
             }

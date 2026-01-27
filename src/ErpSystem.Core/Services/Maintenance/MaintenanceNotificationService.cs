@@ -1,18 +1,21 @@
 using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.Maintenance;
-using ErpSystem.Core.Interfaces.Common;
-using ErpSystem.Core.Enums;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
 /// <summary>
 /// Service for managing maintenance notifications, alerts, and reminders
+/// Delegates actual notification delivery to the unified INotificationService
 /// </summary>
 public class MaintenanceNotificationService : IMaintenanceNotificationService
 {
+    private readonly INotificationService _notificationService;
     private readonly IEmailService _emailService;
     private readonly IMaintenanceScheduleService _scheduleService;
     private readonly IWorkOrderService _workOrderService;
@@ -20,16 +23,22 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
     private readonly ITechnicianService _technicianService;
     private readonly ILogger<MaintenanceNotificationService> _logger;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ErpSystem.Core.Interfaces.HR.IEmployeeRepository _employeeRepository;
 
     public MaintenanceNotificationService(
+        INotificationService notificationService,
         IEmailService emailService,
         IMaintenanceScheduleService scheduleService,
         IWorkOrderService workOrderService,
         IMaintenanceAssetService assetService,
         ITechnicianService technicianService,
         ILogger<MaintenanceNotificationService> logger,
-        ICurrentUserProvider currentUserProvider)
+        ICurrentUserProvider currentUserProvider,
+        IUnitOfWork unitOfWork,
+        ErpSystem.Core.Interfaces.HR.IEmployeeRepository employeeRepository)
     {
+        _notificationService = notificationService;
         _emailService = emailService;
         _scheduleService = scheduleService;
         _workOrderService = workOrderService;
@@ -37,6 +46,8 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         _technicianService = technicianService;
         _logger = logger;
         _currentUserProvider = currentUserProvider;
+        _unitOfWork = unitOfWork;
+        _employeeRepository = employeeRepository;
     }
 
     #region Scheduled Maintenance Notifications
@@ -49,7 +60,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
 
             // Get schedules due in the next 7 days
             var upcomingSchedules = await _scheduleService.GetSchedulesDueInDaysAsync(7);
-            
+
             foreach (var schedule in upcomingSchedules)
             {
                 await SendScheduleReminderAsync(schedule);
@@ -57,13 +68,13 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
 
             // Get overdue schedules
             var overdueSchedules = await _scheduleService.GetOverdueSchedulesAsync();
-            
+
             foreach (var schedule in overdueSchedules)
             {
                 await SendOverdueMaintenanceAlertAsync(schedule);
             }
 
-            _logger.LogInformation("Processed {UpcomingCount} upcoming and {OverdueCount} overdue maintenance notifications", 
+            _logger.LogInformation("Processed {UpcomingCount} upcoming and {OverdueCount} overdue maintenance notifications",
                 upcomingSchedules.Count(), overdueSchedules.Count());
         }
         catch (Exception ex)
@@ -98,7 +109,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
                 Priority = MapPriorityToString(schedule.Priority),
                 ScheduledFor = DateTime.UtcNow
             };
-            
+
             await CreateNotificationAsync(createDto);
 
             _logger.LogInformation("Schedule reminder sent for schedule {ScheduleId}", schedule.Id);
@@ -156,7 +167,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
     {
         try
         {
-            _logger.LogInformation("Sending work order assignment notification for WO {WorkOrderId} to technician {TechnicianId}", 
+            _logger.LogInformation("Sending work order assignment notification for WO {WorkOrderId} to technician {TechnicianId}",
                 workOrderId, technicianId);
 
             var createDto = new CreateMaintenanceNotificationDto
@@ -182,15 +193,123 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
 
     public async Task SendWorkOrderStatusChangeNotificationAsync(Guid workOrderId, string previousStatus, string newStatus)
     {
-        _logger.LogInformation("Work order status notification stubbed for WO {WorkOrderId}: {PreviousStatus} -> {NewStatus}", 
-            workOrderId, previousStatus, newStatus);
-        // Stub implementation - would create proper notification in production
+        try
+        {
+            _logger.LogInformation("Sending work order status change notification for WO {WorkOrderId}: {PreviousStatus} -> {NewStatus}",
+                workOrderId, previousStatus, newStatus);
+
+            var workOrder = await _workOrderService.GetWorkOrderByIdAsync(workOrderId);
+            if (workOrder == null)
+            {
+                _logger.LogWarning("Work order {WorkOrderId} not found when sending status change notification", workOrderId);
+                return;
+            }
+
+            var notifications = new List<CreateMaintenanceNotificationDto>();
+
+            var priority = GetStatusChangeNotificationPriority(newStatus);
+
+            // Notify assigned technician if any
+            if (workOrder.AssignedTechnicianId.HasValue)
+            {
+                notifications.Add(new CreateMaintenanceNotificationDto
+                {
+                    NotificationType = "WorkOrderStatusChanged",
+                    EntityType = "WorkOrder",
+                    EntityId = workOrderId,
+                    RecipientId = workOrder.AssignedTechnicianId.Value,
+                    Title = $"Work Order Status Updated: {newStatus}",
+                    Message = $"Work order '{workOrder.Title}' changed from {previousStatus} to {newStatus}.",
+                    Priority = priority,
+                    ScheduledFor = DateTime.UtcNow
+                });
+            }
+
+            // Notify requester if available
+            if (workOrder.RequestedById.HasValue && workOrder.RequestedById.Value != Guid.Empty)
+            {
+                notifications.Add(new CreateMaintenanceNotificationDto
+                {
+                    NotificationType = "WorkOrderStatusChanged",
+                    EntityType = "WorkOrder",
+                    EntityId = workOrderId,
+                    RecipientId = workOrder.RequestedById.Value,
+                    Title = $"Your Work Order Status Updated: {newStatus}",
+                    Message = $"Your work order '{workOrder.Title}' changed from {previousStatus} to {newStatus}.",
+                    Priority = priority,
+                    ScheduledFor = DateTime.UtcNow
+                });
+            }
+
+            foreach (var n in notifications)
+            {
+                await CreateNotificationAsync(n);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending work order status change notification for WO {WorkOrderId}", workOrderId);
+            throw;
+        }
     }
 
     public async Task SendWorkOrderCompletionNotificationAsync(Guid workOrderId)
     {
-        _logger.LogInformation("Work order completion notification stubbed for WO {WorkOrderId}", workOrderId);
-        // Stub implementation - would create proper notification in production
+        try
+        {
+            _logger.LogInformation("Sending work order completion notification for WO {WorkOrderId}", workOrderId);
+
+            var workOrder = await _workOrderService.GetWorkOrderByIdAsync(workOrderId);
+            if (workOrder == null)
+            {
+                _logger.LogWarning("Work order {WorkOrderId} not found when sending completion notification", workOrderId);
+                return;
+            }
+
+            var notifications = new List<CreateMaintenanceNotificationDto>();
+
+            // Notify requester
+            if (workOrder.RequestedById.HasValue && workOrder.RequestedById.Value != Guid.Empty)
+            {
+                notifications.Add(new CreateMaintenanceNotificationDto
+                {
+                    NotificationType = "WorkOrderCompleted",
+                    EntityType = "WorkOrder",
+                    EntityId = workOrderId,
+                    RecipientId = workOrder.RequestedById.Value,
+                    Title = "Work Order Completed",
+                    Message = $"Your work order '{workOrder.Title}' has been completed.",
+                    Priority = "Normal",
+                    ScheduledFor = DateTime.UtcNow
+                });
+            }
+
+            // Notify assigned technician (confirmation)
+            if (workOrder.AssignedTechnicianId.HasValue)
+            {
+                notifications.Add(new CreateMaintenanceNotificationDto
+                {
+                    NotificationType = "WorkOrderCompleted",
+                    EntityType = "WorkOrder",
+                    EntityId = workOrderId,
+                    RecipientId = workOrder.AssignedTechnicianId.Value,
+                    Title = "Work Order Marked Completed",
+                    Message = $"Work order '{workOrder.Title}' has been marked as completed.",
+                    Priority = "Low",
+                    ScheduledFor = DateTime.UtcNow
+                });
+            }
+
+            foreach (var n in notifications)
+            {
+                await CreateNotificationAsync(n);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending work order completion notification for WO {WorkOrderId}", workOrderId);
+            throw;
+        }
     }
 
     #endregion
@@ -352,9 +471,9 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         {
             // Get assets with warranties expiring in the next 60 days
             var assets = await _assetService.GetAllAssetsAsync();
-            var assetsWithExpiringWarranty = assets.Where(a => 
-                a.WarrantyEndDate.HasValue && 
-                a.WarrantyEndDate.Value >= DateTime.Now && 
+            var assetsWithExpiringWarranty = assets.Where(a =>
+                a.WarrantyEndDate.HasValue &&
+                a.WarrantyEndDate.Value >= DateTime.Now &&
                 a.WarrantyEndDate.Value <= DateTime.Now.AddDays(60)).ToList();
 
             foreach (var asset in assetsWithExpiringWarranty)
@@ -403,32 +522,20 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
     {
         try
         {
-            // Send email notifications
+            // Delegate to unified notification service for all delivery channels
             foreach (var recipient in notification.Recipients)
             {
                 if (!string.IsNullOrEmpty(recipient.Email))
                 {
-                    var subject = notification.Title;
-                    var body = FormatNotificationEmailBody(notification, recipient);
-                    
-                    var email = new EmailDto
-                    {
-                        To = recipient.Email,
-                        Subject = subject,
-                        Body = body,
-                        IsHtml = true
-                    };
-                    await _emailService.SendEmailAsync(email);
+                    // Send via unified service which handles email, SMS, push, in-app, database persistence, etc.
+                    await _notificationService.SendEmailAsync(
+                        recipient.Email,
+                        notification.Title,
+                        FormatNotificationEmailBody(notification, recipient));
                 }
             }
 
-            // Here you would also:
-            // - Save notification to database
-            // - Send push notifications
-            // - Send SMS for critical alerts
-            // - Post to communication channels (Teams, Slack, etc.)
-
-            _logger.LogInformation("Notification processed: {Title} to {RecipientCount} recipients", 
+            _logger.LogInformation("Notification processed via unified service: {Title} to {RecipientCount} recipients",
                 notification.Title, notification.Recipients.Count);
         }
         catch (Exception ex)
@@ -440,7 +547,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
 
     // Helper methods removed - would be implemented with proper recipient management in production
 
-    private string MapPriorityToString(string priority)
+    private static string MapPriorityToString(string priority)
     {
         return priority?.ToLower() switch
         {
@@ -452,7 +559,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         };
     }
 
-    private string GetStatusChangeNotificationPriority(string status)
+    private static string GetStatusChangeNotificationPriority(string status)
     {
         return status?.ToLower() switch
         {
@@ -476,10 +583,10 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Getting notifications with filter");
-            
+
             // Mock implementation - would retrieve from database
             var notifications = new List<MaintenanceNotificationDto>();
-            
+
             return new PagedResult<MaintenanceNotificationDto>
             {
                 Items = notifications,
@@ -503,7 +610,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Getting notification {NotificationId}", id);
-            
+
             // Mock implementation - would retrieve from database
             return null;
         }
@@ -521,9 +628,63 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
     {
         try
         {
-            _logger.LogInformation("Creating notification: {Title}", createDto.Title);
-            
-            var notification = new MaintenanceNotificationDto
+            _logger.LogInformation("Creating notification via unified service: {Title}", createDto.Title);
+
+            // Use DTO's TenantId if provided (for background service), otherwise use current user's tenant
+            var tenantId = createDto.TenantId ?? _currentUserProvider.TenantId;
+
+            // Build unified notification DTO
+            var notificationData = new Dictionary<string, object>
+            {
+                ["NotificationType"] = createDto.NotificationType,
+                ["EntityType"] = createDto.EntityType,
+                ["EntityId"] = createDto.EntityId.ToString()
+            };
+
+            if (!string.IsNullOrWhiteSpace(createDto.AdditionalData))
+            {
+                notificationData["AdditionalData"] = createDto.AdditionalData;
+            }
+
+            // CRITICAL: RecipientId MUST be a valid UserId, not EmployeeId or TenantId
+            // If no recipient provided, this is an error - notifications require a recipient
+            if (createDto.RecipientId == Guid.Empty)
+            {
+                _logger.LogWarning("Cannot create notification: RecipientId is empty/null. NotificationType={NotificationType}, EntityType={EntityType}, EntityId={EntityId}",
+                    createDto.NotificationType, createDto.EntityType, createDto.EntityId);
+                throw new InvalidOperationException("RecipientId must be provided and cannot be empty for notifications");
+            }
+
+            // Create in-app notification via unified service
+            // Use provided tenantId from DTO (for background service), or current user's tenant
+            var effectiveTenantId = createDto.TenantId ?? tenantId;
+
+            if (effectiveTenantId != Guid.Empty)
+            {
+                // Use explicit tenant overload for background service context
+                await _notificationService.CreateInAppNotificationAsync(
+                    userId: createDto.RecipientId,
+                    title: createDto.Title,
+                    message: createDto.Message,
+                    type: createDto.NotificationType,
+                    data: notificationData,
+                    tenantId: effectiveTenantId
+                );
+            }
+            else
+            {
+                // Use default overload (will use current user's tenant)
+                await _notificationService.CreateInAppNotificationAsync(
+                    userId: createDto.RecipientId,
+                    title: createDto.Title,
+                    message: createDto.Message,
+                    type: createDto.NotificationType,
+                    data: notificationData
+                );
+            }
+
+            // Return a DTO for backwards compatibility
+            var dto = new MaintenanceNotificationDto
             {
                 Id = Guid.NewGuid(),
                 NotificationType = createDto.NotificationType,
@@ -534,21 +695,19 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
                 Title = createDto.Title,
                 Message = createDto.Message,
                 Priority = createDto.Priority,
-                Status = "Pending",
+                Status = "Sent",
                 ScheduledFor = createDto.ScheduledFor ?? DateTime.UtcNow,
                 AdditionalData = createDto.AdditionalData,
                 ActionUrl = createDto.ActionUrl,
                 CreatedDate = DateTime.UtcNow
             };
-            
-            // Mock implementation - would save to database
-            _logger.LogInformation("Created notification {NotificationId}", notification.Id);
-            
-            return notification;
+
+            _logger.LogInformation("Created notification via unified service: {Title}", createDto.Title);
+            return dto;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error creating notification");
+            _logger.LogError(ex, "Error creating notification via unified service");
             throw;
         }
     }
@@ -561,10 +720,10 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Creating bulk notifications for {EntityCount} entities", bulkDto.EntityIds.Count);
-            
+
             var results = new List<MaintenanceNotificationDto>();
             var recipientIds = bulkDto.RecipientIds ?? new List<Guid>();
-            
+
             // Create notification for each entity-recipient combination
             foreach (var entityId in bulkDto.EntityIds)
             {
@@ -584,7 +743,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
                             Priority = bulkDto.Priority,
                             ScheduledFor = bulkDto.ScheduledFor
                         };
-                        
+
                         var notification = await CreateNotificationAsync(createDto);
                         results.Add(notification);
                     }
@@ -604,12 +763,12 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
                         Priority = bulkDto.Priority,
                         ScheduledFor = bulkDto.ScheduledFor
                     };
-                    
+
                     var notification = await CreateNotificationAsync(createDto);
                     results.Add(notification);
                 }
             }
-            
+
             _logger.LogInformation("Created {Count} bulk notifications", results.Count);
             return results;
         }
@@ -628,7 +787,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Updating notification status {NotificationId} to {Status}", id, updateDto.Status);
-            
+
             // Mock implementation - would update in database
             var notification = new MaintenanceNotificationDto
             {
@@ -636,7 +795,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
                 Status = updateDto.Status,
                 CreatedDate = DateTime.UtcNow
             };
-            
+
             if (updateDto.Status.Equals("Read", StringComparison.OrdinalIgnoreCase))
             {
                 notification.ReadAt = DateTime.UtcNow;
@@ -646,7 +805,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
             {
                 notification.DismissedAt = DateTime.UtcNow;
             }
-            
+
             return notification;
         }
         catch (Exception ex)
@@ -664,7 +823,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Marking notification {NotificationId} as read for user {UserId}", id, userId);
-            
+
             var updateDto = new UpdateNotificationStatusDto { Status = "Read" };
             return await UpdateNotificationStatusAsync(id, updateDto);
         }
@@ -683,7 +842,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Dismissing notification {NotificationId} for user {UserId}", id, userId);
-            
+
             var updateDto = new UpdateNotificationStatusDto { Status = "Dismissed" };
             return await UpdateNotificationStatusAsync(id, updateDto);
         }
@@ -702,7 +861,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Getting unread notifications for user {UserId}", userId);
-            
+
             // Mock implementation - would retrieve from database
             return new List<MaintenanceNotificationDto>();
         }
@@ -721,7 +880,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Getting notifications for user {UserId} by type {Type}", userId, notificationType);
-            
+
             // Mock implementation - would retrieve from database
             return new List<MaintenanceNotificationDto>();
         }
@@ -740,12 +899,56 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Sending pending notifications");
-            
-            // Mock implementation - would retrieve pending notifications from database and send them
-            var pendingCount = 0;
-            
-            _logger.LogInformation("Sent {Count} pending notifications", pendingCount);
-            return pendingCount;
+
+            var now = DateTime.UtcNow;
+            var repo = _unitOfWork.Repository<MaintenanceNotification>();
+            var pending = await repo.FindAsync(n => n.Status == "Pending" && n.ScheduledFor <= now && n.AttemptCount < 5);
+
+            var sentCount = 0;
+            foreach (var entity in pending)
+            {
+                try
+                {
+                    var dto = new MaintenanceNotificationDto
+                    {
+                        Id = entity.Id,
+                        NotificationType = entity.NotificationType,
+                        EntityType = entity.EntityType,
+                        EntityId = entity.EntityId,
+                        RecipientId = entity.RecipientId,
+                        RecipientRole = entity.RecipientRole,
+                        Title = entity.Title,
+                        Message = entity.Message,
+                        Priority = entity.Priority,
+                        Status = entity.Status,
+                        ScheduledFor = entity.ScheduledFor,
+                        AdditionalData = entity.AdditionalData,
+                        ActionUrl = entity.ActionUrl,
+                        CreatedDate = entity.CreatedAt
+                    };
+
+                    dto.Recipients = await ResolveRecipientsAsync(entity);
+                    await ProcessNotificationAsync(dto);
+
+                    entity.Status = "Sent";
+                    entity.SentAt = DateTime.UtcNow;
+                    entity.AttemptCount += 1;
+                    await repo.UpdateAsync(entity);
+                    await _unitOfWork.SaveChangesAsync();
+                    sentCount++;
+                }
+                catch (Exception sendEx)
+                {
+                    entity.AttemptCount += 1;
+                    entity.LastError = sendEx.Message;
+                    await repo.UpdateAsync(entity);
+                    await _unitOfWork.SaveChangesAsync();
+                    _logger.LogWarning(sendEx, "Failed sending notification {Id}", entity.Id);
+                }
+            }
+
+            _logger.LogInformation("Sent {Count} pending notifications", sentCount);
+            return sentCount;
         }
         catch (Exception ex)
         {
@@ -762,7 +965,7 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Getting notification summary for user {UserId}", userId);
-            
+
             // Mock implementation - would calculate from database
             return new NotificationSummaryDto
             {
@@ -787,10 +990,10 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         try
         {
             _logger.LogInformation("Deleting notifications older than {Days} days", olderThanDays);
-            
+
             // Mock implementation - would delete from database
             var deletedCount = 0;
-            
+
             _logger.LogInformation("Deleted {Count} old notifications", deletedCount);
             return deletedCount;
         }
@@ -850,10 +1053,146 @@ public class MaintenanceNotificationService : IMaintenanceNotificationService
         }).ToList();
     }
 
-    private string FormatNotificationEmailBody(MaintenanceNotificationDto notification, NotificationRecipientDto recipient = null)
+    private static string FormatNotificationEmailBody(MaintenanceNotificationDto notification, NotificationRecipientDto recipient = null)
     {
         var recipientSection = recipient != null ? $"<p>Dear {recipient.Name},</p>" : "";
         return $"{recipientSection}<h2>{notification.Title}</h2><p>{notification.Message}</p><p>Priority: {notification.Priority}</p>";
+    }
+
+    private async Task<List<NotificationRecipientDto>> ResolveRecipientsAsync(MaintenanceNotification entity)
+    {
+        var recipients = new List<NotificationRecipientDto>();
+        if (entity.RecipientId != Guid.Empty)
+        {
+            var emp = await _employeeRepository.GetByIdAsync(entity.RecipientId);
+            if (emp != null && !string.IsNullOrWhiteSpace(emp.EmailAddress))
+            {
+                recipients.Add(new NotificationRecipientDto
+                {
+                    Id = emp.Id,
+                    Name = emp.FullName,
+                    Email = emp.EmailAddress,
+                    Role = string.Empty,
+                    DeliveryMethod = "Email"
+                });
+            }
+        }
+        // Role-based recipient resolution can be added here later.
+        return recipients;
+    }
+
+    #endregion
+
+    #region Job Card Notifications
+
+    /// <summary>
+    /// Notifies approvers when a job card is submitted for approval
+    /// </summary>
+    public async Task NotifyJobCardSubmittedAsync(Guid jobCardId)
+    {
+        try
+        {
+            _logger.LogInformation("Sending job card submitted notification for job card {JobCardId}", jobCardId);
+
+            var dto = new CreateMaintenanceNotificationDto
+            {
+                NotificationType = "JobCardSubmitted",
+                EntityType = "JobCard",
+                EntityId = jobCardId,
+                RecipientId = Guid.Empty,
+                RecipientRole = "Manager",
+                Title = "Job Card Submitted for Approval",
+                Message = $"Job card {jobCardId} has been submitted for approval.",
+                Priority = "Normal",
+                ScheduledFor = DateTime.UtcNow
+            };
+            await CreateNotificationAsync(dto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending job card submitted notification for {JobCardId}", jobCardId);
+        }
+    }
+
+    /// <summary>
+    /// Notifies requestor when their job card is approved
+    /// </summary>
+    public async Task NotifyJobCardApprovedAsync(Guid jobCardId)
+    {
+        try
+        {
+            _logger.LogInformation("Sending job card approved notification for job card {JobCardId}", jobCardId);
+
+            var dto = new CreateMaintenanceNotificationDto
+            {
+                NotificationType = "JobCardApproved",
+                EntityType = "JobCard",
+                EntityId = jobCardId,
+                Title = "Your Job Card Was Approved",
+                Message = $"Your job card {jobCardId} has been approved.",
+                Priority = "Normal",
+                ScheduledFor = DateTime.UtcNow
+            };
+            await CreateNotificationAsync(dto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending job card approved notification for {JobCardId}", jobCardId);
+        }
+    }
+
+    /// <summary>
+    /// Notifies requestor when their job card is rejected
+    /// </summary>
+    public async Task NotifyJobCardRejectedAsync(Guid jobCardId, string? reason)
+    {
+        try
+        {
+            _logger.LogInformation("Sending job card rejected notification for job card {JobCardId}", jobCardId);
+
+            var dto = new CreateMaintenanceNotificationDto
+            {
+                NotificationType = "JobCardRejected",
+                EntityType = "JobCard",
+                EntityId = jobCardId,
+                Title = "Your Job Card Was Rejected",
+                Message = $"Your job card {jobCardId} was rejected. Reason: {reason ?? "Not specified"}.",
+                Priority = "High",
+                ScheduledFor = DateTime.UtcNow
+            };
+            await CreateNotificationAsync(dto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending job card rejected notification for {JobCardId}", jobCardId);
+        }
+    }
+
+    /// <summary>
+    /// Notifies requestor when changes are requested for their job card
+    /// </summary>
+    public async Task NotifyJobCardChangesRequestedAsync(Guid jobCardId, string? comments)
+    {
+        try
+        {
+            _logger.LogInformation("Sending job card changes requested notification for job card {JobCardId}", jobCardId);
+
+            var dto = new CreateMaintenanceNotificationDto
+            {
+                NotificationType = "JobCardChangesRequested",
+                EntityType = "JobCard",
+                EntityId = jobCardId,
+                Title = "Changes Requested For Your Job Card",
+                Message = $"Changes were requested for job card {jobCardId}. Comments: {comments ?? "N/A"}.",
+                Priority = "Normal",
+                ScheduledFor = DateTime.UtcNow
+            };
+            await CreateNotificationAsync(dto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending job card changes requested notification for {JobCardId}", jobCardId);
+        }
     }
 
     #endregion

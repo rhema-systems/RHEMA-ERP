@@ -233,7 +233,10 @@ public class MaintenanceConfigurationSeeder
         var transCategory = await _context.MaintenanceAssetCategories
             .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Code == "TRANS");
 
-        if (hvacCategory == null) return;
+        if (hvacCategory == null)
+        {
+            return;
+        }
 
         var assetTypes = new[]
         {

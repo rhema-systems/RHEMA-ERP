@@ -1,11 +1,11 @@
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.Extensions.Logging;
-using ErpSystem.Core.Entities.HR;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -47,15 +47,14 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
     {
         try
         {
-            _logger.LogInformation("Scheduling work order {WorkOrderId} by user {ScheduledById}", 
+            _logger.LogInformation("Scheduling work order {WorkOrderId} by user {ScheduledById}",
                 scheduleDto.WorkOrderId, scheduledById);
 
-            var workOrder = await _workOrderRepository.GetByIdAsync(scheduleDto.WorkOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {scheduleDto.WorkOrderId} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(scheduleDto.WorkOrderId) ?? throw new ArgumentException($"Work order {scheduleDto.WorkOrderId} not found");
             if (workOrder.Status != "Approved")
+            {
                 throw new InvalidOperationException($"Cannot schedule work order in {workOrder.Status} status");
+            }
 
             var result = new WorkOrderSchedulingResult
             {
@@ -71,7 +70,7 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
             // Check parts availability and reserve if needed
             if (scheduleDto.ReserveParts && workOrder.Parts.Any())
             {
-                await ProcessInventoryReservationAsync(scheduleDto.WorkOrderId, scheduleDto.RequestedStartDate, 
+                await ProcessInventoryReservationAsync(scheduleDto.WorkOrderId, scheduleDto.RequestedStartDate,
                     scheduledById, result);
             }
 
@@ -98,7 +97,7 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
 
             _logger.LogInformation("Work order {WorkOrderId} scheduled successfully for {StartDate}. " +
                 "Reserved parts: {PartsReserved}, Technician: {TechnicianId}",
-                scheduleDto.WorkOrderId, scheduleDto.RequestedStartDate, result.PartsReserved, 
+                scheduleDto.WorkOrderId, scheduleDto.RequestedStartDate, result.PartsReserved,
                 scheduleDto.AssignedTechnicianId);
 
             return result;
@@ -118,15 +117,14 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
     {
         try
         {
-            _logger.LogInformation("Rescheduling work order {WorkOrderId} by user {RescheduledById}", 
+            _logger.LogInformation("Rescheduling work order {WorkOrderId} by user {RescheduledById}",
                 rescheduleDto.WorkOrderId, rescheduledById);
 
-            var workOrder = await _workOrderRepository.GetByIdAsync(rescheduleDto.WorkOrderId);
-            if (workOrder == null)
-                throw new ArgumentException($"Work order {rescheduleDto.WorkOrderId} not found");
-
+            var workOrder = await _workOrderRepository.GetByIdAsync(rescheduleDto.WorkOrderId) ?? throw new ArgumentException($"Work order {rescheduleDto.WorkOrderId} not found");
             if (workOrder.Status != "Assigned" && workOrder.Status != "OnHold")
+            {
                 throw new InvalidOperationException($"Cannot reschedule work order in {workOrder.Status} status");
+            }
 
             var result = new WorkOrderSchedulingResult
             {
@@ -142,17 +140,17 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
             if (workOrder.Parts.Any() && rescheduleDto.UpdateReservations)
             {
                 var timeDifference = rescheduleDto.NewStartDate - workOrder.RequestedStartDate;
-                
+
                 // If rescheduled by more than 1 day, update reservations
                 if (Math.Abs(timeDifference?.TotalDays ?? 0) > 1)
                 {
-                    await UpdateInventoryReservationsAsync(rescheduleDto.WorkOrderId, 
+                    await UpdateInventoryReservationsAsync(rescheduleDto.WorkOrderId,
                         rescheduleDto.NewStartDate, rescheduledById, result);
                 }
             }
 
             // Update technician assignment if changed
-            if (rescheduleDto.NewAssignedTechnicianId.HasValue && 
+            if (rescheduleDto.NewAssignedTechnicianId.HasValue &&
                 rescheduleDto.NewAssignedTechnicianId != workOrder.AssignedTechnicianId)
             {
                 workOrder.AssignedTechnicianId = rescheduleDto.NewAssignedTechnicianId;
@@ -161,7 +159,7 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
             }
 
             // Update team assignment if changed
-            if (rescheduleDto.NewAssignedTeamId.HasValue && 
+            if (rescheduleDto.NewAssignedTeamId.HasValue &&
                 rescheduleDto.NewAssignedTeamId != workOrder.AssignedTeamId)
             {
                 workOrder.AssignedTeamId = rescheduleDto.NewAssignedTeamId;
@@ -200,19 +198,19 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
             // Get all work orders and filter for those needing scheduling (approved but not assigned)
             var allWorkOrders = await _workOrderRepository.GetAllAsync();
             var workOrders = allWorkOrders
-                .Where(wo => wo.Status == "Approved" && 
-                           !wo.AssignedTechnicianId.HasValue && 
+                .Where(wo => wo.Status == "Approved" &&
+                           !wo.AssignedTechnicianId.HasValue &&
                            !wo.AssignedTeamId.HasValue)
                 .Where(wo => startDate == null || wo.RequestedStartDate >= startDate)
                 .Where(wo => endDate == null || wo.RequestedStartDate <= endDate)
                 .ToList();
-            
+
             var result = new List<WorkOrderForSchedulingDto>();
-            
+
             foreach (var wo in workOrders)
             {
                 var partsAvailability = await _maintenanceInventoryService.CheckPartsAvailabilityAsync(wo.Id);
-                
+
                 result.Add(new WorkOrderForSchedulingDto
                 {
                     WorkOrderId = wo.Id,
@@ -261,9 +259,7 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
         {
             // This would integrate with the TechnicianSchedulingService
             // For now, return a basic implementation
-            var technician = await _employeeRepository.GetByIdAsync(technicianId);
-            if (technician == null)
-                throw new ArgumentException($"Technician {technicianId} not found");
+            var technician = await _employeeRepository.GetByIdAsync(technicianId) ?? throw new ArgumentException($"Technician {technicianId} not found");
 
             // Check for existing work order assignments during this period
             var allWorkOrders = await _workOrderRepository.GetAllAsync();
@@ -337,7 +333,7 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
         try
         {
             var partsAvailability = await _maintenanceInventoryService.CheckPartsAvailabilityAsync(workOrderId);
-            
+
             if (!partsAvailability.AllPartsAvailable)
             {
                 result.WarningMessages.Add($"{partsAvailability.UnavailableParts} parts are not available for reservation");
@@ -353,7 +349,7 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
             if (availableParts.Any())
             {
                 // Create reservations (using allocation with "Reserved" status)
-            var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
+                var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
                 if (workOrder != null)
                 {
                     foreach (var availablePart in availableParts)
@@ -376,7 +372,7 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
                                 };
 
                                 var reservation = await _inventoryService.AllocateForWorkOrderAsync(reservationRequest);
-                                
+
                                 // Update part with reservation info
                                 part.AllocationId = reservation.Id;
                                 part.QuantityAllocated = reservation.AllocatedQuantity;
@@ -384,7 +380,7 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
                                 part.Status = "Reserved";
 
                                 await _workOrderRepository.UpdateAsync(workOrder);
-                                
+
                                 result.PartsReserved++;
                                 result.ReservedParts.Add(new ReservedPartDto
                                 {
@@ -398,7 +394,7 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning(ex, "Failed to reserve part {PartId} for work order {WorkOrderId}", 
+                                _logger.LogWarning(ex, "Failed to reserve part {PartId} for work order {WorkOrderId}",
                                     availablePart.PartId, workOrderId);
                                 result.WarningMessages.Add($"Failed to reserve part {part.ItemName}: {ex.Message}");
                                 result.ReservationFailures.Add(new PartReservationFailure
@@ -429,10 +425,13 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
         try
         {
             var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId);
-            if (workOrder == null) return;
+            if (workOrder == null)
+            {
+                return;
+            }
 
             var reservedParts = workOrder.Parts.Where(p => p.Status == "Reserved" && p.AllocationId.HasValue).ToList();
-            
+
             foreach (var part in reservedParts)
             {
                 try
@@ -442,7 +441,7 @@ public class WorkOrderSchedulingService : IWorkOrderSchedulingService
                     // For now, we'll just log the update need
                     _logger.LogInformation("Need to update reservation {AllocationId} for new date {NewDate}",
                         part.AllocationId, newRequiredDate);
-                    
+
                     result.SuccessMessages.Add($"Updated reservation for {part.ItemName}");
                 }
                 catch (Exception ex)
