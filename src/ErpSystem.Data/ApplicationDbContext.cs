@@ -174,7 +174,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     #region HR Entities
 
-    // Company Setup
+    #region Company Setup
+
     public DbSet<Division> Divisions { get; set; }
     public DbSet<Department> Departments { get; set; }
     public DbSet<Section> Sections { get; set; }
@@ -188,6 +189,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<Shift> Shifts { get; set; }
     public DbSet<WorkStation> WorkStations { get; set; }
     public DbSet<EmployeeContractType> EmployeeContractTypes { get; set; }
+
+    public DbSet<OrganizationStructure> OrganizationStructures { get; set; }
+    public DbSet<OrganizationLevel> OrganizationLevels { get; set; }
+    public DbSet<OrganizationUnit> OrganizationUnits { get; set; }
+    public DbSet<OrganizationUnitHistory> OrganizationUnitHistories { get; set; }
+    public DbSet<OrganizationChartNode> OrganizationChartNodes { get; set; }
+
+    public DbSet<LocationStructure> LocationStructures { get; set; }
+    public DbSet<LocationLevel> LocationLevels { get; set; }
+    public DbSet<Location> Locations { get; set; }
+    public DbSet<LocationContact> LocationContacts { get; set; }
+
+    #endregion
 
     // Employee
     public DbSet<Employee> Employees { get; set; }
@@ -1761,6 +1775,242 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     private void ConfigureHREntities(ModelBuilder builder)
     {
+        builder.Entity<OrganizationStructure>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.Code })
+                .IsUnique()
+                .HasDatabaseName("IX_OrgStructure_Tenant_Code");
+
+            entity.HasIndex(e => new { e.TenantId, e.IsDefault })
+                .HasDatabaseName("IX_OrgStructure_Tenant_Default");
+
+            entity.HasIndex(e => new { e.TenantId, e.IsActive })
+                .HasDatabaseName("IX_OrgStructure_Tenant_Active");
+
+            entity.HasMany(e => e.Levels)
+                .WithOne(e => e.OrganizationStructure)
+                .HasForeignKey(e => e.StructureId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<OrganizationLevel>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.StructureId, e.LevelNumber })
+                .IsUnique()
+                .HasDatabaseName("IX_OrgLevel_Tenant_Structure_LevelNum");
+
+            entity.HasIndex(e => new { e.TenantId, e.StructureId, e.Code })
+                .IsUnique()
+                .HasDatabaseName("IX_OrgLevel_Tenant_Structure_Code");
+
+            entity.HasIndex(e => new { e.StructureId, e.IsActive })
+                .HasDatabaseName("IX_OrgLevel_Structure_Active");
+
+            entity.HasOne(e => e.OrganizationStructure)
+                .WithMany(e => e.Levels)
+                .HasForeignKey(e => e.StructureId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.OrganizationUnits)
+                .WithOne(e => e.OrganizationLevel)
+                .HasForeignKey(e => e.OrganizationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<OrganizationUnit>(entity =>
+        {
+            // Self-referencing relationship for hierarchy
+            entity.HasOne(e => e.ParentUnit)
+                .WithMany(e => e.ChildUnits)
+                .HasForeignKey(e => e.ParentUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.OrganizationLevel)
+                .WithMany(e => e.OrganizationUnits)
+                .HasForeignKey(e => e.OrganizationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.HeadEmployee)
+                .WithMany()
+                .HasForeignKey(e => e.HeadEmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.Employees)
+                .WithOne(e => e.OrganizationUnit)
+                .HasForeignKey(e => e.OrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.Positions)
+                .WithOne(p => p.OrganizationUnit)
+                .HasForeignKey(p => p.OrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.TenantId, e.Code })
+                .IsUnique()
+                .HasDatabaseName("IX_OrgUnit_Tenant_Code");
+
+            entity.HasIndex(e => e.ParentUnitId)
+                .HasDatabaseName("IX_OrgUnit_ParentId");
+
+            entity.HasIndex(e => e.OrganizationLevelId)
+                .HasDatabaseName("IX_OrgUnit_LevelId");
+
+            entity.HasIndex(e => e.HeadEmployeeId)
+                .HasDatabaseName("IX_OrgUnit_HeadEmployeeId");
+
+            entity.HasIndex(e => new { e.IsActive })
+                .HasDatabaseName("IX_OrgUnit_Active");
+
+            entity.HasIndex(e => new { e.ParentUnitId, e.Sequence })
+                .HasDatabaseName("IX_OrgUnit_Parent_Sequence");
+
+            entity.HasIndex(e => new { e.OrganizationLevelId })
+                .HasDatabaseName("IX_OrgUnit_Level");
+        });
+
+        builder.Entity<OrganizationUnitHistory>(entity =>
+        {
+            entity.ToTable("OrganizationUnitHistories");
+
+            entity.HasOne(e => e.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(e => e.OrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict); // Keep history even if unit is deleted
+
+            // Indexes
+            entity.HasIndex(e => e.OrganizationUnitId)
+                .HasDatabaseName("IX_OrgUnitHistory_UnitId");
+
+            entity.HasIndex(e => new { e.OrganizationUnitId, e.EffectiveFrom })
+                .HasDatabaseName("IX_OrgUnitHistory_Unit_EffectiveFrom");
+
+            entity.HasIndex(e => new { e.TenantId, e.EffectiveFrom })
+                .HasDatabaseName("IX_OrgUnitHistory_Tenant_EffectiveFrom");
+        });
+
+        builder.Entity<LocationStructure>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.Code })
+                .IsUnique()
+                .HasDatabaseName("IX_LocStructure_Tenant_Code");
+
+            entity.HasIndex(e => new { e.TenantId, e.IsDefault })
+                .HasDatabaseName("IX_LocStructure_Tenant_Default");
+
+            entity.HasMany(e => e.LocationLevels)
+                .WithOne(e => e.Structure)
+                .HasForeignKey(e => e.StructureId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.Locations)
+                .WithOne(e => e.Structure)
+                .HasForeignKey(e => e.StructureId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<LocationLevel>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.StructureId, e.LevelNumber })
+                .IsUnique()
+                .HasDatabaseName("IX_LocLevel_Tenant_Structure_LevelNum");
+
+            entity.HasIndex(e => new { e.TenantId, e.StructureId, e.Code })
+                .IsUnique()
+                .HasDatabaseName("IX_LocLevel_Tenant_Structure_Code");
+
+            entity.HasOne(e => e.Structure)
+                .WithMany(e => e.LocationLevels)
+                .HasForeignKey(e => e.StructureId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.Locations)
+                .WithOne(e => e.LocationLevel)
+                .HasForeignKey(e => e.LocationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Location>(entity =>
+        {
+            // Self-referencing relationship
+            entity.HasOne(e => e.ParentLocation)
+                .WithMany(e => e.ChildLocations)
+                .HasForeignKey(e => e.ParentLocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Relationship with Structure
+            entity.HasOne(e => e.Structure)
+                .WithMany(e => e.Locations)
+                .HasForeignKey(e => e.StructureId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Relationship with LocationLevel
+            entity.HasOne(e => e.LocationLevel)
+                .WithMany(e => e.Locations)
+                .HasForeignKey(e => e.LocationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Relationship with Country
+            entity.HasOne(e => e.Country)
+                .WithMany()
+                .HasForeignKey(e => e.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Employees collection
+            entity.HasMany(e => e.Employees)
+                .WithOne(e => e.Location)
+                .HasForeignKey(e => e.LocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Contacts collection
+            entity.HasMany(e => e.LocationContacts)
+                .WithOne(e => e.Location)
+                .HasForeignKey(e => e.LocationId)
+                .OnDelete(DeleteBehavior.Cascade); // Delete contacts when location is deleted
+
+            // Indexes
+            entity.HasIndex(e => new { e.TenantId, e.StructureId, e.Code })
+                .IsUnique()
+                .HasDatabaseName("IX_Location_Tenant_Structure_Code");
+
+            entity.HasIndex(e => e.ParentLocationId)
+                .HasDatabaseName("IX_Location_ParentId");
+
+            entity.HasIndex(e => e.LocationLevelId)
+                .HasDatabaseName("IX_Location_LevelId");
+
+            entity.HasIndex(e => e.CountryId)
+                .HasDatabaseName("IX_Location_CountryId");
+
+            entity.HasIndex(e => new { e.StructureId, e.IsActive })
+                .HasDatabaseName("IX_Location_Structure_Active");
+
+            entity.HasIndex(e => new { e.ParentLocationId, e.Sequence })
+                .HasDatabaseName("IX_Location_Parent_Sequence");
+        });
+
+        builder.Entity<LocationContact>(entity =>
+        {
+            entity.HasOne(e => e.Location)
+                .WithMany(e => e.LocationContacts)
+                .HasForeignKey(e => e.LocationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Indexes
+            entity.HasIndex(e => e.LocationId)
+                .HasDatabaseName("IX_LocContact_LocationId");
+
+            entity.HasIndex(e => new { e.LocationId, e.IsPrimary })
+                .HasDatabaseName("IX_LocContact_Location_Primary");
+
+            entity.HasIndex(e => e.EmployeeId)
+                .HasDatabaseName("IX_LocContact_EmployeeId");
+        });
+
         // Configure Employee entity
         builder.Entity<Employee>(entity =>
         {
@@ -1928,7 +2178,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(x => x.LeaveBalances)
                 .HasForeignKey(x => x.LeaveTypeId)
                 .OnDelete(DeleteBehavior.Restrict);
-            
+
             entity.HasOne(x => x.Employee)
                 .WithMany(e => e.LeaveBalances)
                 .HasForeignKey(x => x.EmployeeId)
@@ -1993,7 +2243,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(x => x.PlannedBy)
                 .OnDelete(DeleteBehavior.Restrict);
-            
+
             entity.HasOne(x => x.Employee)
                 .WithMany(e => e.LeavePlans)
                 .HasForeignKey(x => x.EmployeeId)

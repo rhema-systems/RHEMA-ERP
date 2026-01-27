@@ -28,6 +28,10 @@ public class EmployeeDto
     public string? SectionName { get; set; }
     public string? UnitName { get; set; }
     public string PositionTitle { get; set; } = string.Empty;
+    public string? OrganizationLevelName { get; set; }
+    public string? OrganizationUnitName { get; set; }
+    public string? LocationLevelName { get; set; }
+    public string? LocationName { get; set; }
     public StaffStatus StaffStatus { get; set; }
     public ContractType ContractType { get; set; }
     public bool IsActive { get; set; }
@@ -44,6 +48,10 @@ public class EmployeeDto
 /// </summary>
 public class EmployeeDetailDto : EmployeeDto
 {
+    public Guid OrganizationLevelId { get; set; }
+    public Guid OrganizationUnitId { get; set; }
+    public Guid LocationLevelId { get; set; }
+    public Guid? LocationId { get; set; }
     public DateOnly? DateOfBirth { get; set; }
     public MaritalStatus? MaritalStatus { get; set; }
     public string? Religion { get; set; }
@@ -141,8 +149,11 @@ public class CreateEmployeeDto
     public Guid DepartmentId { get; set; }
 
     public Guid? SectionId { get; set; }
-
     public Guid? UnitId { get; set; }
+    public Guid OrganizationLevelId { get; set; }
+    public Guid OrganizationUnitId { get; set; }
+    public Guid LocationLevelId { get; set; }
+    public Guid LocationId { get; set; }
 
     [Required]
     public Guid PositionId { get; set; }
@@ -193,6 +204,10 @@ public class UpdateEmployeeDto
     public int? ProbationPeriodDays { get; set; }
     public DateOnly? ConfirmationDate { get; set; }
     public DateOnly? RetirementDate { get; set; }
+    public Guid OrganizationLevelId { get; set; }
+    public Guid OrganizationUnitId { get; set; }
+    public Guid LocationLevelId { get; set; }
+    public Guid LocationId { get; set; }
     public Guid? DivisionId { get; set; }
     public Guid? DepartmentId { get; set; }
     public Guid? SectionId { get; set; }
@@ -538,6 +553,10 @@ public class EmployeePositionDto
     public string Title { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public Guid OrganizationLevelId { get; set; }
+    public string OrganizationLevelName { get; set; } = string.Empty;
+    public Guid OrganizationUnitId { get; set; }
+    public string OrganizationUnitName { get; set; } = string.Empty;
     public Guid DepartmentId { get; set; }
     public string DepartmentName { get; set; } = string.Empty;
     public int Level { get; set; }
@@ -564,6 +583,12 @@ public class CreateEmployeePositionDto
 
     [Required]
     public Guid DepartmentId { get; set; }
+
+    [Required]
+    public Guid OrganizationLevelId { get; set; }
+
+    [Required]
+    public Guid OrganizationUnitId { get; set; }
 
     public int Level { get; set; } = 1;
     public decimal? MinSalary { get; set; }

@@ -105,10 +105,18 @@ public class Employee : TenantEntity
 
     public Guid? UnitId { get; set; }
 
+    public Guid OrganizationLevelId { get; set; }
+
+    public Guid OrganizationUnitId { get; set; }
+
     [Required]
     public Guid PositionId { get; set; }
 
     public StaffStatus StaffStatus { get; set; } = StaffStatus.Active;
+
+    public Guid LocationLevelId { get; set; }
+
+    public Guid LocationId { get; set; }
 
     public Guid? StationId { get; set; }
 
@@ -254,6 +262,10 @@ public class Employee : TenantEntity
     public virtual Shift? Shift { get; set; }
     public virtual WorkStation? Station { get; set; }
     public virtual Employee? Manager { get; set; }
+    public virtual LocationLevel LocationLevel { get; set; } = null!;
+    public virtual Location? Location { get; set; }
+    public virtual OrganizationLevel OrganizationLevel { get; set; } = null!;
+    public virtual OrganizationUnit OrganizationUnit { get; set; } = null!;
 
     // Related Collections
     public virtual ICollection<EmployeeEmergencyContact> EmergencyContacts { get; set; } = new List<EmployeeEmergencyContact>();
@@ -416,6 +428,18 @@ public class EmployeePosition : TenantEntity
 
     public Guid? UnitId { get; set; }
 
+    /// <summary>
+    /// Organization level this position belongs to
+    /// </summary>
+    [Required]
+    public Guid OrganizationLevelId { get; set; }
+
+    /// <summary>
+    /// Organization unit this position belongs to
+    /// </summary>
+    [Required]
+    public Guid OrganizationUnitId { get; set; }
+
     public Guid? StaffCategoryId { get; set; }
 
     // Position hierarchy
@@ -455,6 +479,12 @@ public class EmployeePosition : TenantEntity
     // Navigation Properties
     [ForeignKey(nameof(ReportsToPositionId))]
     public virtual EmployeePosition? ReportsToPosition { get; set; }
+
+    [ForeignKey(nameof(OrganizationLevelId))]
+    public virtual OrganizationLevel OrganizationLevel { get; set; } = null!;
+
+    [ForeignKey(nameof(OrganizationUnitId))]
+    public virtual OrganizationUnit OrganizationUnit { get; set; } = null!;
 
     public virtual Department Department { get; set; } = null!;
     public virtual Section? Section { get; set; }

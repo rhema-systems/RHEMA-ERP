@@ -289,24 +289,3 @@ public class ManpowerBudgetLine : TenantEntity
 
     public string? Notes { get; set; }
 }
-
-/// <summary>
-/// Organizational chart node
-/// </summary>
-public class OrganizationChartNode : TenantEntity
-{
-    public Guid? PositionId { get; set; }
-    public EmployeePosition? Position { get; set; }
-
-    public Guid? EmployeeId { get; set; }
-    public Employee? Employee { get; set; }
-
-    public Guid? ParentNodeId { get; set; }
-    public OrganizationChartNode? ParentNode { get; set; }
-
-    public int Level { get; set; }
-    public string? CustomLabel { get; set; }
-    public bool IsVacant { get; set; }
-
-    public ICollection<OrganizationChartNode> ChildNodes { get; set; } = new List<OrganizationChartNode>();
-}

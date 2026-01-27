@@ -151,6 +151,16 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ISectionRepository, SectionRepository>();
             services.AddScoped<IEmployeeSkillRepository, EmployeeSkillRepository>();
 
+            // Organization & Location structure repositories
+            services.AddScoped<IOrganizationStructureRepository, OrganizationStructureRepository>();
+            services.AddScoped<IOrganizationLevelRepository, OrganizationLevelRepository>();
+            services.AddScoped<IOrganizationUnitRepository, OrganizationUnitRepository>();
+            services.AddScoped<IOrganizationUnitHistoryRepository, OrganizationUnitHistoryRepository>();
+            services.AddScoped<ILocationStructureRepository, LocationStructureRepository>();
+            services.AddScoped<ILocationLevelRepository, LocationLevelRepository>();
+            services.AddScoped<ILocationRepository, LocationRepository>();
+            services.AddScoped<ILocationContactRepository, LocationContactRepository>();
+
             // Additional HR repositories
             services.AddScoped<IEmployeePositionRepository, EmployeePositionRepository>();
 
@@ -428,6 +438,18 @@ namespace ErpSystem.Api.Extensions
 
             // HR Services - NOW ENABLED
             services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeService, ErpSystem.Core.Services.HR.EmployeeService>();
+
+            // Organization Structure Services
+            services.AddScoped<IOrganizationStructureService, OrganizationStructureService>();
+            services.AddScoped<IOrganizationLevelService, OrganizationLevelService>();
+            services.AddScoped<IOrganizationUnitService, OrganizationUnitService>();
+            services.AddScoped<IOrganizationUnitHistoryService, OrganizationUnitHistoryService>();
+
+            // Location Structure Services
+            services.AddScoped<ILocationStructureService, LocationStructureService>();
+            services.AddScoped<ILocationLevelService, LocationLevelService>();
+            services.AddScoped<ILocationService, LocationService>();
+            services.AddScoped<ILocationContactService, LocationContactService>();
 
             services.AddScoped<ILeaveService, LeaveService>();
             
