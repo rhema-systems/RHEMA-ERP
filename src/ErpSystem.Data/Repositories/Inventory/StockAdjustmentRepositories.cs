@@ -11,6 +11,20 @@ public class StockAdjustmentRepository : GenericRepository<StockAdjustment>, ISt
 {
     public StockAdjustmentRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// Gets all stock adjustments with items included
+    /// </summary>
+    public async Task<IEnumerable<StockAdjustment>> GetAllWithItemsAsync()
+    {
+        return await _dbSet
+            .Where(sa => !sa.IsDeleted)
+            .Include(sa => sa.Items)
+                .ThenInclude(i => i.InventoryItem)
+            .Include(sa => sa.Warehouse)
+            .OrderByDescending(sa => sa.AdjustmentDate)
+            .ToListAsync();
+    }
+
     public async Task<IEnumerable<StockAdjustment>> GetAdjustmentsByDateRangeAsync(DateTime startDate, DateTime endDate)
     {
         if (startDate >= endDate)

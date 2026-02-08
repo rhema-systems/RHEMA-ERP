@@ -159,52 +159,134 @@ public class QualityControlController : ControllerBase
             }
 
             // Find the most appropriate quality checklist template
+            var assetCategoryId = workOrder.Asset?.AssetCategoryId;
             var assetCategory = workOrder.Asset?.AssetCategory?.Name;
+            var workOrderTypeId = workOrder.WorkOrderTypeId;
             var workOrderTypeName = workOrder.WorkOrderType?.Name;
+            var maintenanceTypeId = workOrder.MaintenanceTypeId;
             var maintenanceTypeName = workOrder.MaintenanceType?.Name;
 
-            // Priority matching: Try exact match first, then progressively more generic
-            // 1. Exact match: AssetCategory + WorkOrderType + MaintenanceType
-            var checklist = await _context.QualityControlChecklists
-                .Where(c => c.IsActive &&
-                    c.AssetCategory == assetCategory &&
-                    c.WorkOrderType == workOrderTypeName &&
-                    c.MaintenanceType == maintenanceTypeName)
-                .OrderByDescending(c => c.IsMandatory)
-                .FirstOrDefaultAsync() ?? await _context.QualityControlChecklists
-                    .Where(c => c.IsActive &&
-                        c.AssetCategory == assetCategory &&
-                        c.WorkOrderType == workOrderTypeName &&
-                        string.IsNullOrEmpty(c.MaintenanceType))
-                    .OrderByDescending(c => c.IsMandatory)
-                    .FirstOrDefaultAsync();
+            // Log the values we're searching for
+            _logger.LogInformation("Looking for checklist with AssetCategoryId={AssetCategoryId}, AssetCategory={AssetCategory}, WorkOrderTypeId={WorkOrderTypeId}, WorkOrderType={WorkOrderType}, MaintenanceTypeId={MaintenanceTypeId}, MaintenanceType={MaintenanceType}",
+                assetCategoryId, assetCategory, workOrderTypeId, workOrderTypeName, maintenanceTypeId, maintenanceTypeName);
 
-            // 3. Generic match: WorkOrderType + MaintenanceType (no specific AssetCategory)
-            if (checklist == null)
+            ErpSystem.Core.Entities.Maintenance.QualityControlChecklist? checklist = null;
+
+            // Priority 1: ID-based match with MaintenanceTypeId only (primary match)
+            if (checklist == null && maintenanceTypeId != Guid.Empty)
             {
                 checklist = await _context.QualityControlChecklists
                     .Where(c => c.IsActive &&
-                        string.IsNullOrEmpty(c.AssetCategory) &&
-                        c.WorkOrderType == workOrderTypeName &&
-                        c.MaintenanceType == maintenanceTypeName)
+                        c.MaintenanceTypeId == maintenanceTypeId)
                     .OrderByDescending(c => c.IsMandatory)
                     .FirstOrDefaultAsync();
+                if (checklist != null) _logger.LogInformation("Found checklist via Priority 1 (ID-based MaintenanceTypeId): {ChecklistId}", checklist.Id);
             }
 
-            // 4. Generic match: WorkOrderType only (no specific AssetCategory or MaintenanceType)
-            if (checklist == null)
+            // Priority 2: ID-based match with MaintenanceType + AssetCategory
+            if (checklist == null && maintenanceTypeId != Guid.Empty && assetCategoryId.HasValue)
             {
                 checklist = await _context.QualityControlChecklists
                     .Where(c => c.IsActive &&
-                        string.IsNullOrEmpty(c.AssetCategory) &&
-                        c.WorkOrderType == workOrderTypeName &&
-                        string.IsNullOrEmpty(c.MaintenanceType))
+                        c.MaintenanceTypeId == maintenanceTypeId &&
+                        c.AssetCategoryId == assetCategoryId)
                     .OrderByDescending(c => c.IsMandatory)
                     .FirstOrDefaultAsync();
+                if (checklist != null) _logger.LogInformation("Found checklist via Priority 2 (ID-based MaintenanceType + AssetCategory): {ChecklistId}", checklist.Id);
+            }
+
+            // Priority 3: ID-based match with MaintenanceType + AssetCategory + WorkOrderType
+            if (checklist == null && maintenanceTypeId != Guid.Empty && assetCategoryId.HasValue && workOrderTypeId != Guid.Empty)
+            {
+                checklist = await _context.QualityControlChecklists
+                    .Where(c => c.IsActive &&
+                        c.MaintenanceTypeId == maintenanceTypeId &&
+                        c.AssetCategoryId == assetCategoryId &&
+                        c.WorkOrderTypeId == workOrderTypeId)
+                    .OrderByDescending(c => c.IsMandatory)
+                    .FirstOrDefaultAsync();
+                if (checklist != null) _logger.LogInformation("Found checklist via Priority 3 (ID-based exact match): {ChecklistId}", checklist.Id);
+            }
+
+            // Fallback to text-based matching (for backward compatibility with existing data)
+            // Use case-insensitive comparison for text matching
+            var assetCategoryLower = assetCategory?.ToLower();
+            var workOrderTypeLower = workOrderTypeName?.ToLower();
+            var maintenanceTypeLower = maintenanceTypeName?.ToLower();
+
+            // Priority 4: Text-based exact match (case-insensitive)
+            if (checklist == null && !string.IsNullOrEmpty(assetCategory) && !string.IsNullOrEmpty(workOrderTypeName) && !string.IsNullOrEmpty(maintenanceTypeName))
+            {
+                checklist = await _context.QualityControlChecklists
+                    .Where(c => c.IsActive &&
+                        c.AssetCategory != null && c.AssetCategory.ToLower() == assetCategoryLower &&
+                        c.WorkOrderType != null && c.WorkOrderType.ToLower() == workOrderTypeLower &&
+                        c.MaintenanceType != null && c.MaintenanceType.ToLower() == maintenanceTypeLower)
+                    .OrderByDescending(c => c.IsMandatory)
+                    .FirstOrDefaultAsync();
+                if (checklist != null) _logger.LogInformation("Found checklist via Priority 4 (Text-based exact match): {ChecklistId}", checklist.Id);
+            }
+
+            // Priority 5: Text-based match without MaintenanceType (case-insensitive)
+            if (checklist == null && !string.IsNullOrEmpty(assetCategory) && !string.IsNullOrEmpty(workOrderTypeName))
+            {
+                checklist = await _context.QualityControlChecklists
+                    .Where(c => c.IsActive &&
+                        c.AssetCategory != null && c.AssetCategory.ToLower() == assetCategoryLower &&
+                        c.WorkOrderType != null && c.WorkOrderType.ToLower() == workOrderTypeLower &&
+                        (c.MaintenanceType == null || c.MaintenanceType == ""))
+                    .OrderByDescending(c => c.IsMandatory)
+                    .FirstOrDefaultAsync();
+                if (checklist != null) _logger.LogInformation("Found checklist via Priority 5 (Text-based no maintenance type): {ChecklistId}", checklist.Id);
+            }
+
+            // Priority 6: Text-based generic match (WorkOrderType + MaintenanceType, no AssetCategory) (case-insensitive)
+            if (checklist == null && !string.IsNullOrEmpty(workOrderTypeName) && !string.IsNullOrEmpty(maintenanceTypeName))
+            {
+                checklist = await _context.QualityControlChecklists
+                    .Where(c => c.IsActive &&
+                        (c.AssetCategory == null || c.AssetCategory == "") &&
+                        c.WorkOrderType != null && c.WorkOrderType.ToLower() == workOrderTypeLower &&
+                        c.MaintenanceType != null && c.MaintenanceType.ToLower() == maintenanceTypeLower)
+                    .OrderByDescending(c => c.IsMandatory)
+                    .FirstOrDefaultAsync();
+                if (checklist != null) _logger.LogInformation("Found checklist via Priority 6 (Text-based generic with maintenance type): {ChecklistId}", checklist.Id);
+            }
+
+            // Priority 7: Text-based generic match (WorkOrderType only) (case-insensitive)
+            if (checklist == null && !string.IsNullOrEmpty(workOrderTypeName))
+            {
+                checklist = await _context.QualityControlChecklists
+                    .Where(c => c.IsActive &&
+                        (c.AssetCategory == null || c.AssetCategory == "") &&
+                        c.WorkOrderType != null && c.WorkOrderType.ToLower() == workOrderTypeLower &&
+                        (c.MaintenanceType == null || c.MaintenanceType == ""))
+                    .OrderByDescending(c => c.IsMandatory)
+                    .FirstOrDefaultAsync();
+                if (checklist != null) _logger.LogInformation("Found checklist via Priority 7 (Text-based work order type only): {ChecklistId}", checklist.Id);
+            }
+
+            // Priority 8: Any active checklist matching just the work order type name (most lenient)
+            if (checklist == null && !string.IsNullOrEmpty(workOrderTypeName))
+            {
+                checklist = await _context.QualityControlChecklists
+                    .Where(c => c.IsActive &&
+                        c.WorkOrderType != null && c.WorkOrderType.ToLower() == workOrderTypeLower)
+                    .OrderByDescending(c => c.IsMandatory)
+                    .FirstOrDefaultAsync();
+                if (checklist != null) _logger.LogInformation("Found checklist via Priority 8 (Any matching work order type): {ChecklistId}", checklist.Id);
             }
 
             if (checklist == null)
             {
+                // Log all available checklists for debugging
+                var allChecklists = await _context.QualityControlChecklists
+                    .Where(c => c.IsActive)
+                    .Select(c => new { c.Id, c.Name, c.AssetCategory, c.WorkOrderType, c.MaintenanceType })
+                    .ToListAsync();
+                _logger.LogWarning("No checklist found. Available active checklists: {Checklists}",
+                    System.Text.Json.JsonSerializer.Serialize(allChecklists));
+
                 return BadRequest($"No quality checklist found for asset category '{assetCategory}', work order type '{workOrderTypeName}', and maintenance type '{maintenanceTypeName}'");
             }
 

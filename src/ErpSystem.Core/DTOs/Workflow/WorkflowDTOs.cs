@@ -25,6 +25,8 @@ public class UpdateWorkflowDefinitionDto
     public string? Description { get; set; }
     public string? Configuration { get; set; }
     public Guid LastModifiedById { get; set; }
+    public List<CreateWorkflowStepDto>? Steps { get; set; }
+    public List<CreateWorkflowTransitionDto>? Transitions { get; set; }
 }
 
 /// <summary>
@@ -32,6 +34,7 @@ public class UpdateWorkflowDefinitionDto
 /// </summary>
 public class CreateWorkflowStepDto
 {
+    public Guid? Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public WorkflowStepType StepType { get; set; }
@@ -325,6 +328,8 @@ public class WorkflowStatusDto
 {
     public Guid WorkflowInstanceId { get; set; }
     public string WorkflowName { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+    public string EntityType { get; set; } = string.Empty;
     public WorkflowInstanceStatus Status { get; set; }
     public DateTime StartedDate { get; set; }
     public DateTime? CompletedDate { get; set; }
@@ -373,6 +378,92 @@ public class WorkflowApprovalStatusDto
     public DateTime RequestedDate { get; set; }
     public DateTime? DueDate { get; set; }
     public bool IsOverdue { get; set; }
+}
+
+/// <summary>
+/// Lightweight summary of the workflow state for a specific entity record (used by UI).
+/// </summary>
+public class WorkflowEntitySummaryDto
+{
+    public string EntityType { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+
+    public bool HasActiveInstance { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    public string? WorkflowName { get; set; }
+    public WorkflowInstanceStatus? Status { get; set; }
+
+    public string? CurrentStepName { get; set; }
+    public Guid? CurrentStepInstanceId { get; set; }
+
+    public bool CanCurrentUserApprove { get; set; }
+    public List<WorkflowPendingApproverDto> PendingApprovers { get; set; } = new();
+}
+
+/// <summary>
+/// Batch request for workflow entity summaries (used by list/grid UIs to avoid per-row calls).
+/// </summary>
+public class WorkflowEntitySummaryBatchRequestDto
+{
+    public List<WorkflowEntityRefDto> Entities { get; set; } = new();
+}
+
+/// <summary>
+/// Identifies a workflow-enabled entity record.
+/// </summary>
+public class WorkflowEntityRefDto
+{
+    public string EntityType { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+}
+
+public class WorkflowPendingApproverDto
+{
+    public Guid? ApproverId { get; set; }
+    public string? ApproverName { get; set; }
+    public string? ApproverRole { get; set; }
+}
+
+public class WorkflowEntityAuditDto
+{
+    public string EntityType { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+    public Guid WorkflowInstanceId { get; set; }
+    public string WorkflowName { get; set; } = string.Empty;
+    public WorkflowInstanceStatus Status { get; set; }
+    public DateTime StartedDate { get; set; }
+    public DateTime? CompletedDate { get; set; }
+
+    public List<WorkflowStepAuditDto> Steps { get; set; } = new();
+}
+
+public class WorkflowStepAuditDto
+{
+    public Guid StepInstanceId { get; set; }
+    public string StepName { get; set; } = string.Empty;
+    public WorkflowStepType StepType { get; set; }
+    public WorkflowStepInstanceStatus Status { get; set; }
+    public DateTime? StartedDate { get; set; }
+    public DateTime? CompletedDate { get; set; }
+    public Guid? AssignedToId { get; set; }
+    public string? AssignedToName { get; set; }
+    public string? Comments { get; set; }
+
+    public List<WorkflowApprovalAuditDto> Approvals { get; set; } = new();
+}
+
+public class WorkflowApprovalAuditDto
+{
+    public Guid ApprovalId { get; set; }
+    public Guid? ApproverId { get; set; }
+    public string? ApproverName { get; set; }
+    public string? ApproverRole { get; set; }
+    public WorkflowApprovalStatus Status { get; set; }
+    public DateTime RequestedDate { get; set; }
+    public DateTime? ProcessedDate { get; set; }
+    public string? Comments { get; set; }
+    public Guid? ProcessedById { get; set; }
+    public string? ProcessedByName { get; set; }
 }
 
 /// <summary>
@@ -459,5 +550,20 @@ public class WorkflowTransitionDto
     public WorkflowConditionDto? Condition { get; set; }
     public bool IsDefault { get; set; }
     public int Priority { get; set; }
+}
+
+/// <summary>
+/// Lightweight DTO for workflow entity types
+/// </summary>
+public class WorkflowEntityTypeInfoDto
+{
+    public Guid Id { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int DisplayOrder { get; set; }
+    public string? Icon { get; set; }
+    public string? ColorCode { get; set; }
+    public bool IsActive { get; set; }
 }
 

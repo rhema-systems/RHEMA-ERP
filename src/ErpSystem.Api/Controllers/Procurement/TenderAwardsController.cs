@@ -90,6 +90,29 @@ public class TenderAwardsController : ControllerBase
     }
 
     /// <summary>
+    /// Get award by bid ID (for external portal - suppliers can view their own award)
+    /// </summary>
+    [HttpGet("by-bid/{bidId}")]
+    public async Task<ActionResult<TenderAwardDto>> GetAwardByBid(Guid bidId)
+    {
+        try
+        {
+            var award = await _awardService.GetAwardByBidIdAsync(bidId);
+            if (award == null)
+            {
+                return NotFound($"Award for bid {bidId} not found");
+            }
+
+            return Ok(award);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting award for bid {BidId}", bidId);
+            return StatusCode(500, "An error occurred while retrieving the award");
+        }
+    }
+
+    /// <summary>
     /// Generate award recommendation
     /// </summary>
     [HttpGet("recommendation/{tenderId}")]
@@ -267,6 +290,31 @@ public class TenderAwardsController : ControllerBase
         {
             _logger.LogError(ex, "Error sending award notifications for award {AwardId}", id);
             return StatusCode(500, "An error occurred while sending award notifications");
+        }
+    }
+
+    /// <summary>
+    /// Create a purchase order from a tender award
+    /// </summary>
+    [HttpPost("create-purchase-order")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    public async Task<ActionResult<PurchaseOrderFromAwardResponseDto>> CreatePurchaseOrderFromAward([FromBody] CreatePurchaseOrderFromAwardDto dto)
+    {
+        try
+        {
+            var result = await _awardService.CreatePurchaseOrderFromAwardAsync(dto);
+            _logger.LogInformation("Created purchase order {OrderNumber} from tender award {AwardId}",
+                result.OrderNumber, dto.TenderAwardId);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating purchase order from tender award {AwardId}", dto.TenderAwardId);
+            return StatusCode(500, "An error occurred while creating the purchase order");
         }
     }
 }

@@ -99,6 +99,7 @@ public interface IPurchaseOrderItemRepository : IGenericRepository<PurchaseOrder
     Task<PurchaseOrderItem> CreateItemAsync(PurchaseOrderItem item);
     Task<PurchaseOrderItem> UpdateItemAsync(PurchaseOrderItem item);
     Task<PurchaseOrderItem?> GetItemByIdAsync(Guid itemId);
+    Task DeleteItemAsync(Guid itemId);
 }
 
 #endregion
@@ -174,6 +175,43 @@ public interface IPurchaseRequisitionItemRepository : IGenericRepository<Purchas
     Task<IEnumerable<PurchaseRequisitionItem>> GetApprovedItemsNotOrderedAsync();
     Task<IEnumerable<PurchaseRequisitionItem>> GetItemsByRequisitionIdAsync(Guid requisitionId);
     Task<PurchaseRequisitionItem> CreateItemAsync(PurchaseRequisitionItem item);
+}
+
+#endregion
+
+#region RFQ Repositories
+
+/// <summary>
+/// Repository interface for Requests for Quotation (RFQ)
+/// </summary>
+public interface IRequestForQuotationRepository : IGenericRepository<RequestForQuotation>
+{
+    Task<RequestForQuotation?> GetByRfqNumberAsync(string rfqNumber);
+    Task<RequestForQuotation?> GetWithDetailsAsync(Guid rfqId);
+    Task<PagedResult<RequestForQuotation>> GetRfqsAsync(int page, int pageSize, string? search = null, string? status = null);
+    Task<string> GenerateRfqNumberAsync();
+}
+
+public interface IRequestForQuotationItemRepository : IGenericRepository<RequestForQuotationItem>
+{
+    Task<IEnumerable<RequestForQuotationItem>> GetByRfqIdAsync(Guid rfqId);
+}
+
+public interface IRequestForQuotationInvitationRepository : IGenericRepository<RequestForQuotationInvitation>
+{
+    Task<IEnumerable<RequestForQuotationInvitation>> GetByRfqIdAsync(Guid rfqId);
+    Task<IEnumerable<RequestForQuotationInvitation>> GetForSupplierAsync(Guid businessPartnerId, Guid tenantId);
+}
+
+public interface IRequestForQuotationQuoteRepository : IGenericRepository<RequestForQuotationQuote>
+{
+    Task<RequestForQuotationQuote?> GetByRfqAndSupplierAsync(Guid rfqId, Guid businessPartnerId, Guid tenantId);
+    Task<IEnumerable<RequestForQuotationQuote>> GetByRfqIdAsync(Guid rfqId);
+}
+
+public interface IRequestForQuotationQuoteItemRepository : IGenericRepository<RequestForQuotationQuoteItem>
+{
+    Task<IEnumerable<RequestForQuotationQuoteItem>> GetByQuoteIdAsync(Guid quoteId);
 }
 
 #endregion

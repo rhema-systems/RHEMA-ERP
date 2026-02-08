@@ -75,7 +75,31 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
   'PurchaseOrder': {
     displayName: 'Purchase Order',
     iconName: 'ShoppingCart',
-    routePattern: '/procurement/purchase-orders?id={id}',
+    routePattern: '/procurement/purchase-orders/{id}',
+    module: 'procurement'
+  },
+  'PurchaseRequisition': {
+    displayName: 'Purchase Requisition',
+    iconName: 'FileText',
+    routePattern: '/procurement/purchase-requisitions/{id}',
+    module: 'procurement'
+  },
+  'Tender': {
+    displayName: 'Tender',
+    iconName: 'FileText',
+    routePattern: '/procurement/tenders/{id}',
+    module: 'procurement'
+  },
+  'Rfq': {
+    displayName: 'RFQ',
+    iconName: 'FileText',
+    routePattern: '/procurement/rfqs/{id}/edit',
+    module: 'procurement'
+  },
+  'BusinessPartner': {
+    displayName: 'Business Partner',
+    iconName: 'Users',
+    routePattern: '/procurement/business-partners/{id}',
     module: 'procurement'
   },
   
@@ -110,6 +134,18 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
     displayName: 'Stock Movement',
     iconName: 'ArrowRightLeft',
     routePattern: '/inventory/stock-movements?id={id}',
+    module: 'inventory'
+  },
+  'InventoryTransfer': {
+    displayName: 'Inventory Transfer',
+    iconName: 'ArrowRightLeft',
+    routePattern: '/inventory/transfers',
+    module: 'inventory'
+  },
+  'InventoryRequisition': {
+    displayName: 'Inventory Requisition',
+    iconName: 'ClipboardList',
+    routePattern: '/inventory/requisitions',
     module: 'inventory'
   },
   

@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, CheckCircle2, XCircle, AlertCircle, ClipboardCheck, Building2, MinusCircle } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, AlertCircle, ClipboardCheck, Building2, MinusCircle, Award, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   awardVerificationService,
@@ -35,6 +35,7 @@ interface AwardVerificationDialogProps {
   tenderId: string;
   bidders: BidderInfo[];
   onVerificationComplete?: (verification: TenderAwardVerification) => void;
+  onAwardBidder?: (bidId: string, bidAmount: number) => void;
 }
 
 interface ItemVerification {
@@ -66,6 +67,7 @@ export function AwardVerificationDialog({
   tenderId,
   bidders,
   onVerificationComplete,
+  onAwardBidder,
 }: AwardVerificationDialogProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -469,14 +471,39 @@ export function AwardVerificationDialog({
                         </div>
                       </ScrollArea>
 
-                      {bv.status !== 'verified' && (
-                        <div className="flex justify-end mt-4 pt-4 border-t">
-                          <Button onClick={() => handleVerifyBidder(bv.bidId)} disabled={saving}>
-                            {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
-                            Verify Bidder
-                          </Button>
+                      <div className="flex justify-between items-center mt-4 pt-4 border-t">
+                        {/* Show bid amount */}
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <DollarSign className="h-4 w-4" />
+                          <span>Bid Amount: <strong className="text-foreground">${bidders.find(b => b.bidId === bv.bidId)?.totalBidAmount.toLocaleString() || 0}</strong></span>
                         </div>
-                      )}
+
+                        <div className="flex gap-2">
+                          {bv.status !== 'verified' && (
+                            <Button onClick={() => handleVerifyBidder(bv.bidId)} disabled={saving}>
+                              {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
+                              Verify Bidder
+                            </Button>
+                          )}
+
+                          {/* Award button - enabled only when bidder is verified */}
+                          {onAwardBidder && (
+                            <Button
+                              onClick={() => {
+                                const bidAmount = bidders.find(b => b.bidId === bv.bidId)?.totalBidAmount || 0;
+                                onAwardBidder(bv.bidId, bidAmount);
+                                onOpenChange(false);
+                              }}
+                              disabled={bv.status !== 'verified'}
+                              variant={bv.status === 'verified' ? 'default' : 'outline'}
+                              title={bv.status !== 'verified' ? 'Bidder must be verified before awarding' : ''}
+                            >
+                              <Award className="h-4 w-4 mr-2" />
+                              Award
+                            </Button>
+                          )}
+                        </div>
+                      </div>
                     </CardContent>
                   </Card>
                 </TabsContent>

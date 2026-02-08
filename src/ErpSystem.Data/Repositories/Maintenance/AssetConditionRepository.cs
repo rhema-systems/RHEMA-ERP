@@ -1,6 +1,7 @@
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Data.Repositories.Maintenance;
 
@@ -9,7 +10,12 @@ namespace ErpSystem.Data.Repositories.Maintenance;
 /// </summary>
 public class AssetConditionRepository : GenericRepository<PreInspectionChecklistTemplate>, IAssetConditionRepository
 {
-    public AssetConditionRepository(ApplicationDbContext context) : base(context) { }
+    private readonly ILogger<AssetConditionRepository> _logger;
+
+    public AssetConditionRepository(ApplicationDbContext context, ILogger<AssetConditionRepository> logger) : base(context)
+    {
+        _logger = logger;
+    }
 
     #region Template Operations
 
@@ -148,6 +154,8 @@ public class AssetConditionRepository : GenericRepository<PreInspectionChecklist
             .Include(r => r.Template)
                 .ThenInclude(t => t.ChecklistItems.Where(i => !i.IsDeleted).OrderBy(i => i.SortOrder))
             .Include(r => r.ItemResults.Where(ir => !ir.IsDeleted))
+                .ThenInclude(ir => ir.ChecklistItem)
+            .Include(r => r.Admission)
             .FirstOrDefaultAsync(r => r.Id == id && r.TenantId == tenantId && !r.IsDeleted);
     }
 
@@ -187,51 +195,126 @@ public class AssetConditionRepository : GenericRepository<PreInspectionChecklist
     public async Task<AssetConditionRecord?> GetAdmissionRecordForAdmissionAsync(Guid admissionId, Guid tenantId)
     {
         return await _context.Set<AssetConditionRecord>()
+            .Include(r => r.Asset)
+            .Include(r => r.Template)
+                .ThenInclude(t => t.ChecklistItems.Where(i => !i.IsDeleted).OrderBy(i => i.SortOrder))
             .Include(r => r.ItemResults.Where(ir => !ir.IsDeleted))
+                .ThenInclude(ir => ir.ChecklistItem)
             .FirstOrDefaultAsync(r => r.AdmissionId == admissionId && r.InspectionType == "Admission" && r.TenantId == tenantId && !r.IsDeleted);
     }
 
     public async Task<AssetConditionRecord?> GetDischargeRecordForAdmissionAsync(Guid admissionId, Guid tenantId)
     {
         return await _context.Set<AssetConditionRecord>()
+            .Include(r => r.Asset)
+            .Include(r => r.Template)
+                .ThenInclude(t => t.ChecklistItems.Where(i => !i.IsDeleted).OrderBy(i => i.SortOrder))
             .Include(r => r.ItemResults.Where(ir => !ir.IsDeleted))
+                .ThenInclude(ir => ir.ChecklistItem)
             .FirstOrDefaultAsync(r => r.AdmissionId == admissionId && r.InspectionType == "Discharge" && r.TenantId == tenantId && !r.IsDeleted);
     }
 
     public async Task<AssetConditionRecord?> GetAdmissionRecordForJobCardAsync(Guid jobCardId, Guid tenantId)
     {
+        _logger.LogInformation("🔍 GetAdmissionRecordForJobCardAsync called with JobCardId: {JobCardId}, TenantId: {TenantId}", jobCardId, tenantId);
+
         // Step 1: Find the admission for this job card
         var admission = await _context.Set<AssetAdmission>()
             .FirstOrDefaultAsync(a => a.JobCardId == jobCardId && a.TenantId == tenantId && !a.IsDeleted);
 
         if (admission == null)
+        {
+            // Debug: Check if there's an admission with this job card but different tenant or deleted
+            var anyAdmission = await _context.Set<AssetAdmission>()
+                .FirstOrDefaultAsync(a => a.JobCardId == jobCardId);
+            if (anyAdmission != null)
+            {
+                _logger.LogWarning("❌ Found admission {AdmissionId} for JobCard {JobCardId}, but TenantId={AdmissionTenantId} (expected {TenantId}), IsDeleted={IsDeleted}",
+                    anyAdmission.Id, jobCardId, anyAdmission.TenantId, tenantId, anyAdmission.IsDeleted);
+            }
+            else
+            {
+                _logger.LogWarning("❌ No admission found for JobCardId: {JobCardId}", jobCardId);
+            }
             return null;
+        }
 
-        // Step 2: Find the condition record for this admission
-        return await _context.Set<AssetConditionRecord>()
+        _logger.LogInformation("✅ Found admission {AdmissionId} for JobCard {JobCardId}", admission.Id, jobCardId);
+
+        // Step 2: Find the condition record for this admission with all navigation properties
+        var record = await _context.Set<AssetConditionRecord>()
+            .Include(r => r.Asset)
+            .Include(r => r.Template)
+                .ThenInclude(t => t.ChecklistItems.Where(i => !i.IsDeleted).OrderBy(i => i.SortOrder))
             .Include(r => r.ItemResults.Where(ir => !ir.IsDeleted))
+                .ThenInclude(ir => ir.ChecklistItem)
             .FirstOrDefaultAsync(r => r.AdmissionId == admission.Id
                 && r.InspectionType == "Admission"
                 && r.TenantId == tenantId
                 && !r.IsDeleted);
+
+        if (record == null)
+        {
+            // Debug: Check if there's a condition record but with different criteria
+            var anyRecord = await _context.Set<AssetConditionRecord>()
+                .FirstOrDefaultAsync(r => r.AdmissionId == admission.Id);
+            if (anyRecord != null)
+            {
+                _logger.LogWarning("❌ Found condition record {RecordId} for Admission {AdmissionId}, but InspectionType={InspectionType}, TenantId={RecordTenantId}, IsDeleted={IsDeleted}",
+                    anyRecord.Id, admission.Id, anyRecord.InspectionType, anyRecord.TenantId, anyRecord.IsDeleted);
+            }
+            else
+            {
+                _logger.LogWarning("❌ No condition record found for AdmissionId: {AdmissionId}", admission.Id);
+            }
+        }
+        else
+        {
+            _logger.LogInformation("✅ Found condition record {RecordId} for Admission {AdmissionId} with {ItemCount} item results",
+                record.Id, admission.Id, record.ItemResults?.Count ?? 0);
+        }
+
+        return record;
     }
 
     public async Task<AssetConditionRecord?> GetDischargeRecordForJobCardAsync(Guid jobCardId, Guid tenantId)
     {
+        _logger.LogInformation("🔍 GetDischargeRecordForJobCardAsync called with JobCardId: {JobCardId}, TenantId: {TenantId}", jobCardId, tenantId);
+
         // Step 1: Find the admission for this job card
         var admission = await _context.Set<AssetAdmission>()
             .FirstOrDefaultAsync(a => a.JobCardId == jobCardId && a.TenantId == tenantId && !a.IsDeleted);
 
         if (admission == null)
+        {
+            _logger.LogWarning("❌ No admission found for JobCardId: {JobCardId} (discharge lookup)", jobCardId);
             return null;
+        }
 
-        // Step 2: Find the discharge condition record for this admission
-        return await _context.Set<AssetConditionRecord>()
+        _logger.LogInformation("✅ Found admission {AdmissionId} for JobCard {JobCardId} (discharge lookup)", admission.Id, jobCardId);
+
+        // Step 2: Find the discharge condition record for this admission with all navigation properties
+        var record = await _context.Set<AssetConditionRecord>()
+            .Include(r => r.Asset)
+            .Include(r => r.Template)
+                .ThenInclude(t => t.ChecklistItems.Where(i => !i.IsDeleted).OrderBy(i => i.SortOrder))
             .Include(r => r.ItemResults.Where(ir => !ir.IsDeleted))
+                .ThenInclude(ir => ir.ChecklistItem)
             .FirstOrDefaultAsync(r => r.AdmissionId == admission.Id
                 && r.InspectionType == "Discharge"
                 && r.TenantId == tenantId
                 && !r.IsDeleted);
+
+        if (record != null)
+        {
+            _logger.LogInformation("✅ Found discharge record {RecordId} for Admission {AdmissionId}", record.Id, admission.Id);
+        }
+        else
+        {
+            _logger.LogInformation("ℹ️ No discharge record found for Admission {AdmissionId} (this is normal if not yet discharged)", admission.Id);
+        }
+
+        return record;
     }
 
     public async Task<int> GetRecordsCountAsync(Guid tenantId)

@@ -113,6 +113,10 @@ namespace ErpSystem.Core.DTOs.Notifications
         public double DeliveryRate { get; set; }
         public double OpenRate { get; set; }
         public double ClickRate { get; set; }
+        /// <summary>
+        /// Average delivery time in seconds for notifications that have a SentAt timestamp.
+        /// </summary>
+        public double AverageDeliveryTimeSeconds { get; set; }
         public List<NotificationTypeStatsDto>? TypeStatistics { get; set; }
         public List<NotificationTrendDto>? Trends { get; set; }
         public List<TopNotificationDto>? TopPerformingNotifications { get; set; }

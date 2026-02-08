@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
+using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.Extensions.Logging;
 
@@ -23,6 +24,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
     private readonly ILogger<BusinessPartnerRegistrationService> _logger;
     private readonly IEmailService? _emailService;
     private readonly INotificationService? _notificationService;
+    private readonly IAppEventBus _appEventBus;
 
     public BusinessPartnerRegistrationService(
         IBusinessPartnerRegistrationRepository registrationRepository,
@@ -35,6 +37,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         IBusinessPartnerLicenseRepository licenseRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IAppEventBus appEventBus,
         ILogger<BusinessPartnerRegistrationService> logger,
         IEmailService? emailService = null,
         INotificationService? notificationService = null)
@@ -49,6 +52,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         _licenseRepository = licenseRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _appEventBus = appEventBus;
         _logger = logger;
         _emailService = emailService;
         _notificationService = notificationService;
@@ -132,6 +136,34 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
 
         // Commit status history
         await _unitOfWork.SaveChangesAsync();
+
+        // Publish event for admin-configurable notification topics (best-effort).
+        try
+        {
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = created.TenantId,
+                EntityType = "BusinessPartner",
+                Activity = "Created",
+                Audience = "Internal",
+                EntityId = created.Id,
+                TriggeredByUserId = userId,
+                Data = new Dictionary<string, object>
+                {
+                    ["RegistrationId"] = created.Id,
+                    ["RegistrationNumber"] = created.RegistrationNumber ?? string.Empty,
+                    ["ApplicantName"] = created.ApplicantName ?? string.Empty,
+                    ["ApplicantEmail"] = created.ApplicantEmail ?? string.Empty,
+                    ["PartnerType"] = created.PartnerType ?? string.Empty,
+                    ["Status"] = created.Status ?? string.Empty,
+                    ["CreatedByUserId"] = userId
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish BusinessPartner.Created entity activity event for registration {RegistrationId}", created.Id);
+        }
 
         return MapToDetailDto(created, new List<Entities.Procurement.BusinessPartnerRegistrationStatusHistory>());
     }
@@ -308,6 +340,47 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
 
         await _registrationRepository.UpdateStatusAsync(id, "Submitted", userId, "Submitted for review");
 
+        // Publish events for admin-configurable notification topics (best-effort).
+        try
+        {
+            var data = new Dictionary<string, object>
+            {
+                ["RegistrationId"] = registration.Id,
+                ["RegistrationNumber"] = registration.RegistrationNumber ?? string.Empty,
+                ["ApplicantName"] = registration.ApplicantName ?? string.Empty,
+                ["ApplicantEmail"] = registration.ApplicantEmail ?? string.Empty,
+                ["PartnerType"] = registration.PartnerType ?? string.Empty,
+                ["Status"] = "Submitted",
+                ["CreatedByUserId"] = registration.CreatedById ?? Guid.Empty
+            };
+
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = registration.TenantId,
+                EntityType = "BusinessPartner",
+                Activity = "Submitted",
+                Audience = "Supplier",
+                EntityId = registration.Id,
+                TriggeredByUserId = userId,
+                Data = data
+            });
+
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = registration.TenantId,
+                EntityType = "BusinessPartner",
+                Activity = "Submitted",
+                Audience = "Internal",
+                EntityId = registration.Id,
+                TriggeredByUserId = userId,
+                Data = data
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish BusinessPartner.Submitted entity activity event for registration {RegistrationId}", id);
+        }
+
         // Send in-app notification to the applicant
         if (_notificationService != null && registration.CreatedById.HasValue)
         {
@@ -460,6 +533,49 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         _logger.LogInformation("Registration {RegistrationId} approved successfully. Status updated to Approved, BusinessPartnerId: {BusinessPartnerId}",
             id, businessPartner.Id);
 
+        // Publish events for admin-configurable notification topics (best-effort).
+        try
+        {
+            var data = new Dictionary<string, object>
+            {
+                ["RegistrationId"] = registration.Id,
+                ["RegistrationNumber"] = registration.RegistrationNumber ?? string.Empty,
+                ["ApplicantName"] = registration.ApplicantName ?? string.Empty,
+                ["ApplicantEmail"] = registration.ApplicantEmail ?? string.Empty,
+                ["PartnerType"] = registration.PartnerType ?? string.Empty,
+                ["Status"] = registration.Status ?? string.Empty,
+                ["BusinessPartnerId"] = businessPartner.Id,
+                ["PartnerCode"] = businessPartner.PartnerCode ?? string.Empty,
+                ["ApprovedById"] = approvedById
+            };
+
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = registration.TenantId,
+                EntityType = "BusinessPartner",
+                Activity = "Approved",
+                Audience = "Supplier",
+                EntityId = businessPartner.Id,
+                TriggeredByUserId = approvedById,
+                Data = data
+            });
+
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = registration.TenantId,
+                EntityType = "BusinessPartner",
+                Activity = "Approved",
+                Audience = "Internal",
+                EntityId = businessPartner.Id,
+                TriggeredByUserId = approvedById,
+                Data = data
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish BusinessPartner.Approved entity activity event for registration {RegistrationId}", id);
+        }
+
         // Send in-app notification to the applicant
         if (_notificationService != null && registration.CreatedById.HasValue)
         {
@@ -522,6 +638,48 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         }
 
         await _registrationRepository.UpdateStatusAsync(id, "Rejected", rejectedById, reason);
+
+        // Publish events for admin-configurable notification topics (best-effort).
+        try
+        {
+            var data = new Dictionary<string, object>
+            {
+                ["RegistrationId"] = registration.Id,
+                ["RegistrationNumber"] = registration.RegistrationNumber ?? string.Empty,
+                ["ApplicantName"] = registration.ApplicantName ?? string.Empty,
+                ["ApplicantEmail"] = registration.ApplicantEmail ?? string.Empty,
+                ["PartnerType"] = registration.PartnerType ?? string.Empty,
+                ["Status"] = "Rejected",
+                ["RejectedById"] = rejectedById,
+                ["Reason"] = reason
+            };
+
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = registration.TenantId,
+                EntityType = "BusinessPartner",
+                Activity = "Rejected",
+                Audience = "Supplier",
+                EntityId = registration.Id,
+                TriggeredByUserId = rejectedById,
+                Data = data
+            });
+
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = registration.TenantId,
+                EntityType = "BusinessPartner",
+                Activity = "Rejected",
+                Audience = "Internal",
+                EntityId = registration.Id,
+                TriggeredByUserId = rejectedById,
+                Data = data
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish BusinessPartner.Rejected entity activity event for registration {RegistrationId}", id);
+        }
 
         // Send in-app notification to the applicant
         if (_notificationService != null && registration.CreatedById.HasValue)
@@ -954,10 +1112,12 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             PrimaryContactTitle = additionalData.ContactPersonTitle,
             // Link to user account (for external portal access and notifications)
             UserId = registration.CreatedById, // Link to the user who created the registration
-            RegistrationStatus = "Approved",
+            // Operational status used across internal UIs and downstream docs.
+            RegistrationStatus = "Active",
             ApprovalStatus = "Approved",
             IsPreferred = false,
             IsBlacklisted = false,
+            IsActive = true,
             ApprovedById = approvedById,
             ApprovedDate = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,

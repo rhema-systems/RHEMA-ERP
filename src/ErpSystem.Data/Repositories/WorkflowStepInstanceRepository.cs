@@ -21,6 +21,7 @@ public class WorkflowStepInstanceRepository : GenericRepository<WorkflowStepInst
     {
         return await _dbSet
             .Include(si => si.WorkflowStep)
+            .Include(si => si.AssignedTo)
             .Where(si => si.WorkflowInstanceId == workflowInstanceId && !si.IsDeleted)
             .OrderBy(si => si.CreatedAt)
             .ToListAsync(cancellationToken);
@@ -58,10 +59,35 @@ public class WorkflowStepInstanceRepository : GenericRepository<WorkflowStepInst
     /// </summary>
     public async Task<WorkflowStepInstance?> GetCurrentStepAsync(Guid workflowInstanceId, CancellationToken cancellationToken = default)
     {
-        return await _dbSet
+        // Prefer the step instance that matches WorkflowInstances.CurrentStepId to avoid returning the wrong
+        // pending step when historical/duplicate step instances exist.
+        var currentStepId = await _context.WorkflowInstances
+            .Where(wi => wi.Id == workflowInstanceId && !wi.IsDeleted)
+            .Select(wi => wi.CurrentStepId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var baseQuery = _dbSet
             .Include(si => si.WorkflowStep)
+            .Include(si => si.AssignedTo)
             .Where(si => si.WorkflowInstanceId == workflowInstanceId &&
-                        si.Status == WorkflowStepInstanceStatus.Pending && !si.IsDeleted)
+                        (si.Status == WorkflowStepInstanceStatus.Pending || si.Status == WorkflowStepInstanceStatus.InProgress) &&
+                        !si.IsDeleted);
+
+        if (currentStepId.HasValue)
+        {
+            var match = await baseQuery
+                .Where(si => si.WorkflowStepId == currentStepId.Value)
+                .OrderByDescending(si => si.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (match != null)
+            {
+                return match;
+            }
+        }
+
+        return await baseQuery
+            .OrderByDescending(si => si.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
     }
 

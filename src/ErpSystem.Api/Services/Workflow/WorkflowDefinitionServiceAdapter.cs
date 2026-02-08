@@ -1,6 +1,11 @@
+using System.Linq;
 using ErpSystem.Core.DTOs.Workflow;
+using System.Text.Json;
 using ErpSystem.Core.Entities.Workflow;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Workflow;
 
@@ -12,41 +17,124 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
 {
     private readonly ErpSystem.Core.Interfaces.Services.IWorkflowDefinitionService _coreService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IWorkflowDefinitionRepository _workflowDefinitionRepository;
+    private readonly IWorkflowStepRepository _workflowStepRepository;
+    private readonly IWorkflowTransitionRepository _workflowTransitionRepository;
+    private readonly IWorkflowEntityTypeRepository _workflowEntityTypeRepository;
     private readonly ILogger<WorkflowDefinitionServiceAdapter> _logger;
 
     public WorkflowDefinitionServiceAdapter(
         ErpSystem.Core.Interfaces.Services.IWorkflowDefinitionService coreService,
         ICurrentUserService currentUserService,
+        IWorkflowDefinitionRepository workflowDefinitionRepository,
+        IWorkflowStepRepository workflowStepRepository,
+        IWorkflowTransitionRepository workflowTransitionRepository,
+        IWorkflowEntityTypeRepository workflowEntityTypeRepository,
         ILogger<WorkflowDefinitionServiceAdapter> logger)
     {
         _coreService = coreService;
         _currentUserService = currentUserService;
+        _workflowDefinitionRepository = workflowDefinitionRepository;
+        _workflowStepRepository = workflowStepRepository;
+        _workflowTransitionRepository = workflowTransitionRepository;
+        _workflowEntityTypeRepository = workflowEntityTypeRepository;
         _logger = logger;
     }
 
     public async Task<WorkflowDefinition> CreateWorkflowDefinitionAsync(CreateWorkflowDefinitionDto createDto)
     {
-        // Map the DTO to entity - for now, create a basic workflow definition
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            throw new InvalidOperationException("Tenant ID is required to create workflow definitions");
+        }
+
+        var entityType = await ResolveOrCreateEntityTypeAsync(createDto.EntityType, tenantId);
+        var existing = await _workflowDefinitionRepository.GetByNameAsync(createDto.Name, tenantId);
+        if (existing != null)
+        {
+            throw new InvalidOperationException($"A workflow definition with name '{createDto.Name}' already exists");
+        }
+
+        var createdById = Guid.TryParse(_currentUserService.UserId, out var parsedUserId)
+            ? parsedUserId
+            : Guid.Empty;
+
         var definition = new WorkflowDefinition
         {
+            Id = Guid.NewGuid(),
             Name = createDto.Name,
             Description = createDto.Description,
-            EntityTypeId = Guid.Empty, // Need to resolve entity type from string
-            TenantId = _currentUserService.TenantId ?? Guid.Empty,
-            CreatedBy = _currentUserService.UserId?.ToString() ?? "System",
-            IsActive = false
+            EntityTypeId = entityType.Id,
+            Configuration = createDto.Configuration,
+            TenantId = tenantId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUserService.UserName ?? "System",
+            CreatedById = createdById,
+            IsActive = false,
+            Version = 1
         };
 
-        return await _coreService.CreateDefinitionAsync(definition);
+        await _workflowDefinitionRepository.AddAsync(definition);
+        await _workflowDefinitionRepository.SaveChangesAsync();
+
+        if (createDto.Steps.Any())
+        {
+            await CreateStepsAndTransitionsAsync(definition, createDto, tenantId);
+        }
+
+        return await _workflowDefinitionRepository.GetWithDetailsAsync(definition.Id) ?? definition;
     }
 
     public async Task<WorkflowDefinition> UpdateWorkflowDefinitionAsync(Guid id, UpdateWorkflowDefinitionDto updateDto)
     {
-        var existingDefinition = await _coreService.GetDefinitionAsync(id) ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
-        existingDefinition.Name = updateDto.Name;
-        existingDefinition.Description = updateDto.Description;
+        var definition = await _workflowDefinitionRepository.GetWithDetailsAsync(id) ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
+        if (definition.Instances?.Any(i => i.Status == WorkflowInstanceStatus.InProgress || i.Status == WorkflowInstanceStatus.Waiting) == true)
+        {
+            throw new InvalidOperationException("Cannot update workflow definition that has active instances. Create a new version instead.");
+        }
 
-        return await _coreService.UpdateDefinitionAsync(existingDefinition);
+        if (!string.IsNullOrWhiteSpace(updateDto.Name))
+        {
+            definition.Name = updateDto.Name;
+        }
+
+        definition.Description = updateDto.Description;
+        definition.Configuration = updateDto.Configuration;
+        definition.UpdatedAt = DateTime.UtcNow;
+        definition.UpdatedBy = _currentUserService.UserName ?? "System";
+        definition.LastModifiedById = Guid.TryParse(_currentUserService.UserId, out var modifiedById)
+            ? modifiedById
+            : null;
+
+        if (updateDto.Steps != null && updateDto.Steps.Any())
+        {
+            definition.Version = Math.Max(1, definition.Version + 1);
+        }
+
+        await _workflowDefinitionRepository.UpdateAsync(definition);
+        await _workflowDefinitionRepository.SaveChangesAsync();
+
+        if (updateDto.Steps != null && updateDto.Steps.Any())
+        {
+            await _workflowTransitionRepository.DeleteRangeAsync(t => t.WorkflowDefinitionId == definition.Id);
+            await _workflowTransitionRepository.SaveChangesAsync();
+            await _workflowStepRepository.DeleteRangeAsync(s => s.WorkflowDefinitionId == definition.Id);
+            await _workflowStepRepository.SaveChangesAsync();
+
+            await CreateStepsAndTransitionsAsync(definition, new CreateWorkflowDefinitionDto
+            {
+                Name = definition.Name,
+                Description = definition.Description,
+                EntityType = definition.EntityType?.Name ?? string.Empty,
+                Configuration = definition.Configuration,
+                CreatedById = modifiedById,
+                Steps = updateDto.Steps ?? new List<CreateWorkflowStepDto>(),
+                Transitions = updateDto.Transitions ?? new List<CreateWorkflowTransitionDto>()
+            }, definition.TenantId);
+        }
+
+        return await _workflowDefinitionRepository.GetWithDetailsAsync(definition.Id) ?? definition;
     }
 
     public async Task<WorkflowDefinition?> GetWorkflowDefinitionAsync(Guid id)
@@ -112,10 +200,195 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
 
     public async Task DeleteWorkflowDefinitionAsync(Guid id)
     {
-        var definition = await _coreService.GetDefinitionAsync(id) ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            throw new InvalidOperationException("Tenant ID is required to delete workflow definitions");
+        }
 
-        // For now, just deactivate instead of deleting
-        await _coreService.DeactivateDefinitionAsync(id);
-        _logger.LogWarning("DeleteWorkflowDefinitionAsync called but only deactivation is implemented. ID: {Id}", id);
+        // IMPORTANT: We only allow deletion when the definition has never been used.
+        // Because we have a global soft-delete query filter, deleting a definition that has instances would
+        // hide it from instance monitoring/history (and can break lookups that rely on definition navigation).
+        var definition = await _workflowDefinitionRepository
+            .GetQueryable()
+            .Include(d => d.Instances)
+            .FirstOrDefaultAsync(d => d.Id == id && d.TenantId == tenantId)
+            ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
+
+        if (definition.Instances?.Any() == true)
+        {
+            throw new InvalidOperationException("Cannot delete a workflow definition that has workflow instances. Deactivate it instead.");
+        }
+
+        definition.IsActive = false;
+        definition.IsDeleted = true;
+        definition.DeletedAt = DateTime.UtcNow;
+        definition.DeletedBy = _currentUserService.UserName ?? "System";
+        definition.UpdatedAt = DateTime.UtcNow;
+        definition.UpdatedBy = _currentUserService.UserName ?? "System";
+        definition.LastModifiedById = Guid.TryParse(_currentUserService.UserId, out var modifiedById)
+            ? modifiedById
+            : null;
+
+        await _workflowDefinitionRepository.UpdateAsync(definition);
+        await _workflowDefinitionRepository.SaveChangesAsync();
+    }
+
+    private async Task CreateStepsAndTransitionsAsync(
+        WorkflowDefinition definition,
+        CreateWorkflowDefinitionDto template,
+        Guid tenantId)
+    {
+        var orderedSteps = template.Steps.OrderBy(s => s.Order).ToList();
+        if (!orderedSteps.Any())
+        {
+            return;
+        }
+
+        var stepEntities = new List<WorkflowStep>();
+        for (var i = 0; i < orderedSteps.Count; i++)
+        {
+            var stepDto = orderedSteps[i];
+            var stepId = stepDto.Id.HasValue && stepDto.Id.Value != Guid.Empty
+                ? stepDto.Id.Value
+                : Guid.NewGuid();
+
+            var stepEntity = new WorkflowStep
+            {
+                Id = stepId,
+                WorkflowDefinitionId = definition.Id,
+                Name = stepDto.Name,
+                Description = stepDto.Description,
+                StepType = stepDto.StepType,
+                Order = stepDto.Order,
+                IsRequired = stepDto.IsRequired,
+                RequiredRole = stepDto.RequiredRole,
+                EstimatedHours = stepDto.EstimatedHours,
+                IsStartStep = i == 0,
+                IsEndStep = i == orderedSteps.Count - 1,
+                Configuration = stepDto.Configuration != null
+                    ? JsonSerializer.Serialize(stepDto.Configuration)
+                    : null,
+                TenantId = tenantId
+            };
+
+            stepEntities.Add(stepEntity);
+        }
+
+        await _workflowStepRepository.AddRangeAsync(stepEntities);
+        await _workflowStepRepository.SaveChangesAsync();
+
+        var transitions = new List<WorkflowTransition>();
+        if (template.Transitions.Any())
+        {
+            var stepIds = stepEntities.Select(s => s.Id).ToHashSet();
+            foreach (var transitionDto in template.Transitions)
+            {
+                if (!stepIds.Contains(transitionDto.FromStepId) || !stepIds.Contains(transitionDto.ToStepId))
+                {
+                    continue;
+                }
+
+                transitions.Add(new WorkflowTransition
+                {
+                    Id = Guid.NewGuid(),
+                    WorkflowDefinitionId = definition.Id,
+                    FromStepId = transitionDto.FromStepId,
+                    ToStepId = transitionDto.ToStepId,
+                    Name = transitionDto.Name,
+                    Description = transitionDto.Description,
+                    Condition = transitionDto.Condition != null
+                        ? JsonSerializer.Serialize(transitionDto.Condition)
+                        : null,
+                    IsDefault = transitionDto.IsDefault,
+                    Priority = transitionDto.Priority,
+                    TenantId = tenantId
+                });
+            }
+        }
+
+        if (!transitions.Any())
+        {
+            for (var i = 0; i < stepEntities.Count - 1; i++)
+            {
+                var from = stepEntities[i];
+                var to = stepEntities[i + 1];
+                transitions.Add(new WorkflowTransition
+                {
+                    Id = Guid.NewGuid(),
+                    WorkflowDefinitionId = definition.Id,
+                    FromStepId = from.Id,
+                    ToStepId = to.Id,
+                    Name = $"{from.Name} to {to.Name}",
+                    Description = "Auto-generated transition",
+                    IsDefault = true,
+                    Priority = 0,
+                    TenantId = tenantId
+                });
+            }
+        }
+
+        if (transitions.Any())
+        {
+            await _workflowTransitionRepository.AddRangeAsync(transitions);
+            await _workflowTransitionRepository.SaveChangesAsync();
+        }
+    }
+
+    private async Task<WorkflowEntityType> ResolveOrCreateEntityTypeAsync(string entityType, Guid tenantId)
+    {
+        var existing = await _workflowEntityTypeRepository.GetByNameAsync(entityType, tenantId);
+        if (existing != null)
+        {
+            return existing;
+        }
+
+        var code = GenerateEntityTypeCode(entityType);
+        var entity = new WorkflowEntityType
+        {
+            Id = Guid.NewGuid(),
+            Name = entityType,
+            Code = code,
+            TenantId = tenantId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUserService.UserName ?? "System",
+            IsActive = true
+        };
+
+        await _workflowEntityTypeRepository.AddAsync(entity);
+        await _workflowEntityTypeRepository.SaveChangesAsync();
+        return entity;
+    }
+
+    private static string GenerateEntityTypeCode(string entityType)
+    {
+        if (string.IsNullOrWhiteSpace(entityType))
+        {
+            return "ENTITY";
+        }
+
+        var codeChars = new List<char>();
+        for (var i = 0; i < entityType.Length; i++)
+        {
+            var ch = entityType[i];
+            if (char.IsWhiteSpace(ch) || ch == '-' || ch == '_')
+            {
+                if (codeChars.LastOrDefault() != '_')
+                {
+                    codeChars.Add('_');
+                }
+                continue;
+            }
+
+            if (char.IsUpper(ch) && i > 0 && char.IsLower(entityType[i - 1]))
+            {
+                codeChars.Add('_');
+            }
+
+            codeChars.Add(char.ToUpperInvariant(ch));
+        }
+
+        var code = new string(codeChars.ToArray()).Trim('_');
+        return string.IsNullOrWhiteSpace(code) ? "ENTITY" : code;
     }
 }

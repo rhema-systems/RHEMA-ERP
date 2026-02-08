@@ -12,7 +12,11 @@ export interface TenderAwardDto {
   businessPartnerId: string;
   businessPartnerName: string;
   awardDate: string;
+  originalBidAmount: number;
   awardedAmount: number;
+  negotiationId?: string;
+  isNegotiated: boolean;
+  negotiationSavings: number;
   currency?: string;
   status: string; // Awarded, Cancelled
   awardJustification?: string;
@@ -92,6 +96,35 @@ export interface CancelAwardDto {
   sendNotifications?: boolean;
 }
 
+export interface CreatePurchaseOrderFromAwardDto {
+  tenderAwardId: string;
+  contractId?: string;
+  contractNumber?: string;
+  requiredDate?: string;
+  deliveryWarehouseId?: string;
+  deliveryAddress?: string;
+  deliveryInstructions?: string;
+  paymentTerms?: string;
+  shippingTerms?: string;
+  notes?: string;
+  autoApprove?: boolean;
+}
+
+export interface PurchaseOrderFromAwardResponseDto {
+  purchaseOrderId: string;
+  orderNumber: string;
+  tenderAwardId: string;
+  tenderNumber: string;
+  businessPartnerId: string;
+  businessPartnerName: string;
+  totalAmount: number;
+  status: string;
+  orderDate: string;
+  itemCount: number;
+  contractNumber?: string;
+  currency?: string;
+}
+
 export interface PagedResult<T> {
   items: T[];
   totalCount: number;
@@ -167,6 +200,23 @@ export async function getAwardByTenderId(tenderId: string): Promise<TenderAwardD
   return response.json();
 }
 
+// Get award by bid ID (for external portal - suppliers can view their own award)
+export async function getAwardByBidId(bidId: string): Promise<TenderAwardDto | null> {
+  const response = await fetch(`${API_BASE_URL}/procurement/TenderAwards/by-bid/${bidId}`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch award by bid');
+  }
+
+  return response.json();
+}
+
 // Generate award recommendation
 export async function generateAwardRecommendation(tenderId: string): Promise<AwardRecommendationDto> {
   const response = await fetch(`${API_BASE_URL}/procurement/TenderAwards/recommendation/${tenderId}`, {
@@ -234,6 +284,22 @@ export async function sendAwardNotifications(awardId: string, data: AwardNotific
   if (!response.ok) {
     throw new Error('Failed to send award notifications');
   }
+}
+
+// Create purchase order from tender award
+export async function createPurchaseOrderFromAward(data: CreatePurchaseOrderFromAwardDto): Promise<PurchaseOrderFromAwardResponseDto> {
+  const response = await fetch(`${API_BASE_URL}/procurement/TenderAwards/create-purchase-order`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || 'Failed to create purchase order from award');
+  }
+
+  return response.json();
 }
 
 

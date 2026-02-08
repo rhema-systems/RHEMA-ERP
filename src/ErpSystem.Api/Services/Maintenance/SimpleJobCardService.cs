@@ -160,9 +160,9 @@ public class SimpleJobCardService : IJobCardService
         return Task.FromResult(new List<JobCardListDto>());
     }
 
-    public Task<Guid> GenerateWorkOrderAsync(Guid jobCardId)
+    public Task<Guid> GenerateWorkOrderAsync(Guid jobCardId, string billingType = "Repairs")
     {
-        _logger.LogInformation("GenerateWorkOrderAsync called for ID: {JobCardId} - not implemented", jobCardId);
+        _logger.LogInformation("GenerateWorkOrderAsync called for ID: {JobCardId} with billing type: {BillingType} - not implemented", jobCardId, billingType);
         throw new NotImplementedException("Work order generation is not yet implemented");
     }
 

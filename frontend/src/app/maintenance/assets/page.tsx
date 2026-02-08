@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -67,7 +67,7 @@ interface MaintenanceHistory {
 }
 
 
-export default function AssetsPage() {
+function AssetsPageContent() {
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
   const { toast } = useToast();
   const searchParams = useSearchParams();
@@ -1416,5 +1416,13 @@ export default function AssetsPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export default function AssetsPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen">Loading...</div>}>
+      <AssetsPageContent />
+    </Suspense>
   );
 }

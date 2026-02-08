@@ -28,12 +28,13 @@ import {
   X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { 
-  QualityChecklist, 
-  QualityChecklistItem, 
+import {
+  QualityChecklist,
+  QualityChecklistItem,
   CreateQualityChecklistDto,
   UpdateQualityChecklistDto,
-  qualityChecklistService 
+  DropdownOption,
+  qualityChecklistService
 } from '@/services/qualityChecklistService';
 
 export default function QualityChecklistsPage() {
@@ -73,11 +74,16 @@ export default function QualityChecklistsPage() {
   const [editingItem, setEditingItem] = useState<Partial<QualityChecklistItem> | null>(null);
   const [duplicateName, setDuplicateName] = useState('');
 
-  // Dropdown options
-  const [workOrderTypes, setWorkOrderTypes] = useState<string[]>([]);
-  const [assetCategories, setAssetCategories] = useState<string[]>([]);
-  const [maintenanceTypes, setMaintenanceTypes] = useState<string[]>([]);
+  // Dropdown options with IDs for proper foreign key matching
+  const [workOrderTypeOptions, setWorkOrderTypeOptions] = useState<DropdownOption[]>([]);
+  const [assetCategoryOptions, setAssetCategoryOptions] = useState<DropdownOption[]>([]);
+  const [maintenanceTypeOptions, setMaintenanceTypeOptions] = useState<DropdownOption[]>([]);
   const [checklistCategories, setChecklistCategories] = useState<string[]>([]);
+
+  // Legacy string arrays for backward compatibility with filters
+  const workOrderTypes = workOrderTypeOptions.map(o => o.name);
+  const assetCategories = assetCategoryOptions.map(o => o.name);
+  const maintenanceTypes = maintenanceTypeOptions.map(o => o.name);
 
   // Define filterChecklists function before useEffect that uses it
   const filterChecklists = () => {
@@ -156,30 +162,47 @@ export default function QualityChecklistsPage() {
   const loadOptions = async () => {
     try {
       const [types, categories, mainTypes, checkCategories] = await Promise.all([
-        qualityChecklistService.getWorkOrderTypes(),
-        qualityChecklistService.getAssetCategories(),
-        qualityChecklistService.getMaintenanceTypes(),
+        qualityChecklistService.getWorkOrderTypesWithIds(),
+        qualityChecklistService.getAssetCategoriesWithIds(),
+        qualityChecklistService.getMaintenanceTypesWithIds(),
         qualityChecklistService.getChecklistCategories()
       ]);
-      
-      setWorkOrderTypes(types);
-      setAssetCategories(categories);
-      setMaintenanceTypes(mainTypes);
+
+      setWorkOrderTypeOptions(types);
+      setAssetCategoryOptions(categories);
+      setMaintenanceTypeOptions(mainTypes);
       setChecklistCategories(checkCategories);
     } catch (error) {
       console.error('Error loading options:', error);
     }
   };
 
+  // Helper to find ID by name from dropdown options
+  const findWorkOrderTypeId = (name: string): string | undefined => {
+    return workOrderTypeOptions.find(o => o.name === name)?.id;
+  };
+  const findAssetCategoryId = (name: string): string | undefined => {
+    return assetCategoryOptions.find(o => o.name === name)?.id;
+  };
+  const findMaintenanceTypeId = (name: string): string | undefined => {
+    return maintenanceTypeOptions.find(o => o.name === name)?.id;
+  };
+
   const handleCreate = async () => {
     if (isSubmitting) return;
-    
+
     try {
       setIsSubmitting(true);
       setError(null);
-      const createData = {
+      const createData: CreateQualityChecklistDto = {
         ...formData,
-        maintenanceType: formData.maintenanceType === 'none' ? '' : formData.maintenanceType
+        maintenanceType: formData.maintenanceType === 'none' ? '' : formData.maintenanceType,
+        // Include IDs for proper foreign key matching
+        workOrderTypeId: findWorkOrderTypeId(formData.workOrderType),
+        assetCategoryId: findAssetCategoryId(formData.assetCategory),
+        maintenanceTypeId: formData.maintenanceType && formData.maintenanceType !== 'none'
+          ? findMaintenanceTypeId(formData.maintenanceType)
+          : undefined
       };
       console.log('Creating quality checklist with data:', createData);
       const newChecklist = await qualityChecklistService.createChecklist(createData);
@@ -203,10 +226,16 @@ export default function QualityChecklistsPage() {
       const updateData: UpdateQualityChecklistDto = {
         ...formData,
         maintenanceType: formData.maintenanceType === 'none' ? '' : formData.maintenanceType,
-        isActive: selectedChecklist.isActive
+        isActive: selectedChecklist.isActive,
+        // Include IDs for proper foreign key matching
+        workOrderTypeId: findWorkOrderTypeId(formData.workOrderType),
+        assetCategoryId: findAssetCategoryId(formData.assetCategory),
+        maintenanceTypeId: formData.maintenanceType && formData.maintenanceType !== 'none'
+          ? findMaintenanceTypeId(formData.maintenanceType)
+          : undefined
       };
       console.log('Updating quality checklist with data:', updateData);
-      
+
       const updatedChecklist = await qualityChecklistService.updateChecklist(selectedChecklist.id, updateData);
       setChecklists(checklists.map(c => c.id === selectedChecklist.id ? updatedChecklist : c));
       setIsEditDialogOpen(false);

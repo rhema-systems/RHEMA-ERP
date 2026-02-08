@@ -42,6 +42,10 @@ public class WorkOrderToolDto
     public string? SafetyNotes { get; set; }
 
     public string? Notes { get; set; }
+    public bool IsExcludedFromBilling { get; set; }
+    public string? BillingExclusionReason { get; set; }
+    public DateTime? BillingExcludedAt { get; set; }
+    public string? BillingExcludedBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 }
@@ -112,6 +116,16 @@ public class ReturnWorkOrderToolDto
 
     [StringLength(1000)]
     public string? ReturnNotes { get; set; }
+}
+
+/// <summary>
+/// DTO for excluding a tool allocation from billing (soft delete in billing view only)
+/// </summary>
+public class ExcludeWorkOrderToolFromBillingDto
+{
+    [Required]
+    [StringLength(1000, MinimumLength = 3)]
+    public string Reason { get; set; } = string.Empty;
 }
 
 /// <summary>

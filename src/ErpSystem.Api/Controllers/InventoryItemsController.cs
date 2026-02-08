@@ -1,11 +1,14 @@
 using System.ComponentModel.DataAnnotations;
 using AutoMapper;
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers;
 
@@ -17,6 +20,9 @@ namespace ErpSystem.Api.Controllers;
 [Authorize]
 public class InventoryItemsController : ControllerBase
 {
+    private static readonly Guid DefaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IInventoryItemRepository _inventoryItemRepository;
     private readonly IStockMovementRepository _stockMovementRepository;
     private readonly IInventoryLocationRepository _inventoryLocationRepository;
@@ -24,10 +30,15 @@ public class InventoryItemsController : ControllerBase
     private readonly IWarehouseLocationRepository _warehouseLocationRepository;
     private readonly IWarehouseRepository _warehouseRepository;
     private readonly IWarehouseQuantityRepository _warehouseQuantityRepository;
+    private readonly IInventoryMovementRepository _inventoryMovementRepository;
+    private readonly IInventoryBalanceRepository _inventoryBalanceRepository;
+    private readonly IItemUnitOfMeasureRepository _itemUnitOfMeasureRepository;
+    private readonly IUnitOfMeasureScheduleRepository _uomScheduleRepository;
     private readonly IMapper _mapper;
     private readonly ILogger<InventoryItemsController> _logger;
 
     public InventoryItemsController(
+        ICurrentUserProvider currentUserProvider,
         IInventoryItemRepository inventoryItemRepository,
         IStockMovementRepository stockMovementRepository,
         IInventoryLocationRepository inventoryLocationRepository,
@@ -35,9 +46,14 @@ public class InventoryItemsController : ControllerBase
         IWarehouseLocationRepository warehouseLocationRepository,
         IWarehouseRepository warehouseRepository,
         IWarehouseQuantityRepository warehouseQuantityRepository,
+        IInventoryMovementRepository inventoryMovementRepository,
+        IInventoryBalanceRepository inventoryBalanceRepository,
+        IItemUnitOfMeasureRepository itemUnitOfMeasureRepository,
+        IUnitOfMeasureScheduleRepository uomScheduleRepository,
         IMapper mapper,
         ILogger<InventoryItemsController> logger)
     {
+        _currentUserProvider = currentUserProvider;
         _inventoryItemRepository = inventoryItemRepository;
         _stockMovementRepository = stockMovementRepository;
         _inventoryLocationRepository = inventoryLocationRepository;
@@ -45,6 +61,10 @@ public class InventoryItemsController : ControllerBase
         _warehouseLocationRepository = warehouseLocationRepository;
         _warehouseRepository = warehouseRepository;
         _warehouseQuantityRepository = warehouseQuantityRepository;
+        _inventoryMovementRepository = inventoryMovementRepository;
+        _inventoryBalanceRepository = inventoryBalanceRepository;
+        _itemUnitOfMeasureRepository = itemUnitOfMeasureRepository;
+        _uomScheduleRepository = uomScheduleRepository;
         _mapper = mapper;
         _logger = logger;
     }
@@ -294,7 +314,7 @@ public class InventoryItemsController : ControllerBase
     /// Update an existing inventory item
     /// </summary>
     [HttpPut("{id:guid}")]
-    public async Task<ActionResult<InventoryItemDto>> UpdateInventoryItem(Guid id, [FromBody] CreateInventoryItemDto updateDto)
+    public async Task<ActionResult<InventoryItemDto>> UpdateInventoryItem(Guid id, [FromBody] UpdateInventoryItemDto updateDto)
     {
         try
         {
@@ -320,6 +340,10 @@ public class InventoryItemsController : ControllerBase
             }
 
             _mapper.Map(updateDto, existingItem);
+
+            // Handle IsActive -> Status conversion
+            existingItem.Status = updateDto.IsActive ? ItemStatus.Active : ItemStatus.Inactive;
+
             await _inventoryItemRepository.UpdateAsync(existingItem);
             await _inventoryItemRepository.SaveChangesAsync();
 
@@ -422,6 +446,352 @@ public class InventoryItemsController : ControllerBase
     }
 
     /// <summary>
+    /// Bin-level stock snapshot (InventoryItem x WarehouseLocation).
+    /// Backed by InventoryLocations (operational bin quantities).
+    /// </summary>
+    [HttpGet("bin-stock")]
+    public async Task<ActionResult<PagedResult<BinStockDto>>> GetBinStock(
+        [FromQuery] Guid? warehouseId = null,
+        [FromQuery] Guid? locationId = null,
+        [FromQuery] string? search = null,
+        [FromQuery] bool includeZero = false,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
+    {
+        try
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 200);
+
+            var tenantId = _currentUserProvider.TenantId;
+            if (tenantId == Guid.Empty)
+            {
+                tenantId = DefaultTenantId;
+            }
+
+            IQueryable<InventoryLocation> query = _inventoryLocationRepository
+                .GetQueryable(il => il.TenantId == tenantId)
+                .AsNoTracking()
+                .Include(il => il.InventoryItem)
+                .Include(il => il.Location)
+                .ThenInclude(l => l.Warehouse);
+
+            if (warehouseId.HasValue)
+            {
+                query = query.Where(il => il.Location.WarehouseId == warehouseId.Value);
+            }
+
+            if (locationId.HasValue)
+            {
+                query = query.Where(il => il.LocationId == locationId.Value);
+            }
+
+            if (!includeZero)
+            {
+                query = query.Where(il => il.Quantity != 0);
+            }
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = search.Trim();
+                var like = $"%{term}%";
+                query = query.Where(il =>
+                    EF.Functions.Like(il.InventoryItem.ItemCode, like) ||
+                    EF.Functions.Like(il.InventoryItem.Name, like) ||
+                    EF.Functions.Like(il.Location.LocationCode, like) ||
+                    EF.Functions.Like(il.Location.Warehouse.Name, like) ||
+                    EF.Functions.Like(il.Location.Warehouse.Code, like));
+            }
+
+            var totalCount = await query.CountAsync();
+
+            var items = await query
+                .OrderBy(il => il.Location.Warehouse.Name)
+                .ThenBy(il => il.Location.LocationCode)
+                .ThenBy(il => il.InventoryItem.ItemCode)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(il => new BinStockDto
+                {
+                    InventoryItemId = il.InventoryItemId,
+                    ItemCode = il.InventoryItem.ItemCode,
+                    ItemName = il.InventoryItem.Name,
+                    UnitOfMeasure = il.InventoryItem.UnitOfMeasure,
+
+                    WarehouseId = il.Location.WarehouseId,
+                    WarehouseCode = il.Location.Warehouse.Code,
+                    WarehouseName = il.Location.Warehouse.Name,
+
+                    LocationId = il.LocationId,
+                    LocationCode = il.Location.LocationCode,
+
+                    Quantity = il.Quantity,
+                    AvailableQuantity = il.AvailableQuantity,
+                    AllocatedQuantity = il.AllocatedQuantity,
+                    AverageCost = il.AverageCost,
+                    LastMovementDate = il.LastMovementDate
+                })
+                .ToListAsync();
+
+            return Ok(new PagedResult<BinStockDto>
+            {
+                Items = items,
+                TotalCount = totalCount,
+                Page = page,
+                PageSize = pageSize
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving bin stock snapshot");
+            return StatusCode(500, "An error occurred while retrieving bin stock");
+        }
+    }
+
+    /// <summary>
+    /// Reconcile InventoryItems/WarehouseQuantities totals from InventoryMovements (source of truth).
+    /// Use this to fix drift when older flows didn't keep totals updated.
+    /// </summary>
+    [HttpPost("reconcile-stock")]
+    public async Task<ActionResult<ApiResponse<object>>> ReconcileStockTotals(
+        [FromQuery] bool dryRun = false,
+        [FromQuery] Guid? warehouseId = null,
+        [FromQuery] Guid? inventoryItemId = null)
+    {
+        try
+        {
+            var tenantId = _currentUserProvider.TenantId;
+            if (tenantId == Guid.Empty)
+            {
+                tenantId = DefaultTenantId;
+            }
+
+            IQueryable<InventoryMovement> movementQuery = _inventoryMovementRepository
+                .GetQueryable(m => m.TenantId == tenantId && m.IsPosted)
+                .AsNoTracking();
+
+            if (warehouseId.HasValue && warehouseId.Value != Guid.Empty)
+            {
+                movementQuery = movementQuery.Where(m => m.WarehouseId == warehouseId.Value);
+            }
+
+            if (inventoryItemId.HasValue && inventoryItemId.Value != Guid.Empty)
+            {
+                movementQuery = movementQuery.Where(m => m.InventoryItemId == inventoryItemId.Value);
+            }
+
+            var movementTotals = await movementQuery
+                .GroupBy(m => new { m.InventoryItemId, m.WarehouseId })
+                .Select(g => new
+                {
+                    g.Key.InventoryItemId,
+                    g.Key.WarehouseId,
+                    QuantityOnHand = g.Sum(m => m.Direction == MovementDirection.In ? m.Quantity : -m.Quantity)
+                })
+                .ToListAsync();
+
+            // Average cost from valuation balances (per item/warehouse) - best effort.
+            IQueryable<InventoryBalance> balanceQuery = _inventoryBalanceRepository
+                .GetQueryable(b => b.TenantId == tenantId)
+                .AsNoTracking();
+
+            if (warehouseId.HasValue && warehouseId.Value != Guid.Empty)
+            {
+                balanceQuery = balanceQuery.Where(b => b.WarehouseId == warehouseId.Value);
+            }
+
+            if (inventoryItemId.HasValue && inventoryItemId.Value != Guid.Empty)
+            {
+                balanceQuery = balanceQuery.Where(b => b.InventoryItemId == inventoryItemId.Value);
+            }
+
+            var balanceAverages = await balanceQuery
+                .GroupBy(b => new { b.InventoryItemId, b.WarehouseId })
+                .Select(g => new
+                {
+                    g.Key.InventoryItemId,
+                    g.Key.WarehouseId,
+                    TotalQty = g.Sum(x => x.QuantityOnHand),
+                    TotalValue = g.Sum(x => x.TotalValue)
+                })
+                .ToListAsync();
+
+            var avgCostByItemWarehouse = balanceAverages
+                .ToDictionary(
+                    x => (x.InventoryItemId, x.WarehouseId),
+                    x => x.TotalQty != 0 ? (x.TotalValue / x.TotalQty) : 0m);
+
+            // Load existing warehouse quantities for the scope and reconcile.
+            IQueryable<WarehouseQuantity> wqQuery = _warehouseQuantityRepository
+                .GetQueryable(q => q.TenantId == tenantId);
+
+            if (warehouseId.HasValue && warehouseId.Value != Guid.Empty)
+            {
+                wqQuery = wqQuery.Where(q => q.WarehouseId == warehouseId.Value);
+            }
+
+            if (inventoryItemId.HasValue && inventoryItemId.Value != Guid.Empty)
+            {
+                wqQuery = wqQuery.Where(q => q.InventoryItemId == inventoryItemId.Value);
+            }
+
+            var existingWarehouseQuantities = await wqQuery.ToListAsync();
+            var wqMap = existingWarehouseQuantities.ToDictionary(q => (q.InventoryItemId, q.WarehouseId));
+            var movementKeys = movementTotals
+                .Select(mt => (mt.InventoryItemId, mt.WarehouseId))
+                .ToHashSet();
+
+            var createdWarehouseQuantities = 0;
+            var updatedWarehouseQuantities = 0;
+
+            foreach (var mt in movementTotals)
+            {
+                var key = (mt.InventoryItemId, mt.WarehouseId);
+                var computedQty = mt.QuantityOnHand;
+                var avgCost = avgCostByItemWarehouse.TryGetValue(key, out var ac) ? ac : 0m;
+
+                if (!wqMap.TryGetValue(key, out var wq))
+                {
+                    wq = new WarehouseQuantity
+                    {
+                        TenantId = tenantId,
+                        InventoryItemId = mt.InventoryItemId,
+                        WarehouseId = mt.WarehouseId,
+                        CurrentStock = computedQty,
+                        AllocatedStock = 0,
+                        AvailableStock = computedQty,
+                        AverageCost = avgCost > 0 ? avgCost : 0,
+                        LastMovementDate = DateTime.UtcNow,
+                        CreatedById = _currentUserProvider.UserId
+                    };
+
+                    if (!dryRun)
+                    {
+                        await _warehouseQuantityRepository.AddAsync(wq);
+                    }
+
+                    wqMap[key] = wq;
+                    createdWarehouseQuantities++;
+                    continue;
+                }
+
+                // Preserve allocations; recompute available based on current/allocated.
+                wq.CurrentStock = computedQty;
+                wq.AvailableStock = computedQty - wq.AllocatedStock;
+                wq.LastMovementDate = DateTime.UtcNow;
+                if (avgCost > 0)
+                {
+                    wq.AverageCost = avgCost;
+                }
+                wq.LastModifiedById = _currentUserProvider.UserId;
+
+                if (!dryRun)
+                {
+                    await _warehouseQuantityRepository.UpdateAsync(wq);
+                }
+
+                updatedWarehouseQuantities++;
+            }
+
+            // For existing WarehouseQuantities with no movements in scope, force them to 0 so drift can't persist.
+            foreach (var wq in existingWarehouseQuantities)
+            {
+                var key = (wq.InventoryItemId, wq.WarehouseId);
+                if (movementKeys.Contains(key))
+                {
+                    continue;
+                }
+
+                wq.CurrentStock = 0;
+                wq.AvailableStock = 0 - wq.AllocatedStock;
+                wq.LastMovementDate = DateTime.UtcNow;
+                wq.LastModifiedById = _currentUserProvider.UserId;
+
+                if (!dryRun)
+                {
+                    await _warehouseQuantityRepository.UpdateAsync(wq);
+                }
+
+                updatedWarehouseQuantities++;
+            }
+
+            // Recompute item totals from warehouse quantities.
+            // Only touch items that appear in the scoped movement totals (or the filter item if provided).
+            var itemIdsToRecalc = inventoryItemId.HasValue && inventoryItemId.Value != Guid.Empty
+                ? new List<Guid> { inventoryItemId.Value }
+                : movementTotals.Select(x => x.InventoryItemId)
+                    .Concat(existingWarehouseQuantities.Select(q => q.InventoryItemId))
+                    .Distinct()
+                    .ToList();
+
+            var updatedInventoryItems = 0;
+            var items = await _inventoryItemRepository
+                .GetQueryable(i => i.TenantId == tenantId && itemIdsToRecalc.Contains(i.Id))
+                .ToListAsync();
+
+            // Overall average cost from balances per item (across warehouses/locations).
+            var itemAvgCosts = await balanceQuery
+                .GroupBy(b => b.InventoryItemId)
+                .Select(g => new
+                {
+                    InventoryItemId = g.Key,
+                    TotalQty = g.Sum(x => x.QuantityOnHand),
+                    TotalValue = g.Sum(x => x.TotalValue)
+                })
+                .ToListAsync();
+
+            var avgCostByItem = itemAvgCosts.ToDictionary(
+                x => x.InventoryItemId,
+                x => x.TotalQty != 0 ? (x.TotalValue / x.TotalQty) : 0m);
+
+            foreach (var item in items)
+            {
+                var totalOnHand = wqMap
+                    .Where(kvp => kvp.Key.InventoryItemId == item.Id)
+                    .Sum(kvp => kvp.Value.CurrentStock);
+
+                item.CurrentStock = totalOnHand;
+                item.AvailableStock = totalOnHand - item.AllocatedStock;
+                item.LastModifiedById = _currentUserProvider.UserId;
+                item.UpdatedAt = DateTime.UtcNow;
+
+                if (avgCostByItem.TryGetValue(item.Id, out var itemAvg) && itemAvg > 0)
+                {
+                    item.AverageCost = itemAvg;
+                }
+
+                if (!dryRun)
+                {
+                    await _inventoryItemRepository.UpdateAsync(item);
+                }
+
+                updatedInventoryItems++;
+            }
+
+            if (!dryRun)
+            {
+                // One SaveChanges is enough - all repositories share the same DbContext in this request scope.
+                await _inventoryItemRepository.SaveChangesAsync();
+            }
+
+            return Ok(ApiResponse<object>.SuccessResponse(new
+            {
+                TenantId = tenantId,
+                DryRun = dryRun,
+                Scope = new { WarehouseId = warehouseId, InventoryItemId = inventoryItemId },
+                MovementGroups = movementTotals.Count,
+                WarehouseQuantities = new { Created = createdWarehouseQuantities, Updated = updatedWarehouseQuantities },
+                InventoryItems = new { Updated = updatedInventoryItems }
+            }, dryRun ? "Dry-run completed (no changes saved)." : "Stock totals reconciled successfully."));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reconciling stock totals from movements");
+            return StatusCode(500, ApiResponse<object>.ErrorResponse("An error occurred while reconciling stock totals."));
+        }
+    }
+
+    /// <summary>
     /// Get allocations for an inventory item
     /// </summary>
     [HttpGet("{id:guid}/allocations")]
@@ -443,6 +813,115 @@ public class InventoryItemsController : ControllerBase
         {
             _logger.LogError(ex, "Error retrieving allocations for item {ItemId}", id);
             return StatusCode(500, "An error occurred while retrieving inventory allocations");
+        }
+    }
+
+    /// <summary>
+    /// Get available units of measure for an inventory item
+    /// </summary>
+    [HttpGet("{id:guid}/units")]
+    public async Task<ActionResult<IEnumerable<ItemUnitOfMeasureDto>>> GetItemUnitsOfMeasure(Guid id)
+    {
+        try
+        {
+            var item = await _inventoryItemRepository.GetByIdAsync(id);
+            if (item == null)
+            {
+                return NotFound($"Inventory item with ID {id} not found");
+            }
+
+            var unitDtos = new List<ItemUnitOfMeasureDto>();
+
+            // Check if item has a UOM Schedule - load it separately
+            if (item.UnitOfMeasureScheduleId.HasValue)
+            {
+                // Load the schedule with details
+                var schedule = await _uomScheduleRepository.GetWithDetailsAsync(item.UnitOfMeasureScheduleId.Value);
+                
+                if (schedule != null)
+                {
+                    // Add base unit
+                    if (schedule.BaseUnitOfMeasure != null)
+                    {
+                        unitDtos.Add(new ItemUnitOfMeasureDto
+                        {
+                            Id = Guid.NewGuid(), // Temporary ID for schedule-based UOMs
+                            UnitOfMeasureId = schedule.BaseUnitOfMeasureId,
+                            UnitCode = schedule.BaseUnitOfMeasure.Code,
+                            UnitName = schedule.BaseUnitOfMeasure.Name,
+                            ConversionFactor = 1.0m,
+                            IsBaseUnit = true,
+                            IsPurchaseUnit = true,
+                            IsSalesUnit = true,
+                            Barcode = null
+                        });
+                    }
+
+                    // Add units from schedule details
+                    if (schedule.Details != null && schedule.Details.Any())
+                    {
+                        foreach (var detail in schedule.Details.Where(d => !d.IsDeleted))
+                        {
+                            if (detail.UnitOfMeasure != null)
+                            {
+                                unitDtos.Add(new ItemUnitOfMeasureDto
+                                {
+                                    Id = detail.Id,
+                                    UnitOfMeasureId = detail.UnitOfMeasureId,
+                                    UnitCode = detail.UnitOfMeasure.Code,
+                                    UnitName = detail.UnitOfMeasure.Name,
+                                    ConversionFactor = detail.BaseQuantity,
+                                    IsBaseUnit = false,
+                                    IsPurchaseUnit = true,
+                                    IsSalesUnit = true,
+                                    Barcode = null
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // Get UOMs from ItemUnitOfMeasures table
+                var units = await _itemUnitOfMeasureRepository.GetByItemAsync(id);
+                unitDtos = units.Select(u => new ItemUnitOfMeasureDto
+                {
+                    Id = u.Id,
+                    UnitOfMeasureId = u.UnitOfMeasureId,
+                    UnitCode = u.UnitOfMeasure?.Code ?? "",
+                    UnitName = u.UnitOfMeasure?.Name ?? "",
+                    ConversionFactor = u.ConversionToBase,
+                    IsBaseUnit = u.IsBaseUnit,
+                    IsPurchaseUnit = u.IsPurchaseUnit,
+                    IsSalesUnit = u.IsSalesUnit,
+                    Barcode = u.Barcode
+                }).ToList();
+            }
+
+            // If no UOMs found, create a default one from the item's base UOM
+            if (!unitDtos.Any() && !string.IsNullOrEmpty(item.UnitOfMeasure))
+            {
+                unitDtos.Add(new ItemUnitOfMeasureDto
+                {
+                    Id = Guid.NewGuid(),
+                    UnitOfMeasureId = Guid.Empty,
+                    UnitCode = item.UnitOfMeasure,
+                    UnitName = item.UnitOfMeasure,
+                    ConversionFactor = 1.0m,
+                    IsBaseUnit = true,
+                    IsPurchaseUnit = true,
+                    IsSalesUnit = true,
+                    Barcode = null
+                });
+            }
+
+            return Ok(unitDtos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving units of measure for item {ItemId}", id);
+            return StatusCode(500, "An error occurred while retrieving units of measure");
         }
     }
 
@@ -548,6 +1027,22 @@ public class InventoryItemsController : ControllerBase
         // For now, returning a placeholder
         return Guid.Empty;
     }
+}
+
+/// <summary>
+/// DTO for item unit of measure
+/// </summary>
+public class ItemUnitOfMeasureDto
+{
+    public Guid Id { get; set; }
+    public Guid UnitOfMeasureId { get; set; }
+    public string UnitCode { get; set; } = string.Empty;
+    public string UnitName { get; set; } = string.Empty;
+    public decimal ConversionFactor { get; set; }
+    public bool IsBaseUnit { get; set; }
+    public bool IsPurchaseUnit { get; set; }
+    public bool IsSalesUnit { get; set; }
+    public string? Barcode { get; set; }
 }
 
 /// <summary>

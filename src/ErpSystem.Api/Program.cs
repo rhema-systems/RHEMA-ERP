@@ -116,6 +116,18 @@ builder.Services.AddDevelopmentServices(builder.Environment);
 // Add Quality Certificate Service
 builder.Services.AddScoped<ErpSystem.Api.Services.QualityCertificateService>();
 
+// Add Transfer Document Service for Shipment Notes and GRNs
+builder.Services.AddScoped<ErpSystem.Api.Services.TransferDocumentService>();
+
+// Add Purchase Receipt (PO GRN) PDF service
+builder.Services.AddScoped<ErpSystem.Api.Services.PurchaseOrderReceiptDocumentService>();
+
+// Add Award Letter Service for PDF award letter generation
+builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardLetterService, ErpSystem.Api.Services.AwardLetterService>();
+
+// Add Price List Lookup Service for procurement pricing
+builder.Services.AddScoped<ErpSystem.Core.Services.Pricing.PriceListLookupService>();
+
 var app = builder.Build();
 
 Console.WriteLine("🔧 App built successfully - configuring middleware...");

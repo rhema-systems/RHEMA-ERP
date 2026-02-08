@@ -207,7 +207,7 @@ public class PurchaseOrder : TenantEntity
     public string OrderNumber { get; set; } = string.Empty;
 
     [Required]
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
 
     // Dates
     public DateTime OrderDate { get; set; } = DateTime.UtcNow;
@@ -232,6 +232,35 @@ public class PurchaseOrder : TenantEntity
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal ShippingCost { get; set; } = 0;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal MiscellaneousCost { get; set; } = 0;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal TotalAdditionalCost { get; set; } = 0; // ShippingCost + MiscellaneousCost
+
+    /// <summary>
+    /// How shipping and similar costs are handled:
+    /// - SpreadToItemCost: allocate proportionally to line items
+    /// - GLExpense: post directly to expense account
+    /// </summary>
+    [MaxLength(50)]
+    public string CostAllocationMethod { get; set; } = "SpreadToItemCost";
+
+    /// <summary>
+    /// Basis used when spreading costs to items.
+    /// Supported values: Value, Weight, Quantity.
+    /// </summary>
+    [MaxLength(50)]
+    public string CostApportionmentBasis { get; set; } = "Value";
+
+    /// <summary>
+    /// GL account used when CostAllocationMethod is GLExpense.
+    /// </summary>
+    [MaxLength(50)]
+    public string? ExpenseGLAccount { get; set; }
+
+    public bool CostsAllocated { get; set; } = false;
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal DiscountAmount { get; set; } = 0;
@@ -263,16 +292,108 @@ public class PurchaseOrder : TenantEntity
 
     // Reference Information
     [MaxLength(100)]
-    public string? SupplierOrderNumber { get; set; }
+    public string? BusinessPartnerOrderNumber { get; set; }
 
     [MaxLength(100)]
     public string? ReferenceNumber { get; set; }
 
+    // === ENHANCED FIELDS ===
+
+    // PO Type
+    [MaxLength(50)]
+    public string OrderType { get; set; } = "Standard"; // Standard, Blanket, Contract, DropShip, Consignment
+
+    // For Blanket/Contract POs
+    public DateTime? ContractStartDate { get; set; }
+    public DateTime? ContractEndDate { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ContractValue { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ContractUsedValue { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ContractRemainingValue { get; set; }
+
+    // Source PR Reference
+    public Guid? SourceRequisitionId { get; set; }
+
+    [MaxLength(50)]
+    public string? SourceRequisitionNumber { get; set; }
+
+    // Source RFQ Reference (when PO is created from an RFQ award)
+    public Guid? SourceRfqId { get; set; }
+
+    [MaxLength(50)]
+    public string? SourceRfqNumber { get; set; }
+
+    /// <summary>
+    /// Award mode that generated the PO: WinnerTakesAll or SplitAward.
+    /// </summary>
+    [MaxLength(30)]
+    public string? SourceRfqAwardType { get; set; }
+
+    /// <summary>
+    /// For winner-takes-all awards, this is the selected quote.
+    /// For split-award, individual items may reference different quotes.
+    /// </summary>
+    public Guid? SourceRfqQuoteId { get; set; }
+
+    // Tender/Contract Integration
+    /// <summary>
+    /// Reference to the tender award that generated this PO
+    /// </summary>
+    public Guid? TenderAwardId { get; set; }
+
+    /// <summary>
+    /// Reference to the contract this PO is linked to
+    /// </summary>
+    public Guid? ContractId { get; set; }
+
+    [MaxLength(50)]
+    public string? TenderNumber { get; set; }
+
+    [MaxLength(50)]
+    public string? ContractNumber { get; set; }
+
+    // Currency
+    [MaxLength(10)]
+    public string Currency { get; set; } = "USD";
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal ExchangeRate { get; set; } = 1;
+
+    // Budget Tracking
+    public Guid? BudgetId { get; set; }
+
+    [MaxLength(100)]
+    public string? BudgetCode { get; set; }
+
+    public bool BudgetValidated { get; set; } = false;
+
+    // Revision/Amendment
+    public int RevisionNumber { get; set; } = 0;
+    public DateTime? LastAmendedAt { get; set; }
+    public Guid? LastAmendedById { get; set; }
+
+    // Auto-Close Settings
+    public bool AutoCloseOnReceipt { get; set; } = true;
+
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal? TolerancePercent { get; set; } = 5; // +/- tolerance for receipt
+
+    // === END ENHANCED FIELDS ===
+
     // Navigation Properties
-    public virtual Supplier Supplier { get; set; } = null!;
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
     public virtual ApplicationUser? RequestedBy { get; set; }
     public virtual ApplicationUser? ApprovedBy { get; set; }
+    public virtual ApplicationUser? LastAmendedBy { get; set; }
+    public virtual PurchaseRequisition? SourceRequisition { get; set; }
+    public virtual TenderAward? TenderAward { get; set; }
     // Note: Warehouse navigation would be added if cross-module references are allowed
+    // Note: Contract navigation would be added when Contract entity is available
     public virtual ICollection<PurchaseOrderItem> Items { get; set; } = new List<PurchaseOrderItem>();
     public virtual ICollection<PurchaseOrderReceipt> Receipts { get; set; } = new List<PurchaseOrderReceipt>();
 }
@@ -285,11 +406,13 @@ public class PurchaseOrderItem : TenantEntity
     [Required]
     public Guid PurchaseOrderId { get; set; }
 
-    [Required]
-    public Guid InventoryItemId { get; set; }
+    /// <summary>
+    /// Reference to inventory item. Can be null for items from tenders that don't have inventory mapping yet.
+    /// </summary>
+    public Guid? InventoryItemId { get; set; }
 
     [MaxLength(100)]
-    public string? SupplierItemCode { get; set; }
+    public string? BusinessPartnerItemCode { get; set; }
 
     [MaxLength(200)]
     public string? ItemDescription { get; set; }
@@ -300,11 +423,56 @@ public class PurchaseOrderItem : TenantEntity
     public decimal ReceivedQuantity { get; set; } = 0;
     public decimal RemainingQuantity { get; set; } = 0;
 
+    /// <summary>
+    /// Unit of measure for this line item
+    /// </summary>
+    [Required]
+    [MaxLength(20)]
+    public string UnitOfMeasure { get; set; } = "EA";
+
+    /// <summary>
+    /// Reference to the specific UOM from the item's UOM schedule (optional)
+    /// </summary>
+    public Guid? ItemUnitOfMeasureId { get; set; }
+
+    /// <summary>
+    /// Warehouse where this item should be delivered/received
+    /// </summary>
+    public Guid? WarehouseId { get; set; }
+
     [Column(TypeName = "decimal(18,4)")]
     public decimal UnitPrice { get; set; } = 0;
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal LineTotal { get; set; } = 0;
+
+    /// <summary>
+    /// Additional landed cost allocated to this line from shipping/misc costs.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal AllocatedAdditionalCost { get; set; } = 0;
+
+    /// <summary>
+    /// Allocated additional cost per unit on the line.
+    /// </summary>
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal AllocatedCostPerUnit { get; set; } = 0;
+
+    /// <summary>
+    /// Effective unit cost after allocated landed costs.
+    /// </summary>
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal LandedUnitCost { get; set; } = 0;
+
+    // RFQ traceability (optional)
+    public Guid? SourceRfqItemId { get; set; }
+    public Guid? SourceRfqQuoteId { get; set; }
+    public Guid? SourceRfqQuoteItemId { get; set; }
+
+    /// <summary>
+    /// Reference to the price list line used for this item (optional)
+    /// </summary>
+    public Guid? PriceListLineId { get; set; }
 
     public DateTime? ExpectedDeliveryDate { get; set; }
 
@@ -314,6 +482,8 @@ public class PurchaseOrderItem : TenantEntity
     // Navigation Properties
     public virtual PurchaseOrder PurchaseOrder { get; set; } = null!;
     public virtual InventoryItem? InventoryItem { get; set; }
+    public virtual ItemUnitOfMeasure? ItemUnitOfMeasure { get; set; }
+    public virtual Warehouse? Warehouse { get; set; }
 }
 
 #endregion
@@ -376,16 +546,27 @@ public class PurchaseOrderReceiptItem : TenantEntity
 {
     [Required]
     public Guid ReceiptId { get; set; }
-
+  
     [Required]
     public Guid PurchaseOrderItemId { get; set; }
-
+  
     public decimal ReceivedQuantity { get; set; } = 0;
     public decimal AcceptedQuantity { get; set; } = 0;
     public decimal RejectedQuantity { get; set; } = 0;
 
-    public Guid? LocationId { get; set; } // Where it was put away
+    /// <summary>
+    /// Snapshot of the PO line UOM at the time of receipt (audit/history-safe).
+    /// </summary>
+    [MaxLength(20)]
+    public string? UnitOfMeasure { get; set; }
 
+    /// <summary>
+    /// Snapshot of the PO line's ItemUnitOfMeasureId at the time of receipt (optional).
+    /// </summary>
+    public Guid? ItemUnitOfMeasureId { get; set; }
+
+    public Guid? LocationId { get; set; } // Where it was put away
+  
     [MaxLength(100)]
     public string? SerialNumber { get; set; }
 
@@ -451,6 +632,77 @@ public class PurchaseRequisition : TenantEntity
     [MaxLength(2000)]
     public string? Notes { get; set; }
 
+    // === ENHANCED FIELDS ===
+
+    // Requisition Type
+    public PurchaseRequisitionType RequisitionType { get; set; } = PurchaseRequisitionType.StockReplenishment;
+
+    // Budget Reference
+    public Guid? BudgetId { get; set; }
+
+    [MaxLength(100)]
+    public string? BudgetCode { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? BudgetAllocated { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? BudgetRemaining { get; set; }
+
+    public bool BudgetValidated { get; set; } = false;
+
+    // Project Reference (for project purchases)
+    public Guid? ProjectId { get; set; }
+
+    [MaxLength(100)]
+    public string? ProjectCode { get; set; }
+
+    [MaxLength(200)]
+    public string? ProjectName { get; set; }
+
+    // Delivery Information
+    public Guid? DeliveryWarehouseId { get; set; }
+
+    [MaxLength(500)]
+    public string? DeliveryAddress { get; set; }
+
+    [MaxLength(500)]
+    public string? DeliveryInstructions { get; set; }
+
+    // Auto-Generated Flag (from planning module)
+    public bool IsAutoGenerated { get; set; } = false;
+
+    [MaxLength(100)]
+    public string? GeneratedFrom { get; set; } // Planning, ReorderAlert, etc.
+
+    public Guid? SourcePlanId { get; set; }
+
+    // Multi-Level Approval Support
+    public int ApprovalLevel { get; set; } = 0; // Current approval level
+    public int RequiredApprovalLevel { get; set; } = 1; // Required approval level based on amount
+
+    public Guid? CurrentApproverId { get; set; }
+
+    [MaxLength(2000)]
+    public string? ApprovalHistory { get; set; } // JSON array of approval steps
+
+    // Amendment Tracking
+    public int RevisionNumber { get; set; } = 0;
+    public DateTime? LastAmendedAt { get; set; }
+    public Guid? LastAmendedById { get; set; }
+
+    [MaxLength(2000)]
+    public string? AmendmentNotes { get; set; }
+
+    // Currency
+    [MaxLength(10)]
+    public string Currency { get; set; } = "USD";
+
+    // Preferred Business Partner (if known at PR stage)
+    public Guid? PreferredBusinessPartnerId { get; set; }
+
+    // === END ENHANCED FIELDS ===
+
     // Approval
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedAt { get; set; }
@@ -465,6 +717,8 @@ public class PurchaseRequisition : TenantEntity
     // Navigation Properties
     public virtual ApplicationUser RequestedBy { get; set; } = null!;
     public virtual ApplicationUser? ApprovedBy { get; set; }
+    public virtual ApplicationUser? CurrentApprover { get; set; }
+    public virtual ApplicationUser? LastAmendedBy { get; set; }
     public virtual ICollection<PurchaseRequisitionItem> Items { get; set; } = new List<PurchaseRequisitionItem>();
 }
 
@@ -496,7 +750,7 @@ public class PurchaseRequisitionItem : TenantEntity
 
     public DateTime? RequiredDate { get; set; }
 
-    public Guid? PreferredSupplierId { get; set; }
+    public Guid? PreferredBusinessPartnerId { get; set; }
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
@@ -512,7 +766,7 @@ public class PurchaseRequisitionItem : TenantEntity
 
     // Navigation Properties
     public virtual PurchaseRequisition Requisition { get; set; } = null!;
-    public virtual Supplier? PreferredSupplier { get; set; }
+    public virtual BusinessPartner? PreferredBusinessPartner { get; set; }
     public virtual PurchaseOrder? PurchaseOrder { get; set; }
     public virtual InventoryItem? InventoryItem { get; set; }
 }

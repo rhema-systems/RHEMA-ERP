@@ -8,6 +8,8 @@ import type {
   WorkflowDefinitionFilterDto,
   WorkflowInstanceFilterDto,
   WorkflowStatusDto,
+  WorkflowEntitySummaryDto,
+  WorkflowEntityAuditDto,
   WorkflowSummaryDto,
   WorkflowValidationResult,
   WorkflowExecutionResult,
@@ -19,7 +21,9 @@ import type {
   ProcessStepRequest,
   AssignStepRequest,
   ProcessApprovalRequest,
-  WorkflowInstance
+  WorkflowInstance,
+  WorkflowVariableInfo,
+  WorkflowEntityTypeInfo
 } from '../types/workflow';
 
 /**
@@ -114,6 +118,55 @@ export class WorkflowApiService {
     return response.data!;
   }
 
+  /**
+   * Gets available condition variables for a given entity type
+   */
+  async getWorkflowVariables(entityType: string): Promise<WorkflowVariableInfo[]> {
+    const params = new URLSearchParams();
+    params.append('entityType', entityType);
+    const response = await apiService.get<ApiResponse<WorkflowVariableInfo[]>>(
+      `${this.basePath}/variables?${params.toString()}`
+    );
+    return response.data || [];
+  }
+
+  /**
+   * Gets available workflow entity types
+   */
+  async getWorkflowEntityTypes(): Promise<WorkflowEntityTypeInfo[]> {
+    const response = await apiService.get<ApiResponse<WorkflowEntityTypeInfo[]>>(
+      `${this.basePath}/entity-types`
+    );
+    return response.data || [];
+  }
+
+  /**
+   * Seeds common workflow entity types for the current tenant
+   */
+  async seedWorkflowEntityTypes(): Promise<WorkflowEntityTypeInfo[]> {
+    const response = await apiService.post<ApiResponse<WorkflowEntityTypeInfo[]>>(
+      `${this.basePath}/entity-types/seed`
+    );
+    return response.data || [];
+  }
+
+  /**
+   * Ensures workflow entity types exist, seeding when empty
+   */
+  async ensureWorkflowEntityTypes(): Promise<WorkflowEntityTypeInfo[]> {
+    const existing = await this.getWorkflowEntityTypes();
+    if (existing.length > 0) {
+      return existing;
+    }
+
+    try {
+      const seeded = await this.seedWorkflowEntityTypes();
+      return seeded.length > 0 ? seeded : existing;
+    } catch {
+      return existing;
+    }
+  }
+
   // Workflow Instance Management
 
   /**
@@ -161,6 +214,50 @@ export class WorkflowApiService {
       `${this.basePath}/instances/${id}`
     );
     return response.data!;
+  }
+
+  /**
+   * Gets a lightweight workflow summary for a specific entity record (current step, pending approvers, and whether the current user can approve).
+   */
+  async getWorkflowEntitySummary(entityType: string, entityId: string): Promise<WorkflowEntitySummaryDto> {
+    const params = new URLSearchParams();
+    params.append('entityType', entityType);
+    params.append('entityId', entityId);
+
+    const response = await apiService.get<ApiResponse<WorkflowEntitySummaryDto>>(
+      `${this.basePath}/entity-summary?${params.toString()}`
+    );
+
+    return response.data!;
+  }
+
+  /**
+   * Batch variant of getWorkflowEntitySummary (preferred for list/grids).
+   */
+  async getWorkflowEntitySummariesBatch(
+    entities: { entityType: string; entityId: string }[]
+  ): Promise<WorkflowEntitySummaryDto[]> {
+    const response = await apiService.post<ApiResponse<WorkflowEntitySummaryDto[]>>(
+      `${this.basePath}/entity-summary/batch`,
+      { entities }
+    );
+
+    return response.data || [];
+  }
+
+  /**
+   * Gets detailed workflow audit information (steps + approvals) for a specific entity record.
+   */
+  async getWorkflowEntityAudit(entityType: string, entityId: string): Promise<WorkflowEntityAuditDto | null> {
+    const params = new URLSearchParams();
+    params.append('entityType', entityType);
+    params.append('entityId', entityId);
+
+    const response = await apiService.get<ApiResponse<WorkflowEntityAuditDto | null>>(
+      `${this.basePath}/entity-audit?${params.toString()}`
+    );
+
+    return response.data ?? null;
   }
 
   /**

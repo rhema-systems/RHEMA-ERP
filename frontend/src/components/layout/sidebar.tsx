@@ -45,6 +45,8 @@ import {
   DollarSign,
   TrendingUp,
   AlertCircle,
+  ClipboardList,
+  Tag,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -144,8 +146,10 @@ const navigationItems: NavItem[] = [
         href: '/procurement/purchasing',
         icon: ShoppingCart,
         children: [
-          { title: 'Purchase Requests', href: '/procurement/requests', icon: FileText },
+          { title: 'Purchase Requests', href: '/procurement/purchase-requisitions', icon: FileText },
+          { title: 'RFQs', href: '/procurement/rfqs', icon: FileText },
           { title: 'Purchase Orders', href: '/procurement/purchase-orders', icon: ShoppingCart },
+          { title: 'Purchase Receipts', href: '/procurement/purchase-receipts', icon: ClipboardList },
           { title: 'Supplier Comparison', href: '/procurement/supplier-comparison', icon: BarChart3 },
         ],
       },
@@ -184,10 +188,31 @@ const navigationItems: NavItem[] = [
     href: '/inventory',
     icon: Package,
     children: [
-      { title: 'Products', href: '/inventory/products', icon: Package },
-      { title: 'Stock Management', href: '/inventory/stock', icon: Package },
-      { title: 'Warehouses', href: '/inventory/warehouses', icon: Building2 },
-      { title: 'Stock Movements', href: '/inventory/movements', icon: Package },
+      {
+        title: 'Cards',
+        href: '/inventory/cards',
+        icon: Package,
+        children: [
+          { title: 'Inventory Items', href: '/inventory/items', icon: Package },
+          { title: 'Warehouse Items', href: '/inventory/warehouse-items', icon: Building2 },
+          { title: 'Item Suppliers', href: '/inventory/item-suppliers', icon: Users },
+          { title: 'Price Lists', href: '/inventory/price-lists', icon: DollarSign },
+        ],
+      },
+      {
+        title: 'Transactions',
+        href: '/inventory/transactions',
+        icon: Activity,
+        children: [
+          { title: 'Stock Movements', href: '/inventory/stock-movements', icon: Activity },
+          { title: 'Inventory Requisitions', href: '/inventory/requisitions', icon: ClipboardList },
+          { title: 'Inventory Receipts', href: '/inventory/adjustments', icon: Package },
+          { title: 'Inventory Transfers', href: '/inventory/transfers', icon: Package },
+          { title: 'Bin Stock', href: '/inventory/bin-stock', icon: FolderTree },
+          { title: 'Physical Counts', href: '/inventory/physical-counts', icon: ClipboardCheck },
+          { title: 'Valuation', href: '/inventory/valuation', icon: DollarSign },
+        ],
+      },
     ],
   },
   {
@@ -237,18 +262,6 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
-    title: 'Workflow',
-    href: '/workflow',
-    icon: Workflow,
-    children: [
-      { title: 'Workflow Demo', href: '/workflow-demo', icon: Workflow },
-      { title: 'Process Designer', href: '/workflow/designer', icon: Code },
-      { title: 'Running Processes', href: '/workflow/running', icon: Workflow },
-      { title: 'Process History', href: '/workflow/history', icon: FileText },
-      { title: 'Task Management', href: '/workflow/tasks', icon: FileText },
-    ],
-  },
-  {
     title: 'Reports',
     href: '/reports',
     icon: BarChart3,
@@ -279,6 +292,8 @@ const navigationItems: NavItem[] = [
     icon: Settings,
     roles: ['admin', 'SuperAdmin', 'TenantAdmin'],
     children: [
+      { title: 'Message Queue', href: '/administration/notifications', icon: Bell },
+      { title: 'System Logs', href: '/administration/system-exception-logs', icon: AlertTriangle },
       {
         title: 'Finance',
         href: '/administration/finance',
@@ -286,6 +301,8 @@ const navigationItems: NavItem[] = [
         children: [
           { title: 'Chart of Accounts', href: '/administration/finance/accounts', icon: CreditCard },
           { title: 'Tax Configuration', href: '/administration/finance/tax', icon: CreditCard },
+          { title: 'Payment Terms', href: '/administration/finance/payment-terms', icon: CreditCard },
+          { title: 'Currencies', href: '/administration/finance/currencies', icon: DollarSign },
           { title: 'Currency Settings', href: '/administration/finance/currency', icon: CreditCard },
           { title: 'Payment Methods', href: '/administration/finance/payment-methods', icon: CreditCard },
           { title: 'Financial Periods', href: '/administration/finance/periods', icon: CreditCard },
@@ -308,6 +325,8 @@ const navigationItems: NavItem[] = [
         href: '/administration/procurement',
         icon: Briefcase,
         children: [
+          { title: 'Pending Partners', href: '/administration/procurement/business-partners/pending', icon: Users },
+          { title: 'Purchase Order Settings', href: '/administration/procurement/purchase-order-settings', icon: Settings },
           { title: 'Partner Categories', href: '/administration/procurement/partner-categories', icon: FolderTree },
           { title: 'Contractor Specializations', href: '/administration/procurement/contractor-specializations', icon: Wrench },
           { title: 'License Types', href: '/administration/procurement/license-types', icon: FileCheck },
@@ -327,10 +346,9 @@ const navigationItems: NavItem[] = [
         href: '/administration/inventory',
         icon: Package,
         children: [
-          { title: 'Product Categories', href: '/administration/inventory/categories', icon: Package },
-          { title: 'Units of Measure', href: '/administration/inventory/units', icon: Package },
-          { title: 'Storage Locations', href: '/administration/inventory/locations', icon: Building2 },
-          { title: 'Stock Levels', href: '/administration/inventory/stock-levels', icon: Package },
+          { title: 'Units of Measure', href: '/administration/inventory/units-of-measure', icon: Package },
+          { title: 'UoM Schedules', href: '/administration/inventory/uom-schedules', icon: Package },
+          { title: 'Warehouses & Locations', href: '/administration/inventory/warehouses', icon: Building2 },
         ],
       },
       {
@@ -441,6 +459,7 @@ const navigationItems: NavItem[] = [
           { title: 'User-Employee Links', href: '/administration/user-employee-links', icon: UserCheck },
           { title: 'Tenant Management', href: '/administration/tenant-management', icon: Building },
           { title: 'Email Settings', href: '/administration/settings/email', icon: Mail },
+          { title: 'Field Labels', href: '/administration/settings/field-labels', icon: Tag },
           { title: 'User-Tenant Mapping', href: '/administration/user-tenant-mapping', icon: Users },
           { title: 'Security Logs', href: '/administration/identity-management/security-logs', icon: FileText },
           { title: 'Audit Logs', href: '/administration/audit-logs', icon: FileText },

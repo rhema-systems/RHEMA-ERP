@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Services;
 using ErpSystem.Shared;
@@ -32,6 +33,7 @@ public class WorkOrderService : IWorkOrderService
     private readonly IUserService _userService;
     private readonly ILogger<WorkOrderService> _logger;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IAppEventBus _appEventBus;
 
     public WorkOrderService(
         IWorkOrderRepository workOrderRepository,
@@ -49,7 +51,8 @@ public class WorkOrderService : IWorkOrderService
         IMaintenanceExpenseRepository expenseRepository,
         IUserService userService,
         ILogger<WorkOrderService> logger,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IAppEventBus appEventBus)
     {
         _workOrderRepository = workOrderRepository;
         _taskRepository = taskRepository;
@@ -67,6 +70,7 @@ public class WorkOrderService : IWorkOrderService
         _userService = userService;
         _logger = logger;
         _unitOfWork = unitOfWork;
+        _appEventBus = appEventBus;
     }
 
     #region Work Order Lifecycle
@@ -170,6 +174,33 @@ public class WorkOrderService : IWorkOrderService
 
             _logger.LogInformation("Work order {WorkOrderId} started successfully by technician {TechnicianId}",
                 workOrderId, technicianId);
+
+            // Publish event for admin-configurable notification topics (best-effort).
+            try
+            {
+                var triggeredBy = Guid.TryParse(_currentUserService.UserId, out var uid) ? uid : (Guid?)null;
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = workOrder.TenantId,
+                    EntityType = "WorkOrder",
+                    Activity = "Started",
+                    Audience = "Internal",
+                    EntityId = workOrder.Id,
+                    TriggeredByUserId = triggeredBy,
+                    Data = new Dictionary<string, object>
+                    {
+                        ["WorkOrderId"] = workOrder.Id,
+                        ["WorkOrderNumber"] = workOrder.WorkOrderNumber ?? string.Empty,
+                        ["TechnicianId"] = technicianId,
+                        ["Status"] = workOrder.Status ?? string.Empty,
+                        ["StartedAt"] = result.StartedAt.ToString("o")
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish WorkOrder.Started entity activity event for work order {WorkOrderId}", workOrderId);
+            }
 
             return result;
         }
@@ -353,6 +384,35 @@ public class WorkOrderService : IWorkOrderService
             _logger.LogInformation("Work order {WorkOrderId} completed successfully. " +
                 "Total cost: {TotalCost}, Parts consumed: {PartsConsumed}, Parts returned: {PartsReturned}",
                 completionDto.WorkOrderId, result.TotalCost, result.PartsConsumed, result.PartsReturned);
+
+            // Publish event for admin-configurable notification topics (best-effort).
+            try
+            {
+                var triggeredBy = Guid.TryParse(_currentUserService.UserId, out var uid) ? uid : (Guid?)null;
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = workOrder.TenantId,
+                    EntityType = "WorkOrder",
+                    Activity = "Completed",
+                    Audience = "Internal",
+                    EntityId = workOrder.Id,
+                    TriggeredByUserId = triggeredBy,
+                    Data = new Dictionary<string, object>
+                    {
+                        ["WorkOrderId"] = workOrder.Id,
+                        ["WorkOrderNumber"] = workOrder.WorkOrderNumber ?? string.Empty,
+                        ["CompletedById"] = completedById,
+                        ["Status"] = workOrder.Status ?? string.Empty,
+                        ["CompletedAt"] = result.CompletionDate.ToString("o"),
+                        ["TotalCost"] = result.TotalCost,
+                        ["TotalHours"] = result.TotalHours
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish WorkOrder.Completed entity activity event for work order {WorkOrderId}", completionDto.WorkOrderId);
+            }
 
             return result;
         }
@@ -770,7 +830,8 @@ public class WorkOrderService : IWorkOrderService
             _logger.LogDebug("CreateWorkOrderDto: Title={Title}, AssetId={AssetId}, WorkOrderTypeId={WorkOrderTypeId}, MaintenanceTypeId={MaintenanceTypeId}, PriorityLevelId={PriorityLevelId}",
                 createDto.Title, createDto.AssetId, createDto.WorkOrderTypeId, createDto.MaintenanceTypeId, createDto.PriorityLevelId);
 
-            // Determine RequestedById - use current user's employee ID, or fall back to assigned technician for background service context
+            // Determine RequestedById - use current user's employee ID or user ID
+            // For background services (e.g., auto-generated from schedules), this will be null
             Guid? requestedById = _currentUserService.EmployeeId;
             if (!requestedById.HasValue || requestedById.Value == Guid.Empty)
             {
@@ -779,10 +840,11 @@ public class WorkOrderService : IWorkOrderService
                 {
                     requestedById = userId;
                 }
-                // Fall back to assigned technician (for background service context)
-                else if (createDto.AssignedTechnicianId.HasValue && createDto.AssignedTechnicianId.Value != Guid.Empty)
+                else
                 {
-                    requestedById = createDto.AssignedTechnicianId.Value;
+                    // For background service context (auto-generated work orders), leave as null
+                    requestedById = null;
+                    _logger.LogInformation("Creating work order without RequestedById (background service context)");
                 }
             }
 
@@ -796,7 +858,7 @@ public class WorkOrderService : IWorkOrderService
                 PriorityLevelId = createDto.PriorityLevelId,
                 TenantId = createDto.TenantId ?? _currentUserService.TenantId ?? Guid.Empty,
                 WorkOrderNumber = await GenerateWorkOrderNumberAsync(),
-                RequestedById = requestedById ?? Guid.Empty,
+                RequestedById = requestedById, // Can be null for auto-generated work orders
                 AssignedTechnicianId = createDto.AssignedTechnicianId, // Assign technician if provided
                 AssignedTeamId = createDto.AssignedTeamId, // Assign team if provided
                 JobCardId = createDto.JobCardId, // Link to job card if generated from one
@@ -810,7 +872,9 @@ public class WorkOrderService : IWorkOrderService
                 SafetyRequirements = createDto.SafetyRequirements,
                 RequiresPermit = createDto.RequiresPermit,
                 RequiresLockout = createDto.RequiresLockout,
-                RequiresConfinedSpaceEntry = createDto.RequiresConfinedSpaceEntry
+                RequiresConfinedSpaceEntry = createDto.RequiresConfinedSpaceEntry,
+                BillingType = createDto.BillingType ?? "Repairs", // Set billing type from DTO
+                FixedAmount = createDto.FixedAmount // Set fixed amount for Maintenance billing type
             };
 
             _logger.LogDebug("Work Order entity created: Id={Id}, Number={Number}, RequestedById={RequestedById}, TenantId={TenantId}",
@@ -824,6 +888,37 @@ public class WorkOrderService : IWorkOrderService
 
             // Generate default tasks based on maintenance type and asset
             await CreateDefaultTasksAsync(workOrder);
+
+            // Publish event for admin-configurable notification topics (best-effort).
+            try
+            {
+                var triggeredBy = Guid.TryParse(_currentUserService.UserId, out var uid) ? uid : (Guid?)null;
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = workOrder.TenantId,
+                    EntityType = "WorkOrder",
+                    Activity = "Created",
+                    Audience = "Internal",
+                    EntityId = workOrder.Id,
+                    TriggeredByUserId = triggeredBy,
+                    Data = new Dictionary<string, object>
+                    {
+                        ["WorkOrderId"] = workOrder.Id,
+                        ["WorkOrderNumber"] = workOrder.WorkOrderNumber ?? string.Empty,
+                        ["Title"] = workOrder.Title ?? string.Empty,
+                        ["Status"] = workOrder.Status ?? string.Empty,
+                        ["AssetId"] = workOrder.AssetId,
+                        ["JobCardId"] = workOrder.JobCardId ?? Guid.Empty,
+                        ["RequestedById"] = workOrder.RequestedById ?? Guid.Empty,
+                        ["AssignedTechnicianId"] = workOrder.AssignedTechnicianId ?? Guid.Empty,
+                        ["AssignedTeamId"] = workOrder.AssignedTeamId ?? Guid.Empty
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish WorkOrder.Created entity activity event for work order {WorkOrderId}", workOrder.Id);
+            }
 
             return await MapToWorkOrderDtoAsync(workOrder);
         }
@@ -1052,7 +1147,14 @@ public class WorkOrderService : IWorkOrderService
         {
             var workOrder = await _workOrderRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Work order {id} not found");
             workOrder.Status = "Approved";
-            workOrder.ApprovedById = (_currentUserService.UserId != null && Guid.TryParse(_currentUserService.UserId, out var userId2)) ? userId2 : Guid.Empty;
+            
+            // Set ApprovedById - can be null for background service context
+            Guid? approvedById = null;
+            if (_currentUserService.UserId != null && Guid.TryParse(_currentUserService.UserId, out var userId2) && userId2 != Guid.Empty)
+            {
+                approvedById = userId2;
+            }
+            workOrder.ApprovedById = approvedById;
             workOrder.ApprovedAt = DateTime.UtcNow;
 
             // Note: Approval notes would need to be implemented via WorkOrderComment entity
@@ -1343,6 +1445,14 @@ public class WorkOrderService : IWorkOrderService
         try
         {
             var parentWorkOrder = await _workOrderRepository.GetByIdAsync(parentId) ?? throw new ArgumentException($"Parent work order {parentId} not found");
+            
+            // Determine RequestedById - can be null for background service context
+            Guid? requestedById = null;
+            if (_currentUserService.UserId != null && Guid.TryParse(_currentUserService.UserId, out var userId3) && userId3 != Guid.Empty)
+            {
+                requestedById = userId3;
+            }
+            
             var childWorkOrder = new WorkOrder
             {
                 Title = createDto.Title,
@@ -1353,7 +1463,7 @@ public class WorkOrderService : IWorkOrderService
                 PriorityLevelId = createDto.PriorityLevelId,
                 TenantId = _currentUserService.TenantId ?? Guid.Empty,
                 WorkOrderNumber = await GenerateWorkOrderNumberAsync(),
-                RequestedById = (_currentUserService.UserId != null && Guid.TryParse(_currentUserService.UserId, out var userId3)) ? userId3 : Guid.Empty,
+                RequestedById = requestedById, // Can be null for auto-generated work orders
                 AssignedTechnicianId = createDto.AssignedTechnicianId, // Assign technician if provided
                 AssignedTeamId = createDto.AssignedTeamId, // Assign team if provided
                 ParentWorkOrderId = parentId,
@@ -1553,6 +1663,8 @@ public class WorkOrderService : IWorkOrderService
             ActualHours = workOrder.ActualHours,
             EstimatedCost = workOrder.EstimatedCost,
             ActualCost = workOrder.ActualCost,
+            BillingType = workOrder.BillingType,
+            FixedAmount = workOrder.FixedAmount,
             CompletionNotes = workOrder.CompletionNotes,
             FailureCode = workOrder.FailureCode,
             CauseCode = workOrder.CauseCode,
@@ -1611,24 +1723,7 @@ public class WorkOrderService : IWorkOrderService
                 CreatedAt = workOrder.PriorityLevel.CreatedAt,
                 UpdatedAt = workOrder.PriorityLevel.UpdatedAt
             } : null,
-            Tasks = workOrder.Tasks?.Select(t => new WorkOrderTaskDtoFull
-            {
-                Id = t.Id,
-                WorkOrderId = t.WorkOrderId,
-                TaskName = t.TaskName,
-                Description = t.Description,
-                Sequence = t.Sequence,
-                Status = t.Status,
-                EstimatedHours = t.EstimatedHours,
-                ActualHours = t.ActualHours,
-                IsRequired = t.IsRequired,
-                PhotoPath = t.PhotoPath,
-                AssignedTechnicianId = t.AssignedTechnicianId,
-                StartedAt = t.StartedAt,
-                CompletedAt = t.CompletedAt,
-                CompletionNotes = t.CompletionNotes,
-                CreatedAt = t.CreatedAt
-            }).ToList() ?? new List<WorkOrderTaskDtoFull>(),
+            Tasks = await MapTasksWithTechniciansAsync(workOrder.Tasks),
             Parts = workOrder.Parts?.Select(p => new WorkOrderPartDto
             {
                 Id = p.Id,
@@ -1665,6 +1760,10 @@ public class WorkOrderService : IWorkOrderService
                 AllocationDate = t.AllocationDate,
                 CheckoutId = t.CheckoutId,
                 Notes = t.Notes,
+                IsExcludedFromBilling = t.IsExcludedFromBilling,
+                BillingExclusionReason = t.BillingExclusionReason,
+                BillingExcludedAt = t.BillingExcludedAt,
+                BillingExcludedBy = t.BillingExcludedBy,
                 CreatedAt = t.CreatedAt,
                 UpdatedAt = t.UpdatedAt
             }).ToList() ?? new List<WorkOrderToolDto>(),
@@ -1968,7 +2067,8 @@ public class WorkOrderService : IWorkOrderService
         Guid taskId,
         string status,
         double? actualHours = null,
-        string? completionNotes = null)
+        string? completionNotes = null,
+        Guid? technicianId = null)
     {
         try
         {
@@ -1996,10 +2096,17 @@ public class WorkOrderService : IWorkOrderService
             if (status == "InProgress" && previousStatus == "Pending")
             {
                 task.StartedAt = DateTime.UtcNow;
-                // If no technician assigned yet, assign current user
-                if (!task.AssignedTechnicianId.HasValue && currentEmployeeId.HasValue)
+                // If no technician assigned yet, assign current user or provided technician
+                if (!task.AssignedTechnicianId.HasValue)
                 {
-                    task.AssignedTechnicianId = currentEmployeeId.Value;
+                    if (technicianId.HasValue)
+                    {
+                        task.AssignedTechnicianId = technicianId.Value;
+                    }
+                    else if (currentEmployeeId.HasValue)
+                    {
+                        task.AssignedTechnicianId = currentEmployeeId.Value;
+                    }
                 }
             }
 
@@ -2014,6 +2121,16 @@ public class WorkOrderService : IWorkOrderService
                 if (!string.IsNullOrEmpty(completionNotes))
                 {
                     task.CompletionNotes = completionNotes;
+                }
+                // Assign technician if provided and not already assigned
+                if (technicianId.HasValue && !task.AssignedTechnicianId.HasValue)
+                {
+                    task.AssignedTechnicianId = technicianId.Value;
+                }
+                // Override technician assignment if explicitly provided during completion
+                else if (technicianId.HasValue)
+                {
+                    task.AssignedTechnicianId = technicianId.Value;
                 }
             }
 
@@ -2383,6 +2500,86 @@ public class WorkOrderService : IWorkOrderService
                 workOrderId, ex.Message);
             // Don't throw - this shouldn't block work order completion
         }
+    }
+
+    #endregion
+
+    #region Task Mapping Helpers
+
+    /// <summary>
+    /// Maps work order tasks to DTOs including technician information
+    /// </summary>
+    private async Task<List<WorkOrderTaskDtoFull>> MapTasksWithTechniciansAsync(ICollection<WorkOrderTask>? tasks)
+    {
+        if (tasks == null || !tasks.Any())
+        {
+            return new List<WorkOrderTaskDtoFull>();
+        }
+
+        var taskDtos = new List<WorkOrderTaskDtoFull>();
+
+        // Get all unique technician IDs from tasks
+        var technicianIds = tasks
+            .Where(t => t.AssignedTechnicianId.HasValue)
+            .Select(t => t.AssignedTechnicianId!.Value)
+            .Distinct()
+            .ToList();
+
+        // Fetch all technicians in one batch
+        var technicians = new Dictionary<Guid, ErpSystem.Core.Entities.HR.Employee>();
+        foreach (var techId in technicianIds)
+        {
+            try
+            {
+                var technician = await _employeeRepository.GetByIdAsync(techId);
+                if (technician != null)
+                {
+                    technicians[techId] = technician;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not load technician {TechnicianId} for task mapping", techId);
+            }
+        }
+
+        // Map tasks with technician information
+        foreach (var task in tasks)
+        {
+            var taskDto = new WorkOrderTaskDtoFull
+            {
+                Id = task.Id,
+                WorkOrderId = task.WorkOrderId,
+                TaskName = task.TaskName,
+                Description = task.Description,
+                Sequence = task.Sequence,
+                Status = task.Status,
+                EstimatedHours = task.EstimatedHours,
+                ActualHours = task.ActualHours,
+                IsRequired = task.IsRequired,
+                PhotoPath = task.PhotoPath,
+                AssignedTechnicianId = task.AssignedTechnicianId,
+                StartedAt = task.StartedAt,
+                CompletedAt = task.CompletedAt,
+                CompletionNotes = task.CompletionNotes,
+                CreatedAt = task.CreatedAt
+            };
+
+            // Add technician information if available
+            if (task.AssignedTechnicianId.HasValue && technicians.TryGetValue(task.AssignedTechnicianId.Value, out var technician))
+            {
+                taskDto.AssignedTechnician = new ErpSystem.Core.DTOs.HR.EmployeeDto
+                {
+                    Id = technician.Id,
+                    FullName = $"{technician.FirstName} {technician.LastName}",
+                    EmployeeNumber = technician.EmployeeNumber
+                };
+            }
+
+            taskDtos.Add(taskDto);
+        }
+
+        return taskDtos;
     }
 
     #endregion

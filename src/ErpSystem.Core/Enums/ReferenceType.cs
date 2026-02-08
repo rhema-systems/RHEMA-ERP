@@ -53,5 +53,10 @@ public enum ReferenceType
     /// <summary>
     /// Manual Issue - general inventory issue
     /// </summary>
-    Manual = 10
+    Manual = 10,
+
+    /// <summary>
+    /// Inventory Requisition - internal request for materials
+    /// </summary>
+    Requisition = 11
 }

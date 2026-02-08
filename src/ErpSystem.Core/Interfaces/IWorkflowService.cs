@@ -8,7 +8,7 @@ public interface IWorkflowService
     /// <summary>
     /// Starts an approval workflow for an entity
     /// </summary>
-    Task StartApprovalWorkflowAsync(string entityType, Guid entityId);
+    Task<ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult> StartApprovalWorkflowAsync(string entityType, Guid entityId);
 
     /// <summary>
     /// Checks if a user can approve a specific workflow step
@@ -18,7 +18,7 @@ public interface IWorkflowService
     /// <summary>
     /// Processes an approval step
     /// </summary>
-    Task ProcessApprovalStepAsync(string entityType, Guid entityId, Guid userId, string action, string? comments = null);
+    Task<ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult> ProcessApprovalStepAsync(string entityType, Guid entityId, Guid userId, string action, string? comments = null);
 
     /// <summary>
     /// Gets the current workflow step for an entity
@@ -38,7 +38,7 @@ public interface IWorkflowService
     /// <summary>
     /// Cancels a workflow
     /// </summary>
-    Task CancelWorkflowAsync(string entityType, Guid entityId, string reason);
+    Task<ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult> CancelWorkflowAsync(string entityType, Guid entityId, string reason);
 }
 
 /// <summary>

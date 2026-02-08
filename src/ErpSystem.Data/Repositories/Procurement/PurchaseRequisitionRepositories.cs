@@ -10,7 +10,12 @@ namespace ErpSystem.Data.Repositories.Procurement;
 
 public class PurchaseRequisitionRepository : GenericRepository<PurchaseRequisition>, IPurchaseRequisitionRepository
 {
-    public PurchaseRequisitionRepository(ApplicationDbContext context) : base(context) { }
+    private readonly IProcurementSettingsRepository _settingsRepository;
+
+    public PurchaseRequisitionRepository(ApplicationDbContext context, IProcurementSettingsRepository settingsRepository) : base(context)
+    {
+        _settingsRepository = settingsRepository;
+    }
 
     public async Task<IEnumerable<PurchaseRequisition>> GetRequisitionsByStatusAsync(string status)
     {
@@ -132,36 +137,84 @@ public class PurchaseRequisitionRepository : GenericRepository<PurchaseRequisiti
 
     public async Task<string> GenerateRequisitionNumberAsync()
     {
-        var currentYear = DateTime.UtcNow.Year;
-        var yearPrefix = currentYear.ToString().Substring(2); // Last 2 digits of year
+        // Get the format from settings
+        var settings = await _context.Set<ProcurementSettings>()
+            .FirstOrDefaultAsync(s => !s.IsDeleted);
+        
+        var format = settings?.PurchaseRequisitionNumberFormat ?? "PR-{YYYY}-{####}";
+        
+        return await GenerateNumberFromFormatAsync(format, "PR");
+    }
 
-        // Get all requisitions for the current year to find max sequence
-        var requisitionsInYear = await _dbSet
-            .Where(pr => pr.RequisitionNumber.StartsWith($"REQ{yearPrefix}") && !pr.IsDeleted)
-            .Select(pr => pr.RequisitionNumber)
-            .ToListAsync();
-
-        int nextSequence = 1;
-        if (requisitionsInYear.Any())
+    private async Task<string> GenerateNumberFromFormatAsync(string format, string prefix)
+    {
+        var now = DateTime.UtcNow;
+        
+        // Replace date placeholders
+        var formattedNumber = format
+            .Replace("{YYYY}", now.Year.ToString())
+            .Replace("{YY}", now.Year.ToString().Substring(2))
+            .Replace("{MM}", now.Month.ToString("D2"))
+            .Replace("{DD}", now.Day.ToString("D2"));
+        
+        // Find sequence placeholder pattern
+        var sequenceMatch = System.Text.RegularExpressions.Regex.Match(format, @"\{(#+)\}");
+        if (sequenceMatch.Success)
         {
-            // Parse all sequence numbers and find the maximum
-            var maxSequence = requisitionsInYear
-                .Select(rn =>
-                {
-                    var sequencePart = rn.Substring(5); // Remove "REQ" + year prefix
-                    if (int.TryParse(sequencePart, out int seq))
+            var sequenceLength = sequenceMatch.Groups[1].Value.Length;
+            
+            // Extract the prefix pattern (everything before the sequence placeholder)
+            var prefixPattern = format.Substring(0, sequenceMatch.Index)
+                .Replace("{YYYY}", now.Year.ToString())
+                .Replace("{YY}", now.Year.ToString().Substring(2))
+                .Replace("{MM}", now.Month.ToString("D2"))
+                .Replace("{DD}", now.Day.ToString("D2"));
+            
+            // Get all requisitions matching the prefix pattern
+            var existingNumbers = await _dbSet
+                .Where(pr => pr.RequisitionNumber.StartsWith(prefixPattern) && !pr.IsDeleted)
+                .Select(pr => pr.RequisitionNumber)
+                .ToListAsync();
+            
+            int nextSequence = 1;
+            if (existingNumbers.Any())
+            {
+                // Extract sequence numbers and find max
+                var maxSequence = existingNumbers
+                    .Select(rn =>
                     {
-                        return seq;
-                    }
-
-                    return 0;
-                })
-                .Max();
-
-            nextSequence = maxSequence + 1;
+                        var sequencePart = rn.Substring(prefixPattern.Length);
+                        // Remove any suffix after the sequence
+                        var suffixStart = format.IndexOf(sequenceMatch.Value) + sequenceMatch.Value.Length;
+                        if (suffixStart < format.Length)
+                        {
+                            var suffix = format.Substring(suffixStart)
+                                .Replace("{YYYY}", now.Year.ToString())
+                                .Replace("{YY}", now.Year.ToString().Substring(2))
+                                .Replace("{MM}", now.Month.ToString("D2"))
+                                .Replace("{DD}", now.Day.ToString("D2"));
+                            if (sequencePart.EndsWith(suffix))
+                            {
+                                sequencePart = sequencePart.Substring(0, sequencePart.Length - suffix.Length);
+                            }
+                        }
+                        
+                        if (int.TryParse(sequencePart, out int seq))
+                        {
+                            return seq;
+                        }
+                        return 0;
+                    })
+                    .Max();
+                
+                nextSequence = maxSequence + 1;
+            }
+            
+            // Replace sequence placeholder with formatted number
+            formattedNumber = formattedNumber.Replace(sequenceMatch.Value, nextSequence.ToString($"D{sequenceLength}"));
         }
-
-        return $"REQ{yearPrefix}{nextSequence:D4}"; // Format as REQ24NNNN
+        
+        return formattedNumber;
     }
 
     // Missing methods referenced in controller
@@ -288,7 +341,7 @@ public class PurchaseRequisitionItemRepository : GenericRepository<PurchaseRequi
         return await _dbSet
             .Where(pri => pri.RequisitionId == requisitionId && !pri.IsDeleted)
             .Include(pri => pri.Requisition)
-            .Include(pri => pri.PreferredSupplier)
+            .Include(pri => pri.PreferredBusinessPartner)
             .Include(pri => pri.PurchaseOrder)
             .OrderBy(pri => pri.ItemDescription)
             .ToListAsync();
@@ -299,7 +352,7 @@ public class PurchaseRequisitionItemRepository : GenericRepository<PurchaseRequi
         return await _dbSet
             .Where(pri => pri.Status == "Pending" && !pri.IsDeleted)
             .Include(pri => pri.Requisition)
-            .Include(pri => pri.PreferredSupplier)
+            .Include(pri => pri.PreferredBusinessPartner)
             .OrderBy(pri => pri.RequiredDate)
             .ToListAsync();
     }
@@ -314,7 +367,7 @@ public class PurchaseRequisitionItemRepository : GenericRepository<PurchaseRequi
         return await _dbSet
             .Where(pri => pri.InventoryItemId == inventoryItemId && !pri.IsDeleted)
             .Include(pri => pri.Requisition)
-            .Include(pri => pri.PreferredSupplier)
+            .Include(pri => pri.PreferredBusinessPartner)
             .OrderByDescending(pri => pri.Requisition.RequisitionDate)
             .ToListAsync();
     }
@@ -327,9 +380,9 @@ public class PurchaseRequisitionItemRepository : GenericRepository<PurchaseRequi
         }
 
         return await _dbSet
-            .Where(pri => pri.PreferredSupplierId == supplierId && !pri.IsDeleted)
+            .Where(pri => pri.PreferredBusinessPartnerId == supplierId && !pri.IsDeleted)
             .Include(pri => pri.Requisition)
-            .Include(pri => pri.PreferredSupplier)
+            .Include(pri => pri.PreferredBusinessPartner)
             .OrderByDescending(pri => pri.Requisition.RequisitionDate)
             .ToListAsync();
     }
@@ -342,7 +395,7 @@ public class PurchaseRequisitionItemRepository : GenericRepository<PurchaseRequi
                          pri.PurchaseOrderId == null &&
                          !pri.IsDeleted)
             .Include(pri => pri.Requisition)
-            .Include(pri => pri.PreferredSupplier)
+            .Include(pri => pri.PreferredBusinessPartner)
             .OrderBy(pri => pri.RequiredDate)
             .ToListAsync();
     }

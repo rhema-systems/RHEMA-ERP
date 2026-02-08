@@ -149,6 +149,8 @@ export interface JobCardApprovalAction {
   assignedTeamId?: string;
   revisedEstimatedHours?: number;
   revisedEstimatedCost?: number;
+  /** Work order billing type: "Maintenance" (fixed price) or "Repairs" (itemized costs) */
+  billingType?: 'Maintenance' | 'Repairs';
 }
 
 export interface SubmitJobCardRequest {

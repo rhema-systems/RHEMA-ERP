@@ -211,6 +211,7 @@ public class InventoryManagementService : IInventoryManagementService
                 ReferenceType = ReferenceType.WO,
                 ReferenceNumber = request.ReferenceNumber,
                 ReferenceId = request.ReferenceId,
+                WarehouseId = bestLocation.Location?.WarehouseId,
                 LocationId = bestLocation.LocationId,
                 Notes = $"Allocated for {request.ReferenceNumber}",
                 ProcessedById = request.UserId,
@@ -287,6 +288,7 @@ public class InventoryManagementService : IInventoryManagementService
                 ReferenceType = ReferenceType.WO, // Assuming work order allocation
                 ReferenceNumber = allocation.ReferenceNumber,
                 ReferenceId = allocation.ReferenceId,
+                WarehouseId = allocation.WarehouseId,
                 LocationId = allocation.LocationId,
                 Notes = $"Consumed from allocation {allocation.Id}",
                 ProcessedById = userId,
@@ -343,6 +345,7 @@ public class InventoryManagementService : IInventoryManagementService
                 ReferenceType = ReferenceType.WO, // Assuming work order allocation
                 ReferenceNumber = allocation.ReferenceNumber,
                 ReferenceId = allocation.ReferenceId,
+                WarehouseId = allocation.WarehouseId,
                 LocationId = allocation.LocationId,
                 Notes = $"Released allocation {allocation.Id}",
                 ProcessedById = userId,

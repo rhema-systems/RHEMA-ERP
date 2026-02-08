@@ -33,4 +33,13 @@ public interface IAssetConditionService
     Task LinkToAdmissionAsync(Guid recordId, Guid admissionId);
     Task LinkToDischargeAsync(Guid recordId, Guid dischargeId);
     Task<AssetConditionRecordDto> UploadItemPhotoAsync(Guid recordId, Guid itemResultId, string photoPath);
+
+    /// <summary>
+    /// Creates work order tasks from completed admission checklist items that have repair/replacement actions.
+    /// This should be called after a work order is generated from a job card.
+    /// </summary>
+    /// <param name="jobCardId">The job card ID</param>
+    /// <param name="workOrderId">The generated work order ID</param>
+    /// <returns>Number of tasks created</returns>
+    Task<int> CreateTasksFromAdmissionChecklistAsync(Guid jobCardId, Guid workOrderId);
 }

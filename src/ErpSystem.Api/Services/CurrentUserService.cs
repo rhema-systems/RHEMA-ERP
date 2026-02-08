@@ -9,6 +9,8 @@ namespace ErpSystem.Api.Services;
 
 public class CurrentUserService : ICurrentUserService, ICurrentUserProvider
 {
+    private static readonly Guid DefaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly UserManager<ApplicationUser> _userManager;
     private ApplicationUser? _cachedUser;
@@ -53,7 +55,11 @@ public class CurrentUserService : ICurrentUserService, ICurrentUserProvider
             {
                 return tenantId;
             }
-            return Guid.Empty; // or throw exception based on requirements
+
+            // Fallback: many parts of the system assume a tenant, and the DB seeds a default tenant.
+            // If the user is authenticated but no tenant claim is present, use the default tenant.
+            var isAuthenticated = _httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated ?? false;
+            return isAuthenticated ? DefaultTenantId : Guid.Empty;
         }
     }
 
@@ -122,7 +128,9 @@ public class CurrentUserService : ICurrentUserService, ICurrentUserProvider
             {
                 return tenantId;
             }
-            return null;
+
+            var isAuthenticated = _httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated ?? false;
+            return isAuthenticated ? DefaultTenantId : null;
         }
     }
 

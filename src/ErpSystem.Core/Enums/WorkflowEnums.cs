@@ -93,6 +93,27 @@ public enum WorkflowInstanceStatus
 }
 
 /// <summary>
+/// High-level workflow outcome used by integration helpers
+/// </summary>
+public enum WorkflowOutcome
+{
+    /// <summary>
+    /// Workflow is still in progress or waiting
+    /// </summary>
+    Pending = 0,
+
+    /// <summary>
+    /// Workflow completed successfully
+    /// </summary>
+    Approved = 1,
+
+    /// <summary>
+    /// Workflow was cancelled or failed
+    /// </summary>
+    Rejected = 2
+}
+
+/// <summary>
 /// Status of individual workflow step instances
 /// </summary>
 public enum WorkflowStepInstanceStatus

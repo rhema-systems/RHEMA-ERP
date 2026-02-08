@@ -48,6 +48,26 @@ public class AssetConditionChecklistItemDto
     public string? DefaultValue { get; set; }
     public string? HelpText { get; set; }
     public bool RequiresPhoto { get; set; }
+
+    /// <summary>
+    /// Whether this item can have a repair or replacement action during admission
+    /// </summary>
+    public bool AllowRepairReplacement { get; set; }
+
+    /// <summary>
+    /// Default action when repair/replacement is selected: "None", "Repair", or "Replace"
+    /// </summary>
+    public string? DefaultRepairReplacementAction { get; set; }
+
+    /// <summary>
+    /// Estimated hours for repair action
+    /// </summary>
+    public double EstimatedRepairHours { get; set; }
+
+    /// <summary>
+    /// Estimated hours for replacement action
+    /// </summary>
+    public double EstimatedReplacementHours { get; set; }
 }
 
 public class CreateAssetConditionTemplateDto
@@ -132,6 +152,26 @@ public class CreateAssetConditionItemDto
     public string? DefaultValue { get; set; }
     public string? HelpText { get; set; }
     public bool RequiresPhoto { get; set; } = false;
+
+    /// <summary>
+    /// Whether this item can have a repair or replacement action during admission
+    /// </summary>
+    public bool AllowRepairReplacement { get; set; } = false;
+
+    /// <summary>
+    /// Default action when repair/replacement is selected: "None", "Repair", or "Replace"
+    /// </summary>
+    public string? DefaultRepairReplacementAction { get; set; }
+
+    /// <summary>
+    /// Estimated hours for repair action
+    /// </summary>
+    public double EstimatedRepairHours { get; set; } = 1.0;
+
+    /// <summary>
+    /// Estimated hours for replacement action
+    /// </summary>
+    public double EstimatedReplacementHours { get; set; } = 1.0;
 }
 
 public class UpdateAssetConditionItemDto : CreateAssetConditionItemDto
@@ -213,6 +253,26 @@ public class AssetConditionItemResultDto
 
     public List<string>? PhotoPaths { get; set; }
     public DateTime? InspectedAt { get; set; }
+
+    /// <summary>
+    /// Selected repair/replacement action: "None", "Repair", or "Replace"
+    /// </summary>
+    public string? RepairReplacementAction { get; set; }
+
+    /// <summary>
+    /// Whether the repair/replacement task has been created in the work order
+    /// </summary>
+    public bool TaskCreated { get; set; }
+
+    /// <summary>
+    /// Reference to the created work order task (if any)
+    /// </summary>
+    public Guid? CreatedTaskId { get; set; }
+
+    /// <summary>
+    /// Whether this item allows repair/replacement (from checklist item)
+    /// </summary>
+    public bool AllowRepairReplacement { get; set; }
 }
 
 /// <summary>
@@ -236,6 +296,12 @@ public class CreateAssetConditionRecordDto
     /// Link to existing admission (required for Discharge type)
     /// </summary>
     public Guid? AdmissionId { get; set; }
+
+    /// <summary>
+    /// The ID of the employee who performed the inspection.
+    /// If not provided, defaults to the current user.
+    /// </summary>
+    public Guid? InspectorId { get; set; }
 
     public string? GeneralNotes { get; set; }
 }
@@ -275,6 +341,17 @@ public class SubmitAssetConditionItemDto
     /// </summary>
     [MaxLength(2000)]
     public string? Comment { get; set; }
+
+    /// <summary>
+    /// Selected repair/replacement action: "None", "Repair", or "Replace"
+    /// </summary>
+    [MaxLength(20)]
+    public string? RepairReplacementAction { get; set; }
+
+    /// <summary>
+    /// Photo paths for this item
+    /// </summary>
+    public List<string>? PhotoPaths { get; set; }
 }
 
 /// <summary>

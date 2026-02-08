@@ -96,7 +96,7 @@ public class SupplierPerformanceService : ISupplierPerformanceService
 
         // Get all purchase orders for this supplier in the period
         var allOrders = await _purchaseOrderRepository.GetOrdersByDateRangeAsync(startDate, endDate);
-        var orders = allOrders.Where(po => po.SupplierId == businessPartnerId).ToList();
+        var orders = allOrders.Where(po => po.BusinessPartnerId == businessPartnerId).ToList();
 
         // Get all receipts for these orders
         var orderIds = orders.Select(o => o.Id).ToList();

@@ -120,7 +120,11 @@ export default function AdmissionChecklistsPage() {
     maxValue: undefined,
     defaultValue: '',
     helpText: '',
-    requiresPhoto: false
+    requiresPhoto: false,
+    allowRepairReplacement: false,
+    defaultRepairReplacementAction: 'None',
+    estimatedRepairHours: 1.0,
+    estimatedReplacementHours: 1.0
   });
   const [choiceOptionsInput, setChoiceOptionsInput] = useState('');
 
@@ -188,7 +192,11 @@ export default function AdmissionChecklistsPage() {
       maxValue: undefined,
       defaultValue: '',
       helpText: '',
-      requiresPhoto: false
+      requiresPhoto: false,
+      allowRepairReplacement: false,
+      defaultRepairReplacementAction: 'None',
+      estimatedRepairHours: 1.0,
+      estimatedReplacementHours: 1.0
     });
     setChoiceOptionsInput('');
   };
@@ -462,7 +470,59 @@ export default function AdmissionChecklistsPage() {
           />
           <Label htmlFor="requiresPhoto">Requires Photo</Label>
         </div>
+        <div className="flex items-center space-x-2">
+          <Switch
+            id="allowRepairReplacement"
+            checked={newItem.allowRepairReplacement}
+            onCheckedChange={(checked) => setNewItem(prev => ({ ...prev, allowRepairReplacement: checked }))}
+          />
+          <Label htmlFor="allowRepairReplacement">Allow Repair/Replace</Label>
+        </div>
       </div>
+
+      {/* Repair/Replacement Options - shown when enabled */}
+      {newItem.allowRepairReplacement && (
+        <div className="grid grid-cols-3 gap-4 p-3 border rounded-lg bg-muted/50">
+          <div className="space-y-2">
+            <Label htmlFor="defaultRepairReplacementAction">Default Action</Label>
+            <Select
+              value={newItem.defaultRepairReplacementAction || 'None'}
+              onValueChange={(value) => setNewItem(prev => ({ ...prev, defaultRepairReplacementAction: value as 'None' | 'Repair' | 'Replace' }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select default action" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="None">None</SelectItem>
+                <SelectItem value="Repair">Repair</SelectItem>
+                <SelectItem value="Replace">Replace</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="estimatedRepairHours">Est. Repair Hours</Label>
+            <Input
+              id="estimatedRepairHours"
+              type="number"
+              step="0.5"
+              min="0.5"
+              value={newItem.estimatedRepairHours}
+              onChange={(e) => setNewItem(prev => ({ ...prev, estimatedRepairHours: parseFloat(e.target.value) || 1.0 }))}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="estimatedReplacementHours">Est. Replace Hours</Label>
+            <Input
+              id="estimatedReplacementHours"
+              type="number"
+              step="0.5"
+              min="0.5"
+              value={newItem.estimatedReplacementHours}
+              onChange={(e) => setNewItem(prev => ({ ...prev, estimatedReplacementHours: parseFloat(e.target.value) || 1.0 }))}
+            />
+          </div>
+        </div>
+      )}
 
       <Button type="button" onClick={handleAddItem} disabled={!newItem.itemName.trim()}>
         <Plus className="mr-2 h-4 w-4" />
@@ -489,10 +549,11 @@ export default function AdmissionChecklistsPage() {
               </div>
             )}
             <div className="flex-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium">{item.itemName}</span>
                 {item.isRequired && <Badge variant="destructive" className="text-xs">Required</Badge>}
                 {item.requiresPhoto && <Badge variant="outline" className="text-xs">📷 Photo</Badge>}
+                {item.allowRepairReplacement && <Badge variant="secondary" className="text-xs">🔧 Repair/Replace</Badge>}
               </div>
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <span>{item.category}</span>

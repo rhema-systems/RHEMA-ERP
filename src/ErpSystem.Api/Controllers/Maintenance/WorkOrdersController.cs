@@ -342,7 +342,8 @@ public class WorkOrdersController : ControllerBase
                 taskId,
                 request.Status,
                 request.ActualHours,
-                request.CompletionNotes);
+                request.CompletionNotes,
+                request.TechnicianId);
 
             if (updatedTask == null)
             {
@@ -619,4 +620,5 @@ public class UpdateTaskStatusRequest
     public string Status { get; set; } = string.Empty;
     public double? ActualHours { get; set; }
     public string? CompletionNotes { get; set; }
+    public Guid? TechnicianId { get; set; }
 }

@@ -46,6 +46,10 @@ public class CreateWorkflowDefinitionAdminDto
     public bool IsActive { get; set; } = true;
 
     public string? Configuration { get; set; }
+
+    public List<CreateWorkflowStepDto>? Steps { get; set; }
+
+    public List<CreateWorkflowTransitionDto>? Transitions { get; set; }
 }
 
 /// <summary>
@@ -63,6 +67,10 @@ public class UpdateWorkflowDefinitionAdminDto
     public bool IsActive { get; set; }
 
     public string? Configuration { get; set; }
+
+    public List<CreateWorkflowStepDto>? Steps { get; set; }
+
+    public List<CreateWorkflowTransitionDto>? Transitions { get; set; }
 }
 
 #endregion

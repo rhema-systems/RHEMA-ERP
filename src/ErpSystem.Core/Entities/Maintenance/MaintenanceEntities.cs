@@ -624,6 +624,18 @@ public class WorkOrder : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal ActualCost { get; set; } = 0;
 
+    /// <summary>
+    /// Billing type for the work order: "Maintenance" uses fixed amount, "Repairs" uses itemized costs
+    /// </summary>
+    [MaxLength(20)]
+    public string BillingType { get; set; } = "Repairs"; // Maintenance, Repairs
+
+    /// <summary>
+    /// Fixed billing amount for Maintenance billing type (copied from MaintenanceType.FixedAmount)
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal FixedAmount { get; set; } = 0;
+
     public double EstimatedHours { get; set; } = 0;
     public double ActualHours { get; set; } = 0;
 
@@ -678,11 +690,11 @@ public class WorkOrder : TenantEntity
     public virtual PriorityLevel PriorityLevel { get; set; } = null!;
     public virtual Employee AssignedTechnician { get; set; } = null!;
     public virtual TechnicianTeam? AssignedTeam { get; set; }
-    public virtual Employee? RequestedBy { get; set; }
-    public virtual Employee? ApprovedBy { get; set; }
-    public virtual Employee? Supervisor { get; set; }
-    public virtual Employee? CompletedBy { get; set; }
-    public virtual Employee? QualityCheckedBy { get; set; }
+    public virtual ApplicationUser? RequestedBy { get; set; }
+    public virtual ApplicationUser? ApprovedBy { get; set; }
+    public virtual ApplicationUser? Supervisor { get; set; }
+    public virtual ApplicationUser? CompletedBy { get; set; }
+    public virtual ApplicationUser? QualityCheckedBy { get; set; }
     public virtual WorkOrder? ParentWorkOrder { get; set; }
     public virtual MaintenanceSchedule? MaintenanceSchedule { get; set; }
     public virtual MaintenanceContractor? Contractor { get; set; }
@@ -792,6 +804,13 @@ public class MaintenanceType : TenantEntity
     public double EstimatedHours { get; set; } = 0;
     [Column(TypeName = "decimal(18,2)")]
     public decimal EstimatedCost { get; set; } = 0;
+
+    /// <summary>
+    /// Fixed billing amount for maintenance-type work orders.
+    /// When work order billing type is "Maintenance", this amount is used instead of itemized costs.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal FixedAmount { get; set; } = 0;
 
     // Priority and criticality
     public int DefaultPriority { get; set; } = 3; // 1=Critical, 2=High, 3=Medium, 4=Low, 5=Deferred

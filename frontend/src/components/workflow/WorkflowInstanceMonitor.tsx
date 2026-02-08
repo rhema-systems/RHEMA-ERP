@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import ReactFlow, {
   Node,
   Edge,
@@ -21,9 +21,20 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { workflowApiService } from '@/services/workflow-api.service';
+import Link from 'next/link';
+import type {
+  WorkflowStatusDto,
+  WorkflowStepStatusDto,
+  WorkflowApprovalStatusDto
+} from '@/types/workflow';
+import {
+  WorkflowInstanceStatus,
+  WorkflowStepInstanceStatus
+} from '@/types/workflow';
 
 import {
-  Play, Pause, Clock, User, CheckCircle, AlertCircle, 
+  Play, Pause, Clock, CheckCircle, AlertCircle,
   XCircle, Timer, RefreshCw, Eye, Filter, Search
 } from 'lucide-react';
 
@@ -50,13 +61,15 @@ const nodeTypes: NodeTypes = {
   integration: IntegrationNode,
 };
 
-interface WorkflowInstance {
+type UiWorkflowStatus = 'running' | 'completed' | 'failed' | 'paused' | 'cancelled';
+
+interface WorkflowInstanceView {
   id: string;
   workflowDefinitionId: string;
   workflowName: string;
   entityType: string;
   entityId: string;
-  status: 'running' | 'completed' | 'failed' | 'paused' | 'cancelled';
+  status: UiWorkflowStatus;
   currentStepId: string;
   currentStepName: string;
   startedAt: string;
@@ -64,6 +77,9 @@ interface WorkflowInstance {
   assignedTo?: string;
   priority: 'low' | 'medium' | 'high';
   progress: number;
+  steps: WorkflowStepStatusDto[];
+  pendingApprovals: WorkflowApprovalStatusDto[];
+  entityLink?: string | null;
 }
 
 interface WorkflowInstanceMonitorProps {
@@ -71,156 +87,296 @@ interface WorkflowInstanceMonitorProps {
   onClose: () => void;
 }
 
-const mockInstances: WorkflowInstance[] = [
-  {
-    id: '1',
-    workflowDefinitionId: 'wf-maintenance-001',
-    workflowName: 'Equipment Maintenance Request',
-    entityType: 'WorkOrder',
-    entityId: 'WO-2024-001',
-    status: 'running',
-    currentStepId: 'approval-manager',
-    currentStepName: 'Manager Approval',
-    startedAt: '2024-01-15T10:30:00Z',
-    assignedTo: 'John Smith',
-    priority: 'high',
-    progress: 60,
-  },
-  {
-    id: '2',
-    workflowDefinitionId: 'wf-procurement-001',
-    workflowName: 'Purchase Order Approval',
-    entityType: 'PurchaseOrder',
-    entityId: 'PO-2024-045',
-    status: 'completed',
-    currentStepId: 'end',
-    currentStepName: 'Completed',
-    startedAt: '2024-01-14T08:00:00Z',
-    completedAt: '2024-01-15T12:00:00Z',
-    assignedTo: 'Alice Johnson',
-    priority: 'medium',
-    progress: 100,
-  },
-  {
-    id: '3',
-    workflowDefinitionId: 'wf-hr-001',
-    workflowName: 'Employee Onboarding',
-    entityType: 'Employee',
-    entityId: 'EMP-2024-012',
-    status: 'paused',
-    currentStepId: 'document-collection',
-    currentStepName: 'Document Collection',
-    startedAt: '2024-01-12T09:00:00Z',
-    assignedTo: 'HR Department',
-    priority: 'low',
-    progress: 30,
-  },
-];
-
 export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMonitorProps) {
-  const [instances, setInstances] = useState<WorkflowInstance[]>(mockInstances);
-  const [selectedInstance, setSelectedInstance] = useState<WorkflowInstance | null>(null);
+  const [instances, setInstances] = useState<WorkflowStatusDto[]>([]);
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('list');
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const toUiStatus = (status: WorkflowInstanceStatus): UiWorkflowStatus => {
+    switch (status) {
+      case WorkflowInstanceStatus.Completed:
+        return 'completed';
+      case WorkflowInstanceStatus.Cancelled:
+        return 'cancelled';
+      case WorkflowInstanceStatus.Failed:
+        return 'failed';
+      case WorkflowInstanceStatus.Suspended:
+      case WorkflowInstanceStatus.Waiting:
+        return 'paused';
+      case WorkflowInstanceStatus.InProgress:
+      case WorkflowInstanceStatus.Created:
+      default:
+        return 'running';
+    }
+  };
+
+  const getCurrentStep = (steps: WorkflowStepStatusDto[]): WorkflowStepStatusDto | null => {
+    if (!steps || steps.length === 0) return null;
+    const inProgress = steps.find(step => step.status === WorkflowStepInstanceStatus.InProgress);
+    if (inProgress) return inProgress;
+    const pending = steps.find(step => step.status === WorkflowStepInstanceStatus.Pending);
+    if (pending) return pending;
+    const completedSteps = steps
+      .filter(step => step.status === WorkflowStepInstanceStatus.Completed)
+      .sort((a, b) => {
+        const aDate = a.completedDate ? new Date(a.completedDate).getTime() : 0;
+        const bDate = b.completedDate ? new Date(b.completedDate).getTime() : 0;
+        return bDate - aDate;
+      });
+    return completedSteps[0] ?? steps[0];
+  };
+
+  const calculateProgress = (status: WorkflowStatusDto) => {
+    if (status.progress && typeof status.progress.percentComplete === 'number') {
+      return Math.max(0, Math.min(100, status.progress.percentComplete));
+    }
+    if (!status.steps || status.steps.length === 0) return 0;
+    const completed = status.steps.filter(step => step.status === WorkflowStepInstanceStatus.Completed).length;
+    return Math.round((completed / status.steps.length) * 100);
+  };
+
+  const determinePriority = (
+    status: WorkflowStatusDto,
+    steps: WorkflowStepStatusDto[],
+    approvals: WorkflowApprovalStatusDto[]
+  ): 'low' | 'medium' | 'high' => {
+    const hasOverdueStep = steps.some(step => step.isOverdue);
+    const hasOverdueApproval = approvals.some(approval => approval.isOverdue);
+
+    if (hasOverdueStep || hasOverdueApproval || status.status === WorkflowInstanceStatus.Failed) {
+      return 'high';
+    }
+
+    if (status.status === WorkflowInstanceStatus.Completed || status.status === WorkflowInstanceStatus.Cancelled) {
+      return 'low';
+    }
+
+    return 'medium';
+  };
+
+  const normalizeEntityType = (value: string) =>
+    value.replace(/[\s_-]+/g, '').toLowerCase();
+
+  const entityRouteMap: Record<string, (id: string) => string> = {
+    jobcard: (id) => `/maintenance/job-cards?id=${id}`,
+    workorder: (id) => `/maintenance/work-orders?id=${id}`,
+    asset: (id) => `/maintenance/assets?id=${id}`,
+    purchaseorder: (id) => `/procurement/purchase-orders/${id}`,
+    purchaseorders: (id) => `/procurement/purchase-orders/${id}`,
+    purchaserequisition: (id) => `/procurement/purchase-requisitions/${id}`,
+    purchaserequisitions: (id) => `/procurement/purchase-requisitions/${id}`,
+    purchasereceipt: (id) => `/procurement/purchase-receipts/${id}`,
+    purchasereceipts: (id) => `/procurement/purchase-receipts/${id}`,
+    tender: (id) => `/procurement/tenders/${id}`,
+    tenderaward: (id) => `/procurement/awards/${id}`,
+    contract: (id) => `/procurement/contracts/${id}`,
+    businesspartner: (id) => `/procurement/business-partners/${id}`,
+  };
+
+  const getEntityLink = (entityType: string, entityId: string) => {
+    if (!entityType || !entityId) return null;
+    const key = normalizeEntityType(entityType);
+    const resolver = entityRouteMap[key];
+    return resolver ? resolver(entityId) : null;
+  };
+
+  const formatDate = (value?: string | Date) => {
+    if (!value) return 'N/A';
+    const date = typeof value === 'string' ? new Date(value) : value;
+    if (Number.isNaN(date.getTime())) return 'N/A';
+    return date.toLocaleString();
+  };
+
+  const formatDuration = (startedAt?: string, completedAt?: string) => {
+    if (!startedAt) return 'N/A';
+    const startDate = new Date(startedAt);
+    if (Number.isNaN(startDate.getTime())) return 'N/A';
+    const endDate = completedAt ? new Date(completedAt) : new Date();
+    if (Number.isNaN(endDate.getTime())) return 'N/A';
+    const hours = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60));
+    return completedAt ? `${hours}h` : `${hours}h (ongoing)`;
+  };
+
+  const instanceViews = useMemo<WorkflowInstanceView[]>(() => {
+    return instances.map(instance => {
+      const steps = instance.steps || [];
+      const approvals = instance.pendingApprovals || [];
+      const currentStep = getCurrentStep(steps);
+      const startedAt = instance.startedDate ? new Date(instance.startedDate).toISOString() : '';
+      const completedAt = instance.completedDate ? new Date(instance.completedDate).toISOString() : undefined;
+      const entityLink = getEntityLink(instance.entityType, instance.entityId);
+      return {
+        id: instance.workflowInstanceId,
+        workflowDefinitionId: 'N/A',
+        workflowName: instance.workflowName,
+        entityType: instance.entityType || 'Workflow',
+        entityId: instance.entityId || instance.workflowInstanceId,
+        status: toUiStatus(instance.status),
+        currentStepId: currentStep?.stepInstanceId ?? '',
+        currentStepName: currentStep?.stepName ?? 'Pending',
+        startedAt,
+        completedAt,
+        assignedTo: currentStep?.assignedToName ?? 'Unassigned',
+        priority: determinePriority(instance, steps, approvals),
+        progress: calculateProgress(instance),
+        steps,
+        pendingApprovals: approvals,
+        entityLink,
+      };
+    });
+  }, [instances]);
+
+  const selectedInstance = useMemo(
+    () => instanceViews.find(instance => instance.id === selectedInstanceId) ?? null,
+    [instanceViews, selectedInstanceId]
+  );
+
+  const loadInstances = async () => {
+    if (!isOpen) return;
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const result = await workflowApiService.getWorkflowInstances({
+        page: 1,
+        pageSize: 50,
+        sortBy: 'StartedDate',
+        sortDescending: true,
+      });
+      setInstances(result.data);
+      if (selectedInstanceId && !result.data.some(item => item.workflowInstanceId === selectedInstanceId)) {
+        setSelectedInstanceId(null);
+      }
+    } catch (error) {
+      console.error('Failed to load workflow instances:', error);
+      setLoadError('Failed to load workflow instances.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      loadInstances();
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (selectedInstance) {
       loadWorkflowVisualization(selectedInstance);
+    } else {
+      setNodes([]);
+      setEdges([]);
     }
-  }, [selectedInstance]);
+  }, [selectedInstance, setEdges, setNodes]);
 
-  const loadWorkflowVisualization = async (instance: WorkflowInstance) => {
-    // Mock workflow visualization data - in real app, this would come from API
-    const mockNodes: Node[] = [
+  const loadWorkflowVisualization = (instance: WorkflowInstanceView) => {
+    if (!instance.steps || instance.steps.length === 0) {
+      setNodes([]);
+      setEdges([]);
+      return;
+    }
+
+    const approvalStepNames = new Set(
+      instance.pendingApprovals.map(approval => approval.stepName)
+    );
+
+    const stepsSorted = [...instance.steps].sort((a, b) => {
+      const aDate = a.startedDate ?? a.completedDate ?? a.dueDate;
+      const bDate = b.startedDate ?? b.completedDate ?? b.dueDate;
+      if (aDate && bDate) {
+        return new Date(aDate).getTime() - new Date(bDate).getTime();
+      }
+      if (aDate) return -1;
+      if (bDate) return 1;
+      return a.stepName.localeCompare(b.stepName);
+    });
+
+    const getNodeClassName = (status: WorkflowStepInstanceStatus) => {
+      switch (status) {
+        case WorkflowStepInstanceStatus.Completed:
+          return 'completed-node';
+        case WorkflowStepInstanceStatus.InProgress:
+          return 'active-node';
+        default:
+          return 'pending-node';
+      }
+    };
+
+    const nodes: Node[] = [
       {
         id: 'start',
         type: 'start',
         position: { x: 250, y: 50 },
         data: { label: 'Start' },
       },
-      {
-        id: 'task-1',
-        type: 'task',
-        position: { x: 250, y: 150 },
-        data: { 
-          label: 'Create Request',
-          assignee: 'System',
-          priority: 'medium',
-          status: 'completed'
-        },
-        className: 'completed-node',
-      },
-      {
-        id: 'approval-manager',
-        type: 'approval',
-        position: { x: 250, y: 250 },
-        data: { 
-          label: 'Manager Approval',
-          approvers: ['John Smith'],
-          approvalType: 'any',
-          status: instance.currentStepId === 'approval-manager' ? 'active' : 'pending'
-        },
-        className: instance.currentStepId === 'approval-manager' ? 'active-node' : 'pending-node',
-      },
-      {
-        id: 'condition-1',
-        type: 'condition',
-        position: { x: 250, y: 350 },
-        data: { 
-          label: 'Approved?',
-          operator: 'AND',
-          status: 'pending'
-        },
-        className: 'pending-node',
-      },
-      {
-        id: 'task-2',
-        type: 'task',
-        position: { x: 100, y: 450 },
-        data: { 
-          label: 'Schedule Work',
-          assignee: 'Maintenance Team',
-          priority: 'high',
-          status: 'pending'
-        },
-        className: 'pending-node',
-      },
-      {
-        id: 'task-3',
-        type: 'task',
-        position: { x: 400, y: 450 },
-        data: { 
-          label: 'Send Rejection',
-          assignee: 'System',
-          priority: 'low',
-          status: 'pending'
-        },
-        className: 'pending-node',
-      },
-      {
-        id: 'end',
-        type: 'end',
-        position: { x: 250, y: 550 },
-        data: { label: 'End' },
-        className: 'pending-node',
-      },
     ];
 
-    const mockEdges: Edge[] = [
-      { id: 'e1', source: 'start', target: 'task-1' },
-      { id: 'e2', source: 'task-1', target: 'approval-manager' },
-      { id: 'e3', source: 'approval-manager', target: 'condition-1' },
-      { id: 'e4', source: 'condition-1', target: 'task-2', sourceHandle: 'true', label: 'Approved' },
-      { id: 'e5', source: 'condition-1', target: 'task-3', sourceHandle: 'false', label: 'Rejected' },
-      { id: 'e6', source: 'task-2', target: 'end' },
-      { id: 'e7', source: 'task-3', target: 'end' },
-    ];
+    stepsSorted.forEach((step, index) => {
+      const yOffset = 150 + index * 120;
+      const approvers = instance.pendingApprovals
+        .filter(approval => approval.stepName === step.stepName)
+        .map(approval => approval.approverName);
+      const isApproval = approvalStepNames.has(step.stepName);
+      nodes.push({
+        id: step.stepInstanceId,
+        type: isApproval ? 'approval' : 'task',
+        position: { x: 250, y: yOffset },
+        data: isApproval
+          ? {
+              label: step.stepName,
+              approvers,
+              approvalType: 'any',
+            }
+          : {
+              label: step.stepName,
+              assignee: step.assignedToName ?? 'Unassigned',
+              priority: instance.priority,
+              dueDate: step.dueDate ? new Date(step.dueDate).toLocaleDateString() : undefined,
+            },
+        className: getNodeClassName(step.status),
+      });
+    });
 
-    setNodes(mockNodes);
-    setEdges(mockEdges);
+    const endOffset = 150 + stepsSorted.length * 120;
+    nodes.push({
+      id: 'end',
+      type: 'end',
+      position: { x: 250, y: endOffset },
+      data: { label: 'End' },
+      className:
+        instance.status === 'completed'
+          ? 'completed-node'
+          : 'pending-node',
+    });
+
+    const edges: Edge[] = [];
+    if (stepsSorted.length > 0) {
+      edges.push({ id: 'e-start', source: 'start', target: stepsSorted[0].stepInstanceId });
+    }
+    stepsSorted.forEach((step, index) => {
+      if (index === stepsSorted.length - 1) return;
+      edges.push({
+        id: `e-${step.stepInstanceId}-${stepsSorted[index + 1].stepInstanceId}`,
+        source: step.stepInstanceId,
+        target: stepsSorted[index + 1].stepInstanceId,
+      });
+    });
+    if (stepsSorted.length > 0) {
+      edges.push({
+        id: `e-${stepsSorted[stepsSorted.length - 1].stepInstanceId}-end`,
+        source: stepsSorted[stepsSorted.length - 1].stepInstanceId,
+        target: 'end',
+      });
+    }
+
+    setNodes(nodes);
+    setEdges(edges);
   };
 
   const getStatusIcon = (status: string) => {
@@ -254,11 +410,12 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
     }
   };
 
-  const filteredInstances = instances.filter(instance => {
+  const filteredInstances = instanceViews.filter(instance => {
     const matchesStatus = filterStatus === 'all' || instance.status === filterStatus;
     const matchesSearch = searchTerm === '' || 
       instance.workflowName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       instance.entityId.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      instance.entityType.toLowerCase().includes(searchTerm.toLowerCase()) ||
       instance.currentStepName.toLowerCase().includes(searchTerm.toLowerCase());
     return matchesStatus && matchesSearch;
   });
@@ -272,9 +429,9 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
         <div className="flex items-center justify-between p-4 border-b">
           <h2 className="text-xl font-semibold">Workflow Instance Monitor</h2>
           <div className="flex items-center space-x-2">
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={loadInstances} disabled={isLoading}>
               <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
+              {isLoading ? 'Refreshing...' : 'Refresh'}
             </Button>
             <Button variant="outline" onClick={onClose}>
               <XCircle className="h-4 w-4" />
@@ -319,19 +476,40 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
             {/* Instance List */}
             <ScrollArea className="flex-1">
               <div className="space-y-2 p-4">
+                {isLoading && (
+                  <div className="text-sm text-muted-foreground">Loading workflow instances...</div>
+                )}
+                {!isLoading && loadError && (
+                  <div className="text-sm text-red-600">{loadError}</div>
+                )}
+                {!isLoading && !loadError && filteredInstances.length === 0 && (
+                  <div className="text-sm text-muted-foreground">No workflow instances found.</div>
+                )}
                 {filteredInstances.map((instance) => (
                   <Card 
                     key={instance.id}
                     className={`cursor-pointer transition-colors ${
                       selectedInstance?.id === instance.id ? 'bg-blue-50 border-blue-200' : 'hover:bg-gray-50'
                     }`}
-                    onClick={() => setSelectedInstance(instance)}
+                    onClick={() => setSelectedInstanceId(instance.id)}
                   >
                     <CardContent className="p-3">
                       <div className="flex items-start justify-between mb-2">
                         <div className="flex-1">
                           <h4 className="font-medium text-sm">{instance.workflowName}</h4>
                           <p className="text-xs text-gray-600">{instance.entityId}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="outline" className="text-[10px] px-2">
+                              {instance.entityType}
+                            </Badge>
+                            {instance.entityLink && (
+                              <Button variant="link" size="sm" className="h-auto p-0 text-xs" asChild>
+                                <Link href={instance.entityLink} target="_blank" rel="noreferrer">
+                                  Open
+                                </Link>
+                              </Button>
+                            )}
+                          </div>
                         </div>
                         <div className="flex items-center space-x-1">
                           {getStatusIcon(instance.status)}
@@ -362,11 +540,11 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                         <div className="mt-2">
                           <div className="flex justify-between text-xs mb-1">
                             <span>Progress</span>
-                            <span>{instance.progress}%</span>
-                          </div>
-                          <div className="w-full bg-gray-200 rounded-full h-1.5">
-                            <div 
-                              className="bg-blue-600 h-1.5 rounded-full" 
+                          <span>{instance.progress}%</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-1.5">
+                          <div 
+                            className="bg-blue-600 h-1.5 rounded-full" 
                               style={{ width: `${instance.progress}%` }}
                             />
                           </div>
@@ -398,7 +576,16 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                   <div className="grid grid-cols-4 gap-4 text-sm">
                     <div>
                       <span className="text-gray-600">Entity ID:</span>
-                      <p className="font-medium">{selectedInstance.entityId}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium">{selectedInstance.entityId}</p>
+                        {selectedInstance.entityLink && (
+                          <Button variant="link" size="sm" className="h-auto p-0 text-xs" asChild>
+                            <Link href={selectedInstance.entityLink} target="_blank" rel="noreferrer">
+                              Open
+                            </Link>
+                          </Button>
+                        )}
+                      </div>
                     </div>
                     <div>
                       <span className="text-gray-600">Current Step:</span>
@@ -410,7 +597,7 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                     </div>
                     <div>
                       <span className="text-gray-600">Started:</span>
-                      <p className="font-medium">{new Date(selectedInstance.startedAt).toLocaleString()}</p>
+                      <p className="font-medium">{formatDate(selectedInstance.startedAt)}</p>
                     </div>
                   </div>
                 </div>
@@ -445,38 +632,54 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                   
                   <TabsContent value="history" className="flex-1 p-4">
                     <div className="space-y-3">
-                      <div className="flex items-center p-3 bg-green-50 border border-green-200 rounded">
-                        <CheckCircle className="h-5 w-5 text-green-600 mr-3" />
-                        <div className="flex-1">
-                          <h4 className="font-medium">Create Request</h4>
-                          <p className="text-sm text-gray-600">Completed by System</p>
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          Jan 15, 10:30 AM
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center p-3 bg-blue-50 border border-blue-200 rounded">
-                        <Clock className="h-5 w-5 text-blue-600 mr-3" />
-                        <div className="flex-1">
-                          <h4 className="font-medium">Manager Approval</h4>
-                          <p className="text-sm text-gray-600">Waiting for John Smith</p>
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          In Progress
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center p-3 bg-gray-50 border border-gray-200 rounded opacity-60">
-                        <Timer className="h-5 w-5 text-gray-400 mr-3" />
-                        <div className="flex-1">
-                          <h4 className="font-medium">Schedule Work</h4>
-                          <p className="text-sm text-gray-600">Pending</p>
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          Pending
-                        </div>
-                      </div>
+                      {selectedInstance.steps.length === 0 && (
+                        <div className="text-sm text-muted-foreground">No step history available.</div>
+                      )}
+                      {selectedInstance.steps.map((step) => {
+                        const isCompleted = step.status === WorkflowStepInstanceStatus.Completed;
+                        const isInProgress = step.status === WorkflowStepInstanceStatus.InProgress;
+                        const statusIcon = isCompleted ? (
+                          <CheckCircle className="h-5 w-5 text-green-600 mr-3" />
+                        ) : isInProgress ? (
+                          <Clock className="h-5 w-5 text-blue-600 mr-3" />
+                        ) : (
+                          <Timer className="h-5 w-5 text-gray-400 mr-3" />
+                        );
+
+                        const statusText = isCompleted
+                          ? 'Completed'
+                          : isInProgress
+                            ? 'In Progress'
+                            : 'Pending';
+
+                        const panelClass = isCompleted
+                          ? 'bg-green-50 border-green-200'
+                          : isInProgress
+                            ? 'bg-blue-50 border-blue-200'
+                            : 'bg-gray-50 border-gray-200 opacity-70';
+
+                        return (
+                          <div
+                            key={step.stepInstanceId}
+                            className={`flex items-center p-3 border rounded ${panelClass}`}
+                          >
+                            {statusIcon}
+                            <div className="flex-1">
+                              <h4 className="font-medium">{step.stepName}</h4>
+                              <p className="text-sm text-gray-600">
+                                {step.assignedToName ? `Assigned to ${step.assignedToName}` : 'Unassigned'}
+                              </p>
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              {isCompleted
+                                ? formatDate(step.completedDate)
+                                : step.startedDate
+                                  ? formatDate(step.startedDate)
+                                  : statusText}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </TabsContent>
                   
@@ -511,25 +714,49 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                         <div className="space-y-2 text-sm">
                           <div className="flex justify-between">
                             <span className="text-gray-600">Started At:</span>
-                            <span>{new Date(selectedInstance.startedAt).toLocaleString()}</span>
+                            <span>{formatDate(selectedInstance.startedAt)}</span>
                           </div>
                           {selectedInstance.completedAt && (
                             <div className="flex justify-between">
                               <span className="text-gray-600">Completed At:</span>
-                              <span>{new Date(selectedInstance.completedAt).toLocaleString()}</span>
+                              <span>{formatDate(selectedInstance.completedAt)}</span>
                             </div>
                           )}
                           <div className="flex justify-between">
                             <span className="text-gray-600">Duration:</span>
                             <span>
-                              {selectedInstance.completedAt 
-                                ? `${Math.floor((new Date(selectedInstance.completedAt).getTime() - new Date(selectedInstance.startedAt).getTime()) / (1000 * 60 * 60))}h`
-                                : `${Math.floor((new Date().getTime() - new Date(selectedInstance.startedAt).getTime()) / (1000 * 60 * 60))}h (ongoing)`
-                              }
+                              {formatDuration(selectedInstance.startedAt, selectedInstance.completedAt)}
                             </span>
                           </div>
                         </div>
                       </div>
+                    </div>
+
+                    <div className="mt-6">
+                      <h4 className="font-medium mb-3">Pending Approvals</h4>
+                      {selectedInstance.pendingApprovals.length === 0 && (
+                        <div className="text-sm text-muted-foreground">No pending approvals.</div>
+                      )}
+                      {selectedInstance.pendingApprovals.length > 0 && (
+                        <div className="space-y-2">
+                          {selectedInstance.pendingApprovals.map((approval) => (
+                            <div
+                              key={approval.approvalId}
+                              className="flex items-center justify-between p-3 border rounded bg-amber-50"
+                            >
+                              <div>
+                                <div className="text-sm font-medium">{approval.stepName}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {approval.approverName} • {formatDate(approval.requestedDate)}
+                                </div>
+                              </div>
+                              <Badge variant="outline" className="text-xs">
+                                Pending
+                              </Badge>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </TabsContent>
                 </Tabs>

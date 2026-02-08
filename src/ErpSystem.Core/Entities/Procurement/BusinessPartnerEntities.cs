@@ -4,10 +4,10 @@ using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Core.Entities.Procurement;
 
-#region Business Partner Management (Unified Supplier/Contractor System)
+#region Business Partner Management (Unified Supplier/Contractor/Customer System)
 
 /// <summary>
-/// Unified entity for managing both suppliers and contractors
+/// Unified entity for managing suppliers, contractors, and customers (debtors)
 /// </summary>
 public class BusinessPartner : TenantEntity
 {
@@ -21,7 +21,7 @@ public class BusinessPartner : TenantEntity
 
     [Required]
     [MaxLength(20)]
-    public string PartnerType { get; set; } = "Supplier"; // Supplier, Contractor, Both
+    public string PartnerType { get; set; } = "Supplier"; // Supplier, Contractor, Both, Customer
 
     // Legal & Registration
     [MaxLength(200)]
@@ -160,8 +160,151 @@ public class BusinessPartner : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal? InsuranceCoverage { get; set; }
 
+    // Customer-Specific Fields (for Debtors/Sales)
+    /// <summary>
+    /// Customer account number for sales/AR purposes
+    /// </summary>
+    [MaxLength(50)]
+    public string? CustomerAccountNumber { get; set; }
+
+    /// <summary>
+    /// Customer type classification (e.g., Retail, Wholesale, Corporate, Government)
+    /// </summary>
+    [MaxLength(50)]
+    public string? CustomerType { get; set; }
+
+    /// <summary>
+    /// Credit limit for the customer
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? CreditLimit { get; set; }
+
+    /// <summary>
+    /// Current outstanding balance
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? OutstandingBalance { get; set; }
+
+    /// <summary>
+    /// Payment terms for the customer (e.g., Net 30, Net 60, COD)
+    /// </summary>
+    [MaxLength(50)]
+    public string? PaymentTerms { get; set; }
+
+    /// <summary>
+    /// Currency code for the customer (e.g., USD, EUR, GBP)
+    /// </summary>
+    [MaxLength(50)]
+    public string? Currency { get; set; }
+
+    /// <summary>
+    /// Default discount percentage for the customer
+    /// </summary>
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal? DefaultDiscount { get; set; }
+
+    /// <summary>
+    /// Price list/tier assigned to the customer
+    /// </summary>
+    [MaxLength(50)]
+    public string? PriceList { get; set; }
+
+    /// <summary>
+    /// Sales representative assigned to this customer
+    /// </summary>
+    public Guid? SalesRepresentativeId { get; set; }
+
+    /// <summary>
+    /// Sales territory/region for the customer
+    /// </summary>
+    [MaxLength(100)]
+    public string? SalesTerritory { get; set; }
+
+    /// <summary>
+    /// Tax exemption status
+    /// </summary>
+    public bool IsTaxExempt { get; set; } = false;
+
+    /// <summary>
+    /// Tax exemption certificate number
+    /// </summary>
+    [MaxLength(100)]
+    public string? TaxExemptionNumber { get; set; }
+
+    /// <summary>
+    /// Tax exemption expiry date
+    /// </summary>
+    public DateTime? TaxExemptionExpiry { get; set; }
+
+    /// <summary>
+    /// Shipping method preference
+    /// </summary>
+    [MaxLength(100)]
+    public string? PreferredShippingMethod { get; set; }
+
+    /// <summary>
+    /// Delivery instructions
+    /// </summary>
+    [MaxLength(500)]
+    public string? DeliveryInstructions { get; set; }
+
+    /// <summary>
+    /// Customer since date
+    /// </summary>
+    public DateTime? CustomerSince { get; set; }
+
+    /// <summary>
+    /// Last purchase date
+    /// </summary>
+    public DateTime? LastPurchaseDate { get; set; }
+
+    /// <summary>
+    /// Total lifetime purchases
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? TotalLifetimePurchases { get; set; }
+
+    /// <summary>
+    /// Average order value
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? AverageOrderValue { get; set; }
+
+    /// <summary>
+    /// Customer loyalty tier (e.g., Bronze, Silver, Gold, Platinum)
+    /// </summary>
+    [MaxLength(50)]
+    public string? LoyaltyTier { get; set; }
+
+    /// <summary>
+    /// Loyalty points balance
+    /// </summary>
+    public int? LoyaltyPoints { get; set; }
+
+    /// <summary>
+    /// Whether the customer is on credit hold
+    /// </summary>
+    public bool IsOnCreditHold { get; set; } = false;
+
+    /// <summary>
+    /// Reason for credit hold
+    /// </summary>
+    [MaxLength(500)]
+    public string? CreditHoldReason { get; set; }
+
+    /// <summary>
+    /// Date when credit hold was applied
+    /// </summary>
+    public DateTime? CreditHoldDate { get; set; }
+
     // Metadata
     public string? Notes { get; set; }
+
+    // Parent Business Partner (for hierarchy/categorization)
+    /// <summary>
+    /// Optional parent business partner for creating hierarchies or groupings
+    /// </summary>
+    public Guid? ParentId { get; set; }
 
     // User Account Link (for external portal access)
     /// <summary>
@@ -171,8 +314,11 @@ public class BusinessPartner : TenantEntity
     public Guid? UserId { get; set; }
 
     // Navigation Properties
+    public virtual BusinessPartner? Parent { get; set; }
+    public virtual ICollection<BusinessPartner> Children { get; set; } = new List<BusinessPartner>();
     public virtual ApplicationUser? User { get; set; }
     public virtual ApplicationUser? ApprovedBy { get; set; }
+    public virtual ApplicationUser? SalesRepresentative { get; set; }
     public virtual ICollection<BusinessPartnerCategory> Categories { get; set; } = new List<BusinessPartnerCategory>();
     public virtual ICollection<BusinessPartnerSpecialization> Specializations { get; set; } = new List<BusinessPartnerSpecialization>();
     public virtual ICollection<BusinessPartnerLicense> Licenses { get; set; } = new List<BusinessPartnerLicense>();

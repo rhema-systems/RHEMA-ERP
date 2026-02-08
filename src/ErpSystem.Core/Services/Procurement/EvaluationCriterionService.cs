@@ -65,6 +65,7 @@ public class EvaluationCriterionService : IEvaluationCriterionService
             CriterionName = dto.CriterionName,
             CriterionCode = dto.CriterionCode,
             Category = dto.Category,
+            EvaluationType = dto.EvaluationType,
             Description = dto.Description,
             MaxScore = dto.MaxScore,
             Weight = dto.Weight,
@@ -92,6 +93,7 @@ public class EvaluationCriterionService : IEvaluationCriterionService
         }
 
         criterion.CriterionName = dto.CriterionName;
+        criterion.EvaluationType = dto.EvaluationType;
         criterion.Description = dto.Description;
         criterion.MaxScore = dto.MaxScore;
         criterion.Weight = dto.Weight;
@@ -131,6 +133,7 @@ public class EvaluationCriterionService : IEvaluationCriterionService
             CriterionName = criterion.CriterionName,
             CriterionCode = criterion.CriterionCode,
             Category = criterion.Category,
+            EvaluationType = criterion.EvaluationType,
             Description = criterion.Description,
             MaxScore = criterion.MaxScore,
             Weight = criterion.Weight,

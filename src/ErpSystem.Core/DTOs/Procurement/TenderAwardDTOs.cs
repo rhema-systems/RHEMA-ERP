@@ -29,7 +29,32 @@ public class TenderAwardDto
     public Guid BusinessPartnerId { get; set; }
     public string BusinessPartnerName { get; set; } = string.Empty;
     public DateTime AwardDate { get; set; }
+
+    /// <summary>
+    /// Original bid amount before any negotiation
+    /// </summary>
+    public decimal OriginalBidAmount { get; set; }
+
+    /// <summary>
+    /// Final award amount (negotiated amount if negotiation exists, otherwise original bid amount)
+    /// </summary>
     public decimal AwardedAmount { get; set; }
+
+    /// <summary>
+    /// Reference to the negotiation (if this award used negotiated prices)
+    /// </summary>
+    public Guid? NegotiationId { get; set; }
+
+    /// <summary>
+    /// Indicates if this award was based on a negotiated price
+    /// </summary>
+    public bool IsNegotiated { get; set; }
+
+    /// <summary>
+    /// Savings achieved through negotiation (OriginalBidAmount - AwardedAmount)
+    /// </summary>
+    public decimal NegotiationSavings { get; set; }
+
     public string? Currency { get; set; }
     public string Status { get; set; } = "Awarded";
     public string? AwardJustification { get; set; }
@@ -335,3 +360,99 @@ public class CreateTenderFromTemplateDto
     public DateTime? ClosingDate { get; set; }
 }
 
+/// <summary>
+/// Tender negotiation DTO
+/// </summary>
+public class TenderNegotiationDto
+{
+    public Guid Id { get; set; }
+    public Guid TenderId { get; set; }
+    public string? TenderNumber { get; set; }
+    public string? TenderTitle { get; set; }
+    public Guid TenderBidId { get; set; }
+    public string? BidNumber { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public string? BusinessPartnerName { get; set; }
+    public Guid? LotId { get; set; }
+    public string? LotCode { get; set; }
+    public string? LotTitle { get; set; }
+    public Guid? BidLotId { get; set; }
+    public string Status { get; set; } = "Invited";
+    public DateTime InvitedDate { get; set; }
+    public Guid? InvitedById { get; set; }
+    public string? InvitedByName { get; set; }
+    public DateTime? CompletedDate { get; set; }
+    public Guid? CompletedById { get; set; }
+    public string? CompletedByName { get; set; }
+    public decimal OriginalAmount { get; set; }
+    public decimal? NegotiatedAmount { get; set; }
+    public string? Currency { get; set; }
+    public string? Notes { get; set; }
+    public List<TenderNegotiationItemDto> Items { get; set; } = new();
+    public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>
+/// Tender negotiation item DTO
+/// </summary>
+public class TenderNegotiationItemDto
+{
+    public Guid Id { get; set; }
+    public Guid NegotiationId { get; set; }
+    public Guid TenderBidItemId { get; set; }
+    public string ItemDescription { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+    public string? UnitOfMeasure { get; set; }
+    public decimal OriginalUnitPrice { get; set; }
+    public decimal OriginalTotalPrice { get; set; }
+    public decimal? NegotiatedUnitPrice { get; set; }
+    public decimal? NegotiatedTotalPrice { get; set; }
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// Create negotiation DTO - used to invite a bidder for negotiation
+/// </summary>
+public class CreateNegotiationDto
+{
+    [Required]
+    public Guid TenderId { get; set; }
+
+    [Required]
+    public Guid TenderBidId { get; set; }
+
+    /// <summary>
+    /// Optional LOT ID for per-LOT negotiations
+    /// </summary>
+    public Guid? LotId { get; set; }
+
+    /// <summary>
+    /// Optional bid LOT ID for per-LOT negotiations
+    /// </summary>
+    public Guid? BidLotId { get; set; }
+
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// Update negotiation item DTO - used to update negotiated prices
+/// </summary>
+public class UpdateNegotiationItemDto
+{
+    [Required]
+    public Guid ItemId { get; set; }
+
+    [Range(0, double.MaxValue)]
+    public decimal? NegotiatedUnitPrice { get; set; }
+
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// Complete negotiation DTO
+/// </summary>
+public class CompleteNegotiationDto
+{
+    public List<UpdateNegotiationItemDto> Items { get; set; } = new();
+    public string? Notes { get; set; }
+}

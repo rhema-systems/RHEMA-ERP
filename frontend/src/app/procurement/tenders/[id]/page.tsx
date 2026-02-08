@@ -15,11 +15,14 @@ import { format } from 'date-fns';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
 import { TenderAward } from '@/components/procurement/tenders/TenderAward';
 import { AnswerClarificationDialog } from '@/components/procurement/tenders/AnswerClarificationDialog';
 import TenderEvaluators from '@/components/procurement/tenders/TenderEvaluators';
 import QCBSEvaluationPanel from '@/components/procurement/tenders/QCBSEvaluationPanel';
-import { Calculator } from 'lucide-react';
+import { AwardVerificationResults } from '@/components/procurement/tenders/AwardVerificationResults';
+import { Calculator, Shield } from 'lucide-react';
 
 export default function TenderDetailPage() {
   const params = useParams();
@@ -35,6 +38,8 @@ export default function TenderDetailPage() {
     submissionDeadline: '',
     openingDate: '',
   });
+  const [externalEmailInput, setExternalEmailInput] = useState('');
+  const [externalRecipientEmails, setExternalRecipientEmails] = useState<string[]>([]);
   const [showAnswerDialog, setShowAnswerDialog] = useState(false);
   const [selectedClarification, setSelectedClarification] = useState<any>(null);
 
@@ -63,10 +68,13 @@ export default function TenderDetailPage() {
   const getStatusBadge = (status: string) => {
     const statusConfig: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', className: string }> = {
       'Draft': { variant: 'secondary', className: 'bg-gray-100 text-gray-800' },
+      'Submitted': { variant: 'outline', className: 'bg-yellow-100 text-yellow-800' },
+      'Approved': { variant: 'default', className: 'bg-green-100 text-green-800' },
       'Published': { variant: 'default', className: 'bg-blue-100 text-blue-800' },
       'Closed': { variant: 'outline', className: 'bg-yellow-100 text-yellow-800' },
       'Awarded': { variant: 'default', className: 'bg-green-100 text-green-800' },
       'Cancelled': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
+      'Rejected': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
     };
     
     const config = statusConfig[status] || { variant: 'outline' as const, className: '' };
@@ -113,6 +121,23 @@ export default function TenderDetailPage() {
     setShowPublishDialog(true);
   };
 
+  const addExternalRecipientEmail = () => {
+    const email = externalEmailInput.trim();
+    if (!email) return;
+    if (!email.includes('@')) {
+      toast.error('Please enter a valid email address');
+      return;
+    }
+    setExternalRecipientEmails(prev =>
+      prev.some(e => e.toLowerCase() === email.toLowerCase()) ? prev : [...prev, email]
+    );
+    setExternalEmailInput('');
+  };
+
+  const removeExternalRecipientEmail = (email: string) => {
+    setExternalRecipientEmails(prev => prev.filter(e => e.toLowerCase() !== email.toLowerCase()));
+  };
+
   const handlePublishConfirm = async () => {
     try {
       // Validate dates
@@ -146,11 +171,14 @@ export default function TenderDetailPage() {
         submissionDeadline: publishData.submissionDeadline,
         openingDate: publishData.openingDate || undefined,
         invitedBusinessPartnerIds,
+        externalRecipientEmails,
         sendNotifications: true,
       });
 
       toast.success('Tender published successfully! Notifications sent to invited suppliers.');
       setShowPublishDialog(false);
+      setExternalRecipientEmails([]);
+      setExternalEmailInput('');
 
       // Reload tender details
       await loadTenderDetails();
@@ -204,17 +232,51 @@ export default function TenderDetailPage() {
         </div>
         <div className="flex items-center gap-2">
           {getStatusBadge(tender.status)}
+          {tender.status === 'Submitted' && tender.currentWorkflowStepName && (
+            <Badge variant="outline" className="text-xs">
+              Step: {tender.currentWorkflowStepName}
+            </Badge>
+          )}
+
           {tender.status === 'Draft' && (
-            <>
-              <Button variant="outline" onClick={() => router.push(`/procurement/tenders/${tenderId}/edit`)}>
-                <Edit className="h-4 w-4 mr-2" />
-                Edit
-              </Button>
-              <Button onClick={handlePublishClick}>
-                <Send className="h-4 w-4 mr-2" />
-                Publish Tender
-              </Button>
-            </>
+            <Button variant="outline" onClick={() => router.push(`/procurement/tenders/${tenderId}/edit`)}>
+              <Edit className="h-4 w-4 mr-2" />
+              Edit
+            </Button>
+          )}
+
+          {(tender.status === 'Draft' || tender.status === 'Submitted') && (
+            <WorkflowApprovalActions
+              entityType="Tender"
+              entityId={tender.id}
+              entityLabel="Tender"
+              entityNumber={tender.tenderNumber}
+              status={tender.status}
+              currentStepName={tender.currentWorkflowStepName}
+              loadWorkflowSummary={tender.status === 'Submitted'}
+              canSubmit={tender.status === 'Draft'}
+              canApproveReject={tender.status === 'Submitted'}
+              onSubmit={async () => {
+                await tenderService.submitTenderForApproval(tender.id);
+                await loadTenderDetails();
+              }}
+              onApprove={async (comments) => {
+                await tenderService.approveTender(tender.id, comments || undefined);
+                await loadTenderDetails();
+              }}
+              onReject={async (comments) => {
+                await tenderService.rejectTender(tender.id, comments);
+                await loadTenderDetails();
+              }}
+              onOpenWorkflows={() => router.push('/administration/workflow')}
+            />
+          )}
+
+          {tender.status === 'Approved' && (
+            <Button onClick={handlePublishClick}>
+              <Send className="h-4 w-4 mr-2" />
+              Publish Tender
+            </Button>
           )}
         </div>
       </div>
@@ -257,7 +319,7 @@ export default function TenderDetailPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-11">
+        <TabsList className="grid w-full grid-cols-12">
           <TabsTrigger value="overview">
             <FileText className="h-4 w-4 mr-2" />
             Overview
@@ -302,6 +364,14 @@ export default function TenderDetailPage() {
             <Award className="h-4 w-4 mr-2" />
             Award
           </TabsTrigger>
+          <TabsTrigger value="verification">
+            <Shield className="h-4 w-4 mr-2" />
+            Verification
+          </TabsTrigger>
+          <TabsTrigger value="approvals">
+            <CheckCircle2 className="h-4 w-4 mr-2" />
+            Approvals
+          </TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -321,7 +391,14 @@ export default function TenderDetailPage() {
               </div>
               <div>
                 <p className="text-sm text-gray-500">Status</p>
-                {getStatusBadge(tender.status)}
+                <div className="flex items-center gap-2">
+                  {getStatusBadge(tender.status)}
+                  {tender.status === 'Submitted' && tender.currentWorkflowStepName && (
+                    <Badge variant="outline" className="text-xs">
+                      Step: {tender.currentWorkflowStepName}
+                    </Badge>
+                  )}
+                </div>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Estimated Value</p>
@@ -1080,6 +1157,16 @@ export default function TenderDetailPage() {
             onAwardCreated={loadTenderDetails}
           />
         </TabsContent>
+
+        {/* Verification Tab */}
+        <TabsContent value="verification" className="space-y-4">
+          <AwardVerificationResults tenderId={tenderId} />
+        </TabsContent>
+
+        {/* Approvals Tab */}
+        <TabsContent value="approvals" className="space-y-4">
+          <WorkflowApprovalHistoryPanel entityType="Tender" entityId={tenderId} />
+        </TabsContent>
       </Tabs>
 
       {/* Publish Tender Confirmation Dialog */}
@@ -1152,6 +1239,58 @@ export default function TenderDetailPage() {
               </div>
             </div>
 
+            {/* External/Public Recipients (RFQ) */}
+            {tender?.tenderType === 'RFQ' && (
+              <div className="rounded-lg border bg-white p-4 space-y-3">
+                <h4 className="font-semibold text-sm">Public Suppliers (Email Only)</h4>
+                <p className="text-xs text-muted-foreground">
+                  Add external email recipients to receive the RFQ PDF attachment. Emails are sent individually (no shared BCC list).
+                </p>
+
+                <div className="space-y-2">
+                  <Label>Additional Recipient Email</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="supplier@example.com"
+                      value={externalEmailInput}
+                      onChange={(e) => setExternalEmailInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addExternalRecipientEmail();
+                        }
+                      }}
+                    />
+                    <Button type="button" variant="outline" onClick={addExternalRecipientEmail}>
+                      Add
+                    </Button>
+                  </div>
+                </div>
+
+                {externalRecipientEmails.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {externalRecipientEmails.map((email) => (
+                      <div
+                        key={email}
+                        className="flex items-center gap-2 px-2 py-1 rounded border bg-muted/40 text-xs"
+                      >
+                        <span>{email}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5"
+                          onClick={() => removeExternalRecipientEmail(email)}
+                        >
+                          <XCircle className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* What happens next */}
             <div className="rounded-lg border bg-blue-50 border-blue-200 p-3">
               <div className="flex gap-2">
@@ -1160,7 +1299,7 @@ export default function TenderDetailPage() {
                   <p className="font-medium mb-1">What happens next?</p>
                   <ul className="space-y-1 list-disc list-inside text-xs">
                     <li>Tender status will change to "Published"</li>
-                    <li>Email notifications will be sent to all {tender?.invitations?.length || 0} invited supplier(s)</li>
+                    <li>Email notifications will be sent to all {tender?.invitations?.length || 0} invited supplier(s){externalRecipientEmails.length > 0 ? ` + ${externalRecipientEmails.length} public recipient(s)` : ''}</li>
                     <li>In-app notifications will be created for invited suppliers</li>
                     <li>Suppliers can view the tender and submit bids until the deadline</li>
                   </ul>

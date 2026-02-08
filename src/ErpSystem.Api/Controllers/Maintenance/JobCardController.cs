@@ -286,6 +286,12 @@ public class JobCardController : ControllerBase
                 return BadRequest(ModelState);
             }
 
+            if (approvalDto.Action?.Equals("Reject", StringComparison.OrdinalIgnoreCase) == true &&
+                string.IsNullOrWhiteSpace(approvalDto.Comments))
+            {
+                return BadRequest("Rejection comment is required.");
+            }
+
             var jobCard = await _jobCardService.ProcessApprovalAsync(id, approvalDto);
 
             // Send notification based on approval action

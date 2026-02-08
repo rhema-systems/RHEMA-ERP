@@ -24,6 +24,8 @@ export interface CreateWorkflowDefinitionAdminDto {
   entityType: string;
   isActive: boolean;
   configuration?: string;
+  steps?: CreateWorkflowStepDto[];
+  transitions?: CreateWorkflowTransitionDto[];
 }
 
 export interface UpdateWorkflowDefinitionAdminDto {
@@ -31,6 +33,8 @@ export interface UpdateWorkflowDefinitionAdminDto {
   description?: string;
   isActive: boolean;
   configuration?: string;
+  steps?: CreateWorkflowStepDto[];
+  transitions?: CreateWorkflowTransitionDto[];
 }
 
 export interface WorkflowDefinitionDto {
@@ -65,6 +69,28 @@ export interface WorkflowStepDto {
 
 export interface WorkflowTransitionDto {
   id: string;
+  fromStepId: string;
+  toStepId: string;
+  name: string;
+  description?: string;
+  condition?: WorkflowConditionDto;
+  isDefault: boolean;
+  priority: number;
+}
+
+export interface CreateWorkflowStepDto {
+  id?: string;
+  name: string;
+  description?: string;
+  stepType: WorkflowStepType;
+  order: number;
+  isRequired: boolean;
+  requiredRole?: string;
+  estimatedHours?: number;
+  configuration?: WorkflowStepConfigurationDto;
+}
+
+export interface CreateWorkflowTransitionDto {
   fromStepId: string;
   toStepId: string;
   name: string;
@@ -158,6 +184,8 @@ export interface WorkflowFormFieldDto {
 export interface WorkflowStatusDto {
   workflowInstanceId: string;
   workflowName: string;
+  entityId: string;
+  entityType: string;
   status: WorkflowInstanceStatus;
   startedDate: Date;
   completedDate?: Date;
@@ -196,6 +224,62 @@ export interface WorkflowApprovalStatusDto {
   isOverdue: boolean;
 }
 
+export interface WorkflowPendingApproverDto {
+  approverId?: string;
+  approverName?: string;
+  approverRole?: string;
+}
+
+export interface WorkflowEntitySummaryDto {
+  entityType: string;
+  entityId: string;
+  hasActiveInstance: boolean;
+  workflowInstanceId?: string;
+  workflowName?: string;
+  status?: WorkflowInstanceStatus;
+  currentStepName?: string;
+  currentStepInstanceId?: string;
+  canCurrentUserApprove: boolean;
+  pendingApprovers: WorkflowPendingApproverDto[];
+}
+
+export interface WorkflowApprovalAuditDto {
+  approvalId: string;
+  approverId?: string;
+  approverName?: string;
+  approverRole?: string;
+  status: WorkflowApprovalStatus;
+  requestedDate: Date;
+  processedDate?: Date;
+  comments?: string;
+  processedById?: string;
+  processedByName?: string;
+}
+
+export interface WorkflowStepAuditDto {
+  stepInstanceId: string;
+  stepName: string;
+  stepType: WorkflowStepType;
+  status: WorkflowStepInstanceStatus;
+  startedDate?: Date;
+  completedDate?: Date;
+  assignedToId?: string;
+  assignedToName?: string;
+  comments?: string;
+  approvals: WorkflowApprovalAuditDto[];
+}
+
+export interface WorkflowEntityAuditDto {
+  entityType: string;
+  entityId: string;
+  workflowInstanceId: string;
+  workflowName: string;
+  status: WorkflowInstanceStatus;
+  startedDate: Date;
+  completedDate?: Date;
+  steps: WorkflowStepAuditDto[];
+}
+
 export interface WorkflowExecutionResult {
   success: boolean;
   message?: string;
@@ -224,6 +308,25 @@ export interface WorkflowValidationError {
   message: string;
   stepId?: string;
   transitionId?: string;
+}
+
+export interface WorkflowVariableInfo {
+  name: string;
+  displayName: string;
+  dataType: string;
+  description?: string;
+  possibleValues?: string[];
+}
+
+export interface WorkflowEntityTypeInfo {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  displayOrder: number;
+  icon?: string;
+  colorCode?: string;
+  isActive: boolean;
 }
 
 // Administration DTOs

@@ -198,6 +198,12 @@ public class TenderAwardConfiguration : IEntityTypeConfiguration<TenderAward>
             .WithMany()
             .HasForeignKey(a => a.BusinessPartnerId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // Negotiation relationship
+        builder.HasOne(a => a.Negotiation)
+            .WithMany()
+            .HasForeignKey(a => a.NegotiationId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -274,7 +280,7 @@ public class EvaluationTemplateCriterionConfiguration : IEntityTypeConfiguration
             .OnDelete(DeleteBehavior.Cascade);
 
         builder.HasOne(tc => tc.EvaluationCriterion)
-            .WithMany()
+            .WithMany(ec => ec.TemplateCriteria)
             .HasForeignKey(tc => tc.EvaluationCriterionId)
             .OnDelete(DeleteBehavior.Restrict);
     }

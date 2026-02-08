@@ -799,7 +799,7 @@ public class ProcurementPlanService : IProcurementPlanService
         {
             Id = Guid.NewGuid(),
             OrderNumber = poNumber,
-            SupplierId = dto.SupplierId,
+            BusinessPartnerId = dto.SupplierId,
             OrderDate = DateTime.UtcNow,
             RequiredDate = dto.RequiredDate ?? planItem.RequiredDate ?? DateTime.UtcNow.AddDays(14),
             Status = "Draft",

@@ -24,6 +24,12 @@ public interface ISettingsService
     Task<SystemSettings> SetSystemSettingAsync(string key, string value, string? description = null);
     Task<IEnumerable<SystemSettings>> GetAllSystemSettingsAsync();
     Task DeleteSystemSettingAsync(string key);
+    
+    // Field Label Configuration
+    Task<Dictionary<string, string>> GetFieldLabelsAsync(string module);
+    Task<Dictionary<string, string>> SetFieldLabelsAsync(string module, Dictionary<string, string> labels);
+    Task<string> GetFieldLabelAsync(string module, string fieldName);
+    Task SetFieldLabelAsync(string module, string fieldName, string label);
 }
 
 public class SettingsService : ISettingsService
@@ -393,6 +399,138 @@ public class SettingsService : ISettingsService
             _logger.LogError(ex, "Error deleting system setting {Key}", key);
             throw;
         }
+    }
+
+    #endregion
+
+    #region Field Label Configuration
+
+    private const string FieldLabelKeyPrefix = "FieldLabel";
+
+    /// <summary>
+    /// Gets all field labels for a specific module (e.g., "InventoryItem", "BusinessPartner")
+    /// </summary>
+    public async Task<Dictionary<string, string>> GetFieldLabelsAsync(string module)
+    {
+        try
+        {
+            var prefix = $"{FieldLabelKeyPrefix}:{module}:";
+            var allSettings = await _unitOfWork.Repository<SystemSettings>().GetAllAsync();
+            var fieldLabels = allSettings
+                .Where(s => s.Key.StartsWith(prefix))
+                .ToDictionary(
+                    s => s.Key.Substring(prefix.Length),
+                    s => s.Value
+                );
+
+            // Return default labels if none are configured
+            if (fieldLabels.Count == 0 && module == "InventoryItem")
+            {
+                return GetDefaultInventoryItemLabels();
+            }
+
+            return fieldLabels;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving field labels for module {Module}", module);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Sets multiple field labels for a module at once
+    /// </summary>
+    public async Task<Dictionary<string, string>> SetFieldLabelsAsync(string module, Dictionary<string, string> labels)
+    {
+        try
+        {
+            foreach (var label in labels)
+            {
+                await SetFieldLabelAsync(module, label.Key, label.Value);
+            }
+
+            _logger.LogInformation("Updated {Count} field labels for module {Module}", labels.Count, module);
+            return await GetFieldLabelsAsync(module);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error setting field labels for module {Module}", module);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Gets a single field label
+    /// </summary>
+    public async Task<string> GetFieldLabelAsync(string module, string fieldName)
+    {
+        try
+        {
+            var key = $"{FieldLabelKeyPrefix}:{module}:{fieldName}";
+            var setting = await GetSystemSettingAsync(key);
+            
+            if (setting != null)
+            {
+                return setting.Value;
+            }
+
+            // Return default label if not configured
+            return GetDefaultLabel(module, fieldName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving field label {Module}:{FieldName}", module, fieldName);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Sets a single field label
+    /// </summary>
+    public async Task SetFieldLabelAsync(string module, string fieldName, string label)
+    {
+        try
+        {
+            var key = $"{FieldLabelKeyPrefix}:{module}:{fieldName}";
+            var description = $"Custom label for {module}.{fieldName} field";
+            await SetSystemSettingAsync(key, label, description);
+            _logger.LogInformation("Set field label {Module}:{FieldName} = {Label}", module, fieldName, label);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error setting field label {Module}:{FieldName}", module, fieldName);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Gets default labels for inventory item fields
+    /// </summary>
+    private Dictionary<string, string> GetDefaultInventoryItemLabels()
+    {
+        return new Dictionary<string, string>
+        {
+            { "Brand", "Brand" },
+            { "Manufacturer", "Manufacturer" },
+            { "Style", "Style" },
+            { "Feature", "Feature" }
+        };
+    }
+
+    /// <summary>
+    /// Gets the default label for a field if no custom label is configured
+    /// </summary>
+    private string GetDefaultLabel(string module, string fieldName)
+    {
+        if (module == "InventoryItem")
+        {
+            var defaults = GetDefaultInventoryItemLabels();
+            return defaults.TryGetValue(fieldName, out var label) ? label : fieldName;
+        }
+
+        // Default to the field name itself
+        return fieldName;
     }
 
     #endregion

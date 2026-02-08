@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
+using System.Threading;
 
 namespace ErpSystem.Core.Interfaces.Procurement;
 
@@ -15,6 +16,12 @@ public interface ITenderService
     Task<IEnumerable<TenderDto>> GetActiveTendersAsync();
     Task<TenderDetailDto> CreateTenderAsync(CreateTenderDto dto);
     Task<TenderDetailDto> UpdateTenderAsync(Guid id, UpdateTenderDto dto);
+
+    // Unified workflow approval (approve before publishing)
+    Task SubmitTenderForApprovalAsync(Guid id, Guid userId);
+    Task ApproveTenderAsync(Guid id, Guid userId, string? comments = null);
+    Task RejectTenderAsync(Guid id, Guid userId, string reason, string? comments = null);
+
     Task<TenderDetailDto> PublishTenderAsync(Guid id, PublishTenderDto dto);
     Task DeleteTenderAsync(Guid id);
     
@@ -158,12 +165,18 @@ public interface ITenderAwardService
 {
     Task<TenderAwardDto?> GetAwardByIdAsync(Guid id);
     Task<TenderAwardDto?> GetAwardByTenderIdAsync(Guid tenderId);
+    Task<TenderAwardDto?> GetAwardByBidIdAsync(Guid bidId);
     Task<PagedResult<TenderAwardDto>> GetAwardsAsync(int page, int pageSize, string? search = null, string? status = null);
     Task<AwardRecommendationDto> GenerateAwardRecommendationAsync(Guid tenderId);
     Task<TenderAwardDto> CreateAwardAsync(Guid tenderId, CreateAwardDto dto);
     Task<TenderAwardDto> UpdateAwardAsync(Guid id, CreateAwardDto dto);
     Task CancelAwardAsync(Guid id, CancelAwardDto dto);
     Task SendAwardNotificationsAsync(Guid tenderId, AwardNotificationDto dto);
+    
+    /// <summary>
+    /// Create a purchase order from a tender award
+    /// </summary>
+    Task<PurchaseOrderFromAwardResponseDto> CreatePurchaseOrderFromAwardAsync(CreatePurchaseOrderFromAwardDto dto);
 }
 
 /// <summary>
@@ -171,7 +184,7 @@ public interface ITenderAwardService
 /// </summary>
 public interface ITenderNotificationService
 {
-    Task SendTenderPublishedNotificationAsync(Guid tenderId, List<Guid> businessPartnerIds);
+    Task SendTenderPublishedNotificationAsync(Guid tenderId, List<Guid> businessPartnerIds, List<string>? externalRecipientEmails = null);
     Task SendBidSubmittedNotificationAsync(Guid bidId);
     Task SendEvaluationAssignedNotificationAsync(Guid tenderId, List<Guid> evaluatorIds);
     Task SendInterviewScheduledNotificationAsync(Guid interviewId);
@@ -179,6 +192,15 @@ public interface ITenderNotificationService
     Task SendRejectionNotificationsAsync(Guid tenderId, List<Guid> rejectedBidIds);
     Task SendClarificationNotificationAsync(Guid clarificationId, bool isAnswer = false);
     Task SendRevisionNotificationAsync(Guid revisionId);
+}
+
+/// <summary>
+/// Generates tender/RFQ invitation documents (PDF) for email attachments.
+/// Implementations live in the API project (QuestPDF) and are consumed by core services.
+/// </summary>
+public interface ITenderInvitationDocumentService
+{
+    Task<(byte[] Content, string FileName)> GenerateTenderInvitationPdfAsync(Guid tenderId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -210,4 +232,20 @@ public interface IPerformanceBondService
     Task<PerformanceBondRequestDto> CreateRequestAsync(CreatePerformanceBondRequestDto dto, string? templateFilePath, string? templateFileName, string? templateFileType, long? templateFileSize);
     Task<PerformanceBondRequestDto> SubmitBondAsync(Guid requestId, SubmitPerformanceBondDto dto, string filePath, string fileName, string? fileType, long? fileSize);
     Task<PerformanceBondRequestDto> ReviewBondAsync(Guid requestId, ReviewPerformanceBondDto dto);
+}
+
+/// <summary>
+/// Tender negotiation service interface
+/// </summary>
+public interface ITenderNegotiationService
+{
+    Task<TenderNegotiationDto?> GetByIdAsync(Guid id);
+    Task<TenderNegotiationDto?> GetByTenderAndBidAsync(Guid tenderId, Guid bidId);
+    Task<IEnumerable<TenderNegotiationDto>> GetByTenderIdAsync(Guid tenderId);
+    Task<IEnumerable<TenderNegotiationDto>> GetByBidIdAsync(Guid bidId);
+    Task<TenderNegotiationDto> CreateNegotiationAsync(CreateNegotiationDto dto);
+    Task<TenderNegotiationDto> UpdateNegotiationItemAsync(Guid negotiationId, UpdateNegotiationItemDto dto);
+    Task<TenderNegotiationDto> SaveDraftAsync(Guid negotiationId, CompleteNegotiationDto dto);
+    Task<TenderNegotiationDto> CompleteNegotiationAsync(Guid negotiationId, CompleteNegotiationDto dto);
+    Task CancelNegotiationAsync(Guid negotiationId);
 }

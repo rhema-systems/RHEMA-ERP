@@ -37,21 +37,22 @@ public class WorkOrderLaborService : IWorkOrderLaborService
     {
         try
         {
-            _logger.LogInformation("Starting labor for work order {WorkOrderId}", createDto.WorkOrderId);
+            _logger.LogInformation("Starting labor for work order {WorkOrderId} with technician {TechnicianId}",
+                createDto.WorkOrderId, createDto.TechnicianId);
 
             var workOrder = await _workOrderRepository.GetByIdAsync(createDto.WorkOrderId)
                 ?? throw new ArgumentException($"Work order with ID {createDto.WorkOrderId} not found");
 
-            // Use the current logged-in user's ID as the technician - the person completing the work is the one logging it
-            var currentUserId = _currentUserService.UserId;
-            if (string.IsNullOrEmpty(currentUserId) || !Guid.TryParse(currentUserId, out var technicianId))
+            // Use the technician ID from the DTO (selected by the user in the UI)
+            var technicianId = createDto.TechnicianId;
+            if (technicianId == Guid.Empty)
             {
-                throw new InvalidOperationException("Current user ID is required to log labor");
+                throw new ArgumentException("Technician ID is required to log labor");
             }
 
-            // Verify the user exists
+            // Verify the technician (user) exists
             var technician = await _userService.GetUserByIdAsync(technicianId)
-                ?? throw new ArgumentException($"Current user with ID {technicianId} not found");
+                ?? throw new ArgumentException($"Technician with ID {technicianId} not found");
 
             var labor = new WorkOrderLabor
             {
@@ -69,7 +70,8 @@ public class WorkOrderLaborService : IWorkOrderLaborService
             await _laborRepository.AddAsync(labor);
             await _unitOfWork.SaveChangesAsync();
 
-            _logger.LogInformation("Started labor {LaborId} for work order {WorkOrderId} by user {UserId}", labor.Id, createDto.WorkOrderId, technicianId);
+            _logger.LogInformation("Started labor {LaborId} for work order {WorkOrderId} by technician {TechnicianId}",
+                labor.Id, createDto.WorkOrderId, technicianId);
 
             return await MapToDto(labor);
         }

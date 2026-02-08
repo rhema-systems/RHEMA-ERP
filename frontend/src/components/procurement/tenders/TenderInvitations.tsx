@@ -10,25 +10,29 @@ import { UserPlus, Trash2, Mail, Search, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { tenderService, type InviteTenderersDto } from '@/services/tenderService';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import { purchasingService, type SuggestedSupplierDto } from '@/services/purchasingService';
 
 interface TenderInvitationsProps {
   formData: TenderFormData;
   updateFormData: (data: Partial<TenderFormData>) => void;
   tenderId: string | null;
+  fromRequisitionId?: string | null;
 }
 
-export default function TenderInvitations({ formData, updateFormData, tenderId }: TenderInvitationsProps) {
+export default function TenderInvitations({ formData, updateFormData, tenderId, fromRequisitionId }: TenderInvitationsProps) {
   const [businessPartners, setBusinessPartners] = useState<BusinessPartnerDto[]>([]);
   const [filteredPartners, setFilteredPartners] = useState<BusinessPartnerDto[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPartnerIds, setSelectedPartnerIds] = useState<string[]>([]);
+  const [suggestedSuppliers, setSuggestedSuppliers] = useState<SuggestedSupplierDto[]>([]);
   // Don't send notifications during tender creation/editing - only when publishing
   const [sendNotifications, setSendNotifications] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     loadBusinessPartners();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromRequisitionId]);
 
   useEffect(() => {
     if (searchTerm) {
@@ -47,9 +51,45 @@ export default function TenderInvitations({ formData, updateFormData, tenderId }
   const loadBusinessPartners = async () => {
     try {
       setLoading(true);
-      const partners = await businessPartnerService.getActivePartners();
-      setBusinessPartners(partners);
-      setFilteredPartners(partners);
+      // RFQ/Tender invitations should support approved + pending + inactive suppliers.
+      // We'll fetch all partners and filter on the client to Supplier/Both for selection.
+      const partnerResult = await businessPartnerService.getPartners({ page: 1, pageSize: 1000 });
+      const partners = (partnerResult.items || []).filter(
+        (p) => p.partnerType === 'Supplier' || p.partnerType === 'Both'
+      );
+
+      let suggested: SuggestedSupplierDto[] = [];
+      if (fromRequisitionId) {
+        try {
+          suggested = await purchasingService.getSuggestedSuppliersForRequisition(fromRequisitionId);
+          setSuggestedSuppliers(suggested);
+        } catch (e) {
+          console.warn('Failed to load suggested suppliers:', e);
+          setSuggestedSuppliers([]);
+        }
+      } else {
+        setSuggestedSuppliers([]);
+      }
+
+      const suggestedMap = new Map(suggested.map((s) => [s.supplierId.toLowerCase(), s]));
+      const sorted = [...partners].sort((a, b) => {
+        const sa = suggestedMap.get(a.id.toLowerCase());
+        const sb = suggestedMap.get(b.id.toLowerCase());
+
+        // Suggested suppliers first.
+        if (sa && !sb) return -1;
+        if (!sa && sb) return 1;
+
+        if (sa && sb) {
+          if (sb.preferredItemCount !== sa.preferredItemCount) return sb.preferredItemCount - sa.preferredItemCount;
+          if (sb.itemMatchCount !== sa.itemMatchCount) return sb.itemMatchCount - sa.itemMatchCount;
+        }
+
+        return a.partnerName.localeCompare(b.partnerName);
+      });
+
+      setBusinessPartners(sorted);
+      setFilteredPartners(sorted);
     } catch (error: any) {
       console.error('Error loading business partners:', error);
       toast.error('Failed to load business partners');
@@ -195,11 +235,12 @@ export default function TenderInvitations({ formData, updateFormData, tenderId }
                 </div>
               ) : (
                 <div className="divide-y">
-                  {filteredPartners.map((partner) => {
+              {filteredPartners.map((partner) => {
                     const isInvited = formData.invitations.some(
                       (inv) => inv.businessPartnerId === partner.id
                     );
                     const isSelected = selectedPartnerIds.includes(partner.id);
+                    const suggested = suggestedSuppliers.find((s) => s.supplierId.toLowerCase() === partner.id.toLowerCase());
 
                     return (
                       <div
@@ -220,9 +261,22 @@ export default function TenderInvitations({ formData, updateFormData, tenderId }
                             <div className="flex items-center gap-2">
                               <span className="font-medium">{partner.partnerName}</span>
                               <span className="text-xs text-gray-500">({partner.partnerCode})</span>
+                              {suggested && (
+                                <span className="px-2 py-0.5 text-xs bg-indigo-100 text-indigo-700 rounded">
+                                  Suggested
+                                </span>
+                              )}
                               {isInvited && (
                                 <span className="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded">
                                   Already Invited
+                                </span>
+                              )}
+                              <span className="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded">
+                                {partner.status}
+                              </span>
+                              {partner.approvalStatus && (
+                                <span className="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded">
+                                  {partner.approvalStatus}
                                 </span>
                               )}
                             </div>
@@ -230,6 +284,11 @@ export default function TenderInvitations({ formData, updateFormData, tenderId }
                               {partner.email && <span>{partner.email}</span>}
                               {partner.phone && <span className="ml-3">{partner.phone}</span>}
                             </div>
+                            {suggested && (suggested.preferredItemCount > 0 || suggested.itemMatchCount > 0) && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                Match: {suggested.itemMatchCount} item(s){suggested.preferredItemCount > 0 ? ` • Preferred: ${suggested.preferredItemCount}` : ''}
+                              </div>
+                            )}
                             {partner.performanceRating && (
                               <div className="text-xs text-gray-500 mt-1">
                                 Rating: {partner.performanceRating.toFixed(1)} / 5.0
@@ -341,5 +400,4 @@ export default function TenderInvitations({ formData, updateFormData, tenderId }
     </div>
   );
 }
-
 

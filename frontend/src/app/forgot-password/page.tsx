@@ -13,6 +13,7 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { authService } from '../../services/auth';
+import { toast } from 'sonner';
 
 const forgotPasswordSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -40,7 +41,7 @@ export default function ForgotPasswordPage() {
     onError: (error: any) => {
       const message = error.message || 'Failed to request password reset. Please try again.';
       console.error('Forgot password error:', message);
-      alert(message);
+      toast.error(message);
     },
   });
 

@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Services;
 
 namespace ErpSystem.Core.Services.Maintenance;
 
@@ -14,15 +15,21 @@ public class AssetConditionService : IAssetConditionService
     private readonly IAssetConditionRepository _repository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IWorkOrderTaskRepository _taskRepository;
+    private readonly IUserService _userService;
 
     public AssetConditionService(
         IAssetConditionRepository repository,
         IUnitOfWork unitOfWork,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        IWorkOrderTaskRepository taskRepository,
+        IUserService userService)
     {
         _repository = repository;
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
+        _taskRepository = taskRepository;
+        _userService = userService;
     }
 
     private Guid TenantId => _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Tenant not found");
@@ -172,50 +179,60 @@ public class AssetConditionService : IAssetConditionService
     {
         var record = await _repository.GetRecordByIdAsync(id, TenantId)
             ?? throw new KeyNotFoundException($"Asset condition record with ID {id} not found");
-        return MapRecordToDto(record);
+        return await MapRecordToDtoAsync(record);
     }
 
     public async Task<AssetConditionRecordDto> GetRecordWithDetailsAsync(Guid id)
     {
         var record = await _repository.GetRecordWithDetailsAsync(id, TenantId)
             ?? throw new KeyNotFoundException($"Asset condition record with ID {id} not found");
-        return MapRecordToDto(record);
+        return await MapRecordToDtoAsync(record);
     }
 
     public async Task<IEnumerable<AssetConditionRecordSummaryDto>> GetAllRecordsAsync(int page = 1, int pageSize = 20)
     {
         var records = await _repository.GetAllRecordsAsync(TenantId, page, pageSize);
-        return records.Select(MapRecordToSummaryDto);
+        var results = new List<AssetConditionRecordSummaryDto>();
+        foreach (var record in records)
+        {
+            results.Add(await MapRecordToSummaryDtoAsync(record));
+        }
+        return results;
     }
 
     public async Task<IEnumerable<AssetConditionRecordSummaryDto>> GetRecordsByAssetAsync(Guid assetId)
     {
         var records = await _repository.GetRecordsByAssetAsync(assetId, TenantId);
-        return records.Select(MapRecordToSummaryDto);
+        var results = new List<AssetConditionRecordSummaryDto>();
+        foreach (var record in records)
+        {
+            results.Add(await MapRecordToSummaryDtoAsync(record));
+        }
+        return results;
     }
 
     public async Task<AssetConditionRecordDto?> GetAdmissionRecordForAdmissionAsync(Guid admissionId)
     {
         var record = await _repository.GetAdmissionRecordForAdmissionAsync(admissionId, TenantId);
-        return record != null ? MapRecordToDto(record) : null;
+        return record != null ? await MapRecordToDtoAsync(record) : null;
     }
 
     public async Task<AssetConditionRecordDto?> GetDischargeRecordForAdmissionAsync(Guid admissionId)
     {
         var record = await _repository.GetDischargeRecordForAdmissionAsync(admissionId, TenantId);
-        return record != null ? MapRecordToDto(record) : null;
+        return record != null ? await MapRecordToDtoAsync(record) : null;
     }
 
     public async Task<AssetConditionRecordDto?> GetAdmissionRecordForJobCardAsync(Guid jobCardId)
     {
         var record = await _repository.GetAdmissionRecordForJobCardAsync(jobCardId, TenantId);
-        return record != null ? MapRecordToDto(record) : null;
+        return record != null ? await MapRecordToDtoAsync(record) : null;
     }
 
     public async Task<AssetConditionRecordDto?> GetDischargeRecordForJobCardAsync(Guid jobCardId)
     {
         var record = await _repository.GetDischargeRecordForJobCardAsync(jobCardId, TenantId);
-        return record != null ? MapRecordToDto(record) : null;
+        return record != null ? await MapRecordToDtoAsync(record) : null;
     }
 
     public async Task<AssetConditionRecordDto> StartConditionInspectionAsync(CreateAssetConditionRecordDto dto)
@@ -224,6 +241,8 @@ public class AssetConditionService : IAssetConditionService
             ?? throw new KeyNotFoundException($"Template with ID {dto.TemplateId} not found");
 
         var prefix = dto.InspectionType == "Admission" ? "ADM" : "DIS";
+        // Use provided InspectorId if available, otherwise default to current user
+        var inspectorId = dto.InspectorId ?? UserId;
         var record = new AssetConditionRecord
         {
             Id = Guid.NewGuid(),
@@ -231,7 +250,7 @@ public class AssetConditionService : IAssetConditionService
             InspectionNumber = $"{prefix}-{DateTime.UtcNow:yyyyMMddHHmmss}",
             AssetId = dto.AssetId,
             TemplateId = dto.TemplateId,
-            InspectorId = UserId,
+            InspectorId = inspectorId,
             InspectionDate = DateTime.UtcNow,
             InspectionType = dto.InspectionType,
             Status = "InProgress",
@@ -280,6 +299,14 @@ public class AssetConditionService : IAssetConditionService
         itemResult.NumericValue = dto.NumericValue;
         itemResult.SelectedOption = dto.SelectedOption;
         itemResult.Comment = dto.Comment;
+        itemResult.RepairReplacementAction = dto.RepairReplacementAction;
+        // Set photo paths - replace with the provided list (frontend is responsible for managing the full list)
+        if (dto.PhotoPaths != null)
+        {
+            itemResult.PhotoPaths = dto.PhotoPaths.Count > 0
+                ? JsonSerializer.Serialize(dto.PhotoPaths)
+                : null;
+        }
         itemResult.InspectedAt = DateTime.UtcNow;
         itemResult.UpdatedAt = DateTime.UtcNow;
         itemResult.LastModifiedById = UserId;
@@ -304,9 +331,73 @@ public class AssetConditionService : IAssetConditionService
         record.LastModifiedById = UserId;
 
         await _repository.UpdateRecordAsync(record);
+
+        // For admission inspections, create work order tasks for items with repair/replacement actions
+        if (record.InspectionType == "Admission" && record.AdmissionId.HasValue)
+        {
+            await CreateRepairReplacementTasksAsync(record);
+        }
+
         await _unitOfWork.SaveChangesAsync();
 
         return await GetRecordWithDetailsAsync(recordId);
+    }
+
+    /// <summary>
+    /// Creates work order tasks for checklist items that have repair/replacement actions selected
+    /// </summary>
+    private async Task CreateRepairReplacementTasksAsync(AssetConditionRecord record)
+    {
+        if (record.Admission?.WorkOrderId == null)
+            return;
+
+        var workOrderId = record.Admission.WorkOrderId.Value;
+
+        // Get existing tasks to determine the next sequence number
+        var existingTasks = await _taskRepository.GetByWorkOrderIdAsync(workOrderId);
+        var nextSequence = existingTasks.Any() ? existingTasks.Max(t => t.Sequence) + 1 : 1;
+
+        foreach (var itemResult in record.ItemResults.Where(ir => !ir.IsDeleted))
+        {
+            // Skip items without repair/replacement action or with "None" action
+            if (string.IsNullOrEmpty(itemResult.RepairReplacementAction) ||
+                itemResult.RepairReplacementAction == "None" ||
+                itemResult.TaskCreated)
+                continue;
+
+            var checklistItem = itemResult.ChecklistItem;
+            if (checklistItem == null || !checklistItem.AllowRepairReplacement)
+                continue;
+
+            // Determine estimated hours based on action
+            var estimatedHours = itemResult.RepairReplacementAction == "Repair"
+                ? checklistItem.EstimatedRepairHours
+                : checklistItem.EstimatedReplacementHours;
+
+            // Create the work order task
+            var task = new WorkOrderTask
+            {
+                Id = Guid.NewGuid(),
+                WorkOrderId = workOrderId,
+                TaskName = $"{itemResult.RepairReplacementAction} - {checklistItem.ItemName}",
+                Description = $"[From Admission Checklist] {checklistItem.Description ?? checklistItem.ItemName}. " +
+                              $"Inspector comment: {itemResult.Comment ?? "No comment"}",
+                Sequence = nextSequence++,
+                EstimatedHours = estimatedHours,
+                IsRequired = true,
+                TenantId = TenantId,
+                CreatedAt = DateTime.UtcNow,
+                CreatedById = UserId,
+                Status = "Pending"
+            };
+
+            await _taskRepository.AddAsync(task);
+
+            // Mark the item result as having a task created
+            itemResult.TaskCreated = true;
+            itemResult.CreatedTaskId = task.Id;
+            await _repository.UpdateItemResultAsync(itemResult);
+        }
     }
 
     public async Task CancelConditionInspectionAsync(Guid recordId)
@@ -371,6 +462,98 @@ public class AssetConditionService : IAssetConditionService
         return await GetRecordWithDetailsAsync(recordId);
     }
 
+    /// <summary>
+    /// Creates work order tasks from completed admission checklist items that have repair/replacement actions.
+    /// This is called after a work order is generated from a job card.
+    /// </summary>
+    public async Task<int> CreateTasksFromAdmissionChecklistAsync(Guid jobCardId, Guid workOrderId)
+    {
+        // Get the admission condition record for this job card
+        var record = await _repository.GetAdmissionRecordForJobCardAsync(jobCardId, TenantId);
+
+        if (record == null)
+        {
+            // No admission checklist found for this job card - that's OK, not all job cards have them
+            return 0;
+        }
+
+        if (record.Status != "Completed")
+        {
+            // Checklist not completed yet - can't create tasks from incomplete checklist
+            return 0;
+        }
+
+        // Load item results with checklist items
+        var recordWithDetails = await _repository.GetRecordWithDetailsAsync(record.Id, TenantId);
+        if (recordWithDetails == null)
+        {
+            return 0;
+        }
+
+        // Get existing tasks to determine the next sequence number
+        var existingTasks = await _taskRepository.GetByWorkOrderIdAsync(workOrderId);
+        var nextSequence = existingTasks.Any() ? existingTasks.Max(t => t.Sequence) + 1 : 1;
+
+        var tasksCreated = 0;
+
+        foreach (var itemResult in recordWithDetails.ItemResults.Where(ir => !ir.IsDeleted))
+        {
+            // Skip items without repair/replacement action or with "None" action
+            if (string.IsNullOrEmpty(itemResult.RepairReplacementAction) ||
+                itemResult.RepairReplacementAction == "None" ||
+                itemResult.TaskCreated)
+                continue;
+
+            var checklistItem = itemResult.ChecklistItem;
+            if (checklistItem == null || !checklistItem.AllowRepairReplacement)
+                continue;
+
+            // Determine estimated hours based on action
+            var estimatedHours = itemResult.RepairReplacementAction == "Repair"
+                ? checklistItem.EstimatedRepairHours
+                : checklistItem.EstimatedReplacementHours;
+
+            // Create descriptive task name and description
+            var actionType = itemResult.RepairReplacementAction == "Repair" ? "REPAIR" : "REPLACE";
+
+            // Create the work order task
+            var task = new WorkOrderTask
+            {
+                Id = Guid.NewGuid(),
+                WorkOrderId = workOrderId,
+                TaskName = $"[{actionType}] {checklistItem.ItemName}",
+                Description = $"[From Admission Checklist - {actionType}]\n" +
+                              $"Item: {checklistItem.ItemName}\n" +
+                              $"Description: {checklistItem.Description ?? "N/A"}\n" +
+                              $"Action Required: {itemResult.RepairReplacementAction}\n" +
+                              $"Inspector Comment: {itemResult.Comment ?? "No comment provided"}",
+                Sequence = nextSequence++,
+                EstimatedHours = estimatedHours,
+                IsRequired = true,
+                TenantId = TenantId,
+                CreatedAt = DateTime.UtcNow,
+                CreatedById = UserId,
+                Status = "Pending"
+            };
+
+            await _taskRepository.AddAsync(task);
+
+            // Mark the item result as having a task created
+            itemResult.TaskCreated = true;
+            itemResult.CreatedTaskId = task.Id;
+            await _repository.UpdateItemResultAsync(itemResult);
+
+            tasksCreated++;
+        }
+
+        if (tasksCreated > 0)
+        {
+            await _unitOfWork.SaveChangesAsync();
+        }
+
+        return tasksCreated;
+    }
+
     #endregion
 
     #region Private Helper Methods
@@ -405,6 +588,10 @@ public class AssetConditionService : IAssetConditionService
             DefaultValue = dto.DefaultValue,
             HelpText = dto.HelpText,
             RequiresPhoto = dto.RequiresPhoto,
+            AllowRepairReplacement = dto.AllowRepairReplacement,
+            DefaultRepairReplacementAction = dto.DefaultRepairReplacementAction,
+            EstimatedRepairHours = dto.EstimatedRepairHours,
+            EstimatedReplacementHours = dto.EstimatedReplacementHours,
             CreatedAt = DateTime.UtcNow,
             CreatedById = UserId
         };
@@ -425,6 +612,10 @@ public class AssetConditionService : IAssetConditionService
         item.DefaultValue = dto.DefaultValue;
         item.HelpText = dto.HelpText;
         item.RequiresPhoto = dto.RequiresPhoto;
+        item.AllowRepairReplacement = dto.AllowRepairReplacement;
+        item.DefaultRepairReplacementAction = dto.DefaultRepairReplacementAction;
+        item.EstimatedRepairHours = dto.EstimatedRepairHours;
+        item.EstimatedReplacementHours = dto.EstimatedReplacementHours;
         item.UpdatedAt = DateTime.UtcNow;
         item.LastModifiedById = UserId;
     }
@@ -470,13 +661,18 @@ public class AssetConditionService : IAssetConditionService
             MaxValue = item.MaxValue,
             DefaultValue = item.DefaultValue,
             HelpText = item.HelpText,
-            RequiresPhoto = item.RequiresPhoto
+            RequiresPhoto = item.RequiresPhoto,
+            AllowRepairReplacement = item.AllowRepairReplacement,
+            DefaultRepairReplacementAction = item.DefaultRepairReplacementAction,
+            EstimatedRepairHours = item.EstimatedRepairHours,
+            EstimatedReplacementHours = item.EstimatedReplacementHours
         };
     }
 
-    private static AssetConditionRecordDto MapRecordToDto(AssetConditionRecord record)
+    private async Task<AssetConditionRecordDto> MapRecordToDtoAsync(AssetConditionRecord record)
     {
         var itemResults = record.ItemResults?.ToList() ?? new List<AssetConditionItemResult>();
+        var inspectorName = await GetUserNameByIdAsync(record.InspectorId);
         return new AssetConditionRecordDto
         {
             Id = record.Id,
@@ -487,7 +683,7 @@ public class AssetConditionService : IAssetConditionService
             TemplateId = record.TemplateId,
             TemplateName = record.Template?.Name ?? string.Empty,
             InspectorId = record.InspectorId,
-            InspectorName = string.Empty, // Inspector name must be looked up separately from Users table
+            InspectorName = inspectorName,
             InspectionDate = record.InspectionDate,
             InspectionType = record.InspectionType,
             Status = record.Status,
@@ -504,9 +700,10 @@ public class AssetConditionService : IAssetConditionService
         };
     }
 
-    private static AssetConditionRecordSummaryDto MapRecordToSummaryDto(AssetConditionRecord record)
+    private async Task<AssetConditionRecordSummaryDto> MapRecordToSummaryDtoAsync(AssetConditionRecord record)
     {
         var itemResults = record.ItemResults?.ToList() ?? new List<AssetConditionItemResult>();
+        var inspectorName = await GetUserNameByIdAsync(record.InspectorId);
         return new AssetConditionRecordSummaryDto
         {
             Id = record.Id,
@@ -514,7 +711,7 @@ public class AssetConditionService : IAssetConditionService
             AssetName = record.Asset?.Name ?? string.Empty,
             AssetNumber = record.Asset?.AssetNumber ?? string.Empty,
             TemplateName = record.Template?.Name ?? string.Empty,
-            InspectorName = string.Empty, // Inspector name must be looked up separately from Users table
+            InspectorName = inspectorName,
             InspectionDate = record.InspectionDate,
             InspectionType = record.InspectionType,
             Status = record.Status,
@@ -523,6 +720,28 @@ public class AssetConditionService : IAssetConditionService
             HasAdmission = record.AdmissionId.HasValue,
             HasDischarge = record.DischargeId.HasValue
         };
+    }
+
+    private async Task<string> GetUserNameByIdAsync(Guid userId)
+    {
+        try
+        {
+            var user = await _userService.GetUserByIdAsync(userId);
+            if (user != null)
+            {
+                // Return full name if available, otherwise username
+                if (!string.IsNullOrEmpty(user.FirstName) || !string.IsNullOrEmpty(user.LastName))
+                {
+                    return $"{user.FirstName} {user.LastName}".Trim();
+                }
+                return user.UserName ?? "Unknown";
+            }
+            return "Unknown";
+        }
+        catch
+        {
+            return "Unknown";
+        }
     }
 
     private static AssetConditionItemResultDto MapItemResultToDto(AssetConditionItemResult result)
@@ -544,7 +763,11 @@ public class AssetConditionService : IAssetConditionService
             PhotoPaths = !string.IsNullOrEmpty(result.PhotoPaths)
                 ? JsonSerializer.Deserialize<List<string>>(result.PhotoPaths)
                 : null,
-            InspectedAt = result.InspectedAt
+            InspectedAt = result.InspectedAt,
+            RepairReplacementAction = result.RepairReplacementAction,
+            TaskCreated = result.TaskCreated,
+            CreatedTaskId = result.CreatedTaskId,
+            AllowRepairReplacement = result.ChecklistItem?.AllowRepairReplacement ?? false
         };
     }
 

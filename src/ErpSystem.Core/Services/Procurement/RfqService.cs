@@ -1,0 +1,949 @@
+using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Events;
+using ErpSystem.Core.Interfaces.Procurement;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace ErpSystem.Core.Services.Procurement;
+
+public class RfqService : IRfqService
+{
+    private readonly IRequestForQuotationRepository _rfqRepository;
+    private readonly IRequestForQuotationItemRepository _rfqItemRepository;
+    private readonly IRequestForQuotationInvitationRepository _invitationRepository;
+    private readonly IRequestForQuotationQuoteRepository _quoteRepository;
+    private readonly IPurchaseRequisitionRepository _purchaseRequisitionRepository;
+    private readonly IPurchaseRequisitionItemRepository _purchaseRequisitionItemRepository;
+    private readonly IBusinessPartnerRepository _businessPartnerRepository;
+    private readonly IPurchaseOrderRepository _purchaseOrderRepository;
+    private readonly IRfqNotificationService _rfqNotificationService;
+    private readonly IAppEventBus _appEventBus;
+    private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILogger<RfqService> _logger;
+
+    public RfqService(
+        IRequestForQuotationRepository rfqRepository,
+        IRequestForQuotationItemRepository rfqItemRepository,
+        IRequestForQuotationInvitationRepository invitationRepository,
+        IRequestForQuotationQuoteRepository quoteRepository,
+        IPurchaseRequisitionRepository purchaseRequisitionRepository,
+        IPurchaseRequisitionItemRepository purchaseRequisitionItemRepository,
+        IBusinessPartnerRepository businessPartnerRepository,
+        IPurchaseOrderRepository purchaseOrderRepository,
+        IRfqNotificationService rfqNotificationService,
+        IAppEventBus appEventBus,
+        ICurrentUserProvider currentUserProvider,
+        IUnitOfWork unitOfWork,
+        ILogger<RfqService> logger)
+    {
+        _rfqRepository = rfqRepository;
+        _rfqItemRepository = rfqItemRepository;
+        _invitationRepository = invitationRepository;
+        _quoteRepository = quoteRepository;
+        _purchaseRequisitionRepository = purchaseRequisitionRepository;
+        _purchaseRequisitionItemRepository = purchaseRequisitionItemRepository;
+        _businessPartnerRepository = businessPartnerRepository;
+        _purchaseOrderRepository = purchaseOrderRepository;
+        _rfqNotificationService = rfqNotificationService;
+        _appEventBus = appEventBus;
+        _currentUserProvider = currentUserProvider;
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
+
+    public async Task<PagedResult<RfqDto>> GetRfqsAsync(int page, int pageSize, string? search = null, string? status = null)
+    {
+        var result = await _rfqRepository.GetRfqsAsync(page, pageSize, search, status);
+
+        return new PagedResult<RfqDto>
+        {
+            Page = result.Page,
+            PageSize = result.PageSize,
+            TotalCount = result.TotalCount,
+            Items = result.Items.Select(MapToDto).ToList()
+        };
+    }
+
+    public async Task<RfqDetailDto?> GetRfqByIdAsync(Guid id)
+    {
+        var rfq = await _rfqRepository.GetWithDetailsAsync(id);
+        if (rfq == null) return null;
+
+        return MapToDetailDto(rfq);
+    }
+
+    public async Task<RfqDetailDto> CreateRfqFromPurchaseRequisitionAsync(Guid purchaseRequisitionId, CreateRfqFromPurchaseRequisitionDto? dto = null)
+    {
+        dto ??= new CreateRfqFromPurchaseRequisitionDto();
+
+        var pr = await _purchaseRequisitionRepository.GetRequisitionByIdAsync(purchaseRequisitionId)
+            ?? throw new InvalidOperationException($"Purchase requisition with ID {purchaseRequisitionId} not found");
+
+        if (!string.Equals(pr.Status, "Approved", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Purchase requisition must be approved to create an RFQ. Current status: {pr.Status}");
+
+        var prItems = (await _purchaseRequisitionItemRepository.GetItemsByRequisitionIdAsync(purchaseRequisitionId)).ToList();
+        if (prItems.Count == 0)
+            throw new InvalidOperationException("Purchase requisition has no items");
+
+        var rfqNumber = await _rfqRepository.GenerateRfqNumberAsync();
+
+        var rfq = new RequestForQuotation
+        {
+            TenantId = _currentUserProvider.TenantId,
+            RfqNumber = rfqNumber,
+            Title = $"RFQ for {pr.RequisitionNumber}",
+            Description = pr.Justification,
+            Status = "Draft",
+            Currency = "USD",
+            EstimatedValue = pr.TotalAmount,
+            SourcePurchaseRequisitionId = pr.Id,
+            ExternalRecipientEmails = string.IsNullOrWhiteSpace(dto.ExternalRecipientEmails) ? null : dto.ExternalRecipientEmails.Trim(),
+            CreatedById = _currentUserProvider.UserId,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        await _rfqRepository.AddAsync(rfq);
+        await _unitOfWork.SaveChangesAsync(); // persist RFQ Id
+
+        var line = 1;
+        foreach (var item in prItems)
+        {
+            var rfqItem = new RequestForQuotationItem
+            {
+                TenantId = _currentUserProvider.TenantId,
+                RfqId = rfq.Id,
+                SourcePurchaseRequisitionItemId = item.Id,
+                LineNumber = line++,
+                InventoryItemId = item.InventoryItemId,
+                ItemCode = item.InventoryItem?.ItemCode,
+                Description = !string.IsNullOrWhiteSpace(item.ItemDescription)
+                    ? item.ItemDescription
+                    : (item.InventoryItem?.Name ?? "Item"),
+                Quantity = item.Quantity,
+                UnitOfMeasure = item.UnitOfMeasure ?? string.Empty,
+                Specifications = item.Specifications,
+                RequiredDeliveryDate = item.RequiredDate
+            };
+
+            await _rfqItemRepository.AddAsync(rfqItem);
+        }
+
+        await SyncInvitationsAsync(rfq.Id, dto.SupplierIds, isDraftSelection: true);
+
+        await _unitOfWork.SaveChangesAsync();
+
+        var created = await _rfqRepository.GetWithDetailsAsync(rfq.Id)
+            ?? throw new InvalidOperationException("Failed to load created RFQ");
+
+        return MapToDetailDto(created);
+    }
+
+    public async Task<RfqDetailDto> UpdateRfqAsync(Guid id, UpdateRfqDto dto)
+    {
+        var rfq = await _rfqRepository.GetWithDetailsAsync(id)
+            ?? throw new InvalidOperationException($"RFQ with ID {id} not found");
+
+        if (rfq.Status is "Closed" or "Awarded" or "Cancelled")
+            throw new InvalidOperationException($"RFQ cannot be edited in current status: {rfq.Status}");
+
+        if (!string.IsNullOrWhiteSpace(dto.Title))
+            rfq.Title = dto.Title.Trim();
+
+        if (dto.Description != null)
+            rfq.Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim();
+
+        if (dto.SubmissionDeadline.HasValue)
+            rfq.SubmissionDeadline = dto.SubmissionDeadline;
+
+        if (!string.IsNullOrWhiteSpace(dto.Currency))
+            rfq.Currency = dto.Currency.Trim();
+
+        if (dto.EstimatedValue.HasValue)
+            rfq.EstimatedValue = dto.EstimatedValue.Value;
+
+        if (dto.ExternalRecipientEmails != null)
+            rfq.ExternalRecipientEmails = string.IsNullOrWhiteSpace(dto.ExternalRecipientEmails) ? null : dto.ExternalRecipientEmails.Trim();
+
+        await _rfqRepository.UpdateAsync(rfq);
+
+        if (dto.SupplierIds != null)
+        {
+            await SyncInvitationsAsync(rfq.Id, dto.SupplierIds, isDraftSelection: true);
+        }
+
+        await _unitOfWork.SaveChangesAsync();
+
+        var updated = await _rfqRepository.GetWithDetailsAsync(rfq.Id)
+            ?? throw new InvalidOperationException("Failed to load updated RFQ");
+
+        return MapToDetailDto(updated);
+    }
+
+    public async Task SendRfqAsync(Guid id, SendRfqDto dto)
+    {
+        var rfq = await _rfqRepository.GetWithDetailsAsync(id)
+            ?? throw new InvalidOperationException($"RFQ with ID {id} not found");
+
+        if (rfq.Status is "Closed" or "Awarded" or "Cancelled")
+            throw new InvalidOperationException($"RFQ cannot be sent in current status: {rfq.Status}");
+
+        var supplierIds = (dto.SupplierIds ?? new List<Guid>())
+            .Where(x => x != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        var externalEmails = string.IsNullOrWhiteSpace(dto.ExternalRecipientEmails)
+            ? null
+            : dto.ExternalRecipientEmails.Trim();
+
+        if (supplierIds.Count == 0 && string.IsNullOrWhiteSpace(externalEmails))
+            throw new InvalidOperationException("Please select at least one supplier and/or provide external recipient email(s).");
+
+        rfq.ExternalRecipientEmails = externalEmails;
+        rfq.Status = "Sent";
+        rfq.SentAt = DateTime.UtcNow;
+
+        await _rfqRepository.UpdateAsync(rfq);
+
+        await SyncInvitationsAsync(rfq.Id, supplierIds, isDraftSelection: false);
+
+        await _unitOfWork.SaveChangesAsync();
+
+        // Send notifications after data is persisted (so portal users can open it).
+        await _rfqNotificationService.SendRfqSentNotificationAsync(rfq.Id, supplierIds, ParseEmails(externalEmails));
+    }
+
+    public async Task<List<RfqDto>> GetSupplierRfqsAsync(Guid businessPartnerId, Guid tenantId)
+    {
+        var invitations = await _invitationRepository.GetForSupplierAsync(businessPartnerId, tenantId);
+
+        return invitations
+            .Select(i => i.Rfq)
+            .Where(r => r != null && !r.IsDeleted)
+            .OrderByDescending(r => r.SentAt ?? r.CreatedAt)
+            .Select(MapToDto)
+            .ToList();
+    }
+
+    public async Task<RfqDetailDto?> GetSupplierRfqDetailAsync(Guid rfqId, Guid businessPartnerId, Guid tenantId)
+    {
+        var invitations = await _invitationRepository.GetForSupplierAsync(businessPartnerId, tenantId);
+        var allowed = invitations.Any(i => i.RfqId == rfqId);
+        if (!allowed) return null;
+
+        var rfq = await _rfqRepository.GetWithDetailsAsync(rfqId);
+        if (rfq == null) return null;
+
+        // Do NOT expose other suppliers' quotes in the supplier portal.
+        var detail = MapToDetailDto(rfq);
+        detail.Quotes = detail.Quotes
+            .Where(q => q.BusinessPartnerId == businessPartnerId)
+            .ToList();
+        detail.QuoteCount = detail.Quotes.Count;
+
+        return detail;
+    }
+
+    public async Task<RfqQuoteDto> SubmitQuoteAsync(Guid rfqId, Guid businessPartnerId, Guid submittedByUserId, Guid tenantId, SubmitRfqQuoteDto dto)
+    {
+        var rfq = await _rfqRepository.GetWithDetailsAsync(rfqId)
+            ?? throw new InvalidOperationException($"RFQ with ID {rfqId} not found");
+
+        if (!string.Equals(rfq.Status, "Sent", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"RFQ is not open for quotations. Current status: {rfq.Status}");
+
+        var invitations = await _invitationRepository.GetForSupplierAsync(businessPartnerId, tenantId);
+        var invitation = invitations.FirstOrDefault(i => i.RfqId == rfqId);
+        if (invitation == null)
+            throw new InvalidOperationException("You are not invited to this RFQ");
+
+        var rfqItems = (rfq.Items ?? new List<RequestForQuotationItem>())
+            .Where(i => !i.IsDeleted)
+            .OrderBy(i => i.LineNumber)
+            .ToList();
+
+        if (rfqItems.Count == 0)
+            throw new InvalidOperationException("RFQ has no items");
+
+        var priceByItem = (dto.Items ?? new List<SubmitRfqQuoteItemDto>())
+            .Where(x => x.RfqItemId != Guid.Empty)
+            .GroupBy(x => x.RfqItemId)
+            .ToDictionary(g => g.Key, g => g.Last().UnitPrice);
+
+        foreach (var item in rfqItems)
+        {
+            if (!priceByItem.ContainsKey(item.Id))
+                throw new InvalidOperationException($"Missing unit price for line {item.LineNumber}: {item.Description}");
+        }
+
+        RequestForQuotationQuote? quote = null;
+
+        await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync();
+            try
+            {
+                quote = await _quoteRepository.GetByRfqAndSupplierAsync(rfqId, businessPartnerId, tenantId);
+
+                if (quote == null)
+                {
+                    quote = new RequestForQuotationQuote
+                    {
+                        TenantId = tenantId,
+                        RfqId = rfqId,
+                        BusinessPartnerId = businessPartnerId,
+                        Status = "Draft",
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    await _quoteRepository.AddAsync(quote);
+                    await _unitOfWork.SaveChangesAsync(); // persist Quote Id
+                }
+
+                // Replace quote items (soft delete existing to keep audit-friendly history).
+                // Save the soft-deletes first (within the transaction) to avoid unique-index conflicts on re-insert.
+                var quoteItemRepo = _unitOfWork.Repository<RequestForQuotationQuoteItem>();
+                var existingItems = quote.Items?.Where(i => !i.IsDeleted).ToList() ?? new List<RequestForQuotationQuoteItem>();
+                foreach (var existing in existingItems)
+                {
+                    existing.IsDeleted = true;
+                    await quoteItemRepo.UpdateAsync(existing);
+                }
+                await _unitOfWork.SaveChangesAsync();
+
+                var total = 0m;
+                foreach (var item in rfqItems)
+                {
+                    var unitPrice = priceByItem[item.Id];
+                    var lineTotal = decimal.Round(unitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero);
+                    total += lineTotal;
+
+                    var quoteItem = new RequestForQuotationQuoteItem
+                    {
+                        TenantId = tenantId,
+                        QuoteId = quote.Id,
+                        RfqItemId = item.Id,
+                        UnitPrice = unitPrice,
+                        LineTotal = lineTotal
+                    };
+                    await quoteItemRepo.AddAsync(quoteItem);
+                }
+
+                quote.Notes = dto.Notes;
+                quote.Status = "Submitted";
+                quote.SubmittedAt = DateTime.UtcNow;
+                quote.SubmittedByUserId = submittedByUserId;
+
+                await _quoteRepository.UpdateAsync(quote);
+
+                invitation.Status = "Responded";
+                invitation.RespondedAt = DateTime.UtcNow;
+                await _invitationRepository.UpdateAsync(invitation);
+
+                await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.CommitAsync();
+            }
+            catch
+            {
+                await _unitOfWork.RollbackAsync();
+                throw;
+            }
+        });
+
+        if (quote == null)
+            throw new InvalidOperationException("Failed to load submitted quote");
+
+        var refreshed = await _rfqRepository.GetWithDetailsAsync(rfqId)
+            ?? throw new InvalidOperationException("Failed to load RFQ after quote submission");
+
+        var submitted = refreshed.Quotes.FirstOrDefault(q => q.Id == quote.Id);
+        if (submitted == null)
+            throw new InvalidOperationException("Failed to load submitted quote");
+
+        // Notify internal procurement users (best-effort; do not fail quote submission if notification fails).
+        try
+        {
+            await _rfqNotificationService.SendRfqQuoteSubmittedNotificationAsync(rfqId, quote.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send RFQ quote submitted notification for RFQ {RfqId} Quote {QuoteId}", rfqId, quote.Id);
+        }
+
+        // Publish generic entity activity events to drive admin-configurable notification topics (best-effort).
+        try
+        {
+            var bp = await _businessPartnerRepository.GetByIdAsync(businessPartnerId);
+            var data = new Dictionary<string, object>
+            {
+                ["RfqId"] = rfqId,
+                ["RfqNumber"] = rfq.RfqNumber,
+                ["QuoteId"] = quote.Id,
+                ["BusinessPartnerId"] = businessPartnerId,
+                ["SupplierName"] = bp?.PartnerName ?? string.Empty,
+            };
+
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = tenantId,
+                EntityType = "RFQ",
+                Activity = "QuoteSubmitted",
+                Audience = "Internal",
+                EntityId = rfqId,
+                TriggeredByUserId = submittedByUserId,
+                Data = data
+            });
+
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = tenantId,
+                EntityType = "RFQ",
+                Activity = "QuoteSubmitted",
+                Audience = "Supplier",
+                EntityId = rfqId,
+                TriggeredByUserId = submittedByUserId,
+                Data = data
+            });
+
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = tenantId,
+                EntityType = "SupplierQuote",
+                Activity = "Submitted",
+                Audience = "Internal",
+                EntityId = quote.Id,
+                TriggeredByUserId = submittedByUserId,
+                Data = data
+            });
+
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = tenantId,
+                EntityType = "SupplierQuote",
+                Activity = "Submitted",
+                Audience = "Supplier",
+                EntityId = quote.Id,
+                TriggeredByUserId = submittedByUserId,
+                Data = data
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish QuoteSubmitted entity activity event for RFQ {RfqId} Quote {QuoteId}", rfqId, quote.Id);
+        }
+
+        var awardedQuoteIdByItemId = (refreshed.AwardLines ?? new List<RequestForQuotationAwardLine>())
+            .Where(a => !a.IsDeleted)
+            .GroupBy(a => a.RfqItemId)
+            .ToDictionary(g => g.Key, g => g.Last().QuoteId);
+
+        return MapToQuoteDto(submitted, awardedQuoteIdByItemId);
+    }
+
+    public async Task<CreatePurchaseOrdersFromRfqResponseDto> CreatePurchaseOrdersFromAwardAsync(Guid rfqId, CreatePurchaseOrdersFromRfqDto dto)
+    {
+        dto ??= new CreatePurchaseOrdersFromRfqDto();
+
+        CreatePurchaseOrdersFromRfqResponseDto? response = null;
+
+        await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync();
+            try
+            {
+                var rfq = await _rfqRepository.GetWithDetailsAsync(rfqId)
+                    ?? throw new InvalidOperationException($"RFQ with ID {rfqId} not found");
+
+                if (rfq.Status is "Closed" or "Awarded" or "Cancelled")
+                    throw new InvalidOperationException($"RFQ cannot be awarded in current status: {rfq.Status}");
+
+                if (!string.Equals(rfq.Status, "Sent", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"RFQ must be Sent before awarding. Current status: {rfq.Status}");
+
+                // Prevent accidental double-awards (creates duplicate POs).
+                var hasExistingPo = await _unitOfWork.Repository<PurchaseOrder>()
+                    .ExistsAsync(po => po.TenantId == _currentUserProvider.TenantId && po.SourceRfqId == rfqId);
+                if (hasExistingPo)
+                    throw new InvalidOperationException("This RFQ already has purchase order(s) created from it.");
+
+                var rfqItems = (rfq.Items ?? new List<RequestForQuotationItem>())
+                    .Where(i => !i.IsDeleted)
+                    .OrderBy(i => i.LineNumber)
+                    .ToList();
+
+                if (rfqItems.Count == 0)
+                    throw new InvalidOperationException("RFQ has no items");
+
+                var submittedQuotes = (rfq.Quotes ?? new List<RequestForQuotationQuote>())
+                    .Where(q => !q.IsDeleted && string.Equals(q.Status, "Submitted", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (submittedQuotes.Count == 0)
+                    throw new InvalidOperationException("RFQ has no submitted quotes to award.");
+
+                var mode = (dto.Mode ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(mode)) mode = "WinnerTakesAll";
+
+                // Build selections: one quote line per RFQ item.
+                var selections = new List<(RequestForQuotationItem Item, RequestForQuotationQuote Quote, RequestForQuotationQuoteItem QuoteItem)>();
+
+                if (string.Equals(mode, "WinnerTakesAll", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!dto.QuoteId.HasValue || dto.QuoteId.Value == Guid.Empty)
+                        throw new InvalidOperationException("QuoteId is required for WinnerTakesAll awarding.");
+
+                    var quote = submittedQuotes.FirstOrDefault(q => q.Id == dto.QuoteId.Value)
+                        ?? throw new InvalidOperationException("Selected quote was not found or not submitted.");
+
+                    foreach (var item in rfqItems)
+                    {
+                        var quoteItem = (quote.Items ?? new List<RequestForQuotationQuoteItem>())
+                            .FirstOrDefault(i => !i.IsDeleted && i.RfqItemId == item.Id);
+
+                        if (quoteItem == null)
+                            throw new InvalidOperationException($"Selected quote is missing pricing for RFQ line {item.LineNumber}: {item.Description}");
+
+                        selections.Add((item, quote, quoteItem));
+                    }
+                }
+                else if (string.Equals(mode, "SplitAward", StringComparison.OrdinalIgnoreCase))
+                {
+                    var lines = (dto.Lines ?? new List<RfqSplitAwardLineDto>())
+                        .Where(l => l.RfqItemId != Guid.Empty && l.QuoteId != Guid.Empty)
+                        .ToList();
+
+                    // Must select a quote for every RFQ item.
+                    var distinctItemIds = lines.Select(l => l.RfqItemId).Distinct().ToList();
+                    if (distinctItemIds.Count != rfqItems.Count)
+                        throw new InvalidOperationException("Split award requires selecting a supplier quote for every RFQ item.");
+
+                    var selectedByItem = lines
+                        .GroupBy(l => l.RfqItemId)
+                        .ToDictionary(g => g.Key, g => g.Last().QuoteId);
+
+                    foreach (var item in rfqItems)
+                    {
+                        if (!selectedByItem.TryGetValue(item.Id, out var quoteId))
+                            throw new InvalidOperationException($"Split award selection missing for RFQ line {item.LineNumber}: {item.Description}");
+
+                        var quote = submittedQuotes.FirstOrDefault(q => q.Id == quoteId)
+                            ?? throw new InvalidOperationException($"Selected quote {quoteId} was not found or not submitted.");
+
+                        var quoteItem = (quote.Items ?? new List<RequestForQuotationQuoteItem>())
+                            .FirstOrDefault(i => !i.IsDeleted && i.RfqItemId == item.Id);
+
+                        if (quoteItem == null)
+                            throw new InvalidOperationException($"Selected quote is missing pricing for RFQ line {item.LineNumber}: {item.Description}");
+
+                        selections.Add((item, quote, quoteItem));
+                    }
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Unknown award mode: {dto.Mode}");
+                }
+
+                response = new CreatePurchaseOrdersFromRfqResponseDto();
+
+                // Load PR number if RFQ was generated from PR.
+                string? sourcePrNumber = null;
+                if (rfq.SourcePurchaseRequisitionId.HasValue && rfq.SourcePurchaseRequisitionId.Value != Guid.Empty)
+                {
+                    var pr = await _purchaseRequisitionRepository.GetRequisitionByIdAsync(rfq.SourcePurchaseRequisitionId.Value);
+                    sourcePrNumber = pr?.RequisitionNumber;
+                }
+
+                // Group by supplier -> one PO per supplier.
+                var groups = selections
+                    .GroupBy(x => x.Quote.BusinessPartnerId)
+                    .ToList();
+
+                // Create PO headers first (save immediately) to avoid:
+                // - OrderNumber duplicate race
+                // - FK failure when PO items are inserted but PO header insert fails
+                var poItemRepo = _unitOfWork.Repository<PurchaseOrderItem>();
+
+                var createdPos = new Dictionary<Guid, PurchaseOrder>(); // supplierId -> PO
+                foreach (var group in groups)
+                {
+                    var supplierId = group.Key;
+                    var first = group.First();
+                    var supplierName = first.Quote.BusinessPartner?.PartnerName ?? string.Empty;
+
+                    var subTotal = group.Sum(x => x.QuoteItem.LineTotal);
+
+                    var po = new PurchaseOrder
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = _currentUserProvider.TenantId,
+                        OrderNumber = await _purchaseOrderRepository.GenerateOrderNumberAsync(),
+                        BusinessPartnerId = supplierId,
+                        OrderDate = DateTime.UtcNow,
+                        Status = "Draft",
+                        RequestedById = _currentUserProvider.UserId,
+
+                        SubTotal = subTotal,
+                        TaxAmount = 0,
+                        ShippingCost = 0,
+                        MiscellaneousCost = 0,
+                        TotalAdditionalCost = 0,
+                        DiscountAmount = 0,
+                        TotalAmount = subTotal,
+
+                        Currency = rfq.Currency ?? "USD",
+                        ExchangeRate = 1,
+
+                        Notes = $"Created from RFQ {rfq.RfqNumber}.",
+
+                        SourceRequisitionId = rfq.SourcePurchaseRequisitionId,
+                        SourceRequisitionNumber = sourcePrNumber,
+                        SourceRfqId = rfq.Id,
+                        SourceRfqNumber = rfq.RfqNumber,
+                        SourceRfqAwardType = string.Equals(mode, "SplitAward", StringComparison.OrdinalIgnoreCase) ? "SplitAward" : "WinnerTakesAll",
+                        SourceRfqQuoteId = string.Equals(mode, "WinnerTakesAll", StringComparison.OrdinalIgnoreCase) ? first.Quote.Id : null,
+
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedById = _currentUserProvider.UserId
+                    };
+
+                    await _purchaseOrderRepository.CreatePurchaseOrderAsync(po);
+                    await SaveChangesWithPurchaseOrderNumberRetryAsync(po);
+
+                    createdPos[supplierId] = po;
+                    response.PurchaseOrders.Add(new CreatedPurchaseOrderFromRfqDto
+                    {
+                        PurchaseOrderId = po.Id,
+                        OrderNumber = po.OrderNumber,
+                        BusinessPartnerId = supplierId,
+                        BusinessPartnerName = supplierName,
+                        TotalAmount = po.TotalAmount
+                    });
+                }
+
+                // Create award audit lines + PO items + PR item links.
+                var awardRepo = _unitOfWork.Repository<RequestForQuotationAwardLine>();
+
+                foreach (var (item, quote, quoteItem) in selections)
+                {
+                    var supplierId = quote.BusinessPartnerId;
+                    var po = createdPos[supplierId];
+
+                    // Award audit
+                    var award = new RequestForQuotationAwardLine
+                    {
+                        TenantId = _currentUserProvider.TenantId,
+                        RfqId = rfq.Id,
+                        RfqItemId = item.Id,
+                        BusinessPartnerId = quote.BusinessPartnerId,
+                        QuoteId = quote.Id,
+                        QuoteItemId = quoteItem.Id,
+                        UnitPrice = quoteItem.UnitPrice,
+                        LineTotal = quoteItem.LineTotal,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedById = _currentUserProvider.UserId
+                    };
+                    await awardRepo.AddAsync(award);
+
+                    // PO item
+                    var orderedQty = item.Quantity;
+                    var poItem = new PurchaseOrderItem
+                    {
+                        TenantId = _currentUserProvider.TenantId,
+                        PurchaseOrderId = po.Id,
+                        InventoryItemId = item.InventoryItemId,
+                        ItemDescription = item.Description,
+                        OrderedQuantity = orderedQty,
+                        ReceivedQuantity = 0,
+                        RemainingQuantity = orderedQty,
+                        UnitOfMeasure = item.UnitOfMeasure ?? "EA",
+                        UnitPrice = quoteItem.UnitPrice,
+                        LineTotal = quoteItem.LineTotal,
+
+                        SourceRfqItemId = item.Id,
+                        SourceRfqQuoteId = quote.Id,
+                        SourceRfqQuoteItemId = quoteItem.Id,
+
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedById = _currentUserProvider.UserId
+                    };
+                    await poItemRepo.AddAsync(poItem);
+
+                    // Update source PR line to point to the created PO (if available).
+                    if (item.SourcePurchaseRequisitionItemId.HasValue && item.SourcePurchaseRequisitionItemId.Value != Guid.Empty)
+                    {
+                        var prItem = await _purchaseRequisitionItemRepository.GetByIdAsync(item.SourcePurchaseRequisitionItemId.Value);
+                        if (prItem != null)
+                        {
+                            prItem.PurchaseOrderId = po.Id;
+                            prItem.Status = "Ordered";
+                            prItem.UpdatedAt = DateTime.UtcNow;
+                            prItem.LastModifiedById = _currentUserProvider.UserId;
+                            await _purchaseRequisitionItemRepository.UpdateAsync(prItem);
+                        }
+                    }
+                }
+
+                // Mark RFQ as awarded to prevent re-award and further edits.
+                rfq.Status = "Awarded";
+                rfq.UpdatedAt = DateTime.UtcNow;
+                rfq.LastModifiedById = _currentUserProvider.UserId;
+                await _rfqRepository.UpdateAsync(rfq);
+
+                await _unitOfWork.CommitAsync();
+            }
+            catch
+            {
+                await _unitOfWork.RollbackAsync();
+                throw;
+            }
+        });
+
+        // Notify awarded suppliers (best-effort; do not fail award/PO creation if notification fails).
+        try
+        {
+            await _rfqNotificationService.SendRfqAwardedNotificationAsync(rfqId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send RFQ awarded notifications for RFQ {RfqId}", rfqId);
+        }
+
+        return response ?? new CreatePurchaseOrdersFromRfqResponseDto();
+    }
+
+    private static bool IsDuplicatePurchaseOrderNumber(DbUpdateException ex)
+    {
+        var msg = ex.InnerException?.Message ?? ex.Message;
+        return msg.Contains("IX_PurchaseOrders_OrderNumber", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("Cannot insert duplicate key row", StringComparison.OrdinalIgnoreCase)
+            && msg.Contains("PurchaseOrders", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task SaveChangesWithPurchaseOrderNumberRetryAsync(PurchaseOrder po, int maxRetries = 8)
+    {
+        for (var attempt = 1; attempt <= maxRetries; attempt++)
+        {
+            try
+            {
+                await _unitOfWork.SaveChangesAsync();
+                return;
+            }
+            catch (DbUpdateException ex) when (IsDuplicatePurchaseOrderNumber(ex))
+            {
+                if (attempt == maxRetries)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to generate a unique purchase order number after {maxRetries} attempts. Please retry.",
+                        ex);
+                }
+
+                // Regenerate order number and retry the insert.
+                po.OrderNumber = await _purchaseOrderRepository.GenerateOrderNumberAsync();
+            }
+        }
+    }
+
+    private async Task SyncInvitationsAsync(Guid rfqId, List<Guid> supplierIds, bool isDraftSelection)
+    {
+        var distinct = (supplierIds ?? new List<Guid>())
+            .Where(x => x != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        var existing = (await _invitationRepository.GetByRfqIdAsync(rfqId)).ToList();
+        var existingBySupplier = existing
+            .Where(i => !i.IsDeleted)
+            .ToDictionary(i => i.BusinessPartnerId, i => i);
+
+        // Remove ones no longer selected.
+        foreach (var inv in existingBySupplier.Values)
+        {
+            if (!distinct.Contains(inv.BusinessPartnerId))
+            {
+                inv.IsDeleted = true;
+                await _invitationRepository.UpdateAsync(inv);
+            }
+        }
+
+        // Add/update selected.
+        foreach (var supplierId in distinct)
+        {
+            if (existingBySupplier.TryGetValue(supplierId, out var inv))
+            {
+                // keep status if already responded
+                if (isDraftSelection)
+                {
+                    if (string.Equals(inv.Status, "Invited", StringComparison.OrdinalIgnoreCase))
+                        inv.Status = "Selected";
+                }
+                else
+                {
+                    inv.Status = "Invited";
+                    inv.InvitedAt = DateTime.UtcNow;
+                }
+
+                await _invitationRepository.UpdateAsync(inv);
+                continue;
+            }
+
+            // Validate business partner exists (best-effort).
+            var bp = await _businessPartnerRepository.GetByIdAsync(supplierId);
+            if (bp == null)
+            {
+                _logger.LogWarning("Skipping RFQ invitation for missing business partner {BusinessPartnerId}", supplierId);
+                continue;
+            }
+
+            var created = new RequestForQuotationInvitation
+            {
+                TenantId = _currentUserProvider.TenantId,
+                RfqId = rfqId,
+                BusinessPartnerId = supplierId,
+                Status = isDraftSelection ? "Selected" : "Invited",
+                InvitedAt = DateTime.UtcNow
+            };
+
+            await _invitationRepository.AddAsync(created);
+        }
+    }
+
+    private static List<string>? ParseEmails(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+
+        return raw
+            .Split(new[] { ',', ';', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(e => e.Contains('@'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static RfqDto MapToDto(RequestForQuotation rfq)
+    {
+        return new RfqDto
+        {
+            Id = rfq.Id,
+            RfqNumber = rfq.RfqNumber,
+            Title = rfq.Title,
+            Status = rfq.Status,
+            SubmissionDeadline = rfq.SubmissionDeadline,
+            Currency = rfq.Currency,
+            EstimatedValue = rfq.EstimatedValue,
+            SourcePurchaseRequisitionId = rfq.SourcePurchaseRequisitionId,
+            CreatedAt = rfq.CreatedAt,
+            SentAt = rfq.SentAt,
+            SupplierCount = rfq.Invitations?.Count(i => !i.IsDeleted) ?? 0,
+            // Quotes count should reflect supplier submissions (not drafts).
+            QuoteCount = rfq.Quotes?.Count(q => !q.IsDeleted && string.Equals(q.Status, "Submitted", StringComparison.OrdinalIgnoreCase)) ?? 0
+        };
+    }
+
+    private static RfqDetailDto MapToDetailDto(RequestForQuotation rfq)
+    {
+        var awardedQuoteIdByItemId = (rfq.AwardLines ?? new List<RequestForQuotationAwardLine>())
+            .Where(a => !a.IsDeleted)
+            .GroupBy(a => a.RfqItemId)
+            .ToDictionary(g => g.Key, g => g.Last().QuoteId);
+
+        var detail = new RfqDetailDto
+        {
+            Id = rfq.Id,
+            RfqNumber = rfq.RfqNumber,
+            Title = rfq.Title,
+            Status = rfq.Status,
+            SubmissionDeadline = rfq.SubmissionDeadline,
+            Currency = rfq.Currency,
+            EstimatedValue = rfq.EstimatedValue,
+            SourcePurchaseRequisitionId = rfq.SourcePurchaseRequisitionId,
+            CreatedAt = rfq.CreatedAt,
+            SentAt = rfq.SentAt,
+            ExternalRecipientEmails = rfq.ExternalRecipientEmails,
+            Description = rfq.Description,
+            SupplierCount = rfq.Invitations?.Count(i => !i.IsDeleted) ?? 0,
+            // Quotes count should reflect supplier submissions (not drafts).
+            QuoteCount = rfq.Quotes?.Count(q => !q.IsDeleted && string.Equals(q.Status, "Submitted", StringComparison.OrdinalIgnoreCase)) ?? 0,
+            Items = (rfq.Items ?? new List<RequestForQuotationItem>())
+                .Where(i => !i.IsDeleted)
+                .OrderBy(i => i.LineNumber)
+                .Select(i => new RfqItemDto
+                {
+                    Id = i.Id,
+                    LineNumber = i.LineNumber,
+                    InventoryItemId = i.InventoryItemId,
+                    ItemCode = i.ItemCode,
+                    Description = i.Description,
+                    Quantity = i.Quantity,
+                    UnitOfMeasure = i.UnitOfMeasure,
+                    Specifications = i.Specifications,
+                    RequiredDeliveryDate = i.RequiredDeliveryDate
+                })
+                .ToList(),
+            Suppliers = (rfq.Invitations ?? new List<RequestForQuotationInvitation>())
+                .Where(i => !i.IsDeleted)
+                .OrderByDescending(i => i.InvitedAt)
+                .Select(i => new RfqInvitationDto
+                {
+                    Id = i.Id,
+                    BusinessPartnerId = i.BusinessPartnerId,
+                    PartnerCode = i.BusinessPartner?.PartnerCode ?? string.Empty,
+                    PartnerName = i.BusinessPartner?.PartnerName ?? string.Empty,
+                    PrimaryEmail = i.BusinessPartner?.PrimaryEmail,
+                    Status = i.Status,
+                    InvitedAt = i.InvitedAt
+                })
+                .ToList(),
+            Quotes = (rfq.Quotes ?? new List<RequestForQuotationQuote>())
+                // Internal RFQ details should list only submitted quotes.
+                .Where(q => !q.IsDeleted && string.Equals(q.Status, "Submitted", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(q => q.SubmittedAt ?? q.CreatedAt)
+                .Select(q => MapToQuoteDto(q, awardedQuoteIdByItemId))
+                .ToList()
+        };
+
+        // Ensure totals are computed even if stored items do not include it.
+        foreach (var q in detail.Quotes)
+        {
+            q.TotalAmount = q.Items.Sum(i => i.LineTotal);
+        }
+
+        return detail;
+    }
+
+    private static RfqQuoteDto MapToQuoteDto(RequestForQuotationQuote quote, Dictionary<Guid, Guid>? awardedQuoteIdByRfqItemId)
+    {
+        var dto = new RfqQuoteDto
+        {
+            Id = quote.Id,
+            BusinessPartnerId = quote.BusinessPartnerId,
+            PartnerCode = quote.BusinessPartner?.PartnerCode ?? string.Empty,
+            PartnerName = quote.BusinessPartner?.PartnerName ?? string.Empty,
+            Status = quote.Status,
+            SubmittedAt = quote.SubmittedAt,
+            Notes = quote.Notes,
+            Items = (quote.Items ?? new List<RequestForQuotationQuoteItem>())
+                .Where(i => !i.IsDeleted)
+                .OrderBy(i => i.RfqItem.LineNumber)
+                .Select(i => new RfqQuoteItemDto
+                {
+                    RfqItemId = i.RfqItemId,
+                    LineNumber = i.RfqItem.LineNumber,
+                    Description = i.RfqItem.Description,
+                    Quantity = i.RfqItem.Quantity,
+                    UnitOfMeasure = i.RfqItem.UnitOfMeasure,
+                    UnitPrice = i.UnitPrice,
+                    LineTotal = i.LineTotal,
+                    IsAwarded = awardedQuoteIdByRfqItemId != null
+                        && awardedQuoteIdByRfqItemId.TryGetValue(i.RfqItemId, out var awardedQuoteId)
+                        && awardedQuoteId == quote.Id
+                })
+                .ToList()
+        };
+
+        dto.TotalAmount = dto.Items.Sum(i => i.LineTotal);
+        return dto;
+    }
+}

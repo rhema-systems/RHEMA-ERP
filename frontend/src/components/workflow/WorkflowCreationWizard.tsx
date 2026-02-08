@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +13,16 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
+import { workflowApiService } from '@/services/workflow-api.service';
+import type {
+  CreateWorkflowDefinitionAdminDto,
+  CreateWorkflowStepDto,
+  CreateWorkflowTransitionDto,
+  WorkflowEntityTypeInfo
+} from '@/types/workflow';
+import { WorkflowStepType } from '@/types/workflow';
+import { buildFallbackEntityTypes, filterEntityTypesByModule, isEntityTypeInList } from './entityTypeMapping';
+import { toast } from 'sonner';
 
 import {
   ArrowRight, ArrowLeft, Check, Plus, X, Settings, Database, Users, 
@@ -79,9 +89,14 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
   const [workflowDescription, setWorkflowDescription] = useState('');
   const [selectedModule, setSelectedModule] = useState('');
   const [entityType, setEntityType] = useState('');
+  const [availableEntityTypes, setAvailableEntityTypes] = useState<WorkflowEntityTypeInfo[]>([]);
+  const [entityTypesLoading, setEntityTypesLoading] = useState(false);
+  const [entityTypesError, setEntityTypesError] = useState<string | null>(null);
+  const [isCustomEntityType, setIsCustomEntityType] = useState(false);
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([]);
   const [editingStep, setEditingStep] = useState<WorkflowStep | null>(null);
   const [isStepModalOpen, setIsStepModalOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
 
   // Step editing state
   const [stepName, setStepName] = useState('');
@@ -93,6 +108,84 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
   const [timeoutHours, setTimeoutHours] = useState(24);
   const [conditions, setConditions] = useState<string[]>([]);
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
+
+  const customEntityTypeValue = '__custom__';
+  const { items: entityTypeOptions, fallback: entityTypeFallback } = filterEntityTypesByModule(
+    availableEntityTypes,
+    selectedModule
+  );
+  const entityTypeNotice = entityTypesError
+    ? entityTypesError
+    : entityTypeFallback
+      ? 'No matching entity types for the selected module. Showing all.'
+      : null;
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const loadEntityTypes = async () => {
+      setEntityTypesLoading(true);
+      setEntityTypesError(null);
+      try {
+        const types = await workflowApiService.ensureWorkflowEntityTypes();
+        if (types.length > 0) {
+          setAvailableEntityTypes(types);
+          return;
+        }
+
+        const fallbackTypes = buildFallbackEntityTypes();
+        setAvailableEntityTypes(fallbackTypes);
+        if (fallbackTypes.length === 0) {
+          setEntityTypesError('Unable to load workflow entity types.');
+        }
+      } catch (error) {
+        console.error('Failed to load workflow entity types:', error);
+        const fallbackTypes = buildFallbackEntityTypes();
+        setAvailableEntityTypes(fallbackTypes);
+        if (fallbackTypes.length === 0) {
+          setEntityTypesError('Unable to load workflow entity types.');
+        }
+      } finally {
+        setEntityTypesLoading(false);
+      }
+    };
+
+    loadEntityTypes();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!entityType) {
+      setIsCustomEntityType(availableEntityTypes.length === 0);
+      return;
+    }
+
+    if (availableEntityTypes.length === 0) {
+      setIsCustomEntityType(true);
+      return;
+    }
+
+    const isKnown = availableEntityTypes.some(
+      (item) =>
+        item.name.toLowerCase() === entityType.toLowerCase() ||
+        item.code.toLowerCase() === entityType.toLowerCase()
+    );
+    setIsCustomEntityType(!isKnown);
+  }, [entityType, availableEntityTypes, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !entityType || isCustomEntityType) return;
+
+    const { items: filteredItems } = filterEntityTypesByModule(
+      availableEntityTypes,
+      selectedModule
+    );
+
+    if (!isEntityTypeInList(entityType, filteredItems))
+    {
+      setEntityType('');
+    }
+  }, [selectedModule, availableEntityTypes, entityType, isCustomEntityType, isOpen]);
 
   const resetStepForm = () => {
     setStepName('');
@@ -128,7 +221,7 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
 
   const handleSaveStep = () => {
     const step: WorkflowStep = {
-      id: editingStep?.id || `step-${Date.now()}`,
+      id: editingStep?.id || crypto.randomUUID(),
       type: stepType as any,
       name: stepName,
       description: stepDescription,
@@ -184,18 +277,85 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
   };
 
   const handleComplete = () => {
-    const workflow = {
-      name: workflowName,
-      description: workflowDescription,
-      module: selectedModule,
-      entityType,
-      steps: workflowSteps,
-      isActive: true,
-      version: 1,
-    };
-    
-    onComplete(workflow);
-    onClose();
+    void (async () => {
+      try {
+        setIsCreating(true);
+
+        // Create a real workflow definition record so the Designer can load/save against a real ID.
+        // Keep it inactive until the workflow is fully designed (approvers, conditions, transitions, etc.).
+        const steps: CreateWorkflowStepDto[] = workflowSteps.map((s, idx) => ({
+          id: s.id,
+          name: s.name,
+          description: s.description,
+          // The wizard is a "starter"; real step behavior is configured in the Designer.
+          // Defaulting to Manual avoids getting stuck on Approval steps without approval config.
+          stepType: WorkflowStepType.Manual,
+          order: idx + 1,
+          isRequired: s.isRequired,
+          requiredRole: s.assigneeType === 'role' ? (s.assignee || undefined) : undefined,
+          estimatedHours: s.timeoutHours ? s.timeoutHours : undefined,
+          configuration: undefined,
+        }));
+
+        const transitions: CreateWorkflowTransitionDto[] = steps.length >= 2
+          ? steps.slice(0, steps.length - 1).map((from, i) => ({
+              fromStepId: from.id!,
+              toStepId: steps[i + 1].id!,
+              name: `${from.name} → ${steps[i + 1].name}`,
+              description: undefined,
+              condition: undefined,
+              isDefault: true,
+              priority: 0,
+            }))
+          : [];
+
+        const configuration = JSON.stringify({
+          createdVia: 'wizard',
+          module: selectedModule,
+          wizardVersion: 1,
+        });
+
+        const createDto: CreateWorkflowDefinitionAdminDto = {
+          name: workflowName.trim(),
+          description: workflowDescription.trim() ? workflowDescription.trim() : undefined,
+          entityType: entityType.trim(),
+          isActive: false,
+          configuration,
+          steps,
+          transitions,
+        };
+
+        const created = await workflowApiService.createWorkflowDefinition(createDto);
+        toast.success('Workflow created', { description: 'Opening designer...' });
+
+        onComplete(created);
+        onClose();
+      } catch (error: any) {
+        console.error('Failed to create workflow definition from wizard:', error);
+        const status = error?.status;
+        const existingId = error?.response?.existingDefinitionId;
+        const message = error?.message || 'Please try again.';
+
+        if (status === 409 && existingId) {
+          toast.error('Workflow Already Exists', {
+            description: message,
+            action: {
+              label: 'Open Existing',
+              onClick: () => {
+                onComplete({ id: existingId });
+                onClose();
+              }
+            }
+          });
+        } else {
+          toast.error('Failed to create workflow', {
+            description: message,
+          });
+        }
+      } finally {
+        setIsCreating(false);
+      }
+    })();
   };
 
   const getStepIcon = (type: string) => {
@@ -206,7 +366,8 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
   const canProceed = (step: number) => {
     switch (step) {
       case 1: return workflowName && workflowDescription && selectedModule && entityType;
-      case 2: return workflowSteps.length > 0;
+      // Steps can be defined in the Designer; allow proceeding even with no steps.
+      case 2: return true;
       case 3: return true;
       default: return false;
     }
@@ -241,10 +402,10 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                 </div>
               </div>
             </div>
-          </DialogHeader>
+        </DialogHeader>
 
           {/* Content */}
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 overflow-y-auto">
             {currentStep === 1 && (
               <div className="p-6 space-y-6">
                 <div>
@@ -274,21 +435,53 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                     
                     <div>
                       <Label htmlFor="entityType">Entity Type</Label>
-                      <Select value={entityType} onValueChange={setEntityType}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select entity type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="WorkOrder">Work Order</SelectItem>
-                          <SelectItem value="PurchaseOrder">Purchase Order</SelectItem>
-                          <SelectItem value="Employee">Employee</SelectItem>
-                          <SelectItem value="Asset">Asset</SelectItem>
-                          <SelectItem value="Inventory">Inventory</SelectItem>
-                          <SelectItem value="Project">Project</SelectItem>
-                          <SelectItem value="Customer">Customer</SelectItem>
-                          <SelectItem value="Vendor">Vendor</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      {availableEntityTypes.length > 0 || entityTypesLoading ? (
+                        <div className="space-y-2">
+                          <Select
+                            value={isCustomEntityType ? customEntityTypeValue : entityType}
+                            onValueChange={(value) => {
+                              if (value === customEntityTypeValue) {
+                                setIsCustomEntityType(true);
+                                setEntityType('');
+                                return;
+                              }
+                              setIsCustomEntityType(false);
+                              setEntityType(value);
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder={entityTypesLoading ? 'Loading...' : 'Select entity type'} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {entityTypeOptions.map((item) => (
+                                <SelectItem key={item.id} value={item.name}>
+                                  {item.name}
+                                </SelectItem>
+                              ))}
+                              <SelectItem value={customEntityTypeValue}>Custom...</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {isCustomEntityType && (
+                            <Input
+                              placeholder="Custom Entity Type"
+                              value={entityType}
+                              onChange={(e) => setEntityType(e.target.value)}
+                            />
+                          )}
+                        </div>
+                      ) : (
+                        <Input
+                          id="entityType"
+                          placeholder="Enter entity type"
+                          value={entityType}
+                          onChange={(e) => setEntityType(e.target.value)}
+                        />
+                      )}
+                      {entityTypeNotice && (
+                        <p className={entityTypesError ? 'text-xs text-red-600' : 'text-xs text-amber-600'}>
+                          {entityTypeNotice}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -297,7 +490,7 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
 
                 <div>
                   <h3 className="text-lg font-semibold mb-4">Select Module</h3>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {moduleOptions.map((module) => {
                       const IconComponent = module.icon;
                       return (
@@ -308,12 +501,12 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                           }`}
                           onClick={() => setSelectedModule(module.id)}
                         >
-                          <CardContent className="p-4">
+                          <CardContent className="p-3">
                             <div className="flex items-start space-x-3">
-                              <IconComponent className="h-6 w-6 text-blue-600 mt-1" />
+                              <IconComponent className="h-5 w-5 text-blue-600 mt-0.5" />
                               <div className="flex-1">
-                                <h4 className="font-medium">{module.name}</h4>
-                                <p className="text-sm text-gray-600 mt-1">{module.description}</p>
+                                <h4 className="font-medium text-sm">{module.name}</h4>
+                                <p className="text-xs text-gray-600 mt-1">{module.description}</p>
                               </div>
                               {selectedModule === module.id && (
                                 <Check className="h-5 w-5 text-blue-600" />
@@ -477,6 +670,7 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                 <Button 
                   variant="outline" 
                   onClick={() => setCurrentStep(prev => prev - 1)}
+                  disabled={isCreating}
                 >
                   <ArrowLeft className="h-4 w-4 mr-2" />
                   Back
@@ -484,21 +678,21 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
               )}
             </div>
             <div className="flex items-center space-x-3">
-              <Button variant="outline" onClick={onClose}>
+              <Button variant="outline" onClick={onClose} disabled={isCreating}>
                 Cancel
               </Button>
               {currentStep < 3 ? (
                 <Button 
                   onClick={() => setCurrentStep(prev => prev + 1)}
-                  disabled={!canProceed(currentStep)}
+                  disabled={!canProceed(currentStep) || isCreating}
                 >
                   Next
                   <ArrowRight className="h-4 w-4 ml-2" />
                 </Button>
               ) : (
-                <Button onClick={handleComplete}>
+                <Button onClick={handleComplete} disabled={isCreating}>
                   <Check className="h-4 w-4 mr-2" />
-                  Create Workflow
+                  {isCreating ? 'Creating...' : 'Create Workflow'}
                 </Button>
               )}
             </div>

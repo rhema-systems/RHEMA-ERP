@@ -80,7 +80,9 @@ public interface IJobCardService
     /// <summary>
     /// Generates a work order from an approved job card
     /// </summary>
-    Task<Guid> GenerateWorkOrderAsync(Guid jobCardId);
+    /// <param name="jobCardId">The job card ID</param>
+    /// <param name="billingType">Optional billing type: "Maintenance" (fixed price) or "Repairs" (itemized costs). Defaults to "Repairs".</param>
+    Task<Guid> GenerateWorkOrderAsync(Guid jobCardId, string billingType = "Repairs");
 
     /// <summary>
     /// Gets job cards by asset ID

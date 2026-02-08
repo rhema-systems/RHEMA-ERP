@@ -63,12 +63,15 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
 
     public async Task<BusinessPartner> CreateAsync(BusinessPartner partner)
     {
-        return await AddAsync(partner);
+        var created = await AddAsync(partner);
+        await _context.SaveChangesAsync();
+        return created;
     }
 
     public async Task<BusinessPartner> UpdateAsync(BusinessPartner partner)
     {
         await base.UpdateAsync(partner);
+        await _context.SaveChangesAsync();
         return partner;
     }
 
@@ -78,6 +81,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         if (partner != null)
         {
             await base.DeleteAsync(partner);
+            await _context.SaveChangesAsync();
         }
     }
 
@@ -173,7 +177,15 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
 
     public async Task<IEnumerable<BusinessPartner>> GetActivePartnersAsync(string? partnerType = null)
     {
-        var query = _dbSet.Where(bp => bp.IsActive && !bp.IsDeleted);
+        // "Active partners" are those that are usable in day-to-day transactions (e.g. PO creation):
+        // - Operational status must be Active (or legacy Approved)
+        // - Approval must be Approved
+        // - Not blacklisted
+        var query = _dbSet.Where(bp =>
+            !bp.IsDeleted &&
+            !bp.IsBlacklisted &&
+            bp.ApprovalStatus == "Approved" &&
+            (bp.RegistrationStatus == "Active" || bp.RegistrationStatus == "Approved"));
         if (!string.IsNullOrWhiteSpace(partnerType))
         {
             query = query.Where(bp => bp.PartnerType == partnerType);
@@ -184,7 +196,12 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
 
     public async Task<IEnumerable<BusinessPartner>> GetPreferredPartnersAsync(string? partnerType = null)
     {
-        var query = _dbSet.Where(bp => bp.IsPreferred && bp.IsActive && !bp.IsDeleted);
+        var query = _dbSet.Where(bp =>
+            bp.IsPreferred &&
+            !bp.IsDeleted &&
+            !bp.IsBlacklisted &&
+            bp.ApprovalStatus == "Approved" &&
+            (bp.RegistrationStatus == "Active" || bp.RegistrationStatus == "Approved"));
         if (!string.IsNullOrWhiteSpace(partnerType))
         {
             query = query.Where(bp => bp.PartnerType == partnerType);
@@ -264,7 +281,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
     public async Task<bool> HasActivePurchaseOrdersAsync(Guid partnerId)
     {
         return await _context.PurchaseOrders
-            .AnyAsync(po => po.SupplierId == partnerId && po.Status != "Cancelled" && po.Status != "Completed" && !po.IsDeleted);
+            .AnyAsync(po => po.BusinessPartnerId == partnerId && po.Status != "Cancelled" && po.Status != "Completed" && !po.IsDeleted);
     }
 
     public async Task UpdateStatusAsync(Guid partnerId, string status)
@@ -273,6 +290,16 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         if (partner != null)
         {
             partner.RegistrationStatus = status;
+            // Keep the legacy boolean aligned with the operational status to avoid inconsistencies.
+            if (string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase))
+            {
+                partner.IsActive = true;
+            }
+            else if (string.Equals(status, "Inactive", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(status, "Suspended", StringComparison.OrdinalIgnoreCase))
+            {
+                partner.IsActive = false;
+            }
             partner.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
         }
@@ -286,6 +313,16 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
             partner.ApprovalStatus = approvalStatus;
             partner.ApprovedById = approvedById;
             partner.ApprovedDate = DateTime.UtcNow;
+            if (string.Equals(approvalStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+            {
+                // Once approved, ensure the partner is operationally usable unless explicitly deactivated later.
+                if (partner.RegistrationStatus == "PendingApproval" || string.IsNullOrWhiteSpace(partner.RegistrationStatus))
+                {
+                    partner.RegistrationStatus = "Active";
+                }
+
+                partner.IsActive = partner.RegistrationStatus == "Active" || partner.RegistrationStatus == "Approved";
+            }
             partner.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
         }
@@ -332,7 +369,14 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
 
     public async Task<string> GeneratePartnerCodeAsync(string partnerType)
     {
-        var prefix = partnerType == "Contractor" ? "CON" : "SUP";
+        // Determine prefix based on partner type
+        var prefix = partnerType switch
+        {
+            "Contractor" => "CON",
+            "Customer" => "CUS",
+            "Both" => "BTH",
+            _ => "SUP" // Default to Supplier
+        };
         var year = DateTime.UtcNow.Year.ToString().Substring(2);
 
         var lastPartner = await _dbSet

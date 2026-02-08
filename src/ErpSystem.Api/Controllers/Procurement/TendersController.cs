@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,13 +13,19 @@ namespace ErpSystem.Api.Controllers.Procurement;
 public class TendersController : ControllerBase
 {
     private readonly ITenderService _tenderService;
+    private readonly IWorkflowService _workflowService;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<TendersController> _logger;
 
     public TendersController(
         ITenderService tenderService,
+        IWorkflowService workflowService,
+        ICurrentUserProvider currentUserProvider,
         ILogger<TendersController> logger)
     {
         _tenderService = tenderService;
+        _workflowService = workflowService;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
 
@@ -37,6 +44,24 @@ public class TendersController : ControllerBase
         {
             // Fix parameter order: search, status, tenderType
             var result = await _tenderService.GetTendersAsync(page, pageSize, searchTerm, status, tenderType);
+
+            // Populate current workflow step name for submitted tenders (avoid per-row UI polling).
+            var submitted = result.Items.Where(t => string.Equals(t.Status, "Submitted", StringComparison.OrdinalIgnoreCase)).ToList();
+            if (submitted.Count > 0)
+            {
+                await Task.WhenAll(submitted.Select(async dto =>
+                {
+                    try
+                    {
+                        var step = await _workflowService.GetCurrentWorkflowStepAsync("Tender", dto.Id);
+                        dto.CurrentWorkflowStepName = step?.StepName;
+                    }
+                    catch
+                    {
+                        // Best-effort only.
+                    }
+                }));
+            }
             return Ok(result);
         }
         catch (Exception ex)
@@ -58,6 +83,19 @@ public class TendersController : ControllerBase
             if (tender == null)
             {
                 return NotFound($"Tender with ID {id} not found");
+            }
+
+            if (string.Equals(tender.Status, "Submitted", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var step = await _workflowService.GetCurrentWorkflowStepAsync("Tender", id);
+                    tender.CurrentWorkflowStepName = step?.StepName;
+                }
+                catch
+                {
+                    // ignore
+                }
             }
 
             return Ok(tender);
@@ -150,6 +188,89 @@ public class TendersController : ControllerBase
         {
             _logger.LogError(ex, "Error updating tender {TenderId}", id);
             return StatusCode(500, "An error occurred while updating the tender");
+        }
+    }
+
+    /// <summary>
+    /// Submit a tender for approval (unified workflow)
+    /// </summary>
+    [HttpPost("{id}/submit")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    public async Task<IActionResult> SubmitTender(Guid id)
+    {
+        try
+        {
+            var userId = _currentUserProvider.UserId;
+            await _tenderService.SubmitTenderForApprovalAsync(id, userId);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error submitting tender {TenderId} for approval", id);
+            return StatusCode(500, "An error occurred while submitting the tender for approval");
+        }
+    }
+
+    /// <summary>
+    /// Approve the current tender workflow step
+    /// </summary>
+    [HttpPost("{id}/approve")]
+    public async Task<IActionResult> ApproveTender(Guid id, [FromBody] ApproveTenderRequest? request)
+    {
+        try
+        {
+            var userId = _currentUserProvider.UserId;
+            await _tenderService.ApproveTenderAsync(id, userId, request?.Notes);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error approving tender {TenderId}", id);
+            return StatusCode(500, "An error occurred while approving the tender");
+        }
+    }
+
+    /// <summary>
+    /// Reject the current tender workflow step
+    /// </summary>
+    [HttpPost("{id}/reject")]
+    public async Task<IActionResult> RejectTender(Guid id, [FromBody] RejectTenderRequest request)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request?.Reason))
+            {
+                return BadRequest("Rejection reason is required");
+            }
+
+            var userId = _currentUserProvider.UserId;
+            await _tenderService.RejectTenderAsync(id, userId, request.Reason);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error rejecting tender {TenderId}", id);
+            return StatusCode(500, "An error occurred while rejecting the tender");
         }
     }
 
@@ -812,3 +933,5 @@ public class TendersController : ControllerBase
     #endregion
 }
 
+public record ApproveTenderRequest(string? Notes);
+public record RejectTenderRequest(string? Reason);

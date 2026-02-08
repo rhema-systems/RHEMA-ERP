@@ -11,15 +11,24 @@ namespace ErpSystem.Api.Services.Workflow;
 public class WorkflowInstanceServiceAdapter : ErpSystem.Core.Interfaces.Workflow.IWorkflowInstanceService
 {
     private readonly ErpSystem.Core.Interfaces.Services.IWorkflowInstanceService _coreService;
+    private readonly ErpSystem.Core.Interfaces.Services.IWorkflowStepService _stepService;
+    private readonly ErpSystem.Core.Interfaces.Services.IWorkflowApprovalService _approvalService;
+    private readonly ErpSystem.Core.Interfaces.Services.IWorkflowActivityService _activityService;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<WorkflowInstanceServiceAdapter> _logger;
 
     public WorkflowInstanceServiceAdapter(
         ErpSystem.Core.Interfaces.Services.IWorkflowInstanceService coreService,
+        ErpSystem.Core.Interfaces.Services.IWorkflowStepService stepService,
+        ErpSystem.Core.Interfaces.Services.IWorkflowApprovalService approvalService,
+        ErpSystem.Core.Interfaces.Services.IWorkflowActivityService activityService,
         ICurrentUserService currentUserService,
         ILogger<WorkflowInstanceServiceAdapter> logger)
     {
         _coreService = coreService;
+        _stepService = stepService;
+        _approvalService = approvalService;
+        _activityService = activityService;
         _currentUserService = currentUserService;
         _logger = logger;
     }
@@ -45,14 +54,42 @@ public class WorkflowInstanceServiceAdapter : ErpSystem.Core.Interfaces.Workflow
 
     public async Task<IEnumerable<WorkflowStepInstance>> GetPendingTasksForUserAsync(Guid userId)
     {
-        _logger.LogWarning("GetPendingTasksForUserAsync is not fully implemented");
-        return Enumerable.Empty<WorkflowStepInstance>();
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            _logger.LogWarning("Tenant ID not available for GetPendingTasksForUserAsync");
+            return Enumerable.Empty<WorkflowStepInstance>();
+        }
+
+        return await _stepService.GetActiveStepsForUserAsync(userId, tenantId);
     }
 
     public async Task<IEnumerable<WorkflowApproval>> GetPendingApprovalsAsync(Guid? userId = null, string? role = null)
     {
-        _logger.LogWarning("GetPendingApprovalsAsync is not fully implemented");
-        return Enumerable.Empty<WorkflowApproval>();
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            _logger.LogWarning("Tenant ID not available for GetPendingApprovalsAsync");
+            return Enumerable.Empty<WorkflowApproval>();
+        }
+
+        var effectiveUserId = userId ??
+                              (Guid.TryParse(_currentUserService.UserId, out var parsedUserId)
+                                  ? parsedUserId
+                                  : Guid.Empty);
+
+        if (effectiveUserId == Guid.Empty)
+        {
+            _logger.LogWarning("User ID not available for GetPendingApprovalsAsync");
+            return Enumerable.Empty<WorkflowApproval>();
+        }
+
+        if (!string.IsNullOrWhiteSpace(role) && !_currentUserService.IsInRole(role))
+        {
+            return Enumerable.Empty<WorkflowApproval>();
+        }
+
+        return await _approvalService.GetPendingApprovalsAsync(effectiveUserId, tenantId);
     }
 
     public async Task UpdateWorkflowDataContextAsync(Guid workflowInstanceId, object dataContext)
@@ -70,7 +107,6 @@ public class WorkflowInstanceServiceAdapter : ErpSystem.Core.Interfaces.Workflow
 
     public async Task<IEnumerable<WorkflowActivityLog>> GetWorkflowActivityLogAsync(Guid workflowInstanceId)
     {
-        _logger.LogWarning("GetWorkflowActivityLogAsync is not fully implemented");
-        return Enumerable.Empty<WorkflowActivityLog>();
+        return await _activityService.GetInstanceActivityLogAsync(workflowInstanceId);
     }
 }

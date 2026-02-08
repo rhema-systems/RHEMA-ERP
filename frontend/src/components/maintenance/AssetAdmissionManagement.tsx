@@ -391,7 +391,9 @@ export default function AssetAdmissionManagement() {
             textValue: result.textValue,
             numericValue: result.numericValue,
             selectedOption: result.selectedOption,
-            comment: result.comment
+            comment: result.comment,
+            repairReplacementAction: result.repairReplacementAction as 'None' | 'Repair' | 'Replace' | undefined,
+            photoPaths: result.photoPaths
           };
         });
         setItemResponses(responses);
@@ -410,7 +412,9 @@ export default function AssetAdmissionManagement() {
             textValue: result.textValue,
             numericValue: result.numericValue,
             selectedOption: result.selectedOption,
-            comment: result.comment
+            comment: result.comment,
+            repairReplacementAction: result.repairReplacementAction as 'None' | 'Repair' | 'Replace' | undefined,
+            photoPaths: result.photoPaths
           };
         });
         setItemResponses(responses);
@@ -490,7 +494,9 @@ export default function AssetAdmissionManagement() {
       for (const itemId of Object.keys(itemResponses)) {
         const response = itemResponses[itemId];
         // Only submit if there's actual data
-        if (response.isPresent !== undefined || response.textValue || response.numericValue !== undefined || response.selectedOption || response.comment) {
+        if (response.isPresent !== undefined || response.textValue || response.numericValue !== undefined ||
+            response.selectedOption || response.comment ||
+            (response.repairReplacementAction && response.repairReplacementAction !== 'None')) {
           await assetConditionService.submitItemResult(currentInspection.id, response);
         }
       }
@@ -1391,7 +1397,9 @@ export default function AssetAdmissionManagement() {
                             textValue: result.textValue,
                             numericValue: result.numericValue,
                             selectedOption: result.selectedOption,
-                            comment: result.comment
+                            comment: result.comment,
+                            repairReplacementAction: result.repairReplacementAction as 'None' | 'Repair' | 'Replace' | undefined,
+                            photoPaths: result.photoPaths
                           };
                         });
                         setItemResponses(responses);

@@ -1,12 +1,15 @@
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Entities.Pricing;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data.Configuration;
 using ErpSystem.Data.Configuration.Maintenance;
+using ErpSystem.Data.Configuration.Pricing;
 using ErpSystem.Data.Configuration.Procurement;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -199,6 +202,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     // Notification entities
     public DbSet<Notification> Notifications { get; set; }
+    public DbSet<SystemExceptionLog> SystemExceptionLogs { get; set; }
+    public DbSet<NotificationTopic> NotificationTopics { get; set; }
+    public DbSet<NotificationTopicRecipient> NotificationTopicRecipients { get; set; }
+    public DbSet<EmailCampaign> EmailCampaigns { get; set; }
+    public DbSet<EmailCampaignRecipient> EmailCampaignRecipients { get; set; }
     public DbSet<MaintenanceNotification> MaintenanceNotifications { get; set; }
     public DbSet<MaintenanceNotificationTemplate> MaintenanceNotificationTemplates { get; set; }
     public DbSet<MaintenanceEscalationRule> MaintenanceEscalationRules { get; set; }
@@ -235,6 +243,45 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<InventoryLocation> InventoryLocations { get; set; }
     public DbSet<WarehouseQuantity> WarehouseQuantities { get; set; }
     public DbSet<InventoryAllocation> InventoryAllocations { get; set; }
+
+    // Enhanced Inventory entities
+    public DbSet<UnitOfMeasure> UnitsOfMeasure { get; set; }
+    public DbSet<UnitOfMeasureConversion> UnitOfMeasureConversions { get; set; }
+    public DbSet<ItemUnitOfMeasure> ItemUnitsOfMeasure { get; set; }
+    public DbSet<ItemSupplier> ItemSuppliers { get; set; }
+    public DbSet<GoodsReceiptNote> GoodsReceiptNotes { get; set; }
+    public DbSet<GoodsReceiptNoteItem> GoodsReceiptNoteItems { get; set; }
+    public DbSet<InventoryTransfer> InventoryTransfers { get; set; }
+    public DbSet<InventoryTransferItem> InventoryTransferItems { get; set; }
+    public DbSet<PhysicalCount> PhysicalCounts { get; set; }
+    public DbSet<PhysicalCountItem> PhysicalCountItems { get; set; }
+    public DbSet<InventoryCostLayer> InventoryCostLayers { get; set; }
+    public DbSet<LandedCost> LandedCosts { get; set; }
+    public DbSet<LandedCostItem> LandedCostItems { get; set; }
+    public DbSet<LandedCostAllocation> LandedCostAllocations { get; set; }
+    public DbSet<PurchaseReturn> PurchaseReturns { get; set; }
+    public DbSet<PurchaseReturnItem> PurchaseReturnItems { get; set; }
+    public DbSet<InventoryRequisition> InventoryRequisitions { get; set; }
+    public DbSet<InventoryRequisitionItem> InventoryRequisitionItems { get; set; }
+
+    // Inventory Valuation entities
+    public DbSet<InventoryMovement> InventoryMovements { get; set; }
+    public DbSet<InventoryLayer> InventoryLayers { get; set; }
+    public DbSet<InventoryBalance> InventoryBalances { get; set; }
+
+    // GP-Style Inventory entities
+    public DbSet<ItemClass> ItemClasses { get; set; }
+    public DbSet<PriceGroup> PriceGroups { get; set; }
+    public DbSet<UnitOfMeasureSchedule> UnitOfMeasureSchedules { get; set; }
+    public DbSet<UnitOfMeasureScheduleDetail> UnitOfMeasureScheduleDetails { get; set; }
+    public DbSet<SuggestedSalesItem> SuggestedSalesItems { get; set; }
+
+    // Price List entities
+    public DbSet<PriceList> PriceLists { get; set; }
+    public DbSet<PriceListLine> PriceListLines { get; set; }
+    public DbSet<CustomerGroup> CustomerGroups { get; set; }
+    public DbSet<SupplierGroup> SupplierGroups { get; set; }
+    public DbSet<PriceListChangeHistory> PriceListChangeHistories { get; set; }
 
     // Procurement entities
     public DbSet<Supplier> Suppliers { get; set; }
@@ -287,6 +334,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<BusinessPartnerRegistrationStatusHistory> BusinessPartnerRegistrationStatusHistories { get; set; }
     public DbSet<PurchaseRequisitionItem> PurchaseRequisitionItems { get; set; }
 
+    // RFQ Management (separate from formal tenders)
+    public DbSet<RequestForQuotation> RequestForQuotations { get; set; }
+    public DbSet<RequestForQuotationItem> RequestForQuotationItems { get; set; }
+    public DbSet<RequestForQuotationInvitation> RequestForQuotationInvitations { get; set; }
+    public DbSet<RequestForQuotationQuote> RequestForQuotationQuotes { get; set; }
+    public DbSet<RequestForQuotationQuoteItem> RequestForQuotationQuoteItems { get; set; }
+    public DbSet<RequestForQuotationAwardLine> RequestForQuotationAwardLines { get; set; }
+
     // Business Partner User Management
     public DbSet<BusinessPartnerUser> BusinessPartnerUsers { get; set; }
     public DbSet<TenderAssignment> TenderAssignments { get; set; }
@@ -301,6 +356,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     // Performance Bonds
     public DbSet<PerformanceBondRequest> PerformanceBondRequests { get; set; }
+
+    // Tender Negotiations
+    public DbSet<TenderNegotiation> TenderNegotiations { get; set; }
+    public DbSet<TenderNegotiationItem> TenderNegotiationItems { get; set; }
 
     // Contract Management
     public DbSet<Contract> Contracts { get; set; }
@@ -323,6 +382,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<EmergencyProcurementItem> EmergencyProcurementItems { get; set; }
     public DbSet<EmergencySupplier> EmergencySuppliers { get; set; }
 
+    // Procurement Settings
+    public DbSet<ProcurementSettings> ProcurementSettings { get; set; }
+
     // Performance Tracking
     public DbSet<SupplierPerformanceMetric> SupplierPerformanceMetrics { get; set; }
     public DbSet<QualityIncident> QualityIncidents { get; set; }
@@ -341,6 +403,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<WorkflowActivityLog> WorkflowActivityLogs { get; set; }
     public DbSet<WorkflowApproval> WorkflowApprovals { get; set; }
     public DbSet<WorkflowEntityType> WorkflowEntityTypes { get; set; }
+
+    // Finance - Common entities
+    public DbSet<PaymentTerm> PaymentTerms { get; set; }
+    public DbSet<Currency> Currencies { get; set; }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -368,6 +434,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new EvaluationTemplateConfiguration());
         builder.ApplyConfiguration(new EvaluationTemplateCriterionConfiguration());
 
+        // RFQ configurations (separate from formal tenders)
+        builder.ApplyConfiguration(new RequestForQuotationConfiguration());
+        builder.ApplyConfiguration(new RequestForQuotationItemConfiguration());
+        builder.ApplyConfiguration(new RequestForQuotationInvitationConfiguration());
+        builder.ApplyConfiguration(new RequestForQuotationQuoteConfiguration());
+        builder.ApplyConfiguration(new RequestForQuotationQuoteItemConfiguration());
+        builder.ApplyConfiguration(new RequestForQuotationAwardLineConfiguration());
+        builder.ApplyConfiguration(new EmailCampaignConfiguration());
+        builder.ApplyConfiguration(new EmailCampaignRecipientConfiguration());
+        builder.ApplyConfiguration(new SystemExceptionLogConfiguration());
+        builder.ApplyConfiguration(new NotificationTopicConfiguration());
+        builder.ApplyConfiguration(new NotificationTopicRecipientConfiguration());
+
         // Award Verification configurations
         builder.ApplyConfiguration(new AwardVerificationChecklistTemplateConfiguration());
         builder.ApplyConfiguration(new AwardVerificationChecklistItemConfiguration());
@@ -381,6 +460,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ContractMilestoneConfiguration());
         builder.ApplyConfiguration(new ContractAmendmentConfiguration());
         builder.ApplyConfiguration(new ContractDocumentConfiguration());
+
+        // Price List configurations
+        builder.ApplyConfiguration(new PriceListConfiguration());
+        builder.ApplyConfiguration(new PriceListLineConfiguration());
+        builder.ApplyConfiguration(new CustomerGroupConfiguration());
+        builder.ApplyConfiguration(new SupplierGroupConfiguration());
+        builder.ApplyConfiguration(new PriceListChangeHistoryConfiguration());
 
         // Configure Identity tables with custom names
         builder.Entity<ApplicationUser>(entity =>
@@ -773,6 +859,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // Configure Procurement Planning entities
         ConfigureProcurementPlanningEntities(builder);
 
+        // Configure Finance Common entities
+        ConfigureFinanceCommonEntities(builder);
+
         // Apply global query filters for soft delete and multitenancy
         ApplyGlobalFilters(builder);
 
@@ -1026,27 +1115,27 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .HasForeignKey(wo => wo.AssignedTeamId)
                 .OnDelete(DeleteBehavior.NoAction);
 
-            entity.HasOne(wo => wo.RequestedBy)
+            entity.HasOne<ApplicationUser>(wo => wo.RequestedBy)
                 .WithMany()
                 .HasForeignKey(wo => wo.RequestedById)
                 .OnDelete(DeleteBehavior.NoAction);
 
-            entity.HasOne(wo => wo.ApprovedBy)
+            entity.HasOne<ApplicationUser>(wo => wo.ApprovedBy)
                 .WithMany()
                 .HasForeignKey(wo => wo.ApprovedById)
                 .OnDelete(DeleteBehavior.NoAction);
 
-            entity.HasOne(wo => wo.Supervisor)
+            entity.HasOne<ApplicationUser>(wo => wo.Supervisor)
                 .WithMany()
                 .HasForeignKey(wo => wo.SupervisorId)
                 .OnDelete(DeleteBehavior.NoAction);
 
-            entity.HasOne(wo => wo.CompletedBy)
+            entity.HasOne<ApplicationUser>(wo => wo.CompletedBy)
                 .WithMany()
                 .HasForeignKey(wo => wo.CompletedById)
                 .OnDelete(DeleteBehavior.NoAction);
 
-            entity.HasOne(wo => wo.QualityCheckedBy)
+            entity.HasOne<ApplicationUser>(wo => wo.QualityCheckedBy)
                 .WithMany()
                 .HasForeignKey(wo => wo.QualityCheckedById)
                 .OnDelete(DeleteBehavior.NoAction);
@@ -1190,7 +1279,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasOne(ms => ms.MaintenanceType)
-                .WithMany()
+                .WithMany(mt => mt.MaintenanceSchedules)
                 .HasForeignKey(ms => ms.MaintenanceTypeId)
                 .OnDelete(DeleteBehavior.Restrict);
 
@@ -1256,6 +1345,26 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(ai => ai.Documents)
                 .HasForeignKey(id => id.InspectionId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Configure Technician entity
+        builder.Entity<Technician>(entity =>
+        {
+            entity.HasIndex(t => t.EmployeeId);
+            entity.HasIndex(t => t.EmployeeNumber);
+            entity.HasIndex(t => t.Specialization);
+            entity.HasIndex(t => t.IsActive);
+
+            entity.HasOne(t => t.Employee)
+                .WithMany()
+                .HasForeignKey(t => t.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Ignore SkillAssignments collection - TechnicianSkillAssignment.TechnicianId references Employee, not Technician
+            entity.Ignore(t => t.SkillAssignments);
+
+            // Ignore TeamsLed collection - TechnicianTeam doesn't have a proper FK to Technician
+            entity.Ignore(t => t.TeamsLed);
         });
 
         // Configure TechnicianTeam entity
@@ -2092,6 +2201,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(bp => bp.IsPreferred);
             entity.HasIndex(bp => bp.PrimaryEmail);
             entity.HasIndex(bp => bp.UserId);
+            entity.HasIndex(bp => bp.ParentId);
 
             entity.HasOne(bp => bp.User)
                 .WithMany()
@@ -2102,6 +2212,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(bp => bp.ApprovedById)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            // Self-referential relationship for parent/child business partners
+            entity.HasOne(bp => bp.Parent)
+                .WithMany(bp => bp.Children)
+                .HasForeignKey(bp => bp.ParentId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // Configure PartnerCategory entity
@@ -2767,6 +2883,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             {
                 case EntityState.Added:
                     entry.Entity.CreatedAt = DateTime.UtcNow;
+                    entry.Entity.UpdatedAt = DateTime.UtcNow;
+                    
+                    // Set TenantId for TenantEntity objects if not already set
+                    if (entry.Entity is TenantEntity tenantEntity && tenantEntity.TenantId == Guid.Empty)
+                    {
+                        if (_tenantId.HasValue && _tenantId.Value != Guid.Empty)
+                        {
+                            tenantEntity.TenantId = _tenantId.Value;
+                        }
+                    }
                     break;
                 case EntityState.Modified:
                     entry.Entity.UpdatedAt = DateTime.UtcNow;
@@ -3021,11 +3147,115 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(i => i.ABCClass);
             entity.HasIndex(i => i.IsSerialTracked);
             entity.HasIndex(i => i.IsLotTracked);
+            entity.HasIndex(i => i.ItemClassId);
+            entity.HasIndex(i => i.PriceGroupId);
+            entity.HasIndex(i => i.SubstituteItem1Id);
+            entity.HasIndex(i => i.SubstituteItem2Id);
+            entity.HasIndex(i => i.SubstituteItem3Id).IsUnique(false);
+            entity.HasIndex(i => i.SubstituteItem4Id).IsUnique(false);
+            entity.HasIndex(i => i.IsKit);
+            entity.HasIndex(i => i.IsFinishedGood);
 
             entity.HasOne(i => i.Category)
                 .WithMany(c => c.Items)
                 .HasForeignKey(i => i.CategoryId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(i => i.ItemClass)
+                .WithMany(ic => ic.Items)
+                .HasForeignKey(i => i.ItemClassId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(i => i.PriceGroup)
+                .WithMany(pg => pg.Items)
+                .HasForeignKey(i => i.PriceGroupId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(i => i.SubstituteItem1)
+                .WithMany()
+                .HasForeignKey(i => i.SubstituteItem1Id)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(i => i.SubstituteItem2)
+                .WithMany()
+                .HasForeignKey(i => i.SubstituteItem2Id)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(i => i.SubstituteItem3)
+                .WithMany()
+                .HasForeignKey(i => i.SubstituteItem3Id)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(i => i.SubstituteItem4)
+                .WithMany()
+                .HasForeignKey(i => i.SubstituteItem4Id)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(i => i.UnitOfMeasureSchedule)
+                .WithMany(s => s.Items)
+                .HasForeignKey(i => i.UnitOfMeasureScheduleId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // ItemClass entity (GP: Class ID)
+        builder.Entity<ItemClass>(entity =>
+        {
+            entity.HasIndex(ic => ic.ClassId).IsUnique();
+            entity.HasIndex(ic => ic.IsActive);
+        });
+
+        // PriceGroup entity (GP: Price ID)
+        builder.Entity<PriceGroup>(entity =>
+        {
+            entity.HasIndex(pg => pg.PriceGroupCode).IsUnique();
+            entity.HasIndex(pg => pg.IsActive);
+        });
+
+        // UnitOfMeasureSchedule entity (GP: U of M Schedule)
+        builder.Entity<UnitOfMeasureSchedule>(entity =>
+        {
+            entity.HasIndex(s => s.ScheduleId).IsUnique();
+            entity.HasIndex(s => s.IsActive);
+
+            entity.HasOne(s => s.BaseUnitOfMeasure)
+                .WithMany()
+                .HasForeignKey(s => s.BaseUnitOfMeasureId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // UnitOfMeasureScheduleDetail entity
+        builder.Entity<UnitOfMeasureScheduleDetail>(entity =>
+        {
+            entity.HasIndex(d => d.ScheduleId);
+            entity.HasIndex(d => d.UnitOfMeasureId);
+
+            entity.HasOne(d => d.Schedule)
+                .WithMany(s => s.Details)
+                .HasForeignKey(d => d.ScheduleId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(d => d.UnitOfMeasure)
+                .WithMany()
+                .HasForeignKey(d => d.UnitOfMeasureId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // SuggestedSalesItem entity (GP: Suggest Sales Item Maintenance)
+        builder.Entity<SuggestedSalesItem>(entity =>
+        {
+            entity.HasIndex(s => s.InventoryItemId);
+            entity.HasIndex(s => s.SuggestedItemId);
+            entity.HasIndex(s => s.IsActive);
+
+            entity.HasOne(s => s.InventoryItem)
+                .WithMany(i => i.SuggestedItems)
+                .HasForeignKey(s => s.InventoryItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(s => s.SuggestedItem)
+                .WithMany()
+                .HasForeignKey(s => s.SuggestedItemId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         // InventoryCategory entity
@@ -3047,6 +3277,34 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(w => w.Code).IsUnique();
             entity.HasIndex(w => w.IsActive);
             entity.HasIndex(w => w.WarehouseType);
+
+            // Manager relationship
+            entity.HasOne(w => w.Manager)
+                .WithMany()
+                .HasForeignKey(w => w.ManagerId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Explicit relationships for default locations to avoid shadow properties
+            // Use NoAction to avoid multiple cascade paths with WarehouseLocation
+            entity.HasOne(w => w.DefaultQuarantineLocation)
+                .WithMany()
+                .HasForeignKey(w => w.DefaultQuarantineLocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(w => w.DefaultReceivingLocation)
+                .WithMany()
+                .HasForeignKey(w => w.DefaultReceivingLocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(w => w.DefaultShippingLocation)
+                .WithMany()
+                .HasForeignKey(w => w.DefaultShippingLocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(w => w.DefaultInTransitLocation)
+                .WithMany()
+                .HasForeignKey(w => w.DefaultInTransitLocationId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         // WarehouseLocation entity
@@ -3219,6 +3477,630 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(sai => sai.LocationId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // UnitOfMeasure entity
+        builder.Entity<UnitOfMeasure>(entity =>
+        {
+            entity.HasIndex(u => u.Code);
+            entity.HasIndex(u => u.Category);
+            entity.HasIndex(u => u.IsActive);
+
+            entity.HasMany(u => u.ConversionsFrom)
+                .WithOne(c => c.FromUnit)
+                .HasForeignKey(c => c.FromUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(u => u.ConversionsTo)
+                .WithOne(c => c.ToUnit)
+                .HasForeignKey(c => c.ToUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(u => u.ItemUnits)
+                .WithOne(iu => iu.UnitOfMeasure)
+                .HasForeignKey(iu => iu.UnitOfMeasureId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // UnitOfMeasureConversion entity
+        builder.Entity<UnitOfMeasureConversion>(entity =>
+        {
+            entity.HasIndex(c => new { c.FromUnitId, c.ToUnitId }).IsUnique();
+            entity.HasIndex(c => c.IsActive);
+        });
+
+        // ItemUnitOfMeasure entity
+        builder.Entity<ItemUnitOfMeasure>(entity =>
+        {
+            entity.HasIndex(iu => new { iu.InventoryItemId, iu.UnitOfMeasureId }).IsUnique();
+            entity.HasIndex(iu => iu.IsActive);
+
+            entity.HasOne(iu => iu.InventoryItem)
+                .WithMany(i => i.ItemUnitsOfMeasure)
+                .HasForeignKey(iu => iu.InventoryItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(iu => iu.UnitOfMeasure)
+                .WithMany(u => u.ItemUnits)
+                .HasForeignKey(iu => iu.UnitOfMeasureId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // InventoryTransfer entity - use NoAction to avoid multiple cascade paths
+        builder.Entity<InventoryTransfer>(entity =>
+        {
+            entity.HasIndex(it => it.TransferNumber).IsUnique();
+            entity.HasIndex(it => it.SourceWarehouseId);
+            entity.HasIndex(it => it.DestinationWarehouseId);
+            entity.HasIndex(it => it.Status);
+            entity.HasIndex(it => it.RequestDate);
+
+            entity.HasOne(it => it.SourceWarehouse)
+                .WithMany()
+                .HasForeignKey(it => it.SourceWarehouseId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(it => it.DestinationWarehouse)
+                .WithMany()
+                .HasForeignKey(it => it.DestinationWarehouseId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(it => it.SourceLocation)
+                .WithMany()
+                .HasForeignKey(it => it.SourceLocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(it => it.DestinationLocation)
+                .WithMany()
+                .HasForeignKey(it => it.DestinationLocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(it => it.InTransitLocation)
+                .WithMany()
+                .HasForeignKey(it => it.InTransitLocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(it => it.RequestedBy)
+                .WithMany()
+                .HasForeignKey(it => it.RequestedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(it => it.ApprovedBy)
+                .WithMany()
+                .HasForeignKey(it => it.ApprovedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(it => it.ShippedBy)
+                .WithMany()
+                .HasForeignKey(it => it.ShippedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(it => it.ReceivedBy)
+                .WithMany()
+                .HasForeignKey(it => it.ReceivedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // InventoryTransferItem entity
+        builder.Entity<InventoryTransferItem>(entity =>
+        {
+            entity.HasIndex(iti => iti.InventoryTransferId);
+            entity.HasIndex(iti => iti.InventoryItemId);
+
+            entity.HasOne(iti => iti.InventoryTransfer)
+                .WithMany(it => it.Items)
+                .HasForeignKey(iti => iti.InventoryTransferId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(iti => iti.InventoryItem)
+                .WithMany()
+                .HasForeignKey(iti => iti.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(iti => iti.SourceLocation)
+                .WithMany()
+                .HasForeignKey(iti => iti.SourceLocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(iti => iti.DestinationLocation)
+                .WithMany()
+                .HasForeignKey(iti => iti.DestinationLocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // InventoryRequisition entity - department requisitions for internal issues
+        builder.Entity<InventoryRequisition>(entity =>
+        {
+            entity.HasIndex(ir => ir.RequisitionNumber).IsUnique();
+            entity.HasIndex(ir => ir.WarehouseId);
+            entity.HasIndex(ir => ir.DepartmentId);
+            entity.HasIndex(ir => ir.Status);
+            entity.HasIndex(ir => ir.RequestDate);
+            entity.HasIndex(ir => ir.RequiredDate);
+            entity.HasIndex(ir => new { ir.TenantId, ir.Status });
+
+            entity.HasOne(ir => ir.Warehouse)
+                .WithMany()
+                .HasForeignKey(ir => ir.WarehouseId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(ir => ir.Location)
+                .WithMany()
+                .HasForeignKey(ir => ir.LocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(ir => ir.RequestedBy)
+                .WithMany()
+                .HasForeignKey(ir => ir.RequestedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(ir => ir.ApprovedBy)
+                .WithMany()
+                .HasForeignKey(ir => ir.ApprovedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(ir => ir.IssuedBy)
+                .WithMany()
+                .HasForeignKey(ir => ir.IssuedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // InventoryRequisitionItem entity
+        builder.Entity<InventoryRequisitionItem>(entity =>
+        {
+            entity.HasIndex(iri => iri.InventoryRequisitionId);
+            entity.HasIndex(iri => iri.InventoryItemId);
+
+            entity.HasOne(iri => iri.InventoryRequisition)
+                .WithMany(ir => ir.Items)
+                .HasForeignKey(iri => iri.InventoryRequisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(iri => iri.InventoryItem)
+                .WithMany()
+                .HasForeignKey(iri => iri.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(iri => iri.Location)
+                .WithMany()
+                .HasForeignKey(iri => iri.LocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // GoodsReceiptNote entity
+        builder.Entity<GoodsReceiptNote>(entity =>
+        {
+            entity.HasIndex(grn => grn.GRNNumber).IsUnique();
+            entity.HasIndex(grn => grn.WarehouseId);
+            entity.HasIndex(grn => grn.SupplierId);
+            entity.HasIndex(grn => grn.Status);
+            entity.HasIndex(grn => grn.ReceiptDate);
+
+            entity.HasOne(grn => grn.Warehouse)
+                .WithMany()
+                .HasForeignKey(grn => grn.WarehouseId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(grn => grn.ReceivingLocation)
+                .WithMany()
+                .HasForeignKey(grn => grn.ReceivingLocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(grn => grn.ReceivedBy)
+                .WithMany()
+                .HasForeignKey(grn => grn.ReceivedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(grn => grn.InspectedBy)
+                .WithMany()
+                .HasForeignKey(grn => grn.InspectedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // GoodsReceiptNoteItem entity
+        builder.Entity<GoodsReceiptNoteItem>(entity =>
+        {
+            entity.HasIndex(grni => grni.GoodsReceiptNoteId);
+            entity.HasIndex(grni => grni.InventoryItemId);
+
+            entity.HasOne(grni => grni.GoodsReceiptNote)
+                .WithMany(grn => grn.Items)
+                .HasForeignKey(grni => grni.GoodsReceiptNoteId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(grni => grni.InventoryItem)
+                .WithMany()
+                .HasForeignKey(grni => grni.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(grni => grni.StorageLocation)
+                .WithMany()
+                .HasForeignKey(grni => grni.StorageLocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // PhysicalCount entity
+        builder.Entity<PhysicalCount>(entity =>
+        {
+            entity.HasIndex(pc => pc.CountNumber).IsUnique();
+            entity.HasIndex(pc => pc.WarehouseId);
+            entity.HasIndex(pc => pc.Status);
+            entity.HasIndex(pc => pc.CountDate);
+
+            entity.HasOne(pc => pc.Warehouse)
+                .WithMany()
+                .HasForeignKey(pc => pc.WarehouseId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pc => pc.Location)
+                .WithMany()
+                .HasForeignKey(pc => pc.LocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pc => pc.Category)
+                .WithMany()
+                .HasForeignKey(pc => pc.CategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pc => pc.InitiatedBy)
+                .WithMany()
+                .HasForeignKey(pc => pc.InitiatedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pc => pc.CountedBy)
+                .WithMany()
+                .HasForeignKey(pc => pc.CountedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pc => pc.ApprovedBy)
+                .WithMany()
+                .HasForeignKey(pc => pc.ApprovedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pc => pc.PostedBy)
+                .WithMany()
+                .HasForeignKey(pc => pc.PostedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // PhysicalCountItem entity
+        builder.Entity<PhysicalCountItem>(entity =>
+        {
+            entity.HasIndex(pci => pci.PhysicalCountId);
+            entity.HasIndex(pci => pci.InventoryItemId);
+
+            entity.HasOne(pci => pci.PhysicalCount)
+                .WithMany(pc => pc.Items)
+                .HasForeignKey(pci => pci.PhysicalCountId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(pci => pci.InventoryItem)
+                .WithMany()
+                .HasForeignKey(pci => pci.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(pci => pci.Location)
+                .WithMany()
+                .HasForeignKey(pci => pci.LocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pci => pci.CountedBy)
+                .WithMany()
+                .HasForeignKey(pci => pci.CountedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // LandedCost entity
+        builder.Entity<LandedCost>(entity =>
+        {
+            entity.HasIndex(lc => lc.LandedCostNumber).IsUnique();
+            entity.HasIndex(lc => lc.GoodsReceiptNoteId);
+            entity.HasIndex(lc => lc.Status);
+
+            entity.HasOne(lc => lc.GoodsReceiptNote)
+                .WithMany()
+                .HasForeignKey(lc => lc.GoodsReceiptNoteId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(lc => lc.ApprovedBy)
+                .WithMany()
+                .HasForeignKey(lc => lc.ApprovedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(lc => lc.PostedBy)
+                .WithMany()
+                .HasForeignKey(lc => lc.PostedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // LandedCostItem entity
+        builder.Entity<LandedCostItem>(entity =>
+        {
+            entity.HasIndex(lci => lci.LandedCostId);
+
+            entity.HasOne(lci => lci.LandedCost)
+                .WithMany(lc => lc.Items)
+                .HasForeignKey(lci => lci.LandedCostId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // LandedCostAllocation entity
+        builder.Entity<LandedCostAllocation>(entity =>
+        {
+            entity.HasIndex(lca => lca.LandedCostId);
+            entity.HasIndex(lca => lca.InventoryItemId);
+            entity.HasIndex(lca => lca.GoodsReceiptNoteItemId);
+
+            entity.HasOne(lca => lca.LandedCost)
+                .WithMany(lc => lc.Allocations)
+                .HasForeignKey(lca => lca.LandedCostId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(lca => lca.LandedCostItem)
+                .WithMany()
+                .HasForeignKey(lca => lca.LandedCostItemId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(lca => lca.GoodsReceiptNoteItem)
+                .WithMany()
+                .HasForeignKey(lca => lca.GoodsReceiptNoteItemId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(lca => lca.InventoryItem)
+                .WithMany()
+                .HasForeignKey(lca => lca.InventoryItemId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(lca => lca.CostLayer)
+                .WithMany()
+                .HasForeignKey(lca => lca.CostLayerId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // InventoryCostLayer entity
+        builder.Entity<InventoryCostLayer>(entity =>
+        {
+            entity.HasIndex(icl => icl.InventoryItemId);
+            entity.HasIndex(icl => icl.WarehouseId);
+            entity.HasIndex(icl => icl.LayerDate);
+            entity.HasIndex(icl => icl.IsFullyConsumed);
+
+            entity.HasOne(icl => icl.InventoryItem)
+                .WithMany()
+                .HasForeignKey(icl => icl.InventoryItemId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(icl => icl.Warehouse)
+                .WithMany()
+                .HasForeignKey(icl => icl.WarehouseId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // PurchaseReturn entity
+        builder.Entity<PurchaseReturn>(entity =>
+        {
+            entity.HasIndex(pr => pr.ReturnNumber).IsUnique();
+            entity.HasIndex(pr => pr.SupplierId);
+            entity.HasIndex(pr => pr.WarehouseId);
+            entity.HasIndex(pr => pr.Status);
+            entity.HasIndex(pr => pr.ReturnDate);
+
+            entity.HasOne(pr => pr.GoodsReceiptNote)
+                .WithMany()
+                .HasForeignKey(pr => pr.GoodsReceiptNoteId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pr => pr.Warehouse)
+                .WithMany()
+                .HasForeignKey(pr => pr.WarehouseId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pr => pr.RequestedBy)
+                .WithMany()
+                .HasForeignKey(pr => pr.RequestedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pr => pr.ApprovedBy)
+                .WithMany()
+                .HasForeignKey(pr => pr.ApprovedById)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // PurchaseReturnItem entity
+        builder.Entity<PurchaseReturnItem>(entity =>
+        {
+            entity.HasIndex(pri => pri.PurchaseReturnId);
+            entity.HasIndex(pri => pri.InventoryItemId);
+
+            entity.HasOne(pri => pri.PurchaseReturn)
+                .WithMany(pr => pr.Items)
+                .HasForeignKey(pri => pri.PurchaseReturnId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(pri => pri.InventoryItem)
+                .WithMany()
+                .HasForeignKey(pri => pri.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(pri => pri.GoodsReceiptNoteItem)
+                .WithMany()
+                .HasForeignKey(pri => pri.GoodsReceiptNoteItemId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(pri => pri.Location)
+                .WithMany()
+                .HasForeignKey(pri => pri.LocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // InventoryMovement entity - Immutable source of truth for all inventory transactions
+        builder.Entity<InventoryMovement>(entity =>
+        {
+            // Unique index on MovementNumber per tenant
+            entity.HasIndex(im => new { im.TenantId, im.MovementNumber })
+                .IsUnique()
+                .HasDatabaseName("IX_InventoryMovements_TenantId_MovementNumber");
+
+            // Performance indexes
+            entity.HasIndex(im => im.InventoryItemId)
+                .HasDatabaseName("IX_InventoryMovements_InventoryItemId");
+            entity.HasIndex(im => im.WarehouseId)
+                .HasDatabaseName("IX_InventoryMovements_WarehouseId");
+            entity.HasIndex(im => im.MovementDate)
+                .HasDatabaseName("IX_InventoryMovements_MovementDate");
+            entity.HasIndex(im => im.PostingDate)
+                .HasDatabaseName("IX_InventoryMovements_PostingDate");
+            entity.HasIndex(im => im.MovementType)
+                .HasDatabaseName("IX_InventoryMovements_MovementType");
+            entity.HasIndex(im => im.ReferenceType)
+                .HasDatabaseName("IX_InventoryMovements_ReferenceType");
+            entity.HasIndex(im => im.ReferenceId)
+                .HasDatabaseName("IX_InventoryMovements_ReferenceId");
+            entity.HasIndex(im => im.IsPosted)
+                .HasDatabaseName("IX_InventoryMovements_IsPosted");
+            entity.HasIndex(im => im.CostLayerId)
+                .HasDatabaseName("IX_InventoryMovements_CostLayerId");
+
+            // Composite index for common queries
+            entity.HasIndex(im => new { im.TenantId, im.InventoryItemId, im.WarehouseId, im.MovementDate })
+                .HasDatabaseName("IX_InventoryMovements_Item_Warehouse_Date");
+
+            // Relationships
+            entity.HasOne(im => im.InventoryItem)
+                .WithMany()
+                .HasForeignKey(im => im.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(im => im.Warehouse)
+                .WithMany()
+                .HasForeignKey(im => im.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(im => im.Location)
+                .WithMany()
+                .HasForeignKey(im => im.LocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(im => im.CostLayer)
+                .WithMany(il => il.Movements)
+                .HasForeignKey(im => im.CostLayerId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(im => im.CreatedBy)
+                .WithMany()
+                .HasForeignKey(im => im.CreatedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(im => im.PostedBy)
+                .WithMany()
+                .HasForeignKey(im => im.PostedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // Self-referencing relationship for reversals
+            entity.HasOne(im => im.ReversedMovement)
+                .WithMany()
+                .HasForeignKey(im => im.ReversedMovementId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // InventoryLayer entity - FIFO cost layers
+        builder.Entity<InventoryLayer>(entity =>
+        {
+            // Unique index on LayerNumber per tenant
+            entity.HasIndex(il => new { il.TenantId, il.LayerNumber })
+                .IsUnique()
+                .HasDatabaseName("IX_InventoryLayers_TenantId_LayerNumber");
+
+            // Performance indexes
+            entity.HasIndex(il => il.InventoryItemId)
+                .HasDatabaseName("IX_InventoryLayers_InventoryItemId");
+            entity.HasIndex(il => il.WarehouseId)
+                .HasDatabaseName("IX_InventoryLayers_WarehouseId");
+            entity.HasIndex(il => il.LayerDate)
+                .HasDatabaseName("IX_InventoryLayers_LayerDate");
+            entity.HasIndex(il => il.IsFullyConsumed)
+                .HasDatabaseName("IX_InventoryLayers_IsFullyConsumed");
+            entity.HasIndex(il => il.IsActive)
+                .HasDatabaseName("IX_InventoryLayers_IsActive");
+
+            // Composite index for FIFO consumption queries (oldest first with remaining quantity)
+            entity.HasIndex(il => new { il.TenantId, il.InventoryItemId, il.WarehouseId, il.IsFullyConsumed, il.LayerDate })
+                .HasDatabaseName("IX_InventoryLayers_FIFO_Consumption");
+
+            // Relationships
+            entity.HasOne(il => il.InventoryItem)
+                .WithMany()
+                .HasForeignKey(il => il.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(il => il.Warehouse)
+                .WithMany()
+                .HasForeignKey(il => il.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(il => il.Location)
+                .WithMany()
+                .HasForeignKey(il => il.LocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // InventoryBalance entity - Performance cache (denormalized view)
+        builder.Entity<InventoryBalance>(entity =>
+        {
+            // Unique composite key on Item + Warehouse + Location per tenant
+            entity.HasIndex(ib => new { ib.TenantId, ib.InventoryItemId, ib.WarehouseId, ib.LocationId })
+                .IsUnique()
+                .HasDatabaseName("IX_InventoryBalances_Unique_Item_Warehouse_Location");
+
+            // Performance indexes
+            entity.HasIndex(ib => ib.InventoryItemId)
+                .HasDatabaseName("IX_InventoryBalances_InventoryItemId");
+            entity.HasIndex(ib => ib.WarehouseId)
+                .HasDatabaseName("IX_InventoryBalances_WarehouseId");
+            entity.HasIndex(ib => ib.LastMovementDate)
+                .HasDatabaseName("IX_InventoryBalances_LastMovementDate");
+
+            // Index for low stock queries
+            entity.HasIndex(ib => new { ib.TenantId, ib.QuantityOnHand })
+                .HasDatabaseName("IX_InventoryBalances_QuantityOnHand");
+
+            // Relationships
+            entity.HasOne(ib => ib.InventoryItem)
+                .WithMany()
+                .HasForeignKey(ib => ib.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(ib => ib.Warehouse)
+                .WithMany()
+                .HasForeignKey(ib => ib.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(ib => ib.Location)
+                .WithMany()
+                .HasForeignKey(ib => ib.LocationId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+    }
+
+    private static void ConfigureFinanceCommonEntities(ModelBuilder builder)
+    {
+        // Configure PaymentTerm entity
+        builder.Entity<PaymentTerm>(entity =>
+        {
+            entity.HasIndex(pt => pt.Code);
+            entity.HasIndex(pt => pt.IsActive);
+            entity.HasIndex(pt => pt.IsDefault);
+            entity.HasIndex(pt => pt.ApplicableTo);
+            entity.HasIndex(pt => new { pt.TenantId, pt.Code }).IsUnique();
+        });
+
+        // Configure Currency entity
+        builder.Entity<Currency>(entity =>
+        {
+            entity.HasIndex(c => c.Code);
+            entity.HasIndex(c => c.IsActive);
+            entity.HasIndex(c => c.IsBaseCurrency);
+            entity.HasIndex(c => new { c.TenantId, c.Code }).IsUnique();
         });
     }
 

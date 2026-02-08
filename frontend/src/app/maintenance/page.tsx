@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -105,7 +105,7 @@ const maintenanceModules = [
   },
 ];
 
-export default function MaintenancePage() {
+function MaintenancePageContent() {
   const [activeWorkOrders, setActiveWorkOrders] = useState(0);
   const [assetsManaged, setAssetsManaged] = useState(0);
   const [availableTechnicians, setAvailableTechnicians] = useState(0);
@@ -241,5 +241,13 @@ export default function MaintenancePage() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+export default function MaintenancePage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen">Loading...</div>}>
+      <MaintenancePageContent />
+    </Suspense>
   );
 }

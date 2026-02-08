@@ -258,6 +258,7 @@ public interface IEvaluationCriterionRepository
     Task<IEnumerable<EvaluationCriterion>> GetAllAsync();
     Task<IEnumerable<EvaluationCriterion>> GetActiveAsync();
     Task<IEnumerable<EvaluationCriterion>> GetByCategoryAsync(string category);
+    Task<IEnumerable<EvaluationCriterion>> GetByIdsAsync(IEnumerable<Guid> ids);
     Task<EvaluationCriterion> CreateAsync(EvaluationCriterion criterion);
     Task<EvaluationCriterion> UpdateAsync(EvaluationCriterion criterion);
     Task DeleteAsync(Guid id);
@@ -354,5 +355,24 @@ public interface IPerformanceBondRequestRepository
     Task<IEnumerable<PerformanceBondRequest>> GetByStatusAsync(string status);
     Task<PerformanceBondRequest> CreateAsync(PerformanceBondRequest request);
     Task<PerformanceBondRequest> UpdateAsync(PerformanceBondRequest request);
+    Task DeleteAsync(Guid id);
+}
+
+/// <summary>
+/// Tender negotiation repository interface
+/// </summary>
+public interface ITenderNegotiationRepository
+{
+    Task<TenderNegotiation?> GetByIdAsync(Guid id);
+    Task<TenderNegotiation?> GetByIdWithItemsAsync(Guid id);
+    Task<TenderNegotiation?> GetByTenderAndBidAsync(Guid tenderId, Guid bidId);
+    Task<TenderNegotiation?> GetByTenderBidAndLotAsync(Guid tenderId, Guid bidId, Guid? lotId);
+    Task<IEnumerable<TenderNegotiation>> GetByTenderIdAsync(Guid tenderId);
+    Task<IEnumerable<TenderNegotiation>> GetByBidIdAsync(Guid bidId);
+    Task<IEnumerable<TenderNegotiation>> GetByBusinessPartnerIdAsync(Guid businessPartnerId);
+    Task<TenderNegotiation> CreateAsync(TenderNegotiation negotiation);
+    Task<TenderNegotiation> UpdateAsync(TenderNegotiation negotiation);
+    Task<TenderNegotiationItem?> GetItemByIdAsync(Guid itemId);
+    Task<TenderNegotiationItem> UpdateItemAsync(TenderNegotiationItem item);
     Task DeleteAsync(Guid id);
 }

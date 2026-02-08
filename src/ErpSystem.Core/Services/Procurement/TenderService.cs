@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
@@ -23,10 +24,13 @@ public class TenderService : ITenderService
     private readonly ITenderLotRepository _lotRepository;
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
     private readonly ITenderNotificationService _notificationService;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IUnitOfWork _unitOfWork;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<TenderService> _logger;
+    private readonly IAppEventBus _appEventBus;
 
     public TenderService(
         ITenderRepository tenderRepository,
@@ -41,9 +45,12 @@ public class TenderService : ITenderService
         ITenderLotRepository lotRepository,
         IBusinessPartnerRepository businessPartnerRepository,
         ITenderNotificationService notificationService,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IUnitOfWork unitOfWork,
         UserManager<ApplicationUser> userManager,
         ICurrentUserProvider currentUserProvider,
+        IAppEventBus appEventBus,
         ILogger<TenderService> logger)
     {
         _tenderRepository = tenderRepository;
@@ -58,9 +65,12 @@ public class TenderService : ITenderService
         _lotRepository = lotRepository;
         _businessPartnerRepository = businessPartnerRepository;
         _notificationService = notificationService;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _unitOfWork = unitOfWork;
         _userManager = userManager;
         _currentUserProvider = currentUserProvider;
+        _appEventBus = appEventBus;
         _logger = logger;
     }
 
@@ -124,7 +134,7 @@ public class TenderService : ITenderService
 
             return new PagedResult<TenderDto>
             {
-                Items = result.Items.Select(MapToDto),
+                Items = result.Items.Select(MapToDto).ToList(),
                 TotalCount = result.TotalCount,
                 Page = result.Page,
                 PageSize = result.PageSize
@@ -239,6 +249,34 @@ public class TenderService : ITenderService
 
             _logger.LogInformation("Created tender {TenderId}", tender.Id);
 
+            // Publish event for admin-configurable notification topics (best-effort).
+            try
+            {
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = tender.TenantId,
+                    EntityType = "Tender",
+                    Activity = "Created",
+                    Audience = "Internal",
+                    EntityId = tender.Id,
+                    TriggeredByUserId = _currentUserProvider.UserId,
+                    Data = new Dictionary<string, object>
+                    {
+                        ["TenderId"] = tender.Id,
+                        ["TenderNumber"] = tender.TenderNumber ?? string.Empty,
+                        ["Title"] = tender.Title ?? string.Empty,
+                        ["Status"] = tender.Status ?? string.Empty,
+                        ["TenderType"] = tender.TenderType ?? string.Empty,
+                        ["SubmissionDeadline"] = tender.SubmissionDeadline?.ToString("o") ?? string.Empty,
+                        ["OpeningDate"] = tender.OpeningDate?.ToString("o") ?? string.Empty
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish Tender.Created entity activity event for tender {TenderId}", tender.Id);
+            }
+
             return MapToDetailDto(tender, new List<TenderLot>(), items, new List<TenderDocument>(), new List<TenderFee>(), new List<TenderInvitation>(), new List<TenderClarification>(), new List<TenderEvaluatorDto>(), new List<TenderBid>());
         }
         catch (Exception ex)
@@ -310,6 +348,108 @@ public class TenderService : ITenderService
         }
     }
 
+    public async Task SubmitTenderForApprovalAsync(Guid id, Guid userId)
+    {
+        var tender = await _tenderRepository.GetByIdAsync(id)
+            ?? throw new InvalidOperationException($"Tender with ID {id} not found");
+
+        if (!string.Equals(tender.Status, "Draft", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Tender must be in Draft status to submit for approval (current status: '{tender.Status}')");
+        }
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync("Tender", id);
+        if (!workflowResult.ExecutionResult.Success)
+        {
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start workflow");
+        }
+
+        var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("Tender");
+        statusAdapter.ApplySubmitOutcome(tender, workflowResult.Outcome, userId);
+        tender.UpdatedAt = DateTime.UtcNow;
+
+        await _tenderRepository.UpdateAsync(tender);
+        await _unitOfWork.SaveChangesAsync();
+    }
+
+    public async Task ApproveTenderAsync(Guid id, Guid userId, string? comments = null)
+    {
+        var tender = await _tenderRepository.GetByIdAsync(id)
+            ?? throw new InvalidOperationException($"Tender with ID {id} not found");
+
+        if (!string.Equals(tender.Status, "Submitted", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Tender must be in Submitted status to approve (current status: '{tender.Status}')");
+        }
+
+        var canApprove = await _workflowIntegrationService.CanUserApproveAsync("Tender", id, userId);
+        if (!canApprove)
+        {
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step");
+        }
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            "Tender",
+            id,
+            userId,
+            "Approve",
+            comments);
+
+        if (!workflowResult.ExecutionResult.Success)
+        {
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process approval");
+        }
+
+        var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("Tender");
+        statusAdapter.ApplyApprovalOutcome(tender, workflowResult.Outcome, userId);
+        tender.UpdatedAt = DateTime.UtcNow;
+
+        await _tenderRepository.UpdateAsync(tender);
+        await _unitOfWork.SaveChangesAsync();
+    }
+
+    public async Task RejectTenderAsync(Guid id, Guid userId, string reason, string? comments = null)
+    {
+        var tender = await _tenderRepository.GetByIdAsync(id)
+            ?? throw new InvalidOperationException($"Tender with ID {id} not found");
+
+        if (!string.Equals(tender.Status, "Submitted", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Tender must be in Submitted status to reject (current status: '{tender.Status}')");
+        }
+
+        var canApprove = await _workflowIntegrationService.CanUserApproveAsync("Tender", id, userId);
+        if (!canApprove)
+        {
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step");
+        }
+
+        var rejectionText = !string.IsNullOrWhiteSpace(comments) ? comments : reason;
+        if (string.IsNullOrWhiteSpace(rejectionText))
+        {
+            throw new InvalidOperationException("Rejection reason is required");
+        }
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            "Tender",
+            id,
+            userId,
+            "Reject",
+            rejectionText);
+
+        if (!workflowResult.ExecutionResult.Success)
+        {
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process rejection");
+        }
+
+        var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("Tender");
+        statusAdapter.ApplyApprovalOutcome(tender, workflowResult.Outcome, userId, rejectionText);
+        tender.UpdatedAt = DateTime.UtcNow;
+
+        await _tenderRepository.UpdateAsync(tender);
+        await _unitOfWork.SaveChangesAsync();
+    }
+
     public async Task<TenderDetailDto> PublishTenderAsync(Guid id, PublishTenderDto dto)
     {
         try
@@ -317,9 +457,10 @@ public class TenderService : ITenderService
             var tender = await _tenderRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Tender with ID {id} not found");
 
-            if (tender.Status != "Draft")
+            if (!(string.Equals(tender.Status, "Draft", StringComparison.OrdinalIgnoreCase) ||
+                  string.Equals(tender.Status, "Approved", StringComparison.OrdinalIgnoreCase)))
             {
-                throw new InvalidOperationException("Only draft tenders can be published");
+                throw new InvalidOperationException($"Tender cannot be published in current status: {tender.Status}");
             }
 
             tender.Status = "Published";
@@ -334,10 +475,86 @@ public class TenderService : ITenderService
 
             _logger.LogInformation("Published tender {TenderId}", id);
 
+            // Publish events for admin-configurable notification topics (best-effort).
+            try
+            {
+                var baseData = new Dictionary<string, object>
+                {
+                    ["TenderId"] = tender.Id,
+                    ["TenderNumber"] = tender.TenderNumber ?? string.Empty,
+                    ["Title"] = tender.Title ?? string.Empty,
+                    ["Status"] = tender.Status ?? string.Empty,
+                    ["SubmissionDeadline"] = tender.SubmissionDeadline?.ToString("o") ?? string.Empty,
+                    ["OpeningDate"] = tender.OpeningDate?.ToString("o") ?? string.Empty,
+                    ["PublishedById"] = tender.PublishedById ?? Guid.Empty
+                };
+
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = tender.TenantId,
+                    EntityType = "Tender",
+                    Activity = "Published",
+                    Audience = "Internal",
+                    EntityId = tender.Id,
+                    TriggeredByUserId = _currentUserProvider.UserId,
+                    Data = new Dictionary<string, object>(baseData)
+                });
+
+                if (dto.InvitedBusinessPartnerIds != null)
+                {
+                    foreach (var bpId in dto.InvitedBusinessPartnerIds.Where(x => x != Guid.Empty).Distinct())
+                    {
+                        var supplierData = new Dictionary<string, object>(baseData)
+                        {
+                            ["BusinessPartnerId"] = bpId
+                        };
+
+                        await _appEventBus.PublishAsync(new EntityActivityEvent
+                        {
+                            TenantId = tender.TenantId,
+                            EntityType = "Tender",
+                            Activity = "Published",
+                            Audience = "Supplier",
+                            EntityId = tender.Id,
+                            TriggeredByUserId = _currentUserProvider.UserId,
+                            Data = supplierData
+                        });
+                    }
+                }
+
+                if (dto.ExternalRecipientEmails != null && dto.ExternalRecipientEmails.Any())
+                {
+                    var supplierData = new Dictionary<string, object>(baseData)
+                    {
+                        ["Emails"] = string.Join(",", dto.ExternalRecipientEmails.Where(e => !string.IsNullOrWhiteSpace(e)).Select(e => e.Trim()))
+                    };
+
+                    await _appEventBus.PublishAsync(new EntityActivityEvent
+                    {
+                        TenantId = tender.TenantId,
+                        EntityType = "Tender",
+                        Activity = "Published",
+                        Audience = "Supplier",
+                        EntityId = tender.Id,
+                        TriggeredByUserId = _currentUserProvider.UserId,
+                        Data = supplierData
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish Tender.Published entity activity event for tender {TenderId}", id);
+            }
+
             // Send notifications to invited business partners
             if (dto.InvitedBusinessPartnerIds != null && dto.InvitedBusinessPartnerIds.Any())
             {
-                await _notificationService.SendTenderPublishedNotificationAsync(id, dto.InvitedBusinessPartnerIds);
+                await _notificationService.SendTenderPublishedNotificationAsync(id, dto.InvitedBusinessPartnerIds, dto.ExternalRecipientEmails);
+            }
+            else if (dto.ExternalRecipientEmails != null && dto.ExternalRecipientEmails.Any())
+            {
+                // Allow publish notifications for "public" recipients even if no business partners were invited.
+                await _notificationService.SendTenderPublishedNotificationAsync(id, new List<Guid>(), dto.ExternalRecipientEmails);
             }
 
             var items = await _itemRepository.GetByTenderIdAsync(id);
@@ -586,7 +803,7 @@ public class TenderService : ITenderService
             // Send notifications
             if (dto.SendNotifications)
             {
-                await _notificationService.SendTenderPublishedNotificationAsync(tenderId, dto.BusinessPartnerIds);
+                await _notificationService.SendTenderPublishedNotificationAsync(tenderId, dto.BusinessPartnerIds, dto.ExternalRecipientEmails);
             }
         }
         catch (Exception ex)
@@ -1509,4 +1726,3 @@ public class TenderService : ITenderService
 
     #endregion
 }
-

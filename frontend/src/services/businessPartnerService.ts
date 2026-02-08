@@ -1,6 +1,6 @@
 /**
  * Business Partner Service
- * Main API service for Business Partner (Supplier/Contractor) management
+ * Main API service for Business Partner (Supplier/Contractor/Customer) management
  */
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
@@ -21,7 +21,7 @@ const getAuthHeaders = () => {
 export interface BusinessPartnerDto {
   id: string;
   partnerCode: string;
-  partnerType: string; // Supplier, Contractor, Both
+  partnerType: string; // Supplier, Contractor, Both, Customer
   partnerName: string;
   companyName?: string; // Alias for partnerName
   tradingName?: string;
@@ -42,9 +42,22 @@ export interface BusinessPartnerDto {
   performanceRating?: number;
   createdAt: string;
   updatedAt?: string;
+  // Parent/Hierarchy
+  parentId?: string;
+  parentName?: string;
+  // Customer-specific fields for list view
+  customerType?: string;
+  creditLimit?: number;
+  outstandingBalance?: number;
+  isOnCreditHold?: boolean;
+
+  // Workflow display helpers (optional)
+  currentWorkflowStepName?: string;
 }
 
 export interface BusinessPartnerDetailDto extends BusinessPartnerDto {
+  parentId?: string;
+  parentName?: string;
   legalName?: string;
   postalAddress?: string;
   physicalState?: string;
@@ -73,6 +86,7 @@ export interface BusinessPartnerDetailDto extends BusinessPartnerDto {
   geographicCoverage?: string;
   // Other
   paymentTerms?: string;
+  currency?: string;
   creditLimit?: number;
   insuranceCoverageAmount?: number;
   registrationDate?: string;
@@ -81,6 +95,26 @@ export interface BusinessPartnerDetailDto extends BusinessPartnerDto {
   blacklistDate?: string;
   blacklistExpiryDate?: string;
   notes?: string;
+  // Customer-Specific Fields (for Debtors/Sales)
+  customerAccountNumber?: string;
+  defaultDiscount?: number;
+  priceList?: string;
+  salesRepresentativeId?: string;
+  salesRepresentativeName?: string;
+  salesTerritory?: string;
+  isTaxExempt?: boolean;
+  taxExemptionNumber?: string;
+  taxExemptionExpiry?: string;
+  preferredShippingMethod?: string;
+  deliveryInstructions?: string;
+  customerSince?: string;
+  lastPurchaseDate?: string;
+  totalLifetimePurchases?: number;
+  averageOrderValue?: number;
+  loyaltyTier?: string;
+  loyaltyPoints?: number;
+  creditHoldReason?: string;
+  creditHoldDate?: string;
   // Related Data
   contacts?: BusinessPartnerContactDto[];
   licenses?: BusinessPartnerLicenseDto[];
@@ -199,7 +233,8 @@ export interface LicenseTypeDto {
 
 export interface CreateBusinessPartnerDto {
   partnerType: string;
-  companyName: string;
+  partnerName: string;
+  companyName?: string; // Alias for partnerName
   tradingName?: string;
   registrationNumber?: string;
   taxNumber?: string;
@@ -214,10 +249,26 @@ export interface CreateBusinessPartnerDto {
   bankAccountNumber?: string;
   bankBranchCode?: string;
   paymentTerms?: string;
+  currency?: string;
   creditLimit?: number;
   notes?: string;
   categoryIds?: string[];
   specializationIds?: string[];
+  // Parent/Hierarchy
+  parentId?: string;
+  // Customer-Specific Fields
+  customerType?: string; // Retail, Wholesale, Corporate, Government
+  defaultDiscount?: number;
+  priceList?: string;
+  salesRepresentativeId?: string;
+  salesTerritory?: string;
+  isTaxExempt?: boolean;
+  taxExemptionNumber?: string;
+  taxExemptionExpiry?: string;
+  preferredShippingMethod?: string;
+  deliveryInstructions?: string;
+  customerSince?: string;
+  loyaltyTier?: string;
 }
 
 export interface UpdateBusinessPartnerDto {
@@ -237,6 +288,10 @@ export interface UpdateBusinessPartnerDto {
   notes?: string;
   categoryIds?: string[];
   specializationIds?: string[];
+  currency?: string;
+  paymentTerms?: string;
+  priceList?: string;
+  parentId?: string;
 }
 
 export interface PagedResult<T> {
@@ -315,6 +370,17 @@ export const businessPartnerService = {
     return response.json();
   },
 
+  // Get all partners for dropdown (simple list)
+  async getAllPartnersForDropdown(): Promise<BusinessPartnerDto[]> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners?pageSize=1000`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch partners for dropdown');
+    const result = await response.json();
+    return result.items || result;
+  },
+
   // Get preferred partners
   async getPreferredPartners(partnerType?: string): Promise<BusinessPartnerDto[]> {
     const queryParams = partnerType ? `?partnerType=${partnerType}` : '';
@@ -328,10 +394,16 @@ export const businessPartnerService = {
 
   // Create new partner
   async createPartner(data: CreateBusinessPartnerDto): Promise<BusinessPartnerDetailDto> {
+    // Clean up the data - convert empty strings to undefined for nullable Guid fields
+    const cleanedData = {
+      ...data,
+      parentId: data.parentId && data.parentId !== '' ? data.parentId : undefined,
+    };
+    
     const response = await fetch(`${API_BASE_URL}/procurement/business-partners`, {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify(data)
+      body: JSON.stringify(cleanedData)
     });
 
     if (!response.ok) throw new Error('Failed to create business partner');
@@ -340,10 +412,16 @@ export const businessPartnerService = {
 
   // Update partner
   async updatePartner(id: string, data: UpdateBusinessPartnerDto): Promise<BusinessPartnerDetailDto> {
+    // Clean up the data - convert empty strings to undefined for nullable Guid fields
+    const cleanedData = {
+      ...data,
+      parentId: data.parentId && data.parentId !== '' ? data.parentId : undefined,
+    };
+    
     const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
-      body: JSON.stringify(data)
+      body: JSON.stringify(cleanedData)
     });
 
     if (!response.ok) throw new Error('Failed to update business partner');
@@ -361,13 +439,30 @@ export const businessPartnerService = {
   },
 
   // Approve partner
-  async approvePartner(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}/approve`, {
+  async submitPartnerForApproval(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}/submit`, {
       method: 'POST',
       headers: getAuthHeaders()
     });
 
-    if (!response.ok) throw new Error('Failed to approve business partner');
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to submit business partner for approval');
+    }
+  },
+
+  // Approve partner (workflow)
+  async approvePartner(id: string, notes?: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ notes: notes || undefined })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to approve business partner');
+    }
   },
 
   // Reject partner
@@ -378,7 +473,10 @@ export const businessPartnerService = {
       body: JSON.stringify({ rejectionReason: reason })
     });
 
-    if (!response.ok) throw new Error('Failed to reject business partner');
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to reject business partner');
+    }
   },
 
   // Suspend partner

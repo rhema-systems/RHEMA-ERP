@@ -115,6 +115,29 @@ public class PreInspectionChecklistItem : TenantEntity
 
     public bool RequiresPhoto { get; set; } = false;
 
+    /// <summary>
+    /// Whether this item can have a repair or replacement action during admission.
+    /// When enabled, the admission officer can select "Repair" or "Replace" which
+    /// will be added as a task to the work order.
+    /// </summary>
+    public bool AllowRepairReplacement { get; set; } = false;
+
+    /// <summary>
+    /// Default action when repair/replacement is selected: "Repair", "Replace", or "None"
+    /// </summary>
+    [MaxLength(20)]
+    public string? DefaultRepairReplacementAction { get; set; }
+
+    /// <summary>
+    /// Estimated hours for repair action (used when creating task)
+    /// </summary>
+    public double EstimatedRepairHours { get; set; } = 1.0;
+
+    /// <summary>
+    /// Estimated hours for replacement action (used when creating task)
+    /// </summary>
+    public double EstimatedReplacementHours { get; set; } = 1.0;
+
     // Navigation properties
     [ForeignKey("TemplateId")]
     public virtual PreInspectionChecklistTemplate Template { get; set; } = null!;
@@ -237,6 +260,23 @@ public class AssetConditionItemResult : TenantEntity
     public string? PhotoPaths { get; set; }
 
     public DateTime? InspectedAt { get; set; }
+
+    /// <summary>
+    /// Selected repair/replacement action: "None", "Repair", or "Replace"
+    /// When set to Repair or Replace, a task will be created in the work order
+    /// </summary>
+    [MaxLength(20)]
+    public string? RepairReplacementAction { get; set; }
+
+    /// <summary>
+    /// Whether the repair/replacement task has been created in the work order
+    /// </summary>
+    public bool TaskCreated { get; set; } = false;
+
+    /// <summary>
+    /// Reference to the created work order task (if any)
+    /// </summary>
+    public Guid? CreatedTaskId { get; set; }
 
     // Navigation properties
     [ForeignKey("ConditionRecordId")]

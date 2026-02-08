@@ -15,7 +15,7 @@ import { format } from 'date-fns';
 import * as tenderAwardService from '@/services/tenderAwardService';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { AwardVerificationDialog } from './AwardVerificationDialog';
-import { TenderAwardVerification } from '@/services/awardVerificationService';
+import { TenderAwardVerification, awardVerificationService } from '@/services/awardVerificationService';
 
 interface TenderAwardProps {
   tenderId: string;
@@ -37,6 +37,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
   // Verification selection state
   const [selectedBidsForVerification, setSelectedBidsForVerification] = useState<string[]>([]);
   const [showVerificationDialog, setShowVerificationDialog] = useState(false);
+  const [existingVerification, setExistingVerification] = useState<TenderAwardVerification | null>(null);
 
   useEffect(() => {
     loadAwardData();
@@ -45,7 +46,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
   const loadAwardData = async () => {
     try {
       setLoading(true);
-      
+
       // Check if award already exists
       const award = await tenderAwardService.getAwardByTenderId(tenderId);
       if (award) {
@@ -54,12 +55,16 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
         // Generate recommendation
         const rec = await tenderAwardService.generateAwardRecommendation(tenderId);
         setRecommendation(rec);
-        
+
         // Pre-select recommended bid
         if (rec.recommendedBidId) {
           setSelectedBidId(rec.recommendedBidId);
           setAwardAmount(rec.recommendedAmount.toString());
         }
+
+        // Check for existing verification
+        const verification = await awardVerificationService.getVerificationByTender(tenderId);
+        setExistingVerification(verification);
       }
     } catch (error: any) {
       console.error('Error loading award data:', error);
@@ -121,7 +126,8 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
 
   // Handle verification dialog open
   const handleStartVerification = () => {
-    if (selectedBidsForVerification.length === 0) {
+    // If no bidders selected but there's an existing verification, open to view it
+    if (selectedBidsForVerification.length === 0 && !existingVerification) {
       toast.error('Please select at least one bidder to verify');
       return;
     }
@@ -132,12 +138,28 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
   const handleVerificationComplete = (verification: TenderAwardVerification) => {
     toast.success('Verification completed! You can now proceed with awarding.');
     // Optionally reload data to reflect verification status
+    setExistingVerification(verification);
     loadAwardData();
   };
 
   // Get selected bidders info for the verification dialog
   const getSelectedBiddersInfo = () => {
     if (!recommendation) return [];
+
+    // If no bidders selected but there's an existing verification, return verified bidders
+    if (selectedBidsForVerification.length === 0 && existingVerification) {
+      return existingVerification.bidders?.map(bidder => {
+        const bid = recommendation.bidRecommendations.find(b => b.bidId === bidder.tenderBidId);
+        return {
+          bidId: bidder.tenderBidId,
+          businessPartnerId: bidder.businessPartnerId,
+          businessPartnerName: bidder.businessPartnerName || bid?.businessPartnerName || '',
+          bidNumber: bid?.bidNumber || '',
+          totalBidAmount: bid?.totalBidAmount || 0,
+        };
+      }) || [];
+    }
+
     return recommendation.bidRecommendations
       .filter(bid => selectedBidsForVerification.includes(bid.bidId))
       .map(bid => ({
@@ -353,10 +375,12 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
                 <CardTitle>Bid Comparison</CardTitle>
                 <CardDescription>Select bidders to verify before awarding the tender</CardDescription>
               </div>
-              {selectedBidsForVerification.length > 0 && (
+              {(selectedBidsForVerification.length > 0 || existingVerification) && (
                 <Button onClick={handleStartVerification} variant="outline">
                   <ClipboardCheck className="h-4 w-4 mr-2" />
-                  Verify Selected ({selectedBidsForVerification.length})
+                  {existingVerification && selectedBidsForVerification.length === 0
+                    ? `View Verification (${existingVerification.bidders?.length || 0})`
+                    : `Verify Selected (${selectedBidsForVerification.length})`}
                 </Button>
               )}
             </div>
@@ -507,6 +531,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
         tenderId={tenderId}
         bidders={getSelectedBiddersInfo()}
         onVerificationComplete={handleVerificationComplete}
+        onAwardBidder={(bidId, bidAmount) => handleSelectBid(bidId, bidAmount)}
       />
     </>
   );

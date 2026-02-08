@@ -143,6 +143,106 @@ public class ProductionEmailService : IEmailService
         }
     }
 
+    public async Task<bool> SendEmailWithAttachmentsAsync(string to, string subject, string body, List<EmailAttachment> attachments, bool isHtml = false)
+    {
+        try
+        {
+            // Get email settings from database
+            var emailSettings = await _settingsService.GetEmailSettingsAsync();
+
+            if (emailSettings == null)
+            {
+                _logger.LogWarning("No email settings configured in database. Please configure SMTP settings first.");
+
+                // Fallback to development logging in development environment
+                if (_environment.IsDevelopment())
+                {
+                    _logger.LogInformation("=== EMAIL WITH ATTACHMENTS (No SMTP Config) ===");
+                    _logger.LogInformation("To: {Email}", to);
+                    _logger.LogInformation("Subject: {Subject}", subject);
+                    _logger.LogInformation("Is HTML: {IsHtml}", isHtml);
+                    _logger.LogInformation("Attachments: {AttachmentCount}", attachments?.Count ?? 0);
+                    if (attachments != null && attachments.Count > 0)
+                    {
+                        foreach (var attachment in attachments)
+                        {
+                            _logger.LogInformation("  - {FileName} ({ContentType}, {Size} bytes)",
+                                attachment.FileName,
+                                attachment.ContentType,
+                                attachment.Content?.Length ?? 0);
+                        }
+                    }
+                    _logger.LogInformation("Body Preview: {BodyPreview}", body?.Length > 200 ? body.Substring(0, 200) + "..." : body);
+                    _logger.LogInformation("================================================");
+                    return true;
+                }
+
+                return false;
+            }
+
+            // Validate required settings
+            if (string.IsNullOrEmpty(emailSettings.SmtpHost) ||
+                string.IsNullOrEmpty(emailSettings.FromAddress))
+            {
+                _logger.LogWarning("Incomplete email settings configuration. SMTP host and from address are required.");
+                return false;
+            }
+
+            // Create and configure SMTP client
+            using var smtpClient = new SmtpClient(emailSettings.SmtpHost, emailSettings.SmtpPort);
+
+            if (!string.IsNullOrEmpty(emailSettings.SmtpUsername))
+            {
+                smtpClient.Credentials = new NetworkCredential(emailSettings.SmtpUsername, emailSettings.SmtpPassword);
+            }
+
+            smtpClient.EnableSsl = emailSettings.UseTLS;
+            smtpClient.Timeout = 30000; // 30 seconds timeout
+
+            // Create email message
+            using var mailMessage = new MailMessage
+            {
+                From = new MailAddress(emailSettings.FromAddress, emailSettings.FromName),
+                Subject = subject,
+                Body = body,
+                IsBodyHtml = isHtml
+            };
+
+            mailMessage.To.Add(new MailAddress(to));
+
+            // Add attachments
+            if (attachments != null && attachments.Count > 0)
+            {
+                foreach (var attachment in attachments)
+                {
+                    if (attachment.Content != null && attachment.Content.Length > 0)
+                    {
+                        var memoryStream = new MemoryStream(attachment.Content);
+                        var mailAttachment = new Attachment(memoryStream, attachment.FileName, attachment.ContentType);
+                        mailMessage.Attachments.Add(mailAttachment);
+                    }
+                }
+            }
+
+            // Send email
+            await smtpClient.SendMailAsync(mailMessage);
+
+            _logger.LogInformation("Successfully sent email with {AttachmentCount} attachment(s) to {Email} with subject '{Subject}'",
+                attachments?.Count ?? 0, to, subject);
+            return true;
+        }
+        catch (SmtpException smtpEx)
+        {
+            _logger.LogError(smtpEx, "SMTP error occurred while sending email with attachments to {Email}: {SmtpError}", to, smtpEx.Message);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send email with attachments to {Email}", to);
+            return false;
+        }
+    }
+
     private static string GeneratePasswordResetEmailBody(ApplicationUser user, string resetToken, string resetUrl)
     {
         return $@"

@@ -126,6 +126,48 @@ public class SimpleEmailService : IEmailService
         }
     }
 
+    public async Task<bool> SendEmailWithAttachmentsAsync(string to, string subject, string body, List<EmailAttachment> attachments, bool isHtml = false)
+    {
+        try
+        {
+            if (_environment.IsDevelopment())
+            {
+                _logger.LogInformation("=== EMAIL WITH ATTACHMENTS ===");
+                _logger.LogInformation("To: {Email}", to);
+                _logger.LogInformation("Subject: {Subject}", subject);
+                _logger.LogInformation("Is HTML: {IsHtml}", isHtml);
+                _logger.LogInformation("Attachments: {AttachmentCount}", attachments?.Count ?? 0);
+                
+                if (attachments != null && attachments.Count > 0)
+                {
+                    foreach (var attachment in attachments)
+                    {
+                        _logger.LogInformation("  - {FileName} ({ContentType}, {Size} bytes)",
+                            attachment.FileName,
+                            attachment.ContentType,
+                            attachment.Content?.Length ?? 0);
+                    }
+                }
+                
+                _logger.LogInformation("Body Preview: {BodyPreview}", body?.Length > 200 ? body.Substring(0, 200) + "..." : body);
+                _logger.LogInformation("==============================");
+
+                await Task.Delay(300);
+                return true;
+            }
+
+            // In production, implement actual email sending with attachments
+            // Examples: SendGrid, SMTP with System.Net.Mail, Amazon SES, etc.
+            _logger.LogWarning("Email service with attachments not configured for production environment");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send email with attachments to {Email}", to);
+            return false;
+        }
+    }
+
     public async Task<bool> SendRegistrationSubmittedEmailAsync(string to, string companyName, string registrationId)
     {
         try

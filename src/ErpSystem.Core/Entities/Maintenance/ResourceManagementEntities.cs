@@ -360,6 +360,17 @@ public class WorkOrderTool : TenantEntity
     [MaxLength(1000)]
     public string? Notes { get; set; }
 
+    // Billing behavior
+    public bool IsExcludedFromBilling { get; set; } = false;
+
+    [MaxLength(1000)]
+    public string? BillingExclusionReason { get; set; }
+
+    public DateTime? BillingExcludedAt { get; set; }
+
+    [MaxLength(128)]
+    public string? BillingExcludedBy { get; set; }
+
     // Navigation properties
     public virtual WorkOrder WorkOrder { get; set; } = null!;
     [ForeignKey(nameof(ToolId))]

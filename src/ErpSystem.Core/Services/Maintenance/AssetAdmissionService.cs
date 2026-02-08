@@ -53,6 +53,11 @@ public class AssetAdmissionService : IAssetAdmissionService
             admissions = admissions.Where(a => a.WorkOrderId == query.WorkOrderId.Value);
         }
 
+        if (query.JobCardId.HasValue)
+        {
+            admissions = admissions.Where(a => a.JobCardId == query.JobCardId.Value);
+        }
+
         if (query.FromDate.HasValue)
         {
             admissions = admissions.Where(a => a.AdmissionDate >= query.FromDate.Value);

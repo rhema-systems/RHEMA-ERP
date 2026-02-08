@@ -6,6 +6,62 @@ using ErpSystem.Core.Entities.Finance;
 
 namespace ErpSystem.Core.Interfaces.Finance
 {
+    // ============================================================================
+    // PAYMENT TERM INTERFACES
+    // ============================================================================
+
+    public interface IPaymentTermRepository : IGenericRepository<PaymentTerm>
+    {
+        Task<PaymentTerm?> GetByCodeAsync(string code);
+        Task<IEnumerable<PaymentTerm>> GetActiveAsync();
+        Task<IEnumerable<PaymentTerm>> GetByApplicableToAsync(string applicableTo);
+        Task<PaymentTerm?> GetDefaultAsync(string? applicableTo = null);
+        Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null);
+    }
+
+    public interface IPaymentTermService
+    {
+        Task<PaymentTermDto?> GetByIdAsync(Guid id);
+        Task<PaymentTermDto?> GetByCodeAsync(string code);
+        Task<IEnumerable<PaymentTermDto>> GetAllAsync();
+        Task<IEnumerable<PaymentTermDto>> GetActiveAsync();
+        Task<IEnumerable<PaymentTermDto>> GetByApplicableToAsync(string applicableTo);
+        Task<PaymentTermDto?> GetDefaultAsync(string? applicableTo = null);
+        Task<PaymentTermDto> CreateAsync(CreatePaymentTermDto dto);
+        Task<PaymentTermDto> UpdateAsync(Guid id, UpdatePaymentTermDto dto);
+        Task<bool> DeleteAsync(Guid id);
+        Task<bool> SetDefaultAsync(Guid id);
+        Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null);
+    }
+
+    // ============================================================================
+    // CURRENCY INTERFACES
+    // ============================================================================
+
+    public interface ICurrencyRepository : IGenericRepository<Currency>
+    {
+        Task<Currency?> GetByCodeAsync(string code);
+        Task<IEnumerable<Currency>> GetActiveAsync();
+        Task<Currency?> GetBaseCurrencyAsync();
+        Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null);
+    }
+
+    public interface ICurrencyService
+    {
+        Task<CurrencyDto?> GetByIdAsync(Guid id);
+        Task<CurrencyDto?> GetByCodeAsync(string code);
+        Task<IEnumerable<CurrencyDto>> GetAllAsync();
+        Task<IEnumerable<CurrencyDto>> GetActiveAsync();
+        Task<CurrencyDto?> GetBaseCurrencyAsync();
+        Task<CurrencyDto> CreateAsync(CreateCurrencyDto dto);
+        Task<CurrencyDto> UpdateAsync(Guid id, UpdateCurrencyDto dto);
+        Task<bool> DeleteAsync(Guid id);
+        Task<bool> SetBaseCurrencyAsync(Guid id);
+        Task<bool> UpdateExchangeRateAsync(Guid id, decimal exchangeRate);
+        Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null);
+        Task<decimal> ConvertAsync(decimal amount, string fromCurrencyCode, string toCurrencyCode);
+    }
+
     // Repository Interfaces
     public interface IAccountRepository : IGenericRepository<Account>
     {

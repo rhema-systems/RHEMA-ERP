@@ -25,6 +25,7 @@ export default function EvaluationCriteriaPage() {
     criterionName: '',
     criterionCode: '',
     category: 'General',
+    evaluationType: 'Technical',
     description: '',
     maxScore: 100,
     weight: 0,
@@ -65,6 +66,7 @@ export default function EvaluationCriteriaPage() {
     try {
       const updateData: UpdateEvaluationCriterionDto = {
         criterionName: formData.criterionName,
+        evaluationType: formData.evaluationType,
         description: formData.description,
         maxScore: formData.maxScore,
         weight: formData.weight,
@@ -99,6 +101,7 @@ export default function EvaluationCriteriaPage() {
       criterionName: criterion.criterionName,
       criterionCode: criterion.criterionCode,
       category: criterion.category,
+      evaluationType: criterion.evaluationType || 'Technical',
       description: criterion.description || '',
       maxScore: criterion.maxScore,
       weight: criterion.weight,
@@ -113,6 +116,7 @@ export default function EvaluationCriteriaPage() {
       criterionName: '',
       criterionCode: '',
       category: 'General',
+      evaluationType: 'Technical',
       description: '',
       maxScore: 100,
       weight: 0,
@@ -171,22 +175,39 @@ export default function EvaluationCriteriaPage() {
                   onChange={(e) => setFormData({ ...formData, criterionCode: e.target.value })}
                 />
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="category">Category</Label>
-                <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
-                  <SelectTrigger id="category">
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="General">General</SelectItem>
-                    <SelectItem value="Financial">Financial</SelectItem>
-                    <SelectItem value="Technical">Technical</SelectItem>
-                    <SelectItem value="Experience">Experience</SelectItem>
-                    <SelectItem value="Schedule">Schedule</SelectItem>
-                    <SelectItem value="Quality">Quality</SelectItem>
-                    <SelectItem value="Other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="category">Category</Label>
+                  <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
+                    <SelectTrigger id="category">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="General">General</SelectItem>
+                      <SelectItem value="Financial">Financial</SelectItem>
+                      <SelectItem value="Technical">Technical</SelectItem>
+                      <SelectItem value="Experience">Experience</SelectItem>
+                      <SelectItem value="Schedule">Schedule</SelectItem>
+                      <SelectItem value="Quality">Quality</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="evaluationType">Evaluation Type</Label>
+                  <Select value={formData.evaluationType} onValueChange={(value: 'Technical' | 'Financial') => setFormData({ ...formData, evaluationType: value })}>
+                    <SelectTrigger id="evaluationType">
+                      <SelectValue placeholder="Select evaluation type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Technical">Technical</SelectItem>
+                      <SelectItem value="Financial">Financial</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Technical criteria contribute to Technical Score. Financial criteria contribute to Financial Score.
+                  </p>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
@@ -287,11 +308,14 @@ export default function EvaluationCriteriaPage() {
                   <div key={criterion.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
                     <div className="flex items-start justify-between">
                       <div className="space-y-2 flex-1">
-                        <div className="flex items-center space-x-3">
+                        <div className="flex items-center space-x-3 flex-wrap gap-y-1">
                           <Star className="h-5 w-5 text-muted-foreground" />
                           <h3 className="font-semibold">{criterion.criterionName}</h3>
                           <Badge variant="outline">{criterion.criterionCode}</Badge>
                           <Badge>{criterion.category}</Badge>
+                          <Badge className={criterion.evaluationType === 'Financial' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}>
+                            {criterion.evaluationType || 'Technical'} Evaluation
+                          </Badge>
                           <Badge className={criterion.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
                             {criterion.isActive ? 'Active' : 'Inactive'}
                           </Badge>
@@ -354,13 +378,30 @@ export default function EvaluationCriteriaPage() {
                 onChange={(e) => setFormData({ ...formData, criterionName: e.target.value })}
               />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="edit-code">Criterion Code (Read-only)</Label>
-              <Input
-                id="edit-code"
-                value={formData.criterionCode}
-                disabled
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-code">Criterion Code (Read-only)</Label>
+                <Input
+                  id="edit-code"
+                  value={formData.criterionCode}
+                  disabled
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-evaluationType">Evaluation Type</Label>
+                <Select value={formData.evaluationType} onValueChange={(value: 'Technical' | 'Financial') => setFormData({ ...formData, evaluationType: value })}>
+                  <SelectTrigger id="edit-evaluationType">
+                    <SelectValue placeholder="Select evaluation type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Technical">Technical</SelectItem>
+                    <SelectItem value="Financial">Financial</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Technical criteria contribute to Technical Score. Financial criteria contribute to Financial Score.
+                </p>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">

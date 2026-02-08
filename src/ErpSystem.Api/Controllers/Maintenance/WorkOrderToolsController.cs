@@ -210,6 +210,39 @@ public class WorkOrderToolsController : ControllerBase
     }
 
     /// <summary>
+    /// Exclude a tool allocation from billing (keeps checkout/audit history)
+    /// </summary>
+    [HttpPost("{toolId}/exclude-from-billing")]
+    [ProducesResponseType(typeof(WorkOrderToolDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ExcludeToolFromBilling(Guid workOrderId, Guid toolId, [FromBody] ExcludeWorkOrderToolFromBillingDto dto)
+    {
+        try
+        {
+            var updated = await _workOrderToolService.ExcludeToolFromBillingAsync(workOrderId, toolId, dto.Reason);
+            return Ok(updated);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Tool allocation not found for exclusion: WorkOrder {WorkOrderId}, Tool {ToolId}", workOrderId, toolId);
+            return ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase)
+                ? NotFound(ex.Message)
+                : BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Cannot exclude tool allocation from billing: WorkOrder {WorkOrderId}, Tool {ToolId}", workOrderId, toolId);
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error excluding tool allocation from billing: WorkOrder {WorkOrderId}, Tool {ToolId}", workOrderId, toolId);
+            return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while excluding tool from billing");
+        }
+    }
+
+    /// <summary>
     /// Checkout an allocated tool for the work order
     /// </summary>
     [HttpPost("{toolId}/checkout")]

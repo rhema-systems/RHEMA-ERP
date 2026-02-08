@@ -1,0 +1,819 @@
+/**
+ * Purchasing Service
+ * Handles Purchase Requisitions, Purchase Orders, and Purchase Receipts (GRN)
+ */
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+
+// Helper function to get auth headers
+function getAuthHeaders(): HeadersInit {
+  const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+}
+
+async function getFriendlyErrorMessage(response: Response): Promise<string> {
+  // Try to extract a meaningful error message from the API.
+  // Some endpoints return plain text; others return JSON.
+  let raw = '';
+  try {
+    raw = await response.text();
+  } catch {
+    raw = '';
+  }
+
+  let message = raw?.trim();
+  if (message) {
+    try {
+      const parsed = JSON.parse(message);
+      // common shapes: { error: string } or { message: string } or { success: false, error: string }
+      message =
+        parsed?.error ||
+        parsed?.message ||
+        parsed?.title ||
+        (typeof parsed === 'string' ? parsed : message);
+    } catch {
+      // not JSON, keep text
+    }
+  }
+
+  // Provide user-friendly guidance for known workflow-guard errors.
+  if (
+    response.status === 400 &&
+    message &&
+    message.includes("No active workflow definition found for entity type 'PurchaseRequisition'")
+  ) {
+    return "No approval workflow is active for Purchase Requisitions. Please ask an administrator to activate one under Administration → Workflow, then try again.";
+  }
+
+  if (
+    response.status === 400 &&
+    message &&
+    message.includes("No active workflow definition found for entity type 'PurchaseOrder'")
+  ) {
+    return "No approval workflow is active for Purchase Orders. Please ask an administrator to activate one under Administration → Workflow, then try again.";
+  }
+
+  if (message) return message;
+  return `Request failed (${response.status} ${response.statusText})`;
+}
+
+// ============================================================================
+// PURCHASE REQUISITION INTERFACES
+// ============================================================================
+
+export interface PurchaseRequisitionSummaryDto {
+  id: string;
+  requisitionNumber: string;
+  requisitionDate: string;
+  requestedByName: string;
+  requiredDate?: string;
+  status: string;
+  priority: string;
+  department?: string;
+  totalAmount: number;
+  itemCount: number;
+  currentWorkflowStepName?: string;
+}
+
+export interface PurchaseRequisitionDetailDto extends PurchaseRequisitionSummaryDto {
+  costCenter?: string;
+  justification?: string;
+  notes?: string;
+  approvedByName?: string;
+  approvedAt?: string;
+  rejectionReason?: string;
+  items: PurchaseRequisitionItemDto[];
+}
+
+export interface PurchaseRequisitionItemDto {
+  id: string;
+  requisitionId: string;
+  inventoryItemId?: string;
+  itemCode?: string;
+  itemName?: string;
+  itemDescription: string;
+  quantity: number;
+  unitOfMeasure: string;
+  estimatedUnitPrice: number;
+  lineTotal: number;
+  requiredDate?: string;
+  preferredSupplierId?: string; // Maps to BusinessPartnerId
+  preferredSupplierName?: string; // Maps to BusinessPartner.PartnerName
+  notes?: string;
+  specifications?: string;
+  status: string;
+  purchaseOrderId?: string;
+  purchaseOrderNumber?: string;
+}
+
+export interface SuggestedSupplierDto {
+  supplierId: string;
+  itemMatchCount: number;
+  preferredItemCount: number;
+}
+
+export interface CreateRfqFromPurchaseRequisitionResponseDto {
+  rfqId: string;
+  rfqNumber: string;
+}
+
+export interface CreatePurchaseRequisitionDto {
+  requestedById: string;
+  requiredDate?: string;
+  priority: string;
+  department?: string;
+  costCenter?: string;
+  justification?: string;
+  notes?: string;
+  items: CreatePurchaseRequisitionItemDto[];
+}
+
+export interface CreatePurchaseRequisitionItemDto {
+  inventoryItemId?: string;
+  itemDescription: string;
+  quantity: number;
+  unitOfMeasure?: string;
+  estimatedUnitPrice: number;
+  requiredDate?: string;
+  preferredSupplierId?: string; // Maps to BusinessPartnerId
+  notes?: string;
+  specifications?: string;
+}
+
+// ============================================================================
+// PURCHASE ORDER INTERFACES
+// ============================================================================
+
+export interface PurchaseOrderSummaryDto {
+  id: string;
+  orderNumber: string;
+  supplierId: string; // Maps to BusinessPartnerId
+  supplierName: string; // Maps to BusinessPartner.PartnerName
+  orderDate: string;
+  requiredDate?: string;
+  promisedDate?: string;
+  status: string;
+  totalAmount: number;
+  itemCount: number;
+  requestedByName?: string;
+  currentWorkflowStepName?: string;
+}
+
+export interface PurchaseOrderDetailDto extends PurchaseOrderSummaryDto {
+  receivedDate?: string;
+  approvedByName?: string;
+  approvedAt?: string;
+  subTotal: number;
+  taxAmount: number;
+  shippingCost: number;
+  miscellaneousCost: number;
+  totalAdditionalCost: number;
+  costAllocationMethod: 'SpreadToItemCost' | 'GLExpense';
+  costApportionmentBasis: 'Value' | 'Weight' | 'Quantity';
+  expenseGLAccount?: string;
+  costsAllocated: boolean;
+  discountAmount: number;
+  paymentTerms?: string;
+  shippingTerms?: string;
+  terms?: string;
+  notes?: string;
+  deliveryWarehouseId?: string;
+  deliveryAddress?: string;
+  deliveryInstructions?: string;
+  supplierOrderNumber?: string; // Maps to BusinessPartnerOrderNumber
+  referenceNumber?: string;
+  supplierPhone?: string;
+  supplierEmail?: string;
+  supplierAddress?: string;
+  items: PurchaseOrderItemDto[];
+  receipts: PurchaseOrderReceiptDto[];
+}
+
+export interface PurchaseOrderItemDto {
+  id: string;
+  purchaseOrderId: string;
+  inventoryItemId: string;
+  itemCode: string;
+  itemName: string;
+  supplierItemCode?: string; // Maps to BusinessPartnerItemCode
+  itemDescription?: string;
+  orderedQuantity: number;
+  unitOfMeasure: string;
+  itemUnitOfMeasureId?: string;
+  warehouseId?: string;
+  warehouseName?: string;
+  receivedQuantity: number;
+  remainingQuantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  allocatedAdditionalCost: number;
+  allocatedCostPerUnit: number;
+  landedUnitCost: number;
+  expectedDeliveryDate?: string;
+  notes?: string;
+}
+
+export interface CreatePurchaseOrderDto {
+  supplierId: string; // Maps to BusinessPartnerId
+  requiredDate?: string;
+  promisedDate?: string;
+  paymentTerms?: string;
+  shippingTerms?: string;
+  terms?: string;
+  notes?: string;
+  deliveryWarehouseId?: string;
+  deliveryAddress?: string;
+  deliveryInstructions?: string;
+  referenceNumber?: string;
+  taxAmount?: number;
+  shippingCost?: number;
+  miscellaneousCost?: number;
+  costAllocationMethod?: 'SpreadToItemCost' | 'GLExpense';
+  costApportionmentBasis?: 'Value' | 'Weight' | 'Quantity';
+  expenseGLAccount?: string;
+  discountAmount?: number;
+  requestedById: string;
+  items: CreatePurchaseOrderItemDto[];
+}
+
+export interface CreatePurchaseOrderItemDto {
+  inventoryItemId: string;
+  supplierItemCode?: string; // Maps to BusinessPartnerItemCode
+  itemDescription?: string;
+  orderedQuantity: number;
+  unitOfMeasure: string;
+  itemUnitOfMeasureId?: string;
+  warehouseId?: string;
+  unitPrice: number;
+  priceListLineId?: string;
+  expectedDeliveryDate?: string;
+  notes?: string;
+}
+
+// ============================================================================
+// PURCHASE RECEIPT (GRN) INTERFACES
+// ============================================================================
+
+export interface PurchaseOrderReceiptDto {
+  id: string;
+  purchaseOrderId: string;
+  receiptNumber: string;
+  receiptDate: string;
+  deliveryNote?: string;
+  carrierName?: string;
+  trackingNumber?: string;
+  status: string;
+  receivedByName?: string;
+  inspectedByName?: string;
+  notes?: string;
+  requiresInspection: boolean;
+  inspectionDate?: string;
+  inspectionResult?: string;
+  inspectionNotes?: string;
+  purchaseOrderNumber: string;
+  supplierName: string; // Maps to BusinessPartner.PartnerName
+  items?: PurchaseOrderReceiptItemDto[];
+}
+
+export interface PurchaseOrderReceiptItemDto {
+  id: string;
+  receiptId: string;
+  purchaseOrderItemId: string;
+  receivedQuantity: number;
+  acceptedQuantity: number;
+  rejectedQuantity: number;
+  unitOfMeasure?: string;
+  warehouseId?: string;
+  warehouseCode?: string;
+  warehouseName?: string;
+  locationId?: string;
+  serialNumber?: string;
+  lotNumber?: string;
+  expirationDate?: string;
+  notes?: string;
+  rejectionReason?: string;
+  qualityStatus?: string;
+  qualityNotes?: string;
+  itemCode: string;
+  itemName: string;
+  locationCode?: string;
+}
+
+export interface ReceivePurchaseOrderDto {
+  purchaseOrderId: string;
+  deliveryNote?: string;
+  carrierName?: string;
+  trackingNumber?: string;
+  receivedById: string;
+  inspectedById?: string;
+  notes?: string;
+  requiresInspection: boolean;
+  items: ReceivePurchaseOrderItemDto[];
+}
+
+export interface ReceivePurchaseOrderItemDto {
+  purchaseOrderItemId: string;
+  receivedQuantity: number;
+  acceptedQuantity: number;
+  rejectedQuantity: number;
+  warehouseId?: string;
+  locationId?: string;
+  serialNumber?: string;
+  lotNumber?: string;
+  expirationDate?: string;
+  notes?: string;
+  rejectionReason?: string;
+  qualityStatus?: string;
+  qualityNotes?: string;
+}
+
+// ============================================================================
+// COMMON INTERFACES
+// ============================================================================
+
+export interface UpdateStatusDto {
+  status: string;
+  notes?: string;
+}
+
+export interface ApprovalDto {
+  approved: boolean;
+  comments?: string;
+  rejectionReason?: string;
+}
+
+export interface PagedResult<T> {
+  items: T[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+}
+
+// ============================================================================
+// PURCHASING SERVICE
+// ============================================================================
+
+export const purchasingService = {
+  // ============================================================================
+  // PURCHASE REQUISITIONS
+  // ============================================================================
+
+  /**
+   * Get all purchase requisitions with pagination and filters
+   */
+  async getPurchaseRequisitions(params?: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    status?: string;
+    priority?: string;
+    startDate?: string;
+    endDate?: string;
+    department?: string;
+  }): Promise<PagedResult<PurchaseRequisitionSummaryDto>> {
+    const queryParams = new URLSearchParams();
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.pageSize) queryParams.append('pageSize', params.pageSize.toString());
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.priority) queryParams.append('priority', params.priority);
+    if (params?.startDate) queryParams.append('startDate', params.startDate);
+    if (params?.endDate) queryParams.append('endDate', params.endDate);
+    if (params?.department) queryParams.append('department', params.department);
+
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions?${queryParams}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch purchase requisitions');
+    return response.json();
+  },
+
+  /**
+   * Get purchase requisition by ID
+   */
+  async getPurchaseRequisitionById(id: string): Promise<PurchaseRequisitionDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch purchase requisition');
+    return response.json();
+  },
+
+  /**
+   * Create a new purchase requisition
+   */
+  async createPurchaseRequisition(data: CreatePurchaseRequisitionDto): Promise<PurchaseRequisitionDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to create purchase requisition');
+    }
+    
+    // Handle empty response body (201 Created with no content)
+    const text = await response.text();
+    if (!text) {
+      throw new Error('Server returned empty response');
+    }
+    
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
+    }
+  },
+
+  /**
+   * Update purchase requisition status
+   */
+  async updatePurchaseRequisitionStatus(id: string, status: string, notes?: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}/status`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ status, notes })
+    });
+
+    if (!response.ok) throw new Error('Failed to update purchase requisition status');
+  },
+
+  /**
+   * Submit purchase requisition for approval
+   */
+  async submitPurchaseRequisition(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}/submit`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+  
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+  },
+
+  /**
+   * Approve or reject purchase requisition
+   */
+  async approvePurchaseRequisition(id: string, approval: ApprovalDto): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(approval)
+    });
+  
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+  },
+
+  /**
+   * Get purchase requisitions by status
+   */
+  async getPurchaseRequisitionsByStatus(status: string): Promise<PurchaseRequisitionSummaryDto[]> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/by-status/${status}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch purchase requisitions by status');
+    return response.json();
+  },
+
+  /**
+   * Get purchase requisitions by priority
+   */
+  async getPurchaseRequisitionsByPriority(priority: string): Promise<PurchaseRequisitionSummaryDto[]> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/by-priority/${priority}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch purchase requisitions by priority');
+    return response.json();
+  },
+
+  /**
+   * Get purchase requisitions by department
+   */
+  async getPurchaseRequisitionsByDepartment(department: string): Promise<PurchaseRequisitionSummaryDto[]> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/by-department/${department}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch purchase requisitions by department');
+    return response.json();
+  },
+
+  /**
+   * Get pending approval purchase requisitions
+   */
+  async getPendingApprovalRequisitions(): Promise<PurchaseRequisitionSummaryDto[]> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/pending-approval`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch pending approval requisitions');
+    return response.json();
+  },
+
+  /**
+   * Convert purchase requisition to purchase order
+   */
+  async convertToPurchaseOrder(id: string): Promise<CreatePurchaseOrderDto> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}/convert-to-po`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to convert requisition to purchase order');
+    return response.json();
+  },
+
+  /**
+   * Get suggested suppliers for an RFQ based on a purchase requisition
+   */
+  async getSuggestedSuppliersForRequisition(id: string): Promise<SuggestedSupplierDto[]> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}/suggested-suppliers`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch suggested suppliers');
+    return response.json();
+  },
+
+  /**
+   * Create a Draft RFQ from an approved purchase requisition
+   */
+  async createRfqFromPurchaseRequisition(id: string): Promise<CreateRfqFromPurchaseRequisitionResponseDto> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}/create-rfq`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to create RFQ from purchase requisition');
+    return response.json();
+  },
+
+  // ============================================================================
+  // PURCHASE ORDERS
+  // ============================================================================
+
+  /**
+   * Get all purchase orders with pagination and filters
+   */
+  async getPurchaseOrders(params?: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    status?: string;
+    supplierId?: string; // BusinessPartnerId
+    startDate?: string;
+    endDate?: string;
+  }): Promise<PagedResult<PurchaseOrderSummaryDto>> {
+    const queryParams = new URLSearchParams();
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.pageSize) queryParams.append('pageSize', params.pageSize.toString());
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.supplierId) queryParams.append('supplierId', params.supplierId);
+    if (params?.startDate) queryParams.append('startDate', params.startDate);
+    if (params?.endDate) queryParams.append('endDate', params.endDate);
+
+    const response = await fetch(`${API_BASE_URL}/PurchaseOrders?${queryParams}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch purchase orders');
+    return response.json();
+  },
+
+  /**
+   * Get purchase order by ID
+   */
+  async getPurchaseOrderById(id: string): Promise<PurchaseOrderDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${id}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch purchase order');
+    return response.json();
+  },
+
+  /**
+   * Create a new purchase order
+   */
+  async createPurchaseOrder(data: CreatePurchaseOrderDto): Promise<PurchaseOrderDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseOrders`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create purchase order');
+    }
+    return response.json();
+  },
+
+  /**
+   * Update an existing purchase order (only Draft status)
+   */
+  async updatePurchaseOrder(id: string, data: CreatePurchaseOrderDto): Promise<PurchaseOrderDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update purchase order');
+    }
+    return response.json();
+  },
+
+  /**
+   * Update purchase order status
+   */
+  async updatePurchaseOrderStatus(id: string, status: string, notes?: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${id}/status`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ status, notes })
+    });
+
+    if (!response.ok) throw new Error('Failed to update purchase order status');
+  },
+
+  /**
+   * Submit purchase order for approval
+   */
+  async submitPurchaseOrder(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${id}/submit`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to submit purchase order');
+  },
+
+  /**
+   * Approve or reject purchase order
+   */
+  async approvePurchaseOrder(id: string, approval: ApprovalDto): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${id}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(approval)
+    });
+
+    if (!response.ok) throw new Error('Failed to approve/reject purchase order');
+  },
+
+  /**
+   * Get purchase orders by business partner (supplier)
+   */
+  async getPurchaseOrdersBySupplier(supplierId: string): Promise<PurchaseOrderSummaryDto[]> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseOrders/by-supplier/${supplierId}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch purchase orders by supplier');
+    return response.json();
+  },
+
+  /**
+   * Get purchase orders by status
+   */
+  async getPurchaseOrdersByStatus(status: string): Promise<PurchaseOrderSummaryDto[]> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseOrders/by-status/${status}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch purchase orders by status');
+    return response.json();
+  },
+
+  /**
+   * Receive purchase order (create GRN)
+   */
+  async receivePurchaseOrder(id: string, receiptData: ReceivePurchaseOrderDto): Promise<PurchaseOrderReceiptDto> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${id}/receive`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(receiptData)
+    });
+
+    if (!response.ok) throw new Error('Failed to receive purchase order');
+    return response.json();
+  },
+
+  // ============================================================================
+  // PURCHASE RECEIPTS (GRN)
+  // ============================================================================
+
+  /**
+   * Get all purchase receipts
+   */
+  async getPurchaseReceipts(params?: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<PagedResult<PurchaseOrderReceiptDto>> {
+    const queryParams = new URLSearchParams();
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.pageSize) queryParams.append('pageSize', params.pageSize.toString());
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.startDate) queryParams.append('startDate', params.startDate);
+    if (params?.endDate) queryParams.append('endDate', params.endDate);
+
+    // Note: This endpoint may need to be created on the backend
+    const response = await fetch(`${API_BASE_URL}/PurchaseOrderReceipts?${queryParams}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch purchase receipts');
+    return response.json();
+  },
+
+  /**
+   * Get purchase receipt by ID
+   */
+  async getPurchaseReceiptById(id: string): Promise<PurchaseOrderReceiptDto> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseOrderReceipts/${id}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch purchase receipt');
+    return response.json();
+  },
+
+  /**
+   * Get receipts by purchase order ID
+   */
+  async getReceiptsByPurchaseOrderId(purchaseOrderId: string): Promise<PurchaseOrderReceiptDto[]> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseOrderReceipts/by-purchase-order/${purchaseOrderId}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch receipts');
+    return response.json();
+  },
+
+  /**
+   * Generate a GRN PDF for a purchase receipt (opens in a new tab in the UI).
+   */
+  async getPurchaseReceiptGrnPdf(id: string): Promise<Blob> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseOrderReceipts/${id}/grn`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to generate GRN PDF');
+    return response.blob();
+  }
+};
+
+// Export individual functions for easier imports
+export const {
+  // Purchase Requisitions
+  getPurchaseRequisitions,
+  getPurchaseRequisitionById,
+  createPurchaseRequisition,
+  updatePurchaseRequisitionStatus,
+  submitPurchaseRequisition,
+  approvePurchaseRequisition,
+  getPurchaseRequisitionsByStatus,
+  getPurchaseRequisitionsByPriority,
+  getPurchaseRequisitionsByDepartment,
+  getPendingApprovalRequisitions,
+  convertToPurchaseOrder,
+  getSuggestedSuppliersForRequisition,
+  createRfqFromPurchaseRequisition,
+  
+  // Purchase Orders
+  getPurchaseOrders,
+  getPurchaseOrderById,
+  createPurchaseOrder,
+  updatePurchaseOrder,
+  updatePurchaseOrderStatus,
+  submitPurchaseOrder,
+  approvePurchaseOrder,
+  getPurchaseOrdersBySupplier,
+  getPurchaseOrdersByStatus,
+  receivePurchaseOrder,
+  
+  // Purchase Receipts
+  getPurchaseReceipts,
+  getPurchaseReceiptById,
+  getReceiptsByPurchaseOrderId,
+  getPurchaseReceiptGrnPdf
+} = purchasingService;
+
+export default purchasingService;

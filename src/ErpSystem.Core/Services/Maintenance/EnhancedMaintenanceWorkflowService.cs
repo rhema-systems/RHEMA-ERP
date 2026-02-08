@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Maintenance;
@@ -5,6 +6,7 @@ using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Workflow;
 using Microsoft.Extensions.Logging;
 
@@ -17,6 +19,12 @@ namespace ErpSystem.Core.Services.Maintenance;
 public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowService
 {
     private readonly IWorkflowEngine _workflowEngine;
+    private readonly IWorkflowInstanceRepository _workflowInstanceRepository;
+    private readonly IWorkflowStepInstanceRepository _workflowStepInstanceRepository;
+    private readonly IWorkflowDefinitionRepository _workflowDefinitionRepository;
+    private readonly IWorkflowStepRepository _workflowStepRepository;
+    private readonly IWorkflowTransitionRepository _workflowTransitionRepository;
+    private readonly IWorkflowEntityTypeRepository _workflowEntityTypeRepository;
     private readonly IWorkOrderService _workOrderService;
     private readonly IWorkOrderRepository _workOrderRepository;
     private readonly IMaintenanceAssetRepository _assetRepository;
@@ -34,6 +42,12 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
 
     public EnhancedMaintenanceWorkflowService(
         IWorkflowEngine workflowEngine,
+        IWorkflowInstanceRepository workflowInstanceRepository,
+        IWorkflowStepInstanceRepository workflowStepInstanceRepository,
+        IWorkflowDefinitionRepository workflowDefinitionRepository,
+        IWorkflowStepRepository workflowStepRepository,
+        IWorkflowTransitionRepository workflowTransitionRepository,
+        IWorkflowEntityTypeRepository workflowEntityTypeRepository,
         IWorkOrderService workOrderService,
         IWorkOrderRepository workOrderRepository,
         IMaintenanceAssetRepository assetRepository,
@@ -41,6 +55,12 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
         ILogger<EnhancedMaintenanceWorkflowService> logger)
     {
         _workflowEngine = workflowEngine;
+        _workflowInstanceRepository = workflowInstanceRepository;
+        _workflowStepInstanceRepository = workflowStepInstanceRepository;
+        _workflowDefinitionRepository = workflowDefinitionRepository;
+        _workflowStepRepository = workflowStepRepository;
+        _workflowTransitionRepository = workflowTransitionRepository;
+        _workflowEntityTypeRepository = workflowEntityTypeRepository;
         _workOrderService = workOrderService;
         _workOrderRepository = workOrderRepository;
         _assetRepository = assetRepository;
@@ -88,7 +108,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
             {
                 result.WorkflowInstanceId = workflowResult.WorkflowInstanceId;
                 result.InitialWorkflowStatus = workflowResult.Status;
-                result.CurrentStepId = null; // TODO: Get from workflow result
+                result.CurrentStepId = workflowResult.CurrentStepId;
                 result.SuccessMessages.Add("Work order created and workflow initiated successfully");
 
                 // Apply initial workflow decisions
@@ -415,7 +435,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
         executionData["completedAt"] = DateTime.UtcNow;
         executionData["workStatus"] = "Completed";
 
-        return await ExecuteWorkflowStepAsync(workflowInstanceId, "reject", executionData, userId);
+        return await ExecuteWorkflowStepAsync(workflowInstanceId, "complete", executionData, userId);
     }
 
     private async Task<WorkflowExecutionResult> ExecuteEscalationStepAsync(
@@ -425,7 +445,7 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
         executionData["escalatedAt"] = DateTime.UtcNow;
         executionData["escalationReason"] = executionData.GetValueOrDefault("escalationReason", "Manual escalation");
 
-        return await ExecuteWorkflowStepAsync(workflowInstanceId, "complete", executionData, userId);
+        return await ExecuteWorkflowStepAsync(workflowInstanceId, "escalate", executionData, userId);
     }
 
     #endregion
@@ -876,20 +896,15 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
     {
         try
         {
-            // TODO: This is a temporary adapter to work with existing IWorkflowEngine interface
-            // In the future, we need to either:
-            // 1. Extend IWorkflowEngine to support the methods we need, or
-            // 2. Create a proper workflow engine service that wraps the existing one
-
             var workflowInstance = await _workflowEngine.StartWorkflowAsync(
                 workflowKey, entityId, userId, workflowData);
 
             return new WorkflowExecutionResult
             {
                 Success = true,
-                Status = WorkflowInstanceStatus.InProgress,
+                Status = workflowInstance.Status,
                 WorkflowInstanceId = workflowInstance.Id,
-                CurrentStepId = null, // TODO: Get from workflow instance
+                CurrentStepId = workflowInstance.CurrentStepId,
                 Message = "Workflow started successfully"
             };
         }
@@ -909,35 +924,357 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
         }
     }
 
-    private static async Task<WorkflowInstance?> GetActiveWorkflowInstanceAsync(string entityId, string entityType)
+    private async Task<WorkflowInstance?> GetActiveWorkflowInstanceAsync(string entityId, string entityType)
     {
-        // TODO: Implement proper lookup using IWorkflowInstanceService
-        return null; // Temporary stub
+        if (!Guid.TryParse(entityId, out var parsedEntityId))
+        {
+            _logger.LogWarning("Invalid entity ID {EntityId} when resolving workflow instance", entityId);
+            return null;
+        }
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var entityTypeId = await ResolveEntityTypeIdAsync(entityType, tenantId);
+        if (entityTypeId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var instances = await _workflowInstanceRepository.GetByEntityAsync(entityTypeId, entityId);
+        return instances
+            .Where(i => i.Status == WorkflowInstanceStatus.InProgress ||
+                        i.Status == WorkflowInstanceStatus.Waiting ||
+                        i.Status == WorkflowInstanceStatus.Created)
+            .OrderByDescending(i => i.StartedDate ?? i.CreatedDate)
+            .FirstOrDefault();
     }
 
-    private static async Task<WorkflowStatusDto?> GetWorkflowStatusAsync(string entityId, string entityType)
+    private async Task<WorkflowStatusDto?> GetWorkflowStatusAsync(string entityId, string entityType)
     {
-        // TODO: Implement proper lookup using existing workflow services
-        return null; // Temporary stub
+        var instance = await GetActiveWorkflowInstanceAsync(entityId, entityType) ??
+                       await GetLatestWorkflowInstanceAsync(entityId, entityType);
+
+        if (instance == null)
+        {
+            return null;
+        }
+
+        return await _workflowEngine.GetWorkflowStatusAsync(instance.Id);
     }
 
-    private static async Task<WorkflowExecutionResult> ExecuteWorkflowStepAsync(
+    private async Task<WorkflowExecutionResult> ExecuteWorkflowStepAsync(
         Guid workflowInstanceId, string stepAction, Dictionary<string, object> executionData, string userId)
     {
-        // TODO: Implement proper step execution using existing workflow services
-        return new WorkflowExecutionResult
+        if (!Guid.TryParse(userId, out var parsedUserId) || parsedUserId == Guid.Empty)
         {
-            Success = false,
-            Status = WorkflowInstanceStatus.InProgress,
-            Message = "Step execution not yet implemented"
-        };
+            return new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = WorkflowInstanceStatus.Failed,
+                Message = "Invalid user context for workflow step execution"
+            };
+        }
+
+        var currentStep = await _workflowStepInstanceRepository.GetCurrentStepAsync(workflowInstanceId);
+        if (currentStep == null)
+        {
+            return new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = WorkflowInstanceStatus.Completed,
+                Message = "No active workflow step found"
+            };
+        }
+
+        var action = MapStepAction(stepAction);
+        var comments = executionData.TryGetValue("comments", out var commentValue)
+            ? commentValue?.ToString()
+            : null;
+
+        return await _workflowEngine.ProcessStepAsync(
+            currentStep.Id,
+            parsedUserId,
+            action,
+            executionData,
+            comments);
     }
 
     private async Task<WorkflowDefinition> CreateOrUpdateWorkflowDefinitionAsync(
         CreateWorkflowDefinitionDto workflowDefinition, string tenantId)
     {
-        // TODO: Implement using IWorkflowDefinitionService
-        throw new NotImplementedException("Workflow definition creation not yet implemented");
+        var tenantGuid = ResolveTenantId(tenantId);
+        if (tenantGuid == Guid.Empty)
+        {
+            throw new InvalidOperationException("Tenant ID is required to create or update workflow definitions");
+        }
+
+        var entityType = await ResolveOrCreateEntityTypeAsync(workflowDefinition.EntityType, tenantGuid);
+
+        var existing = await _workflowDefinitionRepository.GetByNameAsync(workflowDefinition.Name, tenantGuid);
+        if (existing != null)
+        {
+            var definition = await _workflowDefinitionRepository.GetWithDetailsAsync(existing.Id) ?? existing;
+
+            if (definition.Instances?.Any(i => i.Status == WorkflowInstanceStatus.InProgress ||
+                                              i.Status == WorkflowInstanceStatus.Waiting) == true)
+            {
+                _logger.LogWarning("Workflow definition {Name} has active instances; skipping update", definition.Name);
+                return definition;
+            }
+
+            await _workflowTransitionRepository.DeleteRangeAsync(t => t.WorkflowDefinitionId == definition.Id);
+            await _workflowTransitionRepository.SaveChangesAsync();
+            await _workflowStepRepository.DeleteRangeAsync(s => s.WorkflowDefinitionId == definition.Id);
+            await _workflowStepRepository.SaveChangesAsync();
+
+            definition.Description = workflowDefinition.Description;
+            definition.Configuration = workflowDefinition.Configuration;
+            definition.EntityTypeId = entityType.Id;
+            definition.Version = Math.Max(1, definition.Version + 1);
+            definition.IsActive = true;
+            definition.UpdatedAt = DateTime.UtcNow;
+            definition.UpdatedBy = _currentUserService.UserName ?? "System";
+            definition.LastModifiedById = Guid.TryParse(_currentUserService.UserId, out var modifiedById)
+                ? modifiedById
+                : null;
+
+            await _workflowDefinitionRepository.UpdateAsync(definition);
+            await _workflowDefinitionRepository.SaveChangesAsync();
+
+            await CreateStepsAndTransitionsAsync(definition, workflowDefinition, tenantGuid);
+            return definition;
+        }
+
+        var createdById = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? parsedUserId : Guid.Empty;
+        var newDefinition = new WorkflowDefinition
+        {
+            Id = Guid.NewGuid(),
+            Name = workflowDefinition.Name,
+            Description = workflowDefinition.Description,
+            EntityTypeId = entityType.Id,
+            Configuration = workflowDefinition.Configuration,
+            TenantId = tenantGuid,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUserService.UserName ?? "System",
+            CreatedById = createdById,
+            IsActive = true,
+            Version = 1
+        };
+
+        await _workflowDefinitionRepository.AddAsync(newDefinition);
+        await _workflowDefinitionRepository.SaveChangesAsync();
+
+        await CreateStepsAndTransitionsAsync(newDefinition, workflowDefinition, tenantGuid);
+        return newDefinition;
+    }
+
+    private async Task<WorkflowInstance?> GetLatestWorkflowInstanceAsync(string entityId, string entityType)
+    {
+        if (!Guid.TryParse(entityId, out _))
+        {
+            return null;
+        }
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var entityTypeId = await ResolveEntityTypeIdAsync(entityType, tenantId);
+        if (entityTypeId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var instances = await _workflowInstanceRepository.GetByEntityAsync(entityTypeId, entityId);
+        return instances
+            .OrderByDescending(i => i.StartedDate ?? i.CreatedDate)
+            .FirstOrDefault();
+    }
+
+    private async Task CreateStepsAndTransitionsAsync(
+        WorkflowDefinition definition,
+        CreateWorkflowDefinitionDto template,
+        Guid tenantId)
+    {
+        var orderedSteps = template.Steps.OrderBy(s => s.Order).ToList();
+        if (!orderedSteps.Any())
+        {
+            return;
+        }
+
+        var stepEntities = new List<WorkflowStep>();
+        for (var i = 0; i < orderedSteps.Count; i++)
+        {
+            var stepDto = orderedSteps[i];
+            var stepEntity = new WorkflowStep
+            {
+                Id = Guid.NewGuid(),
+                WorkflowDefinitionId = definition.Id,
+                Name = stepDto.Name,
+                Description = stepDto.Description,
+                StepType = stepDto.StepType,
+                Order = stepDto.Order,
+                IsRequired = stepDto.IsRequired,
+                RequiredRole = stepDto.RequiredRole,
+                EstimatedHours = stepDto.EstimatedHours,
+                IsStartStep = i == 0,
+                IsEndStep = i == orderedSteps.Count - 1,
+                Configuration = stepDto.Configuration != null ? JsonSerializer.Serialize(stepDto.Configuration) : null,
+                TenantId = tenantId
+            };
+
+            stepEntities.Add(stepEntity);
+        }
+
+        await _workflowStepRepository.AddRangeAsync(stepEntities);
+        await _workflowStepRepository.SaveChangesAsync();
+
+        var transitions = new List<WorkflowTransition>();
+        if (template.Transitions.Any())
+        {
+            var stepIdLookup = stepEntities.ToDictionary(s => s.Id, s => s);
+            foreach (var transitionDto in template.Transitions)
+            {
+                if (!stepIdLookup.ContainsKey(transitionDto.FromStepId) ||
+                    !stepIdLookup.ContainsKey(transitionDto.ToStepId))
+                {
+                    continue;
+                }
+
+                transitions.Add(new WorkflowTransition
+                {
+                    Id = Guid.NewGuid(),
+                    WorkflowDefinitionId = definition.Id,
+                    FromStepId = transitionDto.FromStepId,
+                    ToStepId = transitionDto.ToStepId,
+                    Name = transitionDto.Name,
+                    Description = transitionDto.Description,
+                    Condition = transitionDto.Condition != null ? JsonSerializer.Serialize(transitionDto.Condition) : null,
+                    IsDefault = transitionDto.IsDefault,
+                    Priority = transitionDto.Priority,
+                    TenantId = tenantId
+                });
+            }
+        }
+
+        if (!transitions.Any())
+        {
+            for (var i = 0; i < stepEntities.Count - 1; i++)
+            {
+                var from = stepEntities[i];
+                var to = stepEntities[i + 1];
+                transitions.Add(new WorkflowTransition
+                {
+                    Id = Guid.NewGuid(),
+                    WorkflowDefinitionId = definition.Id,
+                    FromStepId = from.Id,
+                    ToStepId = to.Id,
+                    Name = $"{from.Name} to {to.Name}",
+                    Description = "Auto-generated transition",
+                    IsDefault = true,
+                    Priority = 0,
+                    TenantId = tenantId
+                });
+            }
+        }
+
+        if (transitions.Any())
+        {
+            await _workflowTransitionRepository.AddRangeAsync(transitions);
+            await _workflowTransitionRepository.SaveChangesAsync();
+        }
+    }
+
+    private async Task<WorkflowEntityType> ResolveOrCreateEntityTypeAsync(string entityType, Guid tenantId)
+    {
+        var existing = await _workflowEntityTypeRepository.GetByNameAsync(entityType, tenantId);
+        if (existing != null)
+        {
+            return existing;
+        }
+
+        var code = GenerateEntityTypeCode(entityType);
+        var entity = new WorkflowEntityType
+        {
+            Id = Guid.NewGuid(),
+            Name = entityType,
+            Code = code,
+            TenantId = tenantId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUserService.UserName ?? "System",
+            IsActive = true
+        };
+
+        await _workflowEntityTypeRepository.AddAsync(entity);
+        await _workflowEntityTypeRepository.SaveChangesAsync();
+        return entity;
+    }
+
+    private async Task<Guid> ResolveEntityTypeIdAsync(string entityType, Guid tenantId)
+    {
+        var entity = await _workflowEntityTypeRepository.GetByNameAsync(entityType, tenantId);
+        return entity?.Id ?? Guid.Empty;
+    }
+
+    private Guid ResolveTenantId(string tenantId)
+    {
+        if (Guid.TryParse(tenantId, out var parsed))
+        {
+            return parsed;
+        }
+
+        return _currentUserService.TenantId ?? Guid.Empty;
+    }
+
+    private static string GenerateEntityTypeCode(string entityType)
+    {
+        if (string.IsNullOrWhiteSpace(entityType))
+        {
+            return "ENTITY";
+        }
+
+        var codeChars = new List<char>();
+        for (var i = 0; i < entityType.Length; i++)
+        {
+            var ch = entityType[i];
+            if (char.IsWhiteSpace(ch) || ch == '-' || ch == '_')
+            {
+                if (codeChars.LastOrDefault() != '_')
+                {
+                    codeChars.Add('_');
+                }
+                continue;
+            }
+
+            if (char.IsUpper(ch) && i > 0 && char.IsLower(entityType[i - 1]))
+            {
+                codeChars.Add('_');
+            }
+
+            codeChars.Add(char.ToUpperInvariant(ch));
+        }
+
+        var code = new string(codeChars.ToArray()).Trim('_');
+        return string.IsNullOrWhiteSpace(code) ? "ENTITY" : code;
+    }
+
+    private static WorkflowStepAction MapStepAction(string stepAction)
+    {
+        if (string.IsNullOrWhiteSpace(stepAction))
+        {
+            return WorkflowStepAction.Complete;
+        }
+
+        return stepAction.Trim().ToLowerInvariant() switch
+        {
+            "approve" => WorkflowStepAction.Complete,
+            "reject" => WorkflowStepAction.Reject,
+            "requestchanges" => WorkflowStepAction.RequestInformation,
+            "requestinformation" => WorkflowStepAction.RequestInformation,
+            "requestinfo" => WorkflowStepAction.RequestInformation,
+            "skip" => WorkflowStepAction.Skip,
+            "delegate" => WorkflowStepAction.Delegate,
+            "escalate" => WorkflowStepAction.Delegate,
+            "start" => WorkflowStepAction.Complete,
+            "complete" => WorkflowStepAction.Complete,
+            _ => WorkflowStepAction.Complete
+        };
     }
 
     #endregion

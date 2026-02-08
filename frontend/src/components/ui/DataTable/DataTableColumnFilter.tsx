@@ -93,12 +93,12 @@ export function DataTableColumnFilter<TData, TValue>({
               )}
             </div>
             
-            <Select value={selectedValue || ''} onValueChange={handleFilterChange}>
+            <Select value={selectedValue || '__all__'} onValueChange={v => handleFilterChange(v === '__all__' ? undefined : v)}>
               <SelectTrigger>
                 <SelectValue placeholder="All" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All</SelectItem>
+                <SelectItem value="__all__">All</SelectItem>
                 {options.map((option) => {
                   const IconComponent = option.icon;
                   return (
@@ -155,12 +155,12 @@ export function DataTableColumnFilter<TData, TValue>({
               )}
             </div>
             
-            <Select value={selectedValue || ''} onValueChange={handleFilterChange}>
+            <Select value={selectedValue || '__all__'} onValueChange={v => handleFilterChange(v === '__all__' ? undefined : v)}>
               <SelectTrigger>
                 <SelectValue placeholder="All" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All</SelectItem>
+                <SelectItem value="__all__">All</SelectItem>
                 {sortedUniqueValues.map((value) => (
                   <SelectItem key={String(value)} value={String(value)}>
                     <div className="flex items-center justify-between w-full">

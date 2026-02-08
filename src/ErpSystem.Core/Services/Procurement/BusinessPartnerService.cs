@@ -11,15 +11,21 @@ public class BusinessPartnerService : IBusinessPartnerService
 {
     private readonly IBusinessPartnerRepository _partnerRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ILogger<BusinessPartnerService> _logger;
 
     public BusinessPartnerService(
         IBusinessPartnerRepository partnerRepository,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ILogger<BusinessPartnerService> logger)
     {
         _partnerRepository = partnerRepository;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _logger = logger;
     }
 
@@ -63,6 +69,7 @@ public class BusinessPartnerService : IBusinessPartnerService
         var partner = new BusinessPartner
         {
             Id = Guid.NewGuid(),
+            TenantId = _currentUserProvider.TenantId,
             PartnerCode = partnerCode,
             PartnerName = dto.PartnerName,
             PartnerType = dto.PartnerType,
@@ -77,12 +84,36 @@ public class BusinessPartnerService : IBusinessPartnerService
             PhysicalCity = dto.City,
             PhysicalCountry = dto.Country,
             PhysicalPostalCode = dto.PostalCode,
-            RegistrationStatus = "Approved",
+            // Created internally but not usable in transactions until approved.
+            RegistrationStatus = "PendingApproval",
             ApprovalStatus = "Pending",
             IsPreferred = false,
             IsBlacklisted = false,
-            CreatedAt = DateTime.UtcNow
+            IsActive = false,
+            CreatedAt = DateTime.UtcNow,
+            CreatedById = _currentUserProvider.UserId,
+            ParentId = dto.ParentId
         };
+
+        // Set customer-specific fields if partner type is Customer
+        if (dto.PartnerType == "Customer")
+        {
+            partner.CustomerType = dto.CustomerType;
+            partner.CreditLimit = dto.CreditLimit;
+            partner.PaymentTerms = dto.PaymentTerms;
+            partner.Currency = dto.Currency;
+            partner.DefaultDiscount = dto.DefaultDiscount;
+            partner.PriceList = dto.PriceList;
+            partner.SalesRepresentativeId = dto.SalesRepresentativeId;
+            partner.SalesTerritory = dto.SalesTerritory;
+            partner.IsTaxExempt = dto.IsTaxExempt;
+            partner.TaxExemptionNumber = dto.TaxExemptionNumber;
+            partner.TaxExemptionExpiry = dto.TaxExemptionExpiry;
+            partner.PreferredShippingMethod = dto.PreferredShippingMethod;
+            partner.DeliveryInstructions = dto.DeliveryInstructions;
+            partner.CustomerSince = dto.CustomerSince ?? DateTime.UtcNow;
+            partner.LoyaltyTier = dto.LoyaltyTier;
+        }
 
         var created = await _partnerRepository.CreateAsync(partner);
         return MapToDetailDto(created);
@@ -104,6 +135,29 @@ public class BusinessPartnerService : IBusinessPartnerService
         partner.PhysicalCountry = dto.Country;
         partner.PhysicalPostalCode = dto.PostalCode;
         partner.UpdatedAt = DateTime.UtcNow;
+        partner.ParentId = dto.ParentId;
+
+        // Update customer-specific fields if partner type is Customer
+        if (partner.PartnerType == "Customer")
+        {
+            partner.CustomerType = dto.CustomerType;
+            partner.CreditLimit = dto.CreditLimit;
+            partner.PaymentTerms = dto.PaymentTerms;
+            partner.Currency = dto.Currency;
+            partner.DefaultDiscount = dto.DefaultDiscount;
+            partner.PriceList = dto.PriceList;
+            partner.SalesRepresentativeId = dto.SalesRepresentativeId;
+            partner.SalesTerritory = dto.SalesTerritory;
+            partner.IsTaxExempt = dto.IsTaxExempt;
+            partner.TaxExemptionNumber = dto.TaxExemptionNumber;
+            partner.TaxExemptionExpiry = dto.TaxExemptionExpiry;
+            partner.PreferredShippingMethod = dto.PreferredShippingMethod;
+            partner.DeliveryInstructions = dto.DeliveryInstructions;
+            partner.LoyaltyTier = dto.LoyaltyTier;
+            partner.IsOnCreditHold = dto.IsOnCreditHold;
+            partner.CreditHoldReason = dto.CreditHoldReason;
+            partner.CreditHoldDate = dto.CreditHoldDate;
+        }
 
         var updated = await _partnerRepository.UpdateAsync(partner);
         return MapToDetailDto(updated);
@@ -203,14 +257,100 @@ public class BusinessPartnerService : IBusinessPartnerService
         await _partnerRepository.UpdateStatusAsync(partnerId, status);
     }
 
-    public async Task ApprovePartnerAsync(Guid partnerId, Guid approvedById)
+    public async Task SubmitPartnerForApprovalAsync(Guid partnerId, Guid submittedById)
     {
-        await _partnerRepository.UpdateApprovalStatusAsync(partnerId, "Approved", approvedById);
+        var partner = await _partnerRepository.GetByIdAsync(partnerId)
+            ?? throw new InvalidOperationException($"Business partner with ID {partnerId} not found");
+
+        if (string.Equals(partner.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Business partner is already approved");
+        }
+
+        if (string.Equals(partner.ApprovalStatus, "Rejected", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Business partner is rejected and cannot be submitted for approval");
+        }
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync("BusinessPartner", partnerId);
+        if (!workflowResult.ExecutionResult.Success)
+        {
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start workflow");
+        }
+
+        var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("BusinessPartner");
+        statusAdapter.ApplySubmitOutcome(partner, workflowResult.Outcome, submittedById);
+
+        await _partnerRepository.UpdateAsync(partner);
+    }
+
+    public async Task ApprovePartnerAsync(Guid partnerId, Guid approvedById, string? comments = null)
+    {
+        var partner = await _partnerRepository.GetByIdAsync(partnerId)
+            ?? throw new InvalidOperationException($"Business partner with ID {partnerId} not found");
+
+        if (!string.Equals(partner.ApprovalStatus, "Pending", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(partner.ApprovalStatus))
+        {
+            throw new InvalidOperationException($"Business partner cannot be approved in current approval status: '{partner.ApprovalStatus}'");
+        }
+
+        var canApprove = await _workflowIntegrationService.CanUserApproveAsync("BusinessPartner", partnerId, approvedById);
+        if (!canApprove)
+        {
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step");
+        }
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            "BusinessPartner",
+            partnerId,
+            approvedById,
+            "Approve",
+            comments);
+
+        if (!workflowResult.ExecutionResult.Success)
+        {
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process approval");
+        }
+
+        var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("BusinessPartner");
+        statusAdapter.ApplyApprovalOutcome(partner, workflowResult.Outcome, approvedById);
+
+        await _partnerRepository.UpdateAsync(partner);
     }
 
     public async Task RejectPartnerAsync(Guid partnerId, Guid rejectedById, string reason)
     {
-        await _partnerRepository.UpdateApprovalStatusAsync(partnerId, "Rejected", rejectedById);
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new InvalidOperationException("Rejection reason is required");
+        }
+
+        var partner = await _partnerRepository.GetByIdAsync(partnerId)
+            ?? throw new InvalidOperationException($"Business partner with ID {partnerId} not found");
+
+        var canApprove = await _workflowIntegrationService.CanUserApproveAsync("BusinessPartner", partnerId, rejectedById);
+        if (!canApprove)
+        {
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step");
+        }
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            "BusinessPartner",
+            partnerId,
+            rejectedById,
+            "Reject",
+            reason);
+
+        if (!workflowResult.ExecutionResult.Success)
+        {
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process rejection");
+        }
+
+        var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("BusinessPartner");
+        statusAdapter.ApplyApprovalOutcome(partner, workflowResult.Outcome, rejectedById, reason);
+
+        await _partnerRepository.UpdateAsync(partner);
     }
 
     public async Task UpdatePerformanceRatingAsync(Guid partnerId, decimal rating)
@@ -448,7 +588,15 @@ public class BusinessPartnerService : IBusinessPartnerService
             PerformanceRating = partner.PerformanceRating,
             IsPreferred = partner.IsPreferred,
             IsBlacklisted = partner.IsBlacklisted,
-            CreatedAt = partner.CreatedAt
+            CreatedAt = partner.CreatedAt,
+            // Customer-specific fields for list view
+            CustomerType = partner.CustomerType,
+            CreditLimit = partner.CreditLimit,
+            OutstandingBalance = partner.OutstandingBalance,
+            IsOnCreditHold = partner.IsOnCreditHold,
+            // Parent Business Partner
+            ParentId = partner.ParentId,
+            ParentName = partner.Parent?.PartnerName
         };
     }
 
@@ -509,7 +657,38 @@ public class BusinessPartnerService : IBusinessPartnerService
             ApprovedDate = partner.ApprovedDate,
             InsuranceCoverageAmount = partner.InsuranceCoverage,
             Notes = partner.Notes,
-            CreatedAt = partner.CreatedAt
+            CreatedAt = partner.CreatedAt,
+            // Customer-Specific Fields
+            CustomerType = partner.CustomerType,
+            CustomerAccountNumber = partner.CustomerAccountNumber,
+            CreditLimit = partner.CreditLimit,
+            OutstandingBalance = partner.OutstandingBalance,
+            PaymentTerms = partner.PaymentTerms,
+            Currency = partner.Currency,
+            DefaultDiscount = partner.DefaultDiscount,
+            PriceList = partner.PriceList,
+            SalesRepresentativeId = partner.SalesRepresentativeId,
+            SalesRepresentativeName = partner.SalesRepresentative != null
+                ? $"{partner.SalesRepresentative.FirstName} {partner.SalesRepresentative.LastName}"
+                : null,
+            SalesTerritory = partner.SalesTerritory,
+            IsTaxExempt = partner.IsTaxExempt,
+            TaxExemptionNumber = partner.TaxExemptionNumber,
+            TaxExemptionExpiry = partner.TaxExemptionExpiry,
+            PreferredShippingMethod = partner.PreferredShippingMethod,
+            DeliveryInstructions = partner.DeliveryInstructions,
+            CustomerSince = partner.CustomerSince,
+            LastPurchaseDate = partner.LastPurchaseDate,
+            TotalLifetimePurchases = partner.TotalLifetimePurchases,
+            AverageOrderValue = partner.AverageOrderValue,
+            LoyaltyTier = partner.LoyaltyTier,
+            LoyaltyPoints = partner.LoyaltyPoints,
+            IsOnCreditHold = partner.IsOnCreditHold,
+            CreditHoldReason = partner.CreditHoldReason,
+            CreditHoldDate = partner.CreditHoldDate,
+            // Parent Business Partner
+            ParentId = partner.ParentId,
+            ParentName = partner.Parent?.PartnerName
         };
 
         // Map contacts

@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,13 +13,19 @@ namespace ErpSystem.Api.Controllers.Procurement;
 public class BusinessPartnersController : ControllerBase
 {
     private readonly IBusinessPartnerService _partnerService;
+    private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowService _workflowService;
     private readonly ILogger<BusinessPartnersController> _logger;
 
     public BusinessPartnersController(
         IBusinessPartnerService partnerService,
+        ICurrentUserProvider currentUserProvider,
+        IWorkflowService workflowService,
         ILogger<BusinessPartnersController> logger)
     {
         _partnerService = partnerService;
+        _currentUserProvider = currentUserProvider;
+        _workflowService = workflowService;
         _logger = logger;
     }
 
@@ -45,6 +52,29 @@ public class BusinessPartnersController : ControllerBase
             var categoryIds = categoryId.HasValue ? new List<Guid> { categoryId.Value } : null;
             var result = await _partnerService.GetPartnersAsync(
                 page, pageSize, search, partnerType, status, approvalStatus, null, null, categoryIds, null);
+
+            // Best-effort: populate current workflow step name for partners pending approval.
+            // This keeps list UIs from polling per-row.
+            var pending = result.Items
+                .Where(p => string.Equals(p.ApprovalStatus, "Pending", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (pending.Count > 0)
+            {
+                await Task.WhenAll(pending.Select(async dto =>
+                {
+                    try
+                    {
+                        var step = await _workflowService.GetCurrentWorkflowStepAsync("BusinessPartner", dto.Id);
+                        dto.CurrentWorkflowStepName = step?.StepName;
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }));
+            }
+
             return Ok(result);
         }
         catch (Exception ex)
@@ -66,6 +96,19 @@ public class BusinessPartnersController : ControllerBase
             if (partner == null)
             {
                 return NotFound();
+            }
+
+            if (string.Equals(partner.ApprovalStatus, "Pending", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var step = await _workflowService.GetCurrentWorkflowStepAsync("BusinessPartner", id);
+                    partner.CurrentWorkflowStepName = step?.StepName;
+                }
+                catch
+                {
+                    // ignore
+                }
             }
 
             return Ok(partner);
@@ -254,17 +297,43 @@ public class BusinessPartnersController : ControllerBase
     }
 
     /// <summary>
-    /// Approves a business partner
+    /// Submits a business partner for approval (unified workflow)
     /// </summary>
-    [HttpPost("{id:guid}/approve")]
-    public async Task<IActionResult> ApprovePartner(Guid id, [FromBody] Guid approvedById)
+    [HttpPost("{id:guid}/submit")]
+    public async Task<IActionResult> SubmitPartner(Guid id)
     {
         try
         {
-            await _partnerService.ApprovePartnerAsync(id, approvedById);
+            await _partnerService.SubmitPartnerForApprovalAsync(id, _currentUserProvider.UserId);
             return NoContent();
         }
-        catch (ArgumentException ex)
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error submitting business partner {PartnerId} for approval", id);
+            return StatusCode(500, "An error occurred while submitting the business partner for approval");
+        }
+    }
+
+    /// <summary>
+    /// Approves a business partner
+    /// </summary>
+    [HttpPost("{id:guid}/approve")]
+    public async Task<IActionResult> ApprovePartner(Guid id, [FromBody] ApprovePartnerRequest? request)
+    {
+        try
+        {
+            await _partnerService.ApprovePartnerAsync(id, _currentUserProvider.UserId, request?.Notes);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, ex.Message);
+        }
+        catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
         }
@@ -283,10 +352,19 @@ public class BusinessPartnersController : ControllerBase
     {
         try
         {
-            await _partnerService.RejectPartnerAsync(id, request.RejectedById, request.RejectionReason);
+            if (string.IsNullOrWhiteSpace(request?.RejectionReason))
+            {
+                return BadRequest("Rejection reason is required");
+            }
+
+            await _partnerService.RejectPartnerAsync(id, _currentUserProvider.UserId, request.RejectionReason);
             return NoContent();
         }
-        catch (ArgumentException ex)
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, ex.Message);
+        }
+        catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
         }
@@ -377,5 +455,6 @@ public class BusinessPartnersController : ControllerBase
 }
 
 // Request models
-public record RejectPartnerRequest(Guid RejectedById, string? RejectionReason);
+public record RejectPartnerRequest(string? RejectionReason);
+public record ApprovePartnerRequest(string? Notes);
 public record SuspendPartnerRequest(string? SuspensionReason);

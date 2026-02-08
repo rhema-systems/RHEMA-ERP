@@ -62,6 +62,11 @@ const menuItems: MenuItem[] = [
     icon: ClipboardList,
   },
   {
+    title: 'My RFQs',
+    href: '/external-portal/rfqs',
+    icon: FileText,
+  },
+  {
     title: 'My Tasks',
     href: '/external-portal/task-list',
     icon: ListTodo,

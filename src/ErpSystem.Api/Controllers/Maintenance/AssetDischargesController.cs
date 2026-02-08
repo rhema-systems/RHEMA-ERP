@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,10 +12,17 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 public class AssetDischargesController : ControllerBase
 {
     private readonly IAssetDischargeService _dischargeService;
+    private readonly IFileStorageService _storageService;
+    private readonly ILogger<AssetDischargesController> _logger;
 
-    public AssetDischargesController(IAssetDischargeService dischargeService)
+    public AssetDischargesController(
+        IAssetDischargeService dischargeService,
+        IFileStorageService storageService,
+        ILogger<AssetDischargesController> logger)
     {
         _dischargeService = dischargeService;
+        _storageService = storageService;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -68,13 +76,43 @@ public class AssetDischargesController : ControllerBase
     [RequestSizeLimit(20_000_000)]
     public async Task<ActionResult<object>> UploadDischargePhoto(Guid id, IFormFile file)
     {
-        if (file == null || file.Length == 0)
+        try
         {
-            return BadRequest("No file uploaded.");
-        }
+            if (file == null || file.Length == 0)
+            {
+                return BadRequest("No file uploaded.");
+            }
 
-        var fakePath = $"/uploads/maintenance/discharges/{id}/{file.FileName}";
-        return Ok(new { filePath = fakePath });
+            // Validate file extension (images only)
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (!allowedExtensions.Contains(extension))
+            {
+                return BadRequest(new { message = $"File type {extension} is not allowed. Allowed types: {string.Join(", ", allowedExtensions)}" });
+            }
+
+            // Generate unique file path
+            var fileName = $"{Guid.NewGuid()}{extension}";
+            var filePath = $"maintenance/discharges/{id}/{fileName}";
+
+            // Upload file using storage service
+            using var stream = file.OpenReadStream();
+            var uploadedPath = await _storageService.UploadFileAsync(stream, file.FileName, filePath);
+
+            if (string.IsNullOrEmpty(uploadedPath))
+            {
+                return StatusCode(500, new { message = "Failed to upload file" });
+            }
+
+            _logger.LogInformation("Uploaded discharge photo for discharge {DischargeId}: {FilePath}", id, uploadedPath);
+
+            return Ok(new { filePath = uploadedPath });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error uploading photo for discharge {DischargeId}", id);
+            return StatusCode(500, new { message = "Failed to upload photo", error = ex.Message });
+        }
     }
 
 }
