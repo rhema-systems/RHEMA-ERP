@@ -386,6 +386,15 @@ public class NotificationTopicsController : ControllerBase
                 "WorkflowApprovalRequest"
             };
 
+            // Default email on for key workflow activities so approvals/submissions can reach users outside the app.
+            // Admins can still toggle per topic in the UI after seeding.
+            var defaultEmailActivities = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "WorkflowSubmitted",
+                "WorkflowStepAssignment",
+                "WorkflowApprovalRequest"
+            };
+
             var topicRepo = _unitOfWork.Repository<NotificationTopic>();
             var recipientRepo = _unitOfWork.Repository<NotificationTopicRecipient>();
 
@@ -422,7 +431,7 @@ public class NotificationTopicsController : ControllerBase
                             IsRequired = isRequired,
                             IsActive = true,
                             EnableInApp = true,
-                            EnableEmail = false,
+                            EnableEmail = defaultEmailActivities.Contains(activity),
                             InAppTitleTemplate = "{{Title}}",
                             InAppBodyTemplate = "{{Message}}",
                             CreatedAt = DateTime.UtcNow,
@@ -439,6 +448,11 @@ public class NotificationTopicsController : ControllerBase
                         if (isRequired && !topic.IsRequired) { topic.IsRequired = true; changed = true; }
                         if (string.IsNullOrWhiteSpace(topic.EntityType)) { topic.EntityType = entityType; changed = true; }
                         if (!topic.IsActive) { topic.IsActive = true; changed = true; }
+                        if (defaultEmailActivities.Contains(activity) && !topic.EnableEmail)
+                        {
+                            topic.EnableEmail = true;
+                            changed = true;
+                        }
                         if (isRequired && !topic.EnableInApp && !topic.EnableEmail)
                         {
                             // Ensure required topics always have at least one channel.
