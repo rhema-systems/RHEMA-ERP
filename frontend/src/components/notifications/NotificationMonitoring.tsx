@@ -109,6 +109,28 @@ interface MessageQueueDetail {
 
 type MonitoringMode = 'full' | 'queueOnly'
 
+const isHtmlLike = (value: string | null | undefined) => {
+  if (!value) return false
+  return /<\/?[a-z][\s\S]*>/i.test(value)
+}
+
+const wrapHtmlDoc = (html: string) => {
+  if (/<\s*html[\s>]/i.test(html)) return html
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; padding: 12px; }
+      pre { white-space: pre-wrap; }
+      a { color: #2563eb; }
+    </style>
+  </head>
+  <body>${html}</body>
+</html>`
+}
+
 const formatDateTime = (value: string | null | undefined) => {
   if (!value) return '-'
   const d = new Date(value)
@@ -825,9 +847,31 @@ const NotificationMonitoring: React.FC<{ mode?: MonitoringMode }> = ({ mode = 'f
               )}
               <div>
                 <div className="text-xs text-muted-foreground">Message</div>
-                <pre className="whitespace-pre-wrap rounded-md bg-muted p-3 text-sm max-h-[360px] overflow-auto">
-                  {selectedMessage.message}
-                </pre>
+                {isHtmlLike(selectedMessage.message) ? (
+                  <div className="rounded-md border bg-background overflow-hidden">
+                    <iframe
+                      title="Rendered message"
+                      className="w-full h-[360px] bg-white"
+                      sandbox=""
+                      srcDoc={wrapHtmlDoc(selectedMessage.message)}
+                    />
+                  </div>
+                ) : (
+                  <pre className="whitespace-pre-wrap rounded-md bg-muted p-3 text-sm max-h-[360px] overflow-auto">
+                    {selectedMessage.message}
+                  </pre>
+                )}
+
+                {isHtmlLike(selectedMessage.message) ? (
+                  <details className="mt-2">
+                    <summary className="text-xs text-muted-foreground cursor-pointer select-none">
+                      View raw HTML
+                    </summary>
+                    <pre className="whitespace-pre-wrap rounded-md bg-muted p-3 text-xs max-h-[240px] overflow-auto mt-2">
+                      {selectedMessage.message}
+                    </pre>
+                  </details>
+                ) : null}
               </div>
               {selectedMessage.additionalData && (
                 <div>
