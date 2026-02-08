@@ -1251,6 +1251,7 @@ public class WorkflowController : ControllerBase
         {
             new("WorkOrder", "Maintenance work orders", "Settings", "#3B82F6", 10),
             new("JobCard", "Maintenance job cards", "FileText", "#8B5CF6", 20),
+            new("FleetTrip", "Fleet trip requests and dispatch", "MapPin", "#0EA5E9", 25),
             new("PurchaseOrder", "Procurement purchase orders", "FileText", "#F59E0B", 30),
             new("PurchaseRequisition", "Procurement requisitions", "FileText", "#F97316", 40),
             new("Tender", "Procurement tenders (RFQ/RFP/ITB/EOI)", "FileText", "#06B6D4", 45),

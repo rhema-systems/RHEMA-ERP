@@ -47,6 +47,10 @@ import {
   AlertCircle,
   ClipboardList,
   Tag,
+  MapPin,
+  Truck,
+  ShieldCheck,
+  Droplet,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -116,6 +120,17 @@ const navigationItems: NavItem[] = [
           { title: 'Job Cards', href: '/maintenance/job-cards', icon: FileText },
           { title: 'Work Orders', href: '/maintenance/work-orders', icon: FileText },
           { title: 'Assets', href: '/maintenance/assets', icon: Package },
+          {
+            title: 'Fleet',
+            href: '/maintenance/fleet',
+            icon: Truck,
+            children: [
+              { title: 'Vehicles', href: '/maintenance/fleet/vehicles', icon: Truck },
+              { title: 'Trips', href: '/maintenance/fleet/trips', icon: MapPin },
+              { title: 'Compliance', href: '/maintenance/fleet/compliance', icon: ShieldCheck },
+              { title: 'Fuel', href: '/maintenance/fleet/fuel', icon: Droplet },
+            ],
+          },
           { title: 'Technicians', href: '/maintenance/technicians', icon: Users },
           { title: 'Quality Control', href: '/maintenance/quality-control', icon: ClipboardCheck },
           { title: 'Scheduled Maintenance', href: '/maintenance/scheduled', icon: Calendar },

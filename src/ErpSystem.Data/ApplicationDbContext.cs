@@ -389,6 +389,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // Maintenance Settings
     public DbSet<MaintenanceSettings> MaintenanceSettings { get; set; }
 
+    // Fleet Management (Maintenance)
+    public DbSet<FleetTrip> FleetTrips { get; set; }
+    public DbSet<FleetComplianceItem> FleetComplianceItems { get; set; }
+    public DbSet<FleetFuelTransaction> FleetFuelTransactions { get; set; }
+
     // Performance Tracking
     public DbSet<SupplierPerformanceMetric> SupplierPerformanceMetrics { get; set; }
     public DbSet<QualityIncident> QualityIncidents { get; set; }
@@ -428,6 +433,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new PreInspectionChecklistItemConfiguration());
         builder.ApplyConfiguration(new AssetConditionRecordConfiguration());
         builder.ApplyConfiguration(new AssetConditionItemResultConfiguration());
+
+        // Fleet configurations
+        builder.ApplyConfiguration(new FleetTripConfiguration());
+        builder.ApplyConfiguration(new FleetComplianceItemConfiguration());
+        builder.ApplyConfiguration(new FleetFuelTransactionConfiguration());
 
         // Tender configurations
         builder.ApplyConfiguration(new TenderConfiguration());

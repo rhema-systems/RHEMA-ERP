@@ -1,5 +1,6 @@
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Workflow;
 using Microsoft.Extensions.Logging;
 
@@ -11,6 +12,7 @@ namespace ErpSystem.Core.Services.Workflow;
 /// </summary>
 public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
 {
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IPurchaseRequisitionRepository _purchaseRequisitionRepository;
     private readonly IPurchaseOrderRepository _purchaseOrderRepository;
     private readonly ITenderRepository _tenderRepository;
@@ -21,6 +23,7 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
     private readonly ILogger<WorkflowEntityDisplayService> _logger;
 
     public WorkflowEntityDisplayService(
+        IUnitOfWork unitOfWork,
         IPurchaseRequisitionRepository purchaseRequisitionRepository,
         IPurchaseOrderRepository purchaseOrderRepository,
         ITenderRepository tenderRepository,
@@ -30,6 +33,7 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
         ErpSystem.Core.Interfaces.Inventory.IInventoryRequisitionRepository inventoryRequisitionRepository,
         ILogger<WorkflowEntityDisplayService> logger)
     {
+        _unitOfWork = unitOfWork;
         _purchaseRequisitionRepository = purchaseRequisitionRepository;
         _purchaseOrderRepository = purchaseOrderRepository;
         _tenderRepository = tenderRepository;
@@ -106,6 +110,17 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 info.EntityType = "JobCard";
                 info.EntityNumber = jobCard?.JobCardNumber;
                 info.ActionUrl = $"/maintenance/job-cards?id={entityId}";
+                return info;
+            }
+
+            if (key == Normalize("FleetTrip") || key == Normalize("FLEET_TRIP") || key == Normalize("Fleet Trip"))
+            {
+                var trip = await _unitOfWork.Repository<ErpSystem.Core.Entities.Maintenance.FleetTrip>()
+                    .FirstOrDefaultAsync(t => t.Id == entityId, t => t.VehicleAsset);
+                info.EntityType = "FleetTrip";
+                info.EntityNumber = $"FT-{entityId.ToString()[..8].ToUpperInvariant()}";
+                info.EntityName = trip?.VehicleAsset?.Name;
+                info.ActionUrl = $"/maintenance/fleet/trips?id={entityId}";
                 return info;
             }
 

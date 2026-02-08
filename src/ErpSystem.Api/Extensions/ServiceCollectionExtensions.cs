@@ -351,6 +351,7 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapterRegistry, ErpSystem.Core.Services.Workflow.WorkflowStatusAdapterRegistry>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.JobCardWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.PurchaseOrderWorkflowStatusAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.FleetTripWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.PurchaseRequisitionWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.InventoryTransferWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.InventoryRequisitionWorkflowStatusAdapter>();
@@ -657,6 +658,12 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderNegotiationService, ErpSystem.Core.Services.Procurement.TenderNegotiationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSettingsService, ErpSystem.Core.Services.Procurement.ProcurementSettingsService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceSettingsService, ErpSystem.Core.Services.Maintenance.MaintenanceSettingsService>();
+
+            // Fleet (Maintenance)
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetVehicleService, ErpSystem.Core.Services.Maintenance.Fleet.FleetVehicleService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetTripService, ErpSystem.Core.Services.Maintenance.Fleet.FleetTripService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetComplianceService, ErpSystem.Core.Services.Maintenance.Fleet.FleetComplianceService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetFuelService, ErpSystem.Core.Services.Maintenance.Fleet.FleetFuelService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IConsignmentSettlementService, ErpSystem.Core.Services.Procurement.ConsignmentSettlementService>();
 
             // RFQ (Request For Quotation) - separate from Tender
@@ -677,6 +684,7 @@ namespace ErpSystem.Api.Extensions
 
             // Maintenance background services
             services.AddHostedService<ErpSystem.Api.Services.Maintenance.MaintenanceTriggerEvaluationBackgroundService>();
+            services.AddHostedService<ErpSystem.Api.Services.Maintenance.FleetComplianceReminderBackgroundService>();
 
             // Notification dispatcher background service - sends pending notifications on schedule with dead-letter support
             services.AddHostedService<ErpSystem.Api.Services.NotificationDispatcherBackgroundService>();

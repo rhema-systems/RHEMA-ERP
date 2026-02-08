@@ -155,6 +155,62 @@ public sealed class PurchaseOrderWorkflowStatusAdapter : IWorkflowStatusAdapter
         => entity as PurchaseOrder ?? throw new InvalidOperationException("Expected PurchaseOrder entity.");
 }
 
+public sealed class FleetTripWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "FleetTrip",
+        "Fleet Trip",
+        "FLEET_TRIP"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+    {
+        var trip = RequireFleetTrip(entity);
+        Apply(trip, outcome, userId, rejectionReason: null);
+    }
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+    {
+        var trip = RequireFleetTrip(entity);
+        Apply(trip, outcome, userId, rejectionReason);
+    }
+
+    private static void Apply(FleetTrip trip, WorkflowOutcome outcome, Guid? userId, string? rejectionReason)
+    {
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                trip.Status = FleetTripStatuses.Approved;
+                trip.ApprovedAt = DateTime.UtcNow;
+                trip.ApprovedByUserId = userId;
+                trip.RejectedAt = null;
+                trip.RejectedByUserId = null;
+                trip.RejectionReason = null;
+                break;
+            case WorkflowOutcome.Rejected:
+                trip.Status = FleetTripStatuses.Rejected;
+                trip.RejectedAt = DateTime.UtcNow;
+                trip.RejectedByUserId = userId;
+                trip.RejectionReason = rejectionReason;
+                trip.ApprovedAt = null;
+                trip.ApprovedByUserId = null;
+                break;
+            default:
+                trip.Status = FleetTripStatuses.Submitted;
+                trip.ApprovedAt = null;
+                trip.ApprovedByUserId = null;
+                trip.RejectedAt = null;
+                trip.RejectedByUserId = null;
+                trip.RejectionReason = null;
+                break;
+        }
+    }
+
+    private static FleetTrip RequireFleetTrip(object entity)
+        => entity as FleetTrip ?? throw new InvalidOperationException("Expected FleetTrip entity.");
+}
+
 public sealed class PurchaseRequisitionWorkflowStatusAdapter : IWorkflowStatusAdapter
 {
     public IReadOnlyCollection<string> EntityTypes { get; } = new[]

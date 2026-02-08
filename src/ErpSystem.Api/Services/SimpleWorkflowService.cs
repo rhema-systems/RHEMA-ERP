@@ -36,6 +36,7 @@ public class SimpleWorkflowService : IWorkflowService
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
     private readonly ICurrentUserService _currentUserService;
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SimpleWorkflowService> _logger;
 
     public SimpleWorkflowService(
@@ -56,6 +57,7 @@ public class SimpleWorkflowService : IWorkflowService
         IBusinessPartnerRepository businessPartnerRepository,
         ICurrentUserService currentUserService,
         UserManager<ApplicationUser> userManager,
+        IUnitOfWork unitOfWork,
         ILogger<SimpleWorkflowService> logger)
     {
         _workflowEngine = workflowEngine;
@@ -75,6 +77,7 @@ public class SimpleWorkflowService : IWorkflowService
         _businessPartnerRepository = businessPartnerRepository;
         _currentUserService = currentUserService;
         _userManager = userManager;
+        _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
@@ -585,6 +588,32 @@ public class SimpleWorkflowService : IWorkflowService
             context["contractorId"] = jobCard.ContractorId;
             context["specialInstructions"] = jobCard.SpecialInstructions;
             context["safetyRequirements"] = jobCard.SafetyRequirements;
+        }
+
+        if (IsEntityType(entityTypeRecord, "FLEET_TRIP", "FleetTrip", "Fleet Trip"))
+        {
+            var trip = await _unitOfWork.Repository<ErpSystem.Core.Entities.Maintenance.FleetTrip>()
+                .FirstOrDefaultAsync(t => t.Id == entityId, t => t.VehicleAsset, t => t.DriverEmployee)
+                ?? throw new InvalidOperationException("Fleet trip not found");
+
+            context["status"] = trip.Status;
+            context["vehicleAssetId"] = trip.VehicleAssetId;
+            context["vehicleName"] = trip.VehicleAsset?.Name ?? string.Empty;
+            context["vehicleAssetNumber"] = trip.VehicleAsset?.AssetNumber ?? string.Empty;
+            context["vehicleLicensePlate"] = trip.VehicleAsset?.LicensePlate ?? string.Empty;
+            context["requestedByUserId"] = trip.RequestedByUserId;
+            context["driverEmployeeId"] = trip.DriverEmployeeId;
+            context["purpose"] = trip.Purpose ?? string.Empty;
+            context["origin"] = trip.Origin ?? string.Empty;
+            context["destination"] = trip.Destination ?? string.Empty;
+            context["plannedStartAt"] = trip.PlannedStartAt;
+            context["plannedEndAt"] = trip.PlannedEndAt;
+            context["dispatchedAt"] = trip.DispatchedAt;
+            context["completedAt"] = trip.CompletedAt;
+            context["startMileage"] = trip.StartMileage;
+            context["endMileage"] = trip.EndMileage;
+            context["startOperatingHours"] = trip.StartOperatingHours;
+            context["endOperatingHours"] = trip.EndOperatingHours;
         }
 
         if (IsEntityType(entityTypeRecord, "INVENTORY_TRANSFER", "InventoryTransfer", "Inventory Transfer", "Transfer"))
