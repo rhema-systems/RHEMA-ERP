@@ -186,6 +186,79 @@ const emailDataKeys: string[] = [
   'CustomerEmail',
 ]
 
+const workflowEventKeysByActivity: Record<string, string[]> = {
+  WorkflowSubmitted: [
+    'workflowInstanceId',
+    'workflowDefinitionId',
+    'definitionName',
+    'currentStepName',
+    'InitiatedByUserId',
+    'TargetUserId',
+  ],
+  WorkflowStepAssignment: [
+    'stepInstanceId',
+    'workflowInstanceId',
+    'workflowStepId',
+    'AssignedToUserId',
+    'TargetUserId',
+  ],
+  WorkflowApprovalRequest: [
+    'approvalId',
+    'stepInstanceId',
+    'workflowInstanceId',
+    'workflowStepId',
+    'ApproverUserId',
+    'ApproverRole',
+    'TargetUserId',
+    'TargetRole',
+  ],
+  WorkflowStepEscalated: [
+    'stepInstanceId',
+    'workflowInstanceId',
+    'workflowStepId',
+    'escalationReason',
+    'TargetUserIds',
+  ],
+  WorkflowCompleted: [
+    'workflowInstanceId',
+    'workflowDefinitionId',
+    'InitiatedByUserId',
+    'TargetUserId',
+  ],
+  WorkflowRejected: [
+    'workflowInstanceId',
+    'workflowDefinitionId',
+    'rejectedById',
+    'comments',
+    'InitiatedByUserId',
+    'TargetUserId',
+  ],
+  WorkflowStepOverdue: [
+    'stepInstanceId',
+    'workflowInstanceId',
+    'workflowStepId',
+    'dueDate',
+    'AssignedToUserId',
+    'TargetUserId',
+  ],
+}
+
+const workflowCommonEventKeys: string[] = [
+  'EntityType',
+  'EntityId',
+  'EntityNumber',
+  'ActionUrl',
+  'Title',
+  'Message',
+]
+
+const isWorkflowActivity = (activity: string) => (activity || '').startsWith('Workflow')
+
+const getWorkflowEventKeys = (activity: string) => {
+  const specific = workflowEventKeysByActivity[activity] || []
+  return Array.from(new Set([...workflowCommonEventKeys, ...specific]))
+}
+
 const normalizeKeySegment = (value: string) => (value || '').replace(/[^A-Za-z0-9]/g, '').trim()
 const buildTopicKey = (entityType: string, activity: string, audience: string) => {
   const et = normalizeKeySegment(entityType)
@@ -828,6 +901,20 @@ const TopicForm: React.FC<{
       </TabsContent>
 
       <TabsContent value="templates" className="space-y-4">
+        {isWorkflowActivity(form.activity) ? (
+          <div className="rounded-lg border p-4 space-y-2">
+            <div className="font-medium">Workflow event keys</div>
+            <div className="text-sm text-muted-foreground">
+              These keys are published automatically for workflow activities and can be used in templates and recipient routing (from event data).
+            </div>
+            <div className="flex flex-wrap gap-2 pt-1">
+              {getWorkflowEventKeys(form.activity).map(k => (
+                <Badge key={k} variant="secondary">{k}</Badge>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="space-y-2">
             <Label htmlFor="topic-inapp-title">In-app Title Template (optional)</Label>

@@ -651,6 +651,7 @@ const NotificationMonitoring: React.FC<{ mode?: MonitoringMode }> = ({ mode = 'f
                 <SelectContent>
                   <SelectItem value="all">All Statuses</SelectItem>
                   <SelectItem value="Pending">Pending</SelectItem>
+                  <SelectItem value="Processing">Processing</SelectItem>
                   <SelectItem value="Sent">Sent</SelectItem>
                   <SelectItem value="Failed">Failed</SelectItem>
                   <SelectItem value="Dismissed">Dismissed</SelectItem>
@@ -689,7 +690,15 @@ const NotificationMonitoring: React.FC<{ mode?: MonitoringMode }> = ({ mode = 'f
                     messageQueue.map((m) => (
                       <TableRow key={m.id}>
                         <TableCell>
-                          <Badge variant={m.status === 'Failed' ? 'destructive' : m.status === 'Pending' ? 'secondary' : 'outline'}>
+                          <Badge
+                            variant={
+                              m.status === 'Failed'
+                                ? 'destructive'
+                                : m.status === 'Pending' || m.status === 'Processing'
+                                  ? 'secondary'
+                                  : 'outline'
+                            }
+                          >
                             {m.status}
                           </Badge>
                         </TableCell>

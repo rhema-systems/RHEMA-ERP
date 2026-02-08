@@ -1230,25 +1230,47 @@ public class UnifiedNotificationService : INotificationService
             var maxRetryAttempts = int.TryParse(_configuration["Notifications:MaxRetryAttempts"], out var max) ? max : 5;
             var initialBackoffSeconds = int.TryParse(_configuration["Notifications:InitialBackoffSeconds"], out var backoff) ? backoff : 30;
             var backoffMultiplier = double.TryParse(_configuration["Notifications:BackoffMultiplier"], out var mult) ? mult : 1.5;
+            var batchSize = int.TryParse(_configuration["Notifications:DispatchBatchSize"], out var bs) && bs > 0 ? bs : 200;
+            var processingLeaseSeconds = int.TryParse(_configuration["Notifications:ProcessingLeaseSeconds"], out var pls) && pls > 0 ? pls : 300;
 
             var now = DateTime.UtcNow;
 
-            var pendingNotifications = await _unitOfWork.Repository<Notification>()
-                .FindAsync(n =>
+            var dueIds = await _dbContext.Notifications
+                .AsNoTracking()
+                .Where(n =>
                     !n.IsDeleted &&
-                    n.Status == "Pending" &&
+                    (n.Status == "Pending" || n.Status == "Failed" || n.Status == "Processing") &&
+                    n.SentAt == null &&
                     n.ScheduledFor <= now &&
-                    n.AttemptCount < maxRetryAttempts);
+                    n.AttemptCount < maxRetryAttempts)
+                .OrderBy(n => n.ScheduledFor)
+                .ThenByDescending(n => n.CreatedAt)
+                .Select(n => n.Id)
+                .Take(batchSize)
+                .ToListAsync();
 
-            var notificationsList = pendingNotifications.ToList();
+            var processed = 0;
+            var skipped = 0;
 
-            foreach (var notification in notificationsList)
+            foreach (var id in dueIds)
             {
+                // Atomically claim the notification before sending so multiple dispatchers/admin retries don't double-send.
+                var claimed = await ClaimNotificationForProcessingAsync(id, now, maxRetryAttempts, processingLeaseSeconds);
+                if (claimed == 0)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                var notification = await _dbContext.Notifications.FirstOrDefaultAsync(n => n.Id == id && !n.IsDeleted);
+                if (notification == null)
+                {
+                    skipped++;
+                    continue;
+                }
+
                 try
                 {
-                    notification.AttemptCount += 1;
-                    notification.LastError = null;
-
                     var sentAt = DateTime.UtcNow;
                     var methods = notification.DeliveryMethods ?? string.Empty;
                     var campaignRecipientId = TryParseCampaignRecipientId(notification.AdditionalData);
@@ -1284,6 +1306,7 @@ public class UnifiedNotificationService : INotificationService
 
                         notification.Status = "Sent";
                         notification.SentAt = sentAt;
+                        notification.ScheduledFor = sentAt;
 
                         if (campaignRecipientId.HasValue)
                         {
@@ -1324,6 +1347,7 @@ public class UnifiedNotificationService : INotificationService
 
                         notification.Status = "Sent";
                         notification.SentAt = sentAt;
+                        notification.ScheduledFor = sentAt;
                     }
                     else if (methods.Contains("Push", StringComparison.OrdinalIgnoreCase))
                     {
@@ -1335,6 +1359,7 @@ public class UnifiedNotificationService : INotificationService
                         await SendPushNotificationAsync(notification.RecipientId, notification.Title ?? string.Empty, notification.Message ?? string.Empty);
                         notification.Status = "Sent";
                         notification.SentAt = sentAt;
+                        notification.ScheduledFor = sentAt;
                     }
                     else if (methods.Contains("SMS", StringComparison.OrdinalIgnoreCase))
                     {
@@ -1346,6 +1371,7 @@ public class UnifiedNotificationService : INotificationService
                         await SendSmsAsync(notification.PhoneNumber, notification.Message ?? string.Empty);
                         notification.Status = "Sent";
                         notification.SentAt = sentAt;
+                        notification.ScheduledFor = sentAt;
                     }
                     else
                     {
@@ -1353,6 +1379,7 @@ public class UnifiedNotificationService : INotificationService
                     }
 
                     await _unitOfWork.Repository<Notification>().UpdateAsync(notification);
+                    processed++;
                 }
                 catch (Exception ex)
                 {
@@ -1395,16 +1422,41 @@ public class UnifiedNotificationService : INotificationService
                     }
 
                     await _unitOfWork.Repository<Notification>().UpdateAsync(notification);
+                    processed++;
                 }
             }
 
             await _unitOfWork.SaveChangesAsync();
-            _logger.LogInformation("Processed {Count} pending notifications", notificationsList.Count);
+            _logger.LogInformation(
+                "Processed {Processed} due notifications (skipped {Skipped} already-claimed/not-due).",
+                processed,
+                skipped);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in ProcessPendingNotificationsAsync");
         }
+    }
+
+    private async Task<int> ClaimNotificationForProcessingAsync(Guid notificationId, DateTime now, int maxRetryAttempts, int processingLeaseSeconds)
+    {
+        var leaseUntil = now.AddSeconds(processingLeaseSeconds);
+
+        // NOTE: This uses raw SQL to ensure only one dispatcher/admin retry can claim a record at a time.
+        // It also uses ScheduledFor as a processing lease expiry (so crashed processing can be recovered).
+        return await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+UPDATE [Notifications]
+SET [Status] = {"Processing"},
+    [ScheduledFor] = {leaseUntil},
+    [AttemptCount] = [AttemptCount] + 1,
+    [LastError] = NULL
+WHERE [Id] = {notificationId}
+  AND [IsDeleted] = 0
+  AND [SentAt] IS NULL
+  AND ([Status] = {"Pending"} OR [Status] = {"Failed"} OR [Status] = {"Processing"})
+  AND [ScheduledFor] <= {now}
+  AND [AttemptCount] < {maxRetryAttempts};
+");
     }
 
     public async Task CleanupExpiredNotificationsAsync()
