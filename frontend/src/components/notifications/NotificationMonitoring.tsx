@@ -114,6 +114,15 @@ const isHtmlLike = (value: string | null | undefined) => {
   return /<\/?[a-z][\s\S]*>/i.test(value)
 }
 
+const tryFormatJson = (value: string | null | undefined) => {
+  if (!value) return null
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2)
+  } catch {
+    return null
+  }
+}
+
 const wrapHtmlDoc = (html: string) => {
   if (/<\s*html[\s>]/i.test(html)) return html
   return `<!doctype html>
@@ -876,8 +885,8 @@ const NotificationMonitoring: React.FC<{ mode?: MonitoringMode }> = ({ mode = 'f
               {selectedMessage.additionalData && (
                 <div>
                   <div className="text-xs text-muted-foreground">Additional Data</div>
-                  <pre className="whitespace-pre-wrap rounded-md bg-muted p-3 text-xs max-h-[240px] overflow-auto">
-                    {selectedMessage.additionalData}
+                  <pre className="w-full max-w-full whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs max-h-[240px] overflow-auto">
+                    {tryFormatJson(selectedMessage.additionalData) ?? selectedMessage.additionalData}
                   </pre>
                 </div>
               )}
