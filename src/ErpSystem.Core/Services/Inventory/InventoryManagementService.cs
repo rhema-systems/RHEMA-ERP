@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Inventory;
@@ -19,6 +20,8 @@ public class InventoryManagementService : IInventoryManagementService
     private readonly IInventoryLocationRepository _locationRepository;
     private readonly IInventoryAllocationRepository _allocationRepository;
     private readonly IWarehouseRepository _warehouseRepository;
+    private readonly IConsignmentSettlementService _consignmentSettlementService;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<InventoryManagementService> _logger;
 
     public InventoryManagementService(
@@ -27,6 +30,8 @@ public class InventoryManagementService : IInventoryManagementService
         IInventoryLocationRepository locationRepository,
         IInventoryAllocationRepository allocationRepository,
         IWarehouseRepository warehouseRepository,
+        IConsignmentSettlementService consignmentSettlementService,
+        ICurrentUserProvider currentUserProvider,
         ILogger<InventoryManagementService> logger)
     {
         _itemRepository = itemRepository;
@@ -34,6 +39,8 @@ public class InventoryManagementService : IInventoryManagementService
         _locationRepository = locationRepository;
         _allocationRepository = allocationRepository;
         _warehouseRepository = warehouseRepository;
+        _consignmentSettlementService = consignmentSettlementService;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
 
@@ -491,7 +498,13 @@ public class InventoryManagementService : IInventoryManagementService
 
     private async Task CreateStockMovementAsync(StockMovement movement)
     {
+        if (movement.TenantId == Guid.Empty)
+        {
+            movement.TenantId = _currentUserProvider.TenantId;
+        }
+
         await _movementRepository.AddAsync(movement);
+        await _consignmentSettlementService.TryCreateFromStockMovementAsync(movement);
     }
 
     private static decimal CalculateRecommendedOrderQuantity(InventoryItem item)

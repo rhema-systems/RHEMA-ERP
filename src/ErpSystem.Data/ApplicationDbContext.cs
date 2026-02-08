@@ -292,6 +292,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<PurchaseOrderReceipt> PurchaseOrderReceipts { get; set; }
     public DbSet<PurchaseOrderReceiptItem> PurchaseOrderReceiptItems { get; set; }
     public DbSet<PurchaseRequisition> PurchaseRequisitions { get; set; }
+    public DbSet<ConsignmentSettlement> ConsignmentSettlements { get; set; }
 
     // Business Partner Management (Unified Supplier/Contractor)
     public DbSet<BusinessPartner> BusinessPartners { get; set; }
@@ -446,6 +447,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new SystemExceptionLogConfiguration());
         builder.ApplyConfiguration(new NotificationTopicConfiguration());
         builder.ApplyConfiguration(new NotificationTopicRecipientConfiguration());
+
+        builder.Entity<ConsignmentSettlement>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.StockMovementId }).IsUnique();
+            entity.HasOne(e => e.StockMovement)
+                .WithMany()
+                .HasForeignKey(e => e.StockMovementId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         // Award Verification configurations
         builder.ApplyConfiguration(new AwardVerificationChecklistTemplateConfiguration());

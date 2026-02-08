@@ -707,6 +707,12 @@ public class Warehouse : TenantEntity
     public bool HasReceivingDock { get; set; } = true;
     public bool HasShippingDock { get; set; } = true;
 
+    /// <summary>
+    /// Indicates this warehouse stores consignment stock (vendor-owned stock).
+    /// Any issue/transfer/sale/consumption from this warehouse should trigger consignment settlement.
+    /// </summary>
+    public bool IsConsignmentWarehouse { get; set; } = false;
+
     // Default Quarantine Location for this warehouse
     public Guid? DefaultQuarantineLocationId { get; set; }
     public Guid? DefaultReceivingLocationId { get; set; }

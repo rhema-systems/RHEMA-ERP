@@ -77,6 +77,7 @@ function NewPurchaseOrderPageContent() {
   const [shippingTerms, setShippingTerms] = useState('');
   const [terms, setTerms] = useState('');
   const [notes, setNotes] = useState('');
+  const [orderType, setOrderType] = useState<'Standard' | 'Consignment'>('Standard');
   const [deliveryWarehouseId, setDeliveryWarehouseId] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [deliveryInstructions, setDeliveryInstructions] = useState('');
@@ -515,6 +516,10 @@ function NewPurchaseOrderPageContent() {
       toast.error('Please enter a GL expense account for GL expense allocation');
       return;
     }
+    if (orderType === 'Consignment' && (!deliveryWarehouseId || deliveryWarehouseId === '__none__')) {
+      toast.error('Please select a consignment warehouse for a consignment purchase order');
+      return;
+    }
 
     try {
       setSaving(true);
@@ -528,15 +533,19 @@ function NewPurchaseOrderPageContent() {
         return;
       }
 
+      const normalizedDeliveryWarehouseId =
+        deliveryWarehouseId && deliveryWarehouseId !== '__none__' ? deliveryWarehouseId : undefined;
+
       const createData: CreatePurchaseOrderDto = {
         supplierId: selectedSupplierId,
+        orderType,
         requiredDate: requiredDate || undefined,
         promisedDate: promisedDate || undefined,
         paymentTerms: paymentTerms || undefined,
         shippingTerms: shippingTerms || undefined,
         terms: terms || undefined,
         notes: notes || undefined,
-        deliveryWarehouseId: deliveryWarehouseId || undefined,
+        deliveryWarehouseId: normalizedDeliveryWarehouseId,
         deliveryAddress: deliveryAddress || undefined,
         deliveryInstructions: deliveryInstructions || undefined,
         referenceNumber: referenceNumber || undefined,
@@ -554,7 +563,8 @@ function NewPurchaseOrderPageContent() {
           itemDescription: item.itemDescription || undefined,
           orderedQuantity: item.orderedQuantity,
           unitOfMeasure: item.unitOfMeasure || 'EA',
-          warehouseId: item.warehouseId || undefined,
+          warehouseId:
+            orderType === 'Consignment' ? normalizedDeliveryWarehouseId : item.warehouseId || undefined,
           unitPrice: item.unitPrice,
           priceListLineId: item.priceListLineId || undefined,
           expectedDeliveryDate: item.expectedDeliveryDate || undefined,
@@ -587,6 +597,10 @@ function NewPurchaseOrderPageContent() {
       toast.error('Please enter a GL expense account for GL expense allocation');
       return;
     }
+    if (orderType === 'Consignment' && (!deliveryWarehouseId || deliveryWarehouseId === '__none__')) {
+      toast.error('Please select a consignment warehouse for a consignment purchase order');
+      return;
+    }
 
     try {
       setSubmitting(true);
@@ -600,15 +614,19 @@ function NewPurchaseOrderPageContent() {
         return;
       }
 
+      const normalizedDeliveryWarehouseId =
+        deliveryWarehouseId && deliveryWarehouseId !== '__none__' ? deliveryWarehouseId : undefined;
+
       const createData: CreatePurchaseOrderDto = {
         supplierId: selectedSupplierId,
+        orderType,
         requiredDate: requiredDate || undefined,
         promisedDate: promisedDate || undefined,
         paymentTerms: paymentTerms || undefined,
         shippingTerms: shippingTerms || undefined,
         terms: terms || undefined,
         notes: notes || undefined,
-        deliveryWarehouseId: deliveryWarehouseId || undefined,
+        deliveryWarehouseId: normalizedDeliveryWarehouseId,
         deliveryAddress: deliveryAddress || undefined,
         deliveryInstructions: deliveryInstructions || undefined,
         referenceNumber: referenceNumber || undefined,
@@ -626,7 +644,8 @@ function NewPurchaseOrderPageContent() {
           itemDescription: item.itemDescription || undefined,
           orderedQuantity: item.orderedQuantity,
           unitOfMeasure: item.unitOfMeasure || 'EA',
-          warehouseId: item.warehouseId || undefined,
+          warehouseId:
+            orderType === 'Consignment' ? normalizedDeliveryWarehouseId : item.warehouseId || undefined,
           unitPrice: item.unitPrice,
           priceListLineId: item.priceListLineId || undefined,
           expectedDeliveryDate: item.expectedDeliveryDate || undefined,
@@ -852,6 +871,19 @@ function NewPurchaseOrderPageContent() {
                 placeholder="e.g., FOB, CIF"
               />
             </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="orderType">Order Type</Label>
+              <Select value={orderType} onValueChange={(v) => setOrderType(v as 'Standard' | 'Consignment')}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select order type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Standard">Standard</SelectItem>
+                  <SelectItem value="Consignment">Consignment</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             
             <div className="space-y-2">
               <Label htmlFor="deliveryWarehouse" className="flex items-center gap-2">
@@ -863,14 +895,23 @@ function NewPurchaseOrderPageContent() {
                   <SelectValue placeholder="Select warehouse" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">None</SelectItem>
-                  {warehouses.map(wh => (
+                  {orderType !== 'Consignment' && <SelectItem value="__none__">None</SelectItem>}
+                  {(orderType === 'Consignment'
+                    ? warehouses.filter(w => w.isConsignmentWarehouse)
+                    : warehouses
+                  ).map(wh => (
                     <SelectItem key={wh.id} value={wh.id}>
                       {wh.code} - {wh.name}
+                      {wh.isConsignmentWarehouse ? ' (Consignment)' : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {orderType === 'Consignment' && (
+                <p className="text-xs text-muted-foreground">
+                  Consignment POs must be received into a warehouse marked as consignment.
+                </p>
+              )}
             </div>
           </div>
           

@@ -164,6 +164,7 @@ public class PurchaseOrderSummaryDto
 {
     public Guid Id { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
+    public string OrderType { get; set; } = "Standard";
     public Guid SupplierId { get; set; } // Keep for backward compatibility, maps to BusinessPartnerId
     public string SupplierName { get; set; } = string.Empty; // Keep for backward compatibility, maps to BusinessPartner.PartnerName
     public DateTime OrderDate { get; set; }
@@ -271,6 +272,11 @@ public class CreatePurchaseOrderDto
 {
     [Required]
     public Guid SupplierId { get; set; }
+
+    /// <summary>
+    /// Purchase order type (e.g. Standard, Consignment, DropShip).
+    /// </summary>
+    public string? OrderType { get; set; }
 
     public DateTime? RequiredDate { get; set; }
     public DateTime? PromisedDate { get; set; }

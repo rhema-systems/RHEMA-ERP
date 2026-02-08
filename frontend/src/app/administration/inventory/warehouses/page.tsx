@@ -41,7 +41,7 @@ export default function WarehousesPage() {
   const [formData, setFormData] = useState<CreateWarehouseDto>({
     name: '', code: '', description: '', address: '', city: '', state: '', 
     zipCode: '', country: '', warehouseType: 'Standard', contactPerson: '', 
-    phone: '', email: '', isDefault: false
+    phone: '', email: '', isDefault: false, isConsignmentWarehouse: false
   });
 
   const [locationForm, setLocationForm] = useState<CreateWarehouseLocationDto>({
@@ -105,7 +105,8 @@ export default function WarehousesPage() {
       address: warehouse.address || '', city: warehouse.city || '', state: warehouse.state || '',
       zipCode: warehouse.zipCode || '', country: warehouse.country || '', 
       warehouseType: warehouse.warehouseType, contactPerson: warehouse.contactPerson || '',
-      phone: warehouse.phone || '', email: warehouse.email || '', isDefault: warehouse.isDefault
+      phone: warehouse.phone || '', email: warehouse.email || '', isDefault: warehouse.isDefault,
+      isConsignmentWarehouse: warehouse.isConsignmentWarehouse
     });
     setIsEditDialogOpen(true);
   };
@@ -156,7 +157,7 @@ export default function WarehousesPage() {
     setFormData({
       name: '', code: '', description: '', address: '', city: '', state: '',
       zipCode: '', country: '', warehouseType: 'Standard', contactPerson: '',
-      phone: '', email: '', isDefault: false
+      phone: '', email: '', isDefault: false, isConsignmentWarehouse: false
     });
     setSelectedWarehouse(null);
   };
@@ -239,6 +240,18 @@ export default function WarehousesPage() {
               <div className="flex items-center space-x-2">
                 <Switch checked={formData.isDefault} onCheckedChange={(v) => setFormData({...formData, isDefault: v})} />
                 <Label>Default Warehouse</Label>
+              </div>
+              <div className="flex items-start space-x-2">
+                <Switch
+                  checked={!!formData.isConsignmentWarehouse}
+                  onCheckedChange={(v) => setFormData({ ...formData, isConsignmentWarehouse: v })}
+                />
+                <div className="space-y-1">
+                  <Label>Consignment Warehouse</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Stock issued/transferred/sold/consumed from this warehouse is treated as consignment and will create settlement records.
+                  </p>
+                </div>
               </div>
             </div>
             <DialogFooter>
@@ -346,6 +359,7 @@ export default function WarehousesPage() {
                             </Badge>
                             <Badge variant="secondary">{warehouse.warehouseType}</Badge>
                             {warehouse.isDefault && <Badge className="bg-purple-100 text-purple-800">Default</Badge>}
+                            {warehouse.isConsignmentWarehouse && <Badge className="bg-amber-100 text-amber-900">Consignment</Badge>}
                           </div>
                           <p className="text-sm text-muted-foreground">
                             {[warehouse.city, warehouse.state, warehouse.country].filter(Boolean).join(', ') || 'No address'}
@@ -396,6 +410,18 @@ export default function WarehousesPage() {
             <div className="flex items-center space-x-2">
               <Switch checked={formData.isDefault} onCheckedChange={(v) => setFormData({...formData, isDefault: v})} />
               <Label>Default Warehouse</Label>
+            </div>
+            <div className="flex items-start space-x-2">
+              <Switch
+                checked={!!formData.isConsignmentWarehouse}
+                onCheckedChange={(v) => setFormData({ ...formData, isConsignmentWarehouse: v })}
+              />
+              <div className="space-y-1">
+                <Label>Consignment Warehouse</Label>
+                <p className="text-xs text-muted-foreground">
+                  Stock issued/transferred/sold/consumed from this warehouse is treated as consignment and will create settlement records.
+                </p>
+              </div>
             </div>
           </div>
           <DialogFooter>

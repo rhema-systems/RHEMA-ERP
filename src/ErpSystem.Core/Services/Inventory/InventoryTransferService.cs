@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Inventory;
@@ -27,6 +28,7 @@ public class InventoryTransferService : IInventoryTransferService
     private readonly IWarehouseQuantityRepository _warehouseQuantityRepository;
     private readonly IInventoryLocationRepository _inventoryLocationRepository;
     private readonly IStockMovementRepository _stockMovementRepository;
+    private readonly IConsignmentSettlementService _consignmentSettlementService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
@@ -42,6 +44,7 @@ public class InventoryTransferService : IInventoryTransferService
         IWarehouseQuantityRepository warehouseQuantityRepository,
         IInventoryLocationRepository inventoryLocationRepository,
         IStockMovementRepository stockMovementRepository,
+        IConsignmentSettlementService consignmentSettlementService,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         IWorkflowIntegrationService workflowIntegrationService,
@@ -56,6 +59,7 @@ public class InventoryTransferService : IInventoryTransferService
         _warehouseQuantityRepository = warehouseQuantityRepository;
         _inventoryLocationRepository = inventoryLocationRepository;
         _stockMovementRepository = stockMovementRepository;
+        _consignmentSettlementService = consignmentSettlementService;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _workflowIntegrationService = workflowIntegrationService;
@@ -393,7 +397,7 @@ public class InventoryTransferService : IInventoryTransferService
             await _transferItemRepository.UpdateAsync(item);
 
             // Create outbound movement
-            await _stockMovementRepository.AddAsync(new StockMovement
+            var outboundMovement = new StockMovement
             {
                 InventoryItemId = item.InventoryItemId,
                 MovementType = "TransferOut",
@@ -409,7 +413,9 @@ public class InventoryTransferService : IInventoryTransferService
                 ProcessedById = userId,
                 RunningBalance = sourceQty.CurrentStock,
                 TenantId = _currentUserProvider.TenantId
-            });
+            };
+            await _stockMovementRepository.AddAsync(outboundMovement);
+            await _consignmentSettlementService.TryCreateFromStockMovementAsync(outboundMovement);
         }
 
         // Check if all items are fully shipped
@@ -712,7 +718,7 @@ public class InventoryTransferService : IInventoryTransferService
             await _transferItemRepository.UpdateAsync(item);
 
             // Create inbound movement
-            await _stockMovementRepository.AddAsync(new StockMovement
+            var inboundMovement = new StockMovement
             {
                 InventoryItemId = item.InventoryItemId,
                 MovementType = "TransferIn",
@@ -728,7 +734,9 @@ public class InventoryTransferService : IInventoryTransferService
                 ProcessedById = userId,
                 RunningBalance = destQty.CurrentStock,
                 TenantId = _currentUserProvider.TenantId
-            });
+            };
+            await _stockMovementRepository.AddAsync(inboundMovement);
+            await _consignmentSettlementService.TryCreateFromStockMovementAsync(inboundMovement);
         }
 
         transfer.Status = TransferStatus.Received;
@@ -790,7 +798,7 @@ public class InventoryTransferService : IInventoryTransferService
             }
 
             // Create reversal movement
-            await _stockMovementRepository.AddAsync(new StockMovement
+            var reversalMovement = new StockMovement
             {
                 InventoryItemId = item.InventoryItemId,
                 MovementType = "TransferReversal",
@@ -806,7 +814,9 @@ public class InventoryTransferService : IInventoryTransferService
                 ProcessedById = userId,
                 RunningBalance = sourceQty?.CurrentStock ?? 0,
                 TenantId = _currentUserProvider.TenantId
-            });
+            };
+            await _stockMovementRepository.AddAsync(reversalMovement);
+            await _consignmentSettlementService.TryCreateFromStockMovementAsync(reversalMovement);
 
             // Reset shipped quantity
             item.ShippedQuantity = 0;

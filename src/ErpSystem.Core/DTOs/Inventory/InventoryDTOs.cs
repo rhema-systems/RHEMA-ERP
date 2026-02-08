@@ -608,6 +608,7 @@ public class WarehouseDto
     public bool IsActive { get; set; }
     public bool IsDefault { get; set; }
     public string WarehouseType { get; set; } = string.Empty;
+    public bool IsConsignmentWarehouse { get; set; }
     public string? ContactPerson { get; set; }
     public string? Phone { get; set; }
     public string? Email { get; set; }
@@ -680,6 +681,12 @@ public class CreateWarehouseDto
     public string? Email { get; set; }
 
     public bool IsDefault { get; set; } = false;
+
+    /// <summary>
+    /// When enabled, this warehouse stores consignment stock (vendor-owned).
+    /// Issues/transfers/sales/consumptions from this warehouse should create consignment settlement records.
+    /// </summary>
+    public bool IsConsignmentWarehouse { get; set; } = false;
 }
 
 /// <summary>

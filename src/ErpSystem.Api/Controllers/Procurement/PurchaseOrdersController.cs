@@ -36,6 +36,7 @@ public class PurchaseOrdersController : ControllerBase
     private readonly IPurchaseOrderReceiptItemRepository _purchaseOrderReceiptItemRepository;
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
     private readonly IInventoryItemRepository _inventoryItemRepository;
+    private readonly IWarehouseRepository _warehouseRepository;
     private readonly IProcurementBudgetService _budgetService;
     private readonly IProcurementBudgetRepository _budgetRepository;
     private readonly IProcurementPlanItemRepository _planItemRepository;
@@ -60,6 +61,7 @@ public class PurchaseOrdersController : ControllerBase
         IPurchaseOrderReceiptItemRepository purchaseOrderReceiptItemRepository,
         IBusinessPartnerRepository businessPartnerRepository,
         IInventoryItemRepository inventoryItemRepository,
+        IWarehouseRepository warehouseRepository,
         IProcurementBudgetService budgetService,
         IProcurementBudgetRepository budgetRepository,
         IProcurementPlanItemRepository planItemRepository,
@@ -77,6 +79,7 @@ public class PurchaseOrdersController : ControllerBase
         _purchaseOrderReceiptItemRepository = purchaseOrderReceiptItemRepository;
         _businessPartnerRepository = businessPartnerRepository;
         _inventoryItemRepository = inventoryItemRepository;
+        _warehouseRepository = warehouseRepository;
         _budgetService = budgetService;
         _budgetRepository = budgetRepository;
         _planItemRepository = planItemRepository;
@@ -111,6 +114,7 @@ public class PurchaseOrdersController : ControllerBase
             {
                 Id = po.Id,
                 OrderNumber = po.OrderNumber,
+                OrderType = po.OrderType,
                 SupplierId = po.BusinessPartnerId,
                 SupplierName = po.BusinessPartner?.PartnerName ?? "",
                 OrderDate = po.OrderDate,
@@ -162,6 +166,7 @@ public class PurchaseOrdersController : ControllerBase
             {
                 Id = purchaseOrder.Id,
                 OrderNumber = purchaseOrder.OrderNumber,
+                OrderType = purchaseOrder.OrderType,
                 SupplierId = purchaseOrder.BusinessPartnerId,
                 SupplierName = purchaseOrder.BusinessPartner?.PartnerName ?? "",
                 OrderDate = purchaseOrder.OrderDate,
@@ -326,6 +331,38 @@ public class PurchaseOrdersController : ControllerBase
                 throw new UnauthorizedAccessException("Tenant not found");
             }
 
+            var orderType = NormalizeOrderType(createDto.OrderType);
+            if (string.Equals(orderType, "Consignment", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!createDto.DeliveryWarehouseId.HasValue || createDto.DeliveryWarehouseId.Value == Guid.Empty)
+                {
+                    return BadRequest("DeliveryWarehouseId is required for consignment purchase orders.");
+                }
+
+                var consignmentWarehouse = await _warehouseRepository.GetByIdAsync(createDto.DeliveryWarehouseId.Value);
+                if (consignmentWarehouse == null)
+                {
+                    return BadRequest($"Delivery warehouse with ID {createDto.DeliveryWarehouseId.Value} not found");
+                }
+
+                if (!consignmentWarehouse.IsConsignmentWarehouse)
+                {
+                    return BadRequest($"Delivery warehouse '{consignmentWarehouse.Name}' is not marked as a consignment warehouse.");
+                }
+
+                foreach (var item in createDto.Items)
+                {
+                    if (!item.WarehouseId.HasValue || item.WarehouseId.Value == Guid.Empty)
+                    {
+                        item.WarehouseId = createDto.DeliveryWarehouseId.Value;
+                    }
+                    else if (item.WarehouseId.Value != createDto.DeliveryWarehouseId.Value)
+                    {
+                        return BadRequest("All items in a consignment purchase order must use the selected consignment DeliveryWarehouseId.");
+                    }
+                }
+            }
+
             // Generate purchase order number
             var orderNumber = await _purchaseOrderRepository.GenerateOrderNumberAsync();
 
@@ -373,6 +410,7 @@ public class PurchaseOrdersController : ControllerBase
                 DeliveryInstructions = createDto.DeliveryInstructions,
                 ReferenceNumber = createDto.ReferenceNumber,
                 RequestedById = createDto.RequestedById,
+                OrderType = orderType,
                 TenantId = tenantId
             };
 
@@ -495,6 +533,40 @@ public class PurchaseOrdersController : ControllerBase
             purchaseOrder.ExpenseGLAccount = costAllocationMethod == GLExpense ? updateDto.ExpenseGLAccount?.Trim() : null;
             purchaseOrder.DiscountAmount = discountAmount;
             purchaseOrder.TotalAmount = totalAmount;
+
+            var orderType = NormalizeOrderType(updateDto.OrderType ?? purchaseOrder.OrderType);
+            if (string.Equals(orderType, "Consignment", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!updateDto.DeliveryWarehouseId.HasValue || updateDto.DeliveryWarehouseId.Value == Guid.Empty)
+                {
+                    return BadRequest("DeliveryWarehouseId is required for consignment purchase orders.");
+                }
+
+                var consignmentWarehouse = await _warehouseRepository.GetByIdAsync(updateDto.DeliveryWarehouseId.Value);
+                if (consignmentWarehouse == null)
+                {
+                    return BadRequest($"Delivery warehouse with ID {updateDto.DeliveryWarehouseId.Value} not found");
+                }
+
+                if (!consignmentWarehouse.IsConsignmentWarehouse)
+                {
+                    return BadRequest($"Delivery warehouse '{consignmentWarehouse.Name}' is not marked as a consignment warehouse.");
+                }
+
+                foreach (var item in updateDto.Items)
+                {
+                    if (!item.WarehouseId.HasValue || item.WarehouseId.Value == Guid.Empty)
+                    {
+                        item.WarehouseId = updateDto.DeliveryWarehouseId.Value;
+                    }
+                    else if (item.WarehouseId.Value != updateDto.DeliveryWarehouseId.Value)
+                    {
+                        return BadRequest("All items in a consignment purchase order must use the selected consignment DeliveryWarehouseId.");
+                    }
+                }
+            }
+
+            purchaseOrder.OrderType = orderType;
 
             await _purchaseOrderRepository.UpdatePurchaseOrderAsync(purchaseOrder);
 
@@ -867,6 +939,30 @@ public class PurchaseOrdersController : ControllerBase
                         return BadRequest("LocationId is required for received items. Please select a storage location for each line item.");
                     }
 
+                    if (string.Equals(purchaseOrder.OrderType, "Consignment", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!purchaseOrder.DeliveryWarehouseId.HasValue || purchaseOrder.DeliveryWarehouseId.Value == Guid.Empty)
+                        {
+                            return BadRequest("Consignment purchase orders must have DeliveryWarehouseId set to a consignment warehouse.");
+                        }
+
+                        if (!effectiveWarehouseId.HasValue || effectiveWarehouseId.Value == Guid.Empty)
+                        {
+                            return BadRequest("Warehouse could not be resolved for the selected LocationId.");
+                        }
+
+                        if (effectiveWarehouseId.Value != purchaseOrder.DeliveryWarehouseId.Value)
+                        {
+                            return BadRequest("Consignment purchase order receipts must be posted to the PO DeliveryWarehouseId (dedicated consignment warehouse).");
+                        }
+
+                        var wh = await _warehouseRepository.GetByIdAsync(effectiveWarehouseId.Value);
+                        if (wh?.IsConsignmentWarehouse != true)
+                        {
+                            return BadRequest("Selected warehouse is not marked as a consignment warehouse.");
+                        }
+                    }
+
                     var receiptItem = new PurchaseOrderReceiptItem
                     {
                         Id = Guid.NewGuid(),
@@ -974,6 +1070,7 @@ public class PurchaseOrdersController : ControllerBase
             {
                 Id = po.Id,
                 OrderNumber = po.OrderNumber,
+                OrderType = po.OrderType,
                 SupplierId = po.BusinessPartnerId,
                 SupplierName = po.BusinessPartner?.PartnerName ?? "",
                 OrderDate = po.OrderDate,
@@ -1008,6 +1105,7 @@ public class PurchaseOrdersController : ControllerBase
             {
                 Id = po.Id,
                 OrderNumber = po.OrderNumber,
+                OrderType = po.OrderType,
                 SupplierId = po.BusinessPartnerId,
                 SupplierName = po.BusinessPartner?.PartnerName ?? "",
                 OrderDate = po.OrderDate,
@@ -1113,6 +1211,7 @@ public class PurchaseOrdersController : ControllerBase
         {
             Id = purchaseOrder.Id,
             OrderNumber = purchaseOrder.OrderNumber,
+            OrderType = purchaseOrder.OrderType,
             SupplierId = purchaseOrder.BusinessPartnerId,
             SupplierName = purchaseOrder.BusinessPartner?.PartnerName ?? "",
             OrderDate = purchaseOrder.OrderDate,
@@ -1234,6 +1333,39 @@ public class PurchaseOrdersController : ControllerBase
         }
 
         return BasisValue;
+    }
+
+    private static string NormalizeOrderType(string? orderType)
+    {
+        if (string.IsNullOrWhiteSpace(orderType))
+        {
+            return "Standard";
+        }
+
+        var normalized = orderType.Trim();
+
+        if (string.Equals(normalized, "Consignment", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Consignment";
+        }
+
+        if (string.Equals(normalized, "DropShip", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "Drop Ship", StringComparison.OrdinalIgnoreCase))
+        {
+            return "DropShip";
+        }
+
+        if (string.Equals(normalized, "Blanket", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Blanket";
+        }
+
+        if (string.Equals(normalized, "Contract", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Contract";
+        }
+
+        return normalized;
     }
 
     private async Task ApplyPurchaseOrderCostAllocationAsync(

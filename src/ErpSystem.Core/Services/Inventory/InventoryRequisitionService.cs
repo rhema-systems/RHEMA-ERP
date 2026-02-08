@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Inventory;
@@ -21,6 +22,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
     private readonly IWarehouseRepository _warehouseRepository;
     private readonly IWarehouseQuantityRepository _warehouseQuantityRepository;
     private readonly IStockMovementRepository _stockMovementRepository;
+    private readonly IConsignmentSettlementService _consignmentSettlementService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
@@ -34,6 +36,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         IWarehouseRepository warehouseRepository,
         IWarehouseQuantityRepository warehouseQuantityRepository,
         IStockMovementRepository stockMovementRepository,
+        IConsignmentSettlementService consignmentSettlementService,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         IWorkflowIntegrationService workflowIntegrationService,
@@ -46,6 +49,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         _warehouseRepository = warehouseRepository;
         _warehouseQuantityRepository = warehouseQuantityRepository;
         _stockMovementRepository = stockMovementRepository;
+        _consignmentSettlementService = consignmentSettlementService;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _workflowIntegrationService = workflowIntegrationService;
@@ -422,15 +426,17 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 MovementDate = DateTime.UtcNow,
                 Quantity = -issueItem.IssuedQuantity,
                 UnitCost = requisitionItem.UnitCost,
-                TotalValue = issueItem.IssuedQuantity * requisitionItem.UnitCost,
+                TotalValue = -issueItem.IssuedQuantity * requisitionItem.UnitCost,
                 ReferenceType = ReferenceType.Requisition,
                 ReferenceNumber = requisition.RequisitionNumber,
                 ReferenceId = requisition.Id,
+                WarehouseId = requisition.WarehouseId,
                 LocationId = issueItem.LocationId ?? requisition.LocationId,
                 Notes = $"Issued for requisition {requisition.RequisitionNumber}",
                 TenantId = _currentUserProvider.TenantId
             };
             await _stockMovementRepository.AddAsync(movement);
+            await _consignmentSettlementService.TryCreateFromStockMovementAsync(movement);
         }
 
         // Update requisition status

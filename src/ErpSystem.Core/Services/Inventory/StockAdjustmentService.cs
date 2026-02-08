@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Inventory;
@@ -18,6 +19,7 @@ public class StockAdjustmentService : IStockAdjustmentService
     private readonly IStockMovementRepository _movementRepository;
     private readonly IWarehouseQuantityRepository _warehouseQuantityRepository;
     private readonly IWarehouseLocationRepository _locationRepository;
+    private readonly IConsignmentSettlementService _consignmentSettlementService;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<StockAdjustmentService> _logger;
 
@@ -27,6 +29,7 @@ public class StockAdjustmentService : IStockAdjustmentService
         IStockMovementRepository movementRepository,
         IWarehouseQuantityRepository warehouseQuantityRepository,
         IWarehouseLocationRepository locationRepository,
+        IConsignmentSettlementService consignmentSettlementService,
         ICurrentUserProvider currentUserProvider,
         ILogger<StockAdjustmentService> logger)
     {
@@ -35,6 +38,7 @@ public class StockAdjustmentService : IStockAdjustmentService
         _movementRepository = movementRepository;
         _warehouseQuantityRepository = warehouseQuantityRepository;
         _locationRepository = locationRepository;
+        _consignmentSettlementService = consignmentSettlementService;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
@@ -485,6 +489,7 @@ public class StockAdjustmentService : IStockAdjustmentService
                     }
 
                     await _movementRepository.AddAsync(movement);
+                    await _consignmentSettlementService.TryCreateFromStockMovementAsync(movement);
                 }
             }
 

@@ -150,6 +150,7 @@ export interface CreatePurchaseRequisitionItemDto {
 export interface PurchaseOrderSummaryDto {
   id: string;
   orderNumber: string;
+  orderType: string;
   supplierId: string; // Maps to BusinessPartnerId
   supplierName: string; // Maps to BusinessPartner.PartnerName
   orderDate: string;
@@ -218,6 +219,7 @@ export interface PurchaseOrderItemDto {
 
 export interface CreatePurchaseOrderDto {
   supplierId: string; // Maps to BusinessPartnerId
+  orderType?: string;
   requiredDate?: string;
   promisedDate?: string;
   paymentTerms?: string;

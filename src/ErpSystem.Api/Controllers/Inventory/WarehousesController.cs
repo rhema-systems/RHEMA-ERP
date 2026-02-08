@@ -119,6 +119,7 @@ public class WarehousesController : ControllerBase
                 ZipCode = dto.ZipCode,
                 Country = dto.Country,
                 WarehouseType = dto.WarehouseType,
+                IsConsignmentWarehouse = dto.IsConsignmentWarehouse,
                 ContactPerson = dto.ContactPerson,
                 Phone = dto.Phone,
                 Email = dto.Email,
@@ -173,6 +174,7 @@ public class WarehousesController : ControllerBase
             warehouse.ZipCode = dto.ZipCode;
             warehouse.Country = dto.Country;
             warehouse.WarehouseType = dto.WarehouseType;
+            warehouse.IsConsignmentWarehouse = dto.IsConsignmentWarehouse;
             warehouse.ContactPerson = dto.ContactPerson;
             warehouse.Phone = dto.Phone;
             warehouse.Email = dto.Email;
@@ -238,6 +240,7 @@ public class WarehousesController : ControllerBase
             IsActive = entity.IsActive,
             IsDefault = entity.IsDefault,
             WarehouseType = entity.WarehouseType,
+            IsConsignmentWarehouse = entity.IsConsignmentWarehouse,
             ContactPerson = entity.ContactPerson,
             Phone = entity.Phone,
             Email = entity.Email

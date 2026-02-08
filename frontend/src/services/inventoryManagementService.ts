@@ -386,6 +386,7 @@ export interface WarehouseDto {
   isActive: boolean;
   isDefault: boolean;
   warehouseType: string;
+  isConsignmentWarehouse: boolean;
   contactPerson?: string;
   phone?: string;
   email?: string;
@@ -412,6 +413,7 @@ export interface CreateWarehouseDto {
   phone?: string;
   email?: string;
   isDefault?: boolean;
+  isConsignmentWarehouse?: boolean;
 }
 
 export interface UpdateWarehouseDto extends CreateWarehouseDto {

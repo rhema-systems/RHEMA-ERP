@@ -77,6 +77,8 @@ export default function EditPurchaseOrderPage() {
   const [shippingTerms, setShippingTerms] = useState('');
   const [terms, setTerms] = useState('');
   const [notes, setNotes] = useState('');
+  const [orderType, setOrderType] = useState<'Standard' | 'Consignment'>('Standard');
+  const [deliveryWarehouseId, setDeliveryWarehouseId] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [deliveryInstructions, setDeliveryInstructions] = useState('');
   const [referenceNumber, setReferenceNumber] = useState('');
@@ -128,8 +130,10 @@ export default function EditPurchaseOrderPage() {
         setPromisedDate(po.promisedDate ? po.promisedDate.split('T')[0] : '');
         setPaymentTerms(po.paymentTerms || '');
         setShippingTerms(po.shippingTerms || '');
+        setOrderType(po.orderType === 'Consignment' ? 'Consignment' : 'Standard');
         setTerms(po.terms || '');
         setNotes(po.notes || '');
+        setDeliveryWarehouseId(po.deliveryWarehouseId || '__none__');
         setDeliveryAddress(po.deliveryAddress || '');
         setDeliveryInstructions(po.deliveryInstructions || '');
         setReferenceNumber(po.referenceNumber || '');
@@ -483,6 +487,10 @@ export default function EditPurchaseOrderPage() {
       toast.error('Please enter a GL expense account for GL expense allocation');
       return;
     }
+    if (orderType === 'Consignment' && (!deliveryWarehouseId || deliveryWarehouseId === '__none__')) {
+      toast.error('Please select a consignment warehouse for a consignment purchase order');
+      return;
+    }
 
     try {
       setSaving(true);
@@ -508,14 +516,19 @@ export default function EditPurchaseOrderPage() {
         return;
       }
       
+      const normalizedDeliveryWarehouseId =
+        deliveryWarehouseId && deliveryWarehouseId !== '__none__' ? deliveryWarehouseId : undefined;
+
       const updateData: CreatePurchaseOrderDto = {
         supplierId,
+        orderType,
         requiredDate: requiredDate || undefined,
         promisedDate: promisedDate || undefined,
         paymentTerms: paymentTerms || undefined,
         shippingTerms: shippingTerms || undefined,
         terms: terms || undefined,
         notes: notes || undefined,
+        deliveryWarehouseId: normalizedDeliveryWarehouseId,
         deliveryAddress: deliveryAddress || undefined,
         deliveryInstructions: deliveryInstructions || undefined,
         referenceNumber: referenceNumber || undefined,
@@ -533,7 +546,8 @@ export default function EditPurchaseOrderPage() {
           itemDescription: item.itemDescription || undefined,
           orderedQuantity: item.orderedQuantity,
           unitOfMeasure: item.unitOfMeasure || 'EA',
-          warehouseId: item.warehouseId || undefined,
+          warehouseId:
+            orderType === 'Consignment' ? normalizedDeliveryWarehouseId : item.warehouseId || undefined,
           unitPrice: item.unitPrice,
           expectedDeliveryDate: item.expectedDeliveryDate || undefined,
           notes: item.notes || undefined
@@ -686,6 +700,48 @@ export default function EditPurchaseOrderPage() {
                 onChange={(e) => setShippingTerms(e.target.value)}
                 placeholder="e.g., FOB, CIF"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="orderType">Order Type</Label>
+              <Select value={orderType} onValueChange={(v) => setOrderType(v as 'Standard' | 'Consignment')}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select order type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Standard">Standard</SelectItem>
+                  <SelectItem value="Consignment">Consignment</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="deliveryWarehouse" className="flex items-center gap-2">
+                <TruckIcon className="h-4 w-4" />
+                Delivery Warehouse
+              </Label>
+              <Select value={deliveryWarehouseId} onValueChange={setDeliveryWarehouseId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select warehouse" />
+                </SelectTrigger>
+                <SelectContent>
+                  {orderType !== 'Consignment' && <SelectItem value="__none__">None</SelectItem>}
+                  {(orderType === 'Consignment'
+                    ? warehouses.filter(w => w.isConsignmentWarehouse)
+                    : warehouses
+                  ).map(wh => (
+                    <SelectItem key={wh.id} value={wh.id}>
+                      {wh.code} - {wh.name}
+                      {wh.isConsignmentWarehouse ? ' (Consignment)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {orderType === 'Consignment' && (
+                <p className="text-xs text-muted-foreground">
+                  Consignment POs must be received into a warehouse marked as consignment.
+                </p>
+              )}
             </div>
             
             <div className="space-y-2">
