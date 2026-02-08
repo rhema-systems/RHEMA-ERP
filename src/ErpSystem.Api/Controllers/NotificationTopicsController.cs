@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -195,6 +196,12 @@ public class NotificationTopicsController : ControllerBase
             if (dto.EntityType != null && !string.Equals(topic.EntityType, normalizedEntityType, StringComparison.OrdinalIgnoreCase))
                 return BadRequest("EntityType cannot be changed once created.");
 
+            if (topic.IsRequired && !dto.IsActive)
+                return BadRequest("This topic is required and cannot be deactivated.");
+
+            if (topic.IsRequired && !dto.EnableInApp && !dto.EnableEmail)
+                return BadRequest("This topic is required and must have at least one channel enabled (In-app or Email).");
+
             topic.Name = name;
             topic.Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim();
             topic.IsActive = dto.IsActive;
@@ -209,10 +216,10 @@ public class NotificationTopicsController : ControllerBase
 
             await repo.UpdateAsync(topic);
 
-            // Replace recipients (soft delete existing and insert new).
+            // Replace non-system recipients only (system recipients are protected).
             var recipientRepo = _unitOfWork.Repository<NotificationTopicRecipient>();
             var existingRecipients = (topic.Recipients ?? new List<NotificationTopicRecipient>())
-                .Where(r => !r.IsDeleted)
+                .Where(r => !r.IsDeleted && !r.IsSystem)
                 .ToList();
             foreach (var r in existingRecipients)
             {
@@ -235,6 +242,7 @@ public class NotificationTopicsController : ControllerBase
                     TopicId = topic.Id,
                     RecipientKind = kind,
                     RecipientValue = value,
+                    IsSystem = false,
                     SendInApp = r.SendInApp,
                     SendEmail = r.SendEmail,
                     CreatedAt = DateTime.UtcNow,
@@ -270,6 +278,9 @@ public class NotificationTopicsController : ControllerBase
                 t => t.Recipients);
 
             if (topic == null) return NotFound();
+
+            if (topic.IsSystem)
+                return BadRequest("This is a system topic and cannot be deleted.");
 
             topic.IsDeleted = true;
             topic.DeletedAt = DateTime.UtcNow;
@@ -307,6 +318,8 @@ public class NotificationTopicsController : ControllerBase
             Name = t.Name,
             Description = t.Description,
             EntityType = string.IsNullOrWhiteSpace(t.EntityType) ? entityTypeFromKey : t.EntityType,
+            IsSystem = t.IsSystem,
+            IsRequired = t.IsRequired,
             IsActive = t.IsActive,
             EnableInApp = t.EnableInApp,
             EnableEmail = t.EnableEmail,
@@ -323,11 +336,173 @@ public class NotificationTopicsController : ControllerBase
                     Id = r.Id,
                     RecipientKind = r.RecipientKind,
                     RecipientValue = r.RecipientValue,
+                    IsSystem = r.IsSystem,
                     SendInApp = r.SendInApp,
                     SendEmail = r.SendEmail
                 })
                 .ToList()
         };
+    }
+
+    /// <summary>
+    /// Seeds system topics (including protected workflow topics) for the current tenant.
+    /// Idempotent and safe to run multiple times.
+    /// </summary>
+    [HttpPost("seed-system")]
+    public async Task<ActionResult> SeedSystemTopics()
+    {
+        try
+        {
+            var tenantId = _currentUserService.TenantId;
+            if (!tenantId.HasValue) return BadRequest("TenantId not found in token");
+
+            var userId = Guid.TryParse(_currentUserService.UserId, out var uid) ? (Guid?)uid : null;
+
+            // Seed workflow topics for each active workflow entity type so critical approval notifications cannot be misconfigured.
+            var entityTypeRepo = _unitOfWork.Repository<WorkflowEntityType>();
+            var workflowEntityTypes = await entityTypeRepo.FindAsync(et =>
+                et.TenantId == tenantId.Value && !et.IsDeleted && et.IsActive);
+
+            var normalizedEntityTypes = workflowEntityTypes
+                .Select(et => NormalizeSegment(et.Name))
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var workflowActivities = new[]
+            {
+                "WorkflowSubmitted",
+                "WorkflowStepAssignment",
+                "WorkflowApprovalRequest",
+                "WorkflowStepEscalated",
+                "WorkflowCompleted",
+                "WorkflowRejected",
+                "WorkflowStepOverdue"
+            };
+
+            var requiredActivities = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "WorkflowStepAssignment",
+                "WorkflowApprovalRequest"
+            };
+
+            var topicRepo = _unitOfWork.Repository<NotificationTopic>();
+            var recipientRepo = _unitOfWork.Repository<NotificationTopicRecipient>();
+
+            var createdTopics = 0;
+            var updatedTopics = 0;
+            var createdRecipients = 0;
+
+            foreach (var entityType in normalizedEntityTypes)
+            {
+                foreach (var activity in workflowActivities)
+                {
+                    var key = GenerateKey(entityType, NormalizeSegment(activity), "Internal");
+                    if (string.IsNullOrWhiteSpace(key)) continue;
+
+                    var topic = await topicRepo.FirstOrDefaultAsync(t =>
+                        t.TenantId == tenantId.Value &&
+                        t.Key == key &&
+                        !t.IsDeleted,
+                        t => t.Recipients);
+
+                    var isRequired = requiredActivities.Contains(activity);
+
+                    if (topic == null)
+                    {
+                        topic = new NotificationTopic
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenantId.Value,
+                            Key = key,
+                            Name = $"{entityType}: {activity}",
+                            Description = "System-seeded workflow notification topic.",
+                            EntityType = entityType,
+                            IsSystem = true,
+                            IsRequired = isRequired,
+                            IsActive = true,
+                            EnableInApp = true,
+                            EnableEmail = false,
+                            InAppTitleTemplate = "{{Title}}",
+                            InAppBodyTemplate = "{{Message}}",
+                            CreatedAt = DateTime.UtcNow,
+                            CreatedById = userId
+                        };
+
+                        await topicRepo.AddAsync(topic);
+                        createdTopics++;
+                    }
+                    else
+                    {
+                        var changed = false;
+                        if (!topic.IsSystem) { topic.IsSystem = true; changed = true; }
+                        if (isRequired && !topic.IsRequired) { topic.IsRequired = true; changed = true; }
+                        if (string.IsNullOrWhiteSpace(topic.EntityType)) { topic.EntityType = entityType; changed = true; }
+                        if (!topic.IsActive) { topic.IsActive = true; changed = true; }
+                        if (isRequired && !topic.EnableInApp && !topic.EnableEmail)
+                        {
+                            // Ensure required topics always have at least one channel.
+                            topic.EnableInApp = true;
+                            changed = true;
+                        }
+
+                        if (changed)
+                        {
+                            topic.UpdatedAt = DateTime.UtcNow;
+                            topic.LastModifiedById = userId;
+                            await topicRepo.UpdateAsync(topic);
+                            updatedTopics++;
+                        }
+                    }
+
+                    // Ensure system recipient rules exist (protected from removal by Update).
+                    var recipients = (topic.Recipients ?? new List<NotificationTopicRecipient>())
+                        .Where(r => !r.IsDeleted)
+                        .ToList();
+
+                    var systemRules = GetWorkflowSystemRecipients(activity);
+                    foreach (var rule in systemRules)
+                    {
+                        var exists = recipients.Any(r =>
+                            r.IsSystem &&
+                            string.Equals(r.RecipientKind, rule.Kind, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(r.RecipientValue, rule.Value, StringComparison.OrdinalIgnoreCase));
+                        if (exists) continue;
+
+                        await recipientRepo.AddAsync(new NotificationTopicRecipient
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenantId.Value,
+                            TopicId = topic.Id,
+                            RecipientKind = rule.Kind,
+                            RecipientValue = rule.Value,
+                            IsSystem = true,
+                            SendInApp = true,
+                            SendEmail = true,
+                            CreatedAt = DateTime.UtcNow,
+                            CreatedById = userId
+                        });
+                        createdRecipients++;
+                    }
+                }
+            }
+
+            await _unitOfWork.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                createdTopics,
+                updatedTopics,
+                createdRecipients,
+                entityTypes = normalizedEntityTypes.Count
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error seeding system notification topics");
+            return StatusCode(500, "An error occurred while seeding system notification topics");
+        }
     }
 
     private static (string? entityType, string? activity, string? audience) SplitKey(string? key)
@@ -352,5 +527,30 @@ public class NotificationTopicsController : ControllerBase
         if (string.IsNullOrWhiteSpace(activity)) return string.Empty;
         if (string.IsNullOrWhiteSpace(audience)) return string.Empty;
         return $"{entityType}.{activity}.{audience}";
+    }
+
+    private static List<(string Kind, string Value)> GetWorkflowSystemRecipients(string activity)
+    {
+        if (string.Equals(activity, "WorkflowApprovalRequest", StringComparison.OrdinalIgnoreCase))
+        {
+            return new List<(string, string)>
+            {
+                ("UserFromData", "TargetUserId"),
+                ("RoleFromData", "TargetRole")
+            };
+        }
+
+        if (string.Equals(activity, "WorkflowStepEscalated", StringComparison.OrdinalIgnoreCase))
+        {
+            return new List<(string, string)>
+            {
+                ("UsersFromData", "TargetUserIds")
+            };
+        }
+
+        return new List<(string, string)>
+        {
+            ("UserFromData", "TargetUserId")
+        };
     }
 }

@@ -9,6 +9,8 @@ public class NotificationTopicDto
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? EntityType { get; set; }
+    public bool IsSystem { get; set; }
+    public bool IsRequired { get; set; }
     public bool IsActive { get; set; }
 
     public bool EnableInApp { get; set; }
@@ -28,6 +30,7 @@ public class NotificationTopicRecipientDto
     public Guid Id { get; set; }
     public string RecipientKind { get; set; } = string.Empty;
     public string RecipientValue { get; set; } = string.Empty;
+    public bool IsSystem { get; set; }
     public bool SendInApp { get; set; }
     public bool SendEmail { get; set; }
 }

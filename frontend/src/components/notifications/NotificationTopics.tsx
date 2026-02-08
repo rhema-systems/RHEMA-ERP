@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Button } from '../ui/button'
-import { Plus, Trash2, RefreshCw, Tags, Pencil, Database } from 'lucide-react'
+import { Plus, Trash2, RefreshCw, Tags, Pencil, Database, Shield } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
@@ -63,6 +63,7 @@ interface NotificationTopicRecipientDto {
   id?: string
   recipientKind: RecipientKind | string
   recipientValue: string
+  isSystem?: boolean
   sendInApp: boolean
   sendEmail: boolean
 }
@@ -75,6 +76,8 @@ interface NotificationTopicDto {
   name: string
   description?: string | null
   entityType?: string | null
+  isSystem?: boolean
+  isRequired?: boolean
   isActive: boolean
   enableInApp: boolean
   enableEmail: boolean
@@ -93,6 +96,8 @@ const emptyForm = {
   name: '',
   description: '',
   entityType: '',
+  isSystem: false,
+  isRequired: false,
   isActive: true,
   enableInApp: true,
   enableEmail: true,
@@ -204,6 +209,7 @@ const NotificationTopics: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [seedingEntityTypes, setSeedingEntityTypes] = useState(false)
+  const [seedingSystemTopics, setSeedingSystemTopics] = useState(false)
 
   const [createOpen, setCreateOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -299,6 +305,32 @@ const NotificationTopics: React.FC = () => {
     }
   }
 
+  const seedSystemTopics = async () => {
+    if (!isAdmin) return
+
+    try {
+      setSeedingSystemTopics(true)
+      const res = await apiService.request<any>('/notification-topics/seed-system', { method: 'POST' })
+      const created = res?.createdTopics ?? 0
+      const updated = res?.updatedTopics ?? 0
+      const recipients = res?.createdRecipients ?? 0
+
+      toast({
+        title: 'System topics seeded',
+        description: `Created ${created}, updated ${updated}, added ${recipients} system recipient rule(s).`,
+      })
+      await loadAll()
+    } catch (e: any) {
+      toast({
+        title: 'Failed to seed system topics',
+        description: e?.message || 'Unable to seed system notification topics',
+        variant: 'destructive',
+      })
+    } finally {
+      setSeedingSystemTopics(false)
+    }
+  }
+
   const filteredTopics = useMemo(() => {
     const s = search.trim().toLowerCase()
     if (!s) return topics
@@ -327,6 +359,8 @@ const NotificationTopics: React.FC = () => {
       name: t.name || '',
       description: t.description || '',
       entityType,
+      isSystem: !!t.isSystem,
+      isRequired: !!t.isRequired,
       isActive: !!t.isActive,
       enableInApp: !!t.enableInApp,
       enableEmail: !!t.enableEmail,
@@ -338,6 +372,7 @@ const NotificationTopics: React.FC = () => {
         id: r.id,
         recipientKind: (r.recipientKind as any) || 'Role',
         recipientValue: r.recipientValue || '',
+        isSystem: !!r.isSystem,
         sendInApp: !!r.sendInApp,
         sendEmail: !!r.sendEmail,
       })),
@@ -360,6 +395,7 @@ const NotificationTopics: React.FC = () => {
     actionUrlTemplate: form.actionUrlTemplate?.trim() || null,
     emailTemplateId: form.emailTemplateId ? form.emailTemplateId : null,
     recipients: (form.recipients || [])
+      .filter(r => !r.isSystem)
       .map(r => ({
         recipientKind: (r.recipientKind || '').trim(),
         recipientValue: (r.recipientValue || '').trim(),
@@ -473,6 +509,10 @@ const NotificationTopics: React.FC = () => {
                 <Database className={`h-4 w-4 mr-2 ${seedingEntityTypes ? 'animate-spin' : ''}`} />
                 {seedingEntityTypes ? 'Seeding...' : 'Seed Entity Types'}
               </Button>
+              <Button variant="outline" onClick={seedSystemTopics} disabled={!isAdmin || seedingSystemTopics}>
+                <Shield className={`h-4 w-4 mr-2 ${seedingSystemTopics ? 'animate-spin' : ''}`} />
+                {seedingSystemTopics ? 'Seeding...' : 'Seed System Topics'}
+              </Button>
               <Button onClick={openCreate} disabled={!isAdmin}>
                 <Plus className="h-4 w-4 mr-2" />
                 Create Topic
@@ -523,6 +563,8 @@ const NotificationTopics: React.FC = () => {
                         <div className="flex items-center gap-2 flex-wrap">
                           <div className="font-medium truncate">{t.name}</div>
                           {t.entityType ? <Badge variant="secondary">{t.entityType}</Badge> : null}
+                          {t.isSystem ? <Badge variant="outline">System</Badge> : null}
+                          {t.isRequired ? <Badge variant="secondary">Required</Badge> : null}
                           <Badge variant={t.isActive ? 'default' : 'outline'}>{t.isActive ? 'Active' : 'Inactive'}</Badge>
                           <Badge variant={t.enableInApp ? 'secondary' : 'outline'}>In-app</Badge>
                           <Badge variant={t.enableEmail ? 'secondary' : 'outline'}>Email</Badge>
@@ -552,13 +594,14 @@ const NotificationTopics: React.FC = () => {
                         <Button
                           variant="destructive"
                           size="sm"
+                          disabled={!!t.isSystem}
                           onClick={() => {
                             setDeleteTarget(t)
                             setDeleteOpen(true)
                           }}
                         >
                           <Trash2 className="h-4 w-4 mr-2" />
-                          Delete
+                          {t.isSystem ? 'System' : 'Delete'}
                         </Button>
                       </div>
                     </div>
@@ -753,7 +796,7 @@ const TopicForm: React.FC<{
 
           <div className="lg:col-span-2 flex flex-wrap items-center gap-x-6 gap-y-2 pt-2">
             <div className="flex items-center gap-2">
-              <Switch checked={form.isActive} onCheckedChange={v => update({ isActive: v })} />
+              <Switch checked={form.isActive} onCheckedChange={v => update({ isActive: v })} disabled={isEditMode && !!form.isRequired} />
               <Label>Active</Label>
             </div>
             <div className="flex items-center gap-2">
@@ -766,6 +809,12 @@ const TopicForm: React.FC<{
             </div>
           </div>
         </div>
+
+        {isEditMode && form.isSystem ? (
+          <div className="text-sm text-muted-foreground">
+            This is a <span className="font-medium">system topic</span>. It can’t be deleted, and system recipient rules are protected.
+          </div>
+        ) : null}
 
         <div className="space-y-2">
           <Label htmlFor="topic-desc">Description (optional)</Label>
@@ -853,6 +902,7 @@ const TopicForm: React.FC<{
               {form.recipients.map((r, idx) => {
                 const hint = kindOptions.find(k => k.value === r.recipientKind)?.hint
                 const kind = (r.recipientKind as string) || 'Role'
+                const isSystemRule = !!r.isSystem
 
                 const roleOptions = (roles || [])
                   .filter(rr => !!(rr?.name || '').trim())
@@ -879,6 +929,7 @@ const TopicForm: React.FC<{
                       <Select
                         value={kind}
                         onValueChange={v => onUpdateRecipient(idx, { recipientKind: v as any, recipientValue: '' })}
+                        disabled={isSystemRule}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select kind..." />
@@ -889,6 +940,7 @@ const TopicForm: React.FC<{
                           ))}
                         </SelectContent>
                       </Select>
+                      {isSystemRule ? <Badge variant="outline">System</Badge> : null}
                       {hint ? <div className="text-xs text-muted-foreground">{hint}</div> : null}
                     </div>
 
@@ -898,6 +950,7 @@ const TopicForm: React.FC<{
                         <Select
                           value={r.recipientValue ? r.recipientValue : '__none__'}
                           onValueChange={v => onUpdateRecipient(idx, { recipientValue: v === '__none__' ? '' : v })}
+                          disabled={isSystemRule}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Select a role..." />
@@ -913,6 +966,7 @@ const TopicForm: React.FC<{
                         <Select
                           value={r.recipientValue ? r.recipientValue : '__none__'}
                           onValueChange={v => onUpdateRecipient(idx, { recipientValue: v === '__none__' ? '' : v })}
+                          disabled={isSystemRule}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Select a user..." />
@@ -928,6 +982,7 @@ const TopicForm: React.FC<{
                         <Select
                           value={r.recipientValue ? r.recipientValue : '__none__'}
                           onValueChange={v => onUpdateRecipient(idx, { recipientValue: v === '__none__' ? '' : v })}
+                          disabled={isSystemRule}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Select a data key..." />
@@ -943,6 +998,7 @@ const TopicForm: React.FC<{
                         <Select
                           value={r.recipientValue ? r.recipientValue : '__none__'}
                           onValueChange={v => onUpdateRecipient(idx, { recipientValue: v === '__none__' ? '' : v })}
+                          disabled={isSystemRule}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Select a data key..." />
@@ -958,6 +1014,7 @@ const TopicForm: React.FC<{
                         <Select
                           value={r.recipientValue ? r.recipientValue : '__none__'}
                           onValueChange={v => onUpdateRecipient(idx, { recipientValue: v === '__none__' ? '' : v })}
+                          disabled={isSystemRule}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Select a data key..." />
@@ -973,6 +1030,7 @@ const TopicForm: React.FC<{
                         <Select
                           value={r.recipientValue ? r.recipientValue : '__none__'}
                           onValueChange={v => onUpdateRecipient(idx, { recipientValue: v === '__none__' ? '' : v })}
+                          disabled={isSystemRule}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Select a business partner..." />
@@ -988,6 +1046,7 @@ const TopicForm: React.FC<{
                         <Select
                           value={r.recipientValue ? r.recipientValue : '__none__'}
                           onValueChange={v => onUpdateRecipient(idx, { recipientValue: v === '__none__' ? '' : v })}
+                          disabled={isSystemRule}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Select a data key..." />
@@ -1003,6 +1062,7 @@ const TopicForm: React.FC<{
                         <Select
                           value={r.recipientValue ? r.recipientValue : '__none__'}
                           onValueChange={v => onUpdateRecipient(idx, { recipientValue: v === '__none__' ? '' : v })}
+                          disabled={isSystemRule}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Select a data key..." />
@@ -1021,18 +1081,18 @@ const TopicForm: React.FC<{
                       <Label>Channels</Label>
                       <div className="flex items-center gap-3 pt-1">
                         <div className="flex items-center gap-2">
-                          <Switch checked={!!r.sendInApp} onCheckedChange={v => onUpdateRecipient(idx, { sendInApp: v })} />
+                          <Switch checked={!!r.sendInApp} onCheckedChange={v => onUpdateRecipient(idx, { sendInApp: v })} disabled={isSystemRule} />
                           <span className="text-sm">In-app</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <Switch checked={!!r.sendEmail} onCheckedChange={v => onUpdateRecipient(idx, { sendEmail: v })} />
+                          <Switch checked={!!r.sendEmail} onCheckedChange={v => onUpdateRecipient(idx, { sendEmail: v })} disabled={isSystemRule} />
                           <span className="text-sm">Email</span>
                         </div>
                       </div>
                     </div>
 
                     <div className="lg:col-span-1 flex justify-end pt-7">
-                      <Button variant="ghost" size="icon" onClick={() => onRemoveRecipient(idx)} title="Remove">
+                      <Button variant="ghost" size="icon" onClick={() => onRemoveRecipient(idx)} title="Remove" disabled={isSystemRule}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>

@@ -16,6 +16,8 @@ public class NotificationTopicConfiguration : IEntityTypeConfiguration<Notificat
         builder.Property(t => t.Name).IsRequired().HasMaxLength(200);
         builder.Property(t => t.Description).HasMaxLength(500);
         builder.Property(t => t.EntityType).HasMaxLength(100);
+        builder.Property(t => t.IsSystem).HasDefaultValue(false);
+        builder.Property(t => t.IsRequired).HasDefaultValue(false);
         builder.Property(t => t.InAppTitleTemplate).HasMaxLength(200);
         builder.Property(t => t.ActionUrlTemplate).HasMaxLength(500);
 
@@ -44,6 +46,7 @@ public class NotificationTopicRecipientConfiguration : IEntityTypeConfiguration<
 
         builder.Property(r => r.RecipientKind).IsRequired().HasMaxLength(40);
         builder.Property(r => r.RecipientValue).IsRequired().HasMaxLength(200);
+        builder.Property(r => r.IsSystem).HasDefaultValue(false);
 
         builder.HasIndex(r => new { r.TenantId, r.TopicId });
     }

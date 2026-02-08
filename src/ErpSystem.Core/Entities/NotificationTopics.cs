@@ -28,6 +28,16 @@ public class NotificationTopic : TenantEntity
     [MaxLength(100)]
     public string? EntityType { get; set; }
 
+    /// <summary>
+    /// System-seeded topic. System topics cannot be deleted from the admin UI/API.
+    /// </summary>
+    public bool IsSystem { get; set; } = false;
+
+    /// <summary>
+    /// Required topic. Required topics cannot be deactivated and must have at least one channel enabled.
+    /// </summary>
+    public bool IsRequired { get; set; } = false;
+
     public bool IsActive { get; set; } = true;
 
     // Channels
@@ -81,6 +91,11 @@ public class NotificationTopicRecipient : TenantEntity
     [Required]
     [MaxLength(200)]
     public string RecipientValue { get; set; } = string.Empty;
+
+    /// <summary>
+    /// System recipient rule seeded by the platform. System recipient rules are protected from edits/removal.
+    /// </summary>
+    public bool IsSystem { get; set; } = false;
 
     public bool SendInApp { get; set; } = true;
     public bool SendEmail { get; set; } = false;
