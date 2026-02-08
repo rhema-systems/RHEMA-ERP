@@ -44,7 +44,7 @@ import {
   CreatePurchaseOrderDto,
   CreatePurchaseOrderItemDto
 } from '@/services/purchasingService';
-import { inventoryManagementService, InventoryItemDto, WarehouseDto, ItemUnitOfMeasureDto } from '@/services/inventoryManagementService';
+import { inventoryManagementService, InventoryItemDto, WarehouseDto, ItemUnitOfMeasureDto, WarehouseItemDto } from '@/services/inventoryManagementService';
 import { businessPartnerService, BusinessPartnerDto } from '@/services/businessPartnerService';
 import pricingService from '@/services/pricingService';
 import { format } from 'date-fns';
@@ -97,6 +97,8 @@ export default function EditPurchaseOrderPage() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItemDto[]>([]);
   const [suppliers, setSuppliers] = useState<BusinessPartnerDto[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
+  const [warehouseItemsByWarehouseId, setWarehouseItemsByWarehouseId] = useState<Record<string, WarehouseItemDto[]>>({});
+  const [warehouseItemsByInventoryItemId, setWarehouseItemsByInventoryItemId] = useState<Record<string, WarehouseItemDto[]>>({});
   const [loadingData, setLoadingData] = useState(true);
   
   // Inline editing state
@@ -106,6 +108,35 @@ export default function EditPurchaseOrderPage() {
   const [availableUOMs, setAvailableUOMs] = useState<ItemUnitOfMeasureDto[]>([]);
   const [loadingUOMs, setLoadingUOMs] = useState(false);
   const [loadingPrice, setLoadingPrice] = useState(false);
+
+  const normalizeSelectedWarehouseId = (warehouseId?: string) =>
+    warehouseId && warehouseId !== '__none__' ? warehouseId : '';
+
+  const getEffectiveWarehouseIdForLine = (lineWarehouseId?: string) => {
+    if (orderType === 'Consignment') {
+      return normalizeSelectedWarehouseId(deliveryWarehouseId);
+    }
+    return normalizeSelectedWarehouseId(lineWarehouseId);
+  };
+
+  const ensureWarehouseItemsLoaded = async (warehouseId: string) => {
+    const normalized = normalizeSelectedWarehouseId(warehouseId);
+    if (!normalized || warehouseItemsByWarehouseId[normalized]) {
+      return;
+    }
+
+    const items = await inventoryManagementService.getWarehouseItems(normalized);
+    setWarehouseItemsByWarehouseId(prev => ({ ...prev, [normalized]: items || [] }));
+  };
+
+  const ensureWarehouseItemsByInventoryItemLoaded = async (inventoryItemId: string) => {
+    if (!inventoryItemId || warehouseItemsByInventoryItemId[inventoryItemId]) {
+      return;
+    }
+
+    const items = await inventoryManagementService.getWarehouseItemsByInventoryItem(inventoryItemId);
+    setWarehouseItemsByInventoryItemId(prev => ({ ...prev, [inventoryItemId]: items || [] }));
+  };
 
   // Load existing purchase order
   useEffect(() => {
@@ -301,6 +332,27 @@ export default function EditPurchaseOrderPage() {
     isAddingNewRow
   ]);
 
+  const filteredInventoryItemsForEditing = useMemo(() => {
+    if (!editingItem) return inventoryItems;
+
+    const effectiveWarehouseId = getEffectiveWarehouseIdForLine(editingItem.warehouseId);
+    if (!effectiveWarehouseId) return inventoryItems;
+
+    const allowed = warehouseItemsByWarehouseId[effectiveWarehouseId];
+    if (!allowed) return inventoryItems;
+
+    const allowedIds = new Set(allowed.map(a => a.inventoryItemId));
+    return inventoryItems.filter(i => allowedIds.has(i.id));
+  }, [editingItem, inventoryItems, warehouseItemsByWarehouseId, orderType, deliveryWarehouseId]);
+
+  const filteredWarehousesForEditing = useMemo(() => {
+    if (!editingItem?.inventoryItemId) return warehouses;
+    const linked = warehouseItemsByInventoryItemId[editingItem.inventoryItemId];
+    if (!linked) return warehouses;
+    const allowedIds = new Set(linked.map(l => l.warehouseId));
+    return warehouses.filter(w => allowedIds.has(w.id));
+  }, [editingItem?.inventoryItemId, warehouses, warehouseItemsByInventoryItemId]);
+
   // Handle inventory item selection in inline editing
   const handleInlineInventoryItemSelect = async (itemId: string) => {
     if (!editingItem) return;
@@ -311,6 +363,18 @@ export default function EditPurchaseOrderPage() {
     try {
       setLoadingUOMs(true);
       setLoadingPrice(true);
+
+      const effectiveWarehouseId = getEffectiveWarehouseIdForLine(editingItem.warehouseId);
+      if (effectiveWarehouseId) {
+        await ensureWarehouseItemsLoaded(effectiveWarehouseId);
+        const allowedItems = warehouseItemsByWarehouseId[effectiveWarehouseId] || [];
+        if (!allowedItems.some(wi => wi.inventoryItemId === itemId)) {
+          toast.error('This item is not assigned to the selected warehouse');
+          return;
+        }
+      }
+
+      await ensureWarehouseItemsByInventoryItemLoaded(itemId);
       
       // Load available UOMs
       const uoms = await inventoryManagementService.getItemUnitsOfMeasure(itemId);
@@ -360,6 +424,18 @@ export default function EditPurchaseOrderPage() {
         itemUnitOfMeasureId: finalUOMId,
         unitPrice: finalPrice
       });
+
+      // If no warehouse selected yet, and the item is assigned to exactly one warehouse, auto-select it.
+      if (orderType !== 'Consignment' && !normalizeSelectedWarehouseId(editingItem.warehouseId)) {
+        const linked = warehouseItemsByInventoryItemId[itemId] || [];
+        const uniqueWarehouseIds = Array.from(new Set(linked.map(l => l.warehouseId))).filter(Boolean);
+        if (uniqueWarehouseIds.length === 1) {
+          const wh = warehouses.find(w => w.id === uniqueWarehouseIds[0]);
+          if (wh) {
+            setEditingItem(prev => prev ? { ...prev, warehouseId: wh.id, warehouseName: wh.name } : null);
+          }
+        }
+      }
       
     } catch (error) {
       console.error('Error loading item details:', error);
@@ -367,6 +443,44 @@ export default function EditPurchaseOrderPage() {
     } finally {
       setLoadingUOMs(false);
       setLoadingPrice(false);
+    }
+  };
+
+  const handleInlineWarehouseSelect = async (warehouseId: string) => {
+    if (!editingItem) return;
+
+    const normalized = normalizeSelectedWarehouseId(warehouseId);
+    if (!normalized) return;
+
+    try {
+      await ensureWarehouseItemsLoaded(normalized);
+      const warehouse = warehouses.find(w => w.id === normalized);
+
+      if (editingItem.inventoryItemId) {
+        const allowedItems = warehouseItemsByWarehouseId[normalized] || [];
+        if (!allowedItems.some(wi => wi.inventoryItemId === editingItem.inventoryItemId)) {
+          toast.error('Selected item is not assigned to this warehouse');
+          setEditingItem(prev => prev ? {
+            ...prev,
+            warehouseId: normalized,
+            warehouseName: warehouse?.name,
+            inventoryItemId: '',
+            itemCode: '',
+            itemName: '',
+            itemDescription: '',
+            itemUnitOfMeasureId: undefined,
+            unitOfMeasure: 'EA',
+            unitPrice: 0
+          } : null);
+          setAvailableUOMs([]);
+          return;
+        }
+      }
+
+      setEditingItem(prev => prev ? { ...prev, warehouseId: normalized, warehouseName: warehouse?.name } : null);
+    } catch (e) {
+      console.error('Error loading warehouse items:', e);
+      toast.error('Failed to load warehouse items');
     }
   };
 
@@ -400,6 +514,12 @@ export default function EditPurchaseOrderPage() {
     // Load UOMs if item has inventoryItemId
     if (item.inventoryItemId) {
       try {
+        const effectiveWarehouseId = getEffectiveWarehouseIdForLine(item.warehouseId);
+        if (effectiveWarehouseId) {
+          await ensureWarehouseItemsLoaded(effectiveWarehouseId);
+        }
+        await ensureWarehouseItemsByInventoryItemLoaded(item.inventoryItemId);
+
         setLoadingUOMs(true);
         const uoms = await inventoryManagementService.getItemUnitsOfMeasure(item.inventoryItemId);
         setAvailableUOMs(uoms);
@@ -425,7 +545,7 @@ export default function EditPurchaseOrderPage() {
     }
     
     if (!editingItem.warehouseId) {
-      toast.error('Please select a site');
+      toast.error('Please select a warehouse');
       return;
     }
     
@@ -840,9 +960,8 @@ export default function EditPurchaseOrderPage() {
                   <TableRow>
                     <TableHead className="w-[50px]">#</TableHead>
                     <TableHead className="min-w-[250px]">Item *</TableHead>
-                    <TableHead className="min-w-[120px]">Supplier Code</TableHead>
                     <TableHead className="min-w-[200px]">Description</TableHead>
-                    <TableHead className="min-w-[150px]">Site *</TableHead>
+                    <TableHead className="min-w-[150px]">Warehouse *</TableHead>
                     <TableHead className="min-w-[100px]">Qty *</TableHead>
                     <TableHead className="min-w-[100px]">UOM *</TableHead>
                     <TableHead className="min-w-[120px]">Unit Cost *</TableHead>
@@ -870,20 +989,13 @@ export default function EditPurchaseOrderPage() {
                                 <SelectValue placeholder="Select item" />
                               </SelectTrigger>
                               <SelectContent>
-                                {inventoryItems.map(invItem => (
+                                {filteredInventoryItemsForEditing.map(invItem => (
                                   <SelectItem key={invItem.id} value={invItem.id}>
                                     {invItem.itemCode} - {invItem.name}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              value={editingItem?.supplierItemCode || ''}
-                              onChange={(e) => setEditingItem(prev => prev ? { ...prev, supplierItemCode: e.target.value } : null)}
-                              placeholder="Supplier code"
-                            />
                           </TableCell>
                           <TableCell>
                             <Input
@@ -897,19 +1009,14 @@ export default function EditPurchaseOrderPage() {
                               value={editingItem?.warehouseId || '__none__'}
                               onValueChange={(value) => {
                                 if (value === '__none__') return;
-                                const warehouse = warehouses.find(w => w.id === value);
-                                setEditingItem(prev => prev ? {
-                                  ...prev,
-                                  warehouseId: value,
-                                  warehouseName: warehouse?.name
-                                } : null);
+                                handleInlineWarehouseSelect(value);
                               }}
                             >
                               <SelectTrigger className="w-full">
-                                <SelectValue placeholder="Select site" />
+                                <SelectValue placeholder="Select warehouse" />
                               </SelectTrigger>
                               <SelectContent>
-                                {warehouses.map(wh => (
+                                {filteredWarehousesForEditing.map(wh => (
                                   <SelectItem key={wh.id} value={wh.id}>
                                     {wh.code} - {wh.name}
                                   </SelectItem>
@@ -1020,7 +1127,6 @@ export default function EditPurchaseOrderPage() {
                             <div className="font-medium">{item.itemCode || 'N/A'}</div>
                             <div className="text-sm text-muted-foreground">{item.itemName}</div>
                           </TableCell>
-                          <TableCell>{item.supplierItemCode || '-'}</TableCell>
                           <TableCell className="max-w-[200px] truncate" title={item.itemDescription}>
                             {item.itemDescription}
                           </TableCell>
@@ -1083,55 +1189,43 @@ export default function EditPurchaseOrderPage() {
                         >
                           <SelectTrigger className="w-full">
                             <SelectValue placeholder="Select item" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {inventoryItems.map(invItem => (
-                              <SelectItem key={invItem.id} value={invItem.id}>
-                                {invItem.itemCode} - {invItem.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={editingItem.supplierItemCode || ''}
-                          onChange={(e) => setEditingItem(prev => prev ? { ...prev, supplierItemCode: e.target.value } : null)}
-                          placeholder="Supplier code"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={editingItem.itemDescription || ''}
-                          onChange={(e) => setEditingItem(prev => prev ? { ...prev, itemDescription: e.target.value } : null)}
-                          placeholder="Description"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Select
-                          value={editingItem.warehouseId || '__none__'}
-                          onValueChange={(value) => {
-                            if (value === '__none__') return;
-                            const warehouse = warehouses.find(w => w.id === value);
-                            setEditingItem(prev => prev ? {
-                              ...prev,
-                              warehouseId: value,
-                              warehouseName: warehouse?.name
-                            } : null);
-                          }}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Select site" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {warehouses.map(wh => (
-                              <SelectItem key={wh.id} value={wh.id}>
-                                {wh.code} - {wh.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {filteredInventoryItemsForEditing.map(invItem => (
+                                <SelectItem key={invItem.id} value={invItem.id}>
+                                  {invItem.itemCode} - {invItem.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            value={editingItem.itemDescription || ''}
+                            onChange={(e) => setEditingItem(prev => prev ? { ...prev, itemDescription: e.target.value } : null)}
+                            placeholder="Description"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Select
+                            value={editingItem.warehouseId || '__none__'}
+                            onValueChange={(value) => {
+                              if (value === '__none__') return;
+                              handleInlineWarehouseSelect(value);
+                            }}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Select warehouse" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {filteredWarehousesForEditing.map(wh => (
+                                <SelectItem key={wh.id} value={wh.id}>
+                                  {wh.code} - {wh.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
                       <TableCell>
                         <Input
                           type="number"

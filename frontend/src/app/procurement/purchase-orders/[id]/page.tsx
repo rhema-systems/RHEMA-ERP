@@ -568,7 +568,7 @@ export default function PurchaseOrderDetailPage() {
                       <TableHead className="w-[50px]">#</TableHead>
                       <TableHead>Item Code</TableHead>
                       <TableHead>Item Name</TableHead>
-                      <TableHead>Supplier Code</TableHead>
+                      <TableHead>Warehouse</TableHead>
                       <TableHead className="text-right">Ordered</TableHead>
                       <TableHead>UOM</TableHead>
                       <TableHead className="text-right">Received</TableHead>
@@ -599,7 +599,7 @@ export default function PurchaseOrderDetailPage() {
                               </div>
                             )}
                           </TableCell>
-                          <TableCell>{item.supplierItemCode || '-'}</TableCell>
+                          <TableCell>{item.warehouseName || '-'}</TableCell>
                           <TableCell className="text-right">{item.orderedQuantity}</TableCell>
                           <TableCell>{item.unitOfMeasure || 'EA'}</TableCell>
                           <TableCell className="text-right text-green-600 font-medium">
