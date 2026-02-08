@@ -501,6 +501,96 @@ public class NotificationTopicsController : ControllerBase
                 }
             }
 
+            // Seed non-workflow system topics used by background jobs / global event publishing.
+            // These are system-provided defaults but remain configurable by admins (recipients/templates/channels).
+            var additionalTopics = new[]
+            {
+                new
+                {
+                    EntityType = "FleetCompliance",
+                    Activity = "ComplianceDueSoon",
+                    Audience = "Internal",
+                    Name = "Fleet Compliance: Due Soon",
+                    Description = "System-seeded fleet compliance reminder (due soon).",
+                    EnableEmail = true,
+                    InAppTitleTemplate = "Fleet compliance due soon: {{VehicleName}}",
+                    InAppBodyTemplate = "{{ComplianceType}} expires on {{ExpiryDate}} ({{DaysToExpiry}} days).",
+                    ActionUrlTemplate = "/maintenance/fleet/compliance?vehicleAssetId={{VehicleAssetId}}"
+                },
+                new
+                {
+                    EntityType = "FleetCompliance",
+                    Activity = "ComplianceOverdue",
+                    Audience = "Internal",
+                    Name = "Fleet Compliance: Overdue",
+                    Description = "System-seeded fleet compliance reminder (overdue).",
+                    EnableEmail = true,
+                    InAppTitleTemplate = "Fleet compliance overdue: {{VehicleName}}",
+                    InAppBodyTemplate = "{{ComplianceType}} expired on {{ExpiryDate}} ({{DaysOverdue}} days overdue).",
+                    ActionUrlTemplate = "/maintenance/fleet/compliance?vehicleAssetId={{VehicleAssetId}}"
+                }
+            };
+
+            foreach (var t in additionalTopics)
+            {
+                var key = GenerateKey(NormalizeSegment(t.EntityType), NormalizeSegment(t.Activity), NormalizeSegment(t.Audience));
+                if (string.IsNullOrWhiteSpace(key)) continue;
+
+                var topic = await topicRepo.FirstOrDefaultAsync(x =>
+                    x.TenantId == tenantId.Value &&
+                    x.Key == key &&
+                    !x.IsDeleted,
+                    x => x.Recipients);
+
+                if (topic == null)
+                {
+                    topic = new NotificationTopic
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId.Value,
+                        Key = key,
+                        Name = t.Name,
+                        Description = t.Description,
+                        EntityType = NormalizeSegment(t.EntityType),
+                        IsSystem = true,
+                        IsRequired = false,
+                        IsActive = true,
+                        EnableInApp = true,
+                        EnableEmail = t.EnableEmail,
+                        InAppTitleTemplate = t.InAppTitleTemplate,
+                        InAppBodyTemplate = t.InAppBodyTemplate,
+                        ActionUrlTemplate = t.ActionUrlTemplate,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedById = userId
+                    };
+
+                    await topicRepo.AddAsync(topic);
+                    createdTopics++;
+                }
+                else
+                {
+                    var changed = false;
+
+                    if (!topic.IsSystem) { topic.IsSystem = true; changed = true; }
+                    if (string.IsNullOrWhiteSpace(topic.EntityType)) { topic.EntityType = NormalizeSegment(t.EntityType); changed = true; }
+                    if (!topic.IsActive) { topic.IsActive = true; changed = true; }
+                    if (string.IsNullOrWhiteSpace(topic.Name)) { topic.Name = t.Name; changed = true; }
+                    if (string.IsNullOrWhiteSpace(topic.Description)) { topic.Description = t.Description; changed = true; }
+
+                    if (string.IsNullOrWhiteSpace(topic.InAppTitleTemplate)) { topic.InAppTitleTemplate = t.InAppTitleTemplate; changed = true; }
+                    if (string.IsNullOrWhiteSpace(topic.InAppBodyTemplate)) { topic.InAppBodyTemplate = t.InAppBodyTemplate; changed = true; }
+                    if (string.IsNullOrWhiteSpace(topic.ActionUrlTemplate)) { topic.ActionUrlTemplate = t.ActionUrlTemplate; changed = true; }
+
+                    if (changed)
+                    {
+                        topic.UpdatedAt = DateTime.UtcNow;
+                        topic.LastModifiedById = userId;
+                        await topicRepo.UpdateAsync(topic);
+                        updatedTopics++;
+                    }
+                }
+            }
+
             await _unitOfWork.SaveChangesAsync();
 
             return Ok(new
