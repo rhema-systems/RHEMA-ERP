@@ -85,7 +85,7 @@ Published as `EntityType.Activity.Audience`, configured in Notifications UI.
 - `FleetVehicle.ComplianceOverdue.Internal`
 - `FleetVehicle.StatusChanged.Internal`
 
-## Open decisions (need your answers before coding)
-1) Drivers: use existing Users/Employees, or create a dedicated `FleetDriver` table?
-2) Odometer: odometer-only now, or allow hour-meter as well from day 1?
-3) “Due soon” policy: reminders only, or also block dispatch when due within N days?
+## Confirmed decisions
+1) Drivers: use existing Users/Employees (no separate `FleetDriver` table in Phase 1).
+2) Metering: support both odometer and hour-meter per vehicle from day 1.
+3) “Due soon” policy: send reminders and (optionally) block dispatch within **N** days; **N** is configurable in Admin → Maintenance Settings.

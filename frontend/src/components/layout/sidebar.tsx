@@ -406,6 +406,7 @@ const navigationItems: NavItem[] = [
             href: '/administration/maintenance',
             icon: Wrench,
             children: [
+              { title: 'Maintenance Settings', href: '/administration/maintenance/maintenance-settings', icon: Settings },
               { title: 'Asset Categories', href: '/administration/maintenance/asset-categories', icon: Package },
               { title: 'Work Order Types', href: '/administration/maintenance/work-order-types', icon: FileText },
               { title: 'Maintenance Types', href: '/administration/maintenance/maintenance-types', icon: Wrench },

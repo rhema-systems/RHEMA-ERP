@@ -386,6 +386,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // Procurement Settings
     public DbSet<ProcurementSettings> ProcurementSettings { get; set; }
 
+    // Maintenance Settings
+    public DbSet<MaintenanceSettings> MaintenanceSettings { get; set; }
+
     // Performance Tracking
     public DbSet<SupplierPerformanceMetric> SupplierPerformanceMetrics { get; set; }
     public DbSet<QualityIncident> QualityIncidents { get; set; }
