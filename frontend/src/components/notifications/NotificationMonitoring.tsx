@@ -107,7 +107,22 @@ interface MessageQueueDetail {
   sentAt?: string | null
 }
 
-const NotificationMonitoring: React.FC = () => {
+type MonitoringMode = 'full' | 'queueOnly'
+
+const formatDateTime = (value: string | null | undefined) => {
+  if (!value) return '-'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(d)
+}
+
+const NotificationMonitoring: React.FC<{ mode?: MonitoringMode }> = ({ mode = 'full' }) => {
   const isAdmin = useMemo(() => authService.hasAnyRole(['SuperAdmin', 'TenantAdmin']), [])
   const [metrics, setMetrics] = useState<NotificationMetrics | null>(null)
   const [pendingNotifications, setPendingNotifications] = useState<Notification[]>([])
@@ -118,12 +133,16 @@ const NotificationMonitoring: React.FC = () => {
   const [messageQueueSearch, setMessageQueueSearch] = useState<string>('')
   const [messageDetailsOpen, setMessageDetailsOpen] = useState(false)
   const [selectedMessage, setSelectedMessage] = useState<MessageQueueDetail | null>(null)
+  const [messageDetailsLoading, setMessageDetailsLoading] = useState(false)
+  const [messageDetailsError, setMessageDetailsError] = useState<string | null>(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [deadLetterDeleteConfirmOpen, setDeadLetterDeleteConfirmOpen] = useState(false)
   const [deadLetterDeleteTargetId, setDeadLetterDeleteTargetId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [selectedTab, setSelectedTab] = useState<'health' | 'pending' | 'dead-letters' | 'message-queue'>('health')
+  const [selectedTab, setSelectedTab] = useState<'health' | 'pending' | 'dead-letters' | 'message-queue'>(
+    mode === 'queueOnly' ? 'message-queue' : 'health'
+  )
   const [selectedFilter, setSelectedFilter] = useState('all')
   const { toast } = useToast()
 
@@ -133,11 +152,19 @@ const NotificationMonitoring: React.FC = () => {
       return
     }
 
+    if (mode === 'queueOnly') {
+      loadMessageQueue()
+      const interval = setInterval(() => {
+        loadMessageQueue()
+      }, 30000)
+      return () => clearInterval(interval)
+    }
+
     loadMetrics()
     loadPendingNotifications()
     loadDeadLetters()
     if (selectedTab === 'message-queue') loadMessageQueue()
-    
+
     // Refresh every 30 seconds
     const interval = setInterval(() => {
       loadMetrics()
@@ -147,7 +174,7 @@ const NotificationMonitoring: React.FC = () => {
     }, 30000)
 
     return () => clearInterval(interval)
-  }, [selectedTab])
+  }, [isAdmin, mode, selectedTab])
 
   const loadMetrics = async () => {
     try {
@@ -198,12 +225,20 @@ const NotificationMonitoring: React.FC = () => {
   }
 
   const openMessageDetails = async (id: string) => {
+    setMessageDetailsOpen(true)
+    setSelectedMessage(null)
+    setMessageDetailsLoading(true)
+    setMessageDetailsError(null)
+
     try {
       const detail = await apiService.request<MessageQueueDetail>(`/admin/notifications/message-queue/${id}`)
       setSelectedMessage(detail)
-      setMessageDetailsOpen(true)
-    } catch {
-      toast({ description: 'Failed to load message details', variant: 'destructive' })
+    } catch (e: any) {
+      const msg = e?.error || e?.message || 'Failed to load message details'
+      setMessageDetailsError(msg)
+      toast({ description: msg, variant: 'destructive' })
+    } finally {
+      setMessageDetailsLoading(false)
     }
   }
 
@@ -318,7 +353,7 @@ const NotificationMonitoring: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Health Overview */}
-      {metrics && (
+      {mode === 'full' && metrics ? (
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <Card>
             <CardContent className="pt-6">
@@ -380,27 +415,29 @@ const NotificationMonitoring: React.FC = () => {
             </CardContent>
           </Card>
         </div>
-      )}
+      ) : null}
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b">
-        {(['health', 'pending', 'dead-letters', 'message-queue'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setSelectedTab(tab)}
-            className={`px-4 py-2 font-medium border-b-2 transition-colors ${
-              selectedTab === tab
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {tab === 'health' && 'Health'}
-            {tab === 'pending' && 'Pending Queue'}
-            {tab === 'dead-letters' && 'Dead Letters'}
-            {tab === 'message-queue' && 'Message Queue'}
-          </button>
-        ))}
-      </div>
+      {mode === 'full' ? (
+        <div className="flex gap-2 border-b">
+          {(['health', 'pending', 'dead-letters', 'message-queue'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setSelectedTab(tab)}
+              className={`px-4 py-2 font-medium border-b-2 transition-colors ${
+                selectedTab === tab
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {tab === 'health' && 'Health'}
+              {tab === 'pending' && 'Pending Queue'}
+              {tab === 'dead-letters' && 'Dead Letters'}
+              {tab === 'message-queue' && 'Message Queue'}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {/* Pending Queue Tab */}
       {selectedTab === 'pending' && (
@@ -634,7 +671,7 @@ const NotificationMonitoring: React.FC = () => {
                           {m.emailAddress || m.recipientEmail || m.recipientName || (m.recipientId ? m.recipientId : '-')}
                         </TableCell>
                         <TableCell className="text-sm">{m.attemptCount}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{new Date(m.createdAt).toLocaleString()}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{formatDateTime(m.createdAt)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
                             <Button variant="outline" size="sm" onClick={() => openMessageDetails(m.id)}>
@@ -739,7 +776,13 @@ const NotificationMonitoring: React.FC = () => {
           <DialogHeader>
             <DialogTitle>Message Details</DialogTitle>
           </DialogHeader>
-          {selectedMessage ? (
+          {messageDetailsLoading ? (
+            <div className="text-sm text-muted-foreground">Loading…</div>
+          ) : messageDetailsError ? (
+            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {messageDetailsError}
+            </div>
+          ) : selectedMessage ? (
             <div className="space-y-3">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
@@ -753,6 +796,16 @@ const NotificationMonitoring: React.FC = () => {
                 <div>
                   <div className="text-xs text-muted-foreground">Attempts</div>
                   <div className="font-medium">{selectedMessage.attemptCount}</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <div className="text-xs text-muted-foreground">Created</div>
+                  <div className="font-medium">{formatDateTime(selectedMessage.createdAt)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Scheduled For</div>
+                  <div className="font-medium">{formatDateTime(selectedMessage.scheduledFor)}</div>
                 </div>
               </div>
               <div>

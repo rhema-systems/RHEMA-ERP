@@ -259,7 +259,7 @@ export default function NotificationsPage() {
 
           {isAdmin ? (
             <TabsContent value="monitoring" className="space-y-6">
-              <NotificationMonitoring />
+              <NotificationMonitoring mode="queueOnly" />
             </TabsContent>
           ) : null}
 
