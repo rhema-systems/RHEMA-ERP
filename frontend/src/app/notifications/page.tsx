@@ -33,6 +33,7 @@ import NotificationTemplates from '../../components/notifications/NotificationTe
 import NotificationTopics from '../../components/notifications/NotificationTopics'
 import NotificationHistory from '../../components/notifications/NotificationHistory'
 import NotificationAnalytics from '../../components/notifications/NotificationAnalytics'
+import NotificationMonitoring from '../../components/notifications/NotificationMonitoring'
 import { apiService } from '../../services/api.service'
 import authService from '../../services/auth'
 
@@ -199,7 +200,7 @@ export default function NotificationsPage() {
 
         {/* Main Content Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6" suppressHydrationWarning>
-          <TabsList className={`grid ${isAdmin ? 'grid-cols-7' : 'grid-cols-6'} gap-4`} suppressHydrationWarning>
+          <TabsList className={`grid ${isAdmin ? 'grid-cols-8' : 'grid-cols-6'} gap-4`} suppressHydrationWarning>
             <TabsTrigger value="center" className="flex items-center gap-2" suppressHydrationWarning>
               <Bell className="h-4 w-4" />
               Notification Center
@@ -216,6 +217,12 @@ export default function NotificationsPage() {
               <TabsTrigger value="topics" className="flex items-center gap-2">
                 <Tags className="h-4 w-4" />
                 Topics / Groups
+              </TabsTrigger>
+            ) : null}
+            {isAdmin ? (
+              <TabsTrigger value="monitoring" className="flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                Queue Monitor
               </TabsTrigger>
             ) : null}
             <TabsTrigger value="history" className="flex items-center gap-2">
@@ -247,6 +254,12 @@ export default function NotificationsPage() {
           {isAdmin ? (
             <TabsContent value="topics" className="space-y-6">
               <NotificationTopics />
+            </TabsContent>
+          ) : null}
+
+          {isAdmin ? (
+            <TabsContent value="monitoring" className="space-y-6">
+              <NotificationMonitoring />
             </TabsContent>
           ) : null}
 

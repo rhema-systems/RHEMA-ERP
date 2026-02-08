@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from 'react'
+import React, { useMemo, useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Button } from '../ui/button'
 import { Badge } from '../ui/badge'
@@ -32,18 +32,20 @@ import {
   TableRow,
 } from '../ui/table'
 import { useToast } from '../ui/use-toast'
+import { apiService } from '../../services/api.service'
+import authService from '../../services/auth'
 
 interface NotificationMetrics {
-  Status: string
-  Timestamp: string
-  Metrics: {
-    PendingNotifications: number
-    SentNotifications: number
-    DeadLetters: number
-    CriticalIssues: number
-    HighPriority: number
+  status: string
+  timestamp: string
+  metrics: {
+    pendingNotifications: number
+    sentNotifications: number
+    deadLetters: number
+    criticalIssues: number
+    highPriority: number
   }
-  Details: Record<string, number>
+  details: Record<string, number>
 }
 
 interface Notification {
@@ -106,6 +108,7 @@ interface MessageQueueDetail {
 }
 
 const NotificationMonitoring: React.FC = () => {
+  const isAdmin = useMemo(() => authService.hasAnyRole(['SuperAdmin', 'TenantAdmin']), [])
   const [metrics, setMetrics] = useState<NotificationMetrics | null>(null)
   const [pendingNotifications, setPendingNotifications] = useState<Notification[]>([])
   const [deadLetters, setDeadLetters] = useState<Notification[]>([])
@@ -125,6 +128,11 @@ const NotificationMonitoring: React.FC = () => {
   const { toast } = useToast()
 
   useEffect(() => {
+    if (!isAdmin) {
+      setLoading(false)
+      return
+    }
+
     loadMetrics()
     loadPendingNotifications()
     loadDeadLetters()
@@ -143,10 +151,7 @@ const NotificationMonitoring: React.FC = () => {
 
   const loadMetrics = async () => {
     try {
-      const response = await fetch('/api/admin/notifications/health', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      })
-      const data = await response.json()
+      const data = await apiService.request<NotificationMetrics>('/admin/notifications/health')
       setMetrics(data)
     } catch (error) {
       console.error('Failed to load metrics:', error)
@@ -155,11 +160,8 @@ const NotificationMonitoring: React.FC = () => {
 
   const loadPendingNotifications = async () => {
     try {
-      const response = await fetch('/api/admin/notifications/pending?pageSize=50', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      })
-      const data = await response.json()
-      setPendingNotifications(data.items)
+      const data = await apiService.request<any>('/admin/notifications/pending?pageSize=50')
+      setPendingNotifications(data?.items || [])
     } catch (error) {
       console.error('Failed to load pending:', error)
     } finally {
@@ -169,11 +171,8 @@ const NotificationMonitoring: React.FC = () => {
 
   const loadDeadLetters = async () => {
     try {
-      const response = await fetch('/api/admin/notifications/dead-letters?pageSize=50', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      })
-      const data = await response.json()
-      setDeadLetters(data.items)
+      const data = await apiService.request<any>('/admin/notifications/dead-letters?pageSize=50')
+      setDeadLetters(data?.items || [])
     } catch (error) {
       console.error('Failed to load dead letters:', error)
     } finally {
@@ -189,11 +188,8 @@ const NotificationMonitoring: React.FC = () => {
       if (messageQueueChannel !== 'all') params.set('channel', messageQueueChannel)
       if (messageQueueSearch.trim()) params.set('search', messageQueueSearch.trim())
 
-      const response = await fetch(`/api/admin/notifications/message-queue?${params.toString()}`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      })
-      const data = await response.json()
-      setMessageQueue(data.items || [])
+      const data = await apiService.request<any>(`/admin/notifications/message-queue?${params.toString()}`)
+      setMessageQueue(data?.items || [])
     } catch (error) {
       console.error('Failed to load message queue:', error)
     } finally {
@@ -203,14 +199,7 @@ const NotificationMonitoring: React.FC = () => {
 
   const openMessageDetails = async (id: string) => {
     try {
-      const response = await fetch(`/api/admin/notifications/message-queue/${id}`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      })
-      if (!response.ok) {
-        toast({ description: 'Failed to load message details', variant: 'destructive' })
-        return
-      }
-      const detail = await response.json()
+      const detail = await apiService.request<MessageQueueDetail>(`/admin/notifications/message-queue/${id}`)
       setSelectedMessage(detail)
       setMessageDetailsOpen(true)
     } catch {
@@ -220,19 +209,11 @@ const NotificationMonitoring: React.FC = () => {
 
   const retryMessage = async (id: string) => {
     try {
-      const response = await fetch(`/api/admin/notifications/message-queue/${id}/retry`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      })
-      if (!response.ok) {
-        const data = await response.json().catch(() => null)
-        toast({ description: data?.error || 'Failed to retry message', variant: 'destructive' })
-        return
-      }
+      await apiService.request<any>(`/admin/notifications/message-queue/${id}/retry`, { method: 'POST' })
       toast({ description: 'Message retried successfully' })
       loadMessageQueue()
-    } catch {
-      toast({ description: 'Failed to retry message', variant: 'destructive' })
+    } catch (e: any) {
+      toast({ description: e?.error || e?.message || 'Failed to retry message', variant: 'destructive' })
     }
   }
 
@@ -245,33 +226,21 @@ const NotificationMonitoring: React.FC = () => {
     if (!deleteTargetId) return
 
     try {
-      const response = await fetch(`/api/admin/notifications/message-queue/${deleteTargetId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      })
-      if (!response.ok) {
-        toast({ description: 'Failed to delete message', variant: 'destructive' })
-        return
-      }
-      toast({ description: 'Message deleted' })
+      await apiService.request<any>(`/admin/notifications/message-queue/${deleteTargetId}`, { method: 'DELETE' })
+      toast({ description: 'Message cancelled/deleted' })
       setDeleteTargetId(null)
       loadMessageQueue()
-    } catch {
-      toast({ description: 'Failed to delete message', variant: 'destructive' })
+    } catch (e: any) {
+      toast({ description: e?.message || 'Failed to delete message', variant: 'destructive' })
     }
   }
 
   const retryDeadLetter = async (notificationId: string) => {
     try {
-      const response = await fetch(`/api/admin/notifications/dead-letters/${notificationId}/retry`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      })
-      if (response.ok) {
-        toast({ description: 'Notification moved to pending queue' })
-        loadDeadLetters()
-        loadMetrics()
-      }
+      await apiService.request<any>(`/admin/notifications/dead-letters/${notificationId}/retry`, { method: 'POST' })
+      toast({ description: 'Notification moved to pending queue' })
+      loadDeadLetters()
+      loadMetrics()
     } catch (error) {
       toast({ description: 'Failed to retry notification', variant: 'destructive' })
     }
@@ -279,16 +248,10 @@ const NotificationMonitoring: React.FC = () => {
 
   const retryAllDeadLetters = async () => {
     try {
-      const response = await fetch('/api/admin/notifications/dead-letters/retry-all', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      })
-      if (response.ok) {
-        const data = await response.json()
-        toast({ description: `Moved ${data.retryCount} notifications to pending queue` })
-        loadDeadLetters()
-        loadMetrics()
-      }
+      const data = await apiService.request<any>('/admin/notifications/dead-letters/retry-all', { method: 'POST' })
+      toast({ description: `Moved ${data?.retryCount ?? 0} notifications to pending queue` })
+      loadDeadLetters()
+      loadMetrics()
     } catch (error) {
       toast({ description: 'Failed to retry notifications', variant: 'destructive' })
     }
@@ -303,16 +266,11 @@ const NotificationMonitoring: React.FC = () => {
     if (!deadLetterDeleteTargetId) return
 
     try {
-      const response = await fetch(`/api/admin/notifications/dead-letters/${deadLetterDeleteTargetId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      })
-      if (response.ok) {
-        toast({ description: 'Notification deleted' })
-        setDeadLetterDeleteTargetId(null)
-        loadDeadLetters()
-        loadMetrics()
-      }
+      await apiService.request<any>(`/admin/notifications/dead-letters/${deadLetterDeleteTargetId}`, { method: 'DELETE' })
+      toast({ description: 'Notification deleted' })
+      setDeadLetterDeleteTargetId(null)
+      loadDeadLetters()
+      loadMetrics()
     } catch (error) {
       toast({ description: 'Failed to delete notification', variant: 'destructive' })
     }
@@ -320,14 +278,9 @@ const NotificationMonitoring: React.FC = () => {
 
   const evaluateEscalations = async () => {
     try {
-      const response = await fetch('/api/admin/notifications/escalation-rules/evaluate', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      })
-      if (response.ok) {
-        toast({ description: 'Escalation evaluation triggered' })
-        loadMetrics()
-      }
+      await apiService.request<any>('/admin/notifications/escalation-rules/evaluate', { method: 'POST' })
+      toast({ description: 'Escalation evaluation triggered' })
+      loadMetrics()
     } catch (error) {
       toast({ description: 'Failed to evaluate escalations', variant: 'destructive' })
     }
@@ -351,6 +304,17 @@ const NotificationMonitoring: React.FC = () => {
     }
   }
 
+  if (!isAdmin) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Admin only</CardTitle>
+          <CardDescription>Notification monitoring is available to Tenant Admin / Super Admin users.</CardDescription>
+        </CardHeader>
+      </Card>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Health Overview */}
@@ -361,7 +325,7 @@ const NotificationMonitoring: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Pending</p>
-                  <p className="text-2xl font-bold">{metrics.Metrics.PendingNotifications}</p>
+                  <p className="text-2xl font-bold">{metrics.metrics.pendingNotifications}</p>
                 </div>
                 <Clock className="h-8 w-8 text-blue-500" />
               </div>
@@ -373,7 +337,7 @@ const NotificationMonitoring: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Sent</p>
-                  <p className="text-2xl font-bold">{metrics.Metrics.SentNotifications}</p>
+                  <p className="text-2xl font-bold">{metrics.metrics.sentNotifications}</p>
                 </div>
                 <CheckCircle className="h-8 w-8 text-green-500" />
               </div>
@@ -385,7 +349,7 @@ const NotificationMonitoring: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Dead Letters</p>
-                  <p className="text-2xl font-bold">{metrics.Metrics.DeadLetters}</p>
+                  <p className="text-2xl font-bold">{metrics.metrics.deadLetters}</p>
                 </div>
                 <AlertTriangle className="h-8 w-8 text-red-500" />
               </div>
@@ -397,7 +361,7 @@ const NotificationMonitoring: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Critical</p>
-                  <p className="text-2xl font-bold">{metrics.Metrics.CriticalIssues}</p>
+                  <p className="text-2xl font-bold">{metrics.metrics.criticalIssues}</p>
                 </div>
                 <AlertCircle className="h-8 w-8 text-orange-500" />
               </div>
@@ -409,7 +373,7 @@ const NotificationMonitoring: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Status</p>
-                  <Badge variant="outline" className="mt-2">{metrics.Status}</Badge>
+                  <Badge variant="outline" className="mt-2">{metrics.status}</Badge>
                 </div>
                 <Activity className="h-8 w-8 text-green-500" />
               </div>

@@ -217,18 +217,35 @@ public class NotificationMonitoringController : ControllerBase
     [HttpPost("message-queue/{notificationId:guid}/retry")]
     public async Task<ActionResult> RetryMessageQueueItem(Guid notificationId)
     {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var repo = _unitOfWork.Repository<Notification>();
+        var n = await repo.GetByIdAsync(notificationId);
+
+        if (n == null || n.TenantId != tenantId || n.IsDeleted) return NotFound();
+
+        // Avoid accidental duplicate sends.
+        if (string.Equals(n.Status, "Sent", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { error = "Notification has already been sent." });
+        }
+
+        if (!string.Equals(n.Status, "Pending", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(n.Status, "Failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { error = $"Cannot retry notification with status '{n.Status}'." });
+        }
+
+        // Mark as processing to reduce the chance the background dispatcher picks it up simultaneously.
+        n.Status = "Processing";
+        n.AttemptCount += 1;
+        n.LastError = null;
+        n.ScheduledFor = DateTime.UtcNow;
+
+        await repo.UpdateAsync(n);
+        await _unitOfWork.SaveChangesAsync();
+
         try
         {
-            var tenantId = _currentUserService.TenantId ?? Guid.Empty;
-            var repo = _unitOfWork.Repository<Notification>();
-            var n = await repo.GetByIdAsync(notificationId);
-
-            if (n == null || n.TenantId != tenantId || n.IsDeleted) return NotFound();
-
-            // Only retry things that are queued/failed (admins can still force a resend).
-            n.AttemptCount += 1;
-            n.LastError = null;
-
             var sentAt = DateTime.UtcNow;
 
             if (!string.IsNullOrWhiteSpace(n.DeliveryMethods) &&
@@ -236,7 +253,11 @@ public class NotificationMonitoringController : ControllerBase
             {
                 if (string.IsNullOrWhiteSpace(n.EmailAddress))
                 {
-                    return BadRequest(new { error = "Cannot retry email: missing recipient email address" });
+                    n.Status = "Failed";
+                    n.LastError = "Cannot retry email: missing recipient email address";
+                    await repo.UpdateAsync(n);
+                    await _unitOfWork.SaveChangesAsync();
+                    return BadRequest(new { error = n.LastError });
                 }
 
                 var emailPayload = TryParseEmailPayload(n.AdditionalData);
@@ -265,7 +286,11 @@ public class NotificationMonitoringController : ControllerBase
             {
                 if (n.RecipientId == Guid.Empty)
                 {
-                    return BadRequest(new { error = "Cannot retry in-app notification: missing recipient user id" });
+                    n.Status = "Failed";
+                    n.LastError = "Cannot retry in-app notification: missing recipient user id";
+                    await repo.UpdateAsync(n);
+                    await _unitOfWork.SaveChangesAsync();
+                    return BadRequest(new { error = n.LastError });
                 }
 
                 var dashboardNotification = new ErpSystem.Core.DTOs.Dashboard.NotificationDto
@@ -290,7 +315,11 @@ public class NotificationMonitoringController : ControllerBase
             }
             else
             {
-                return BadRequest(new { error = "Retry not supported for this notification channel" });
+                n.Status = "Failed";
+                n.LastError = "Retry not supported for this notification channel";
+                await repo.UpdateAsync(n);
+                await _unitOfWork.SaveChangesAsync();
+                return BadRequest(new { error = n.LastError });
             }
 
             await repo.UpdateAsync(n);
@@ -301,6 +330,19 @@ public class NotificationMonitoringController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrying message queue item {NotificationId}", notificationId);
+
+            try
+            {
+                n.Status = "Failed";
+                n.LastError = ex.Message;
+                await repo.UpdateAsync(n);
+                await _unitOfWork.SaveChangesAsync();
+            }
+            catch
+            {
+                // Best-effort: preserve original exception response.
+            }
+
             return StatusCode(500, new { error = "Failed to retry notification" });
         }
     }
