@@ -160,39 +160,59 @@ class MaintenanceDataService {
   // Fetch technicians (users available for maintenance assignments)
   async getTechnicians(): Promise<Employee[]> {
     try {
-      console.log('🔧 Fetching technicians from /user endpoint (ApplicationUser)...');
-      
+      // IMPORTANT:
+      // - Work Order scheduling (MaintenanceStaffSchedule) and WorkOrderLabor use ApplicationUser IDs.
+      // - We still want to restrict the dropdown to *maintenance technicians* (HR Employees) when HR is configured.
+      // Strategy:
+      //   1) Load maintenance-available Employees (HR).
+      //   2) Load Users (ApplicationUser) and keep only users whose email matches one of those employees.
+      //   3) Fallback: if no maintenance employees exist (or endpoint fails), return all active users.
+
+      let maintenanceEmployees: any[] = [];
+      try {
+        const response = await apiService.get('/employees/maintenance-available');
+        maintenanceEmployees = Array.isArray(response) ? response : [];
+      } catch (e) {
+        maintenanceEmployees = [];
+      }
+
+      const maintenanceEmails = new Set(
+        maintenanceEmployees
+          .map((e: any) => (e?.emailAddress ?? e?.email ?? '').toString().trim().toLowerCase())
+          .filter((x: string) => x.length > 0)
+      );
+
+      let users: any[] = [];
       try {
         const response = await apiService.get('/user');
-        console.log('🔧 SUCCESS! Users response:', response);
-        
-        const users = Array.isArray(response) ? response : [];
-        
-        if (users.length > 0) {
-          const mappedTechnicians = users.map((user: any) => ({
-            id: user.id, // This is the UserId (ApplicationUser ID)
-            firstName: user.firstName,
-            lastName: user.lastName,
-            email: user.email,
-            department: user.department || '',
-            position: user.position || '',
-            isActive: user.isActive
-          }));
-          
-          console.log(`✅ Successfully loaded ${mappedTechnicians.length} users from /user endpoint`);
-          return mappedTechnicians;
-        }
-      } catch (userError) {
-        console.warn('⚠️ /user endpoint failed:', userError);
+        users = Array.isArray(response) ? response : [];
+      } catch (e) {
+        users = [];
       }
-      
-      // Fallback to all employees if users endpoint fails
-      console.log('🔧 Falling back to employees endpoint...');
-      const employees = await this.getEmployees();
-      const activeTechnicians = employees.filter(emp => emp.isActive);
-      
-      console.log(`🔧 Using ${activeTechnicians.length} active employees as fallback technicians`);
-      return activeTechnicians;
+
+      const activeUsers = users.filter((u: any) => u && u.isActive !== false);
+
+      const technicianUsers =
+        maintenanceEmails.size > 0
+          ? activeUsers.filter((u: any) => {
+              const email = (u?.email ?? u?.emailAddress ?? '').toString().trim().toLowerCase();
+              return email && maintenanceEmails.has(email);
+            })
+          : activeUsers;
+
+      // If HR has technician employees but we can't match any users by email,
+      // fallback to all active users to avoid breaking scheduling/labor entry.
+      const effectiveUsers = maintenanceEmails.size > 0 && technicianUsers.length === 0 ? activeUsers : technicianUsers;
+
+      return effectiveUsers.map((user: any) => ({
+        id: user.id, // ApplicationUser ID (required by schedules/labor)
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        department: user.department || '',
+        position: user.position || '',
+        isActive: user.isActive !== false
+      }));
       
     } catch (error) {
       console.error('❌ Error fetching technicians:', error);
