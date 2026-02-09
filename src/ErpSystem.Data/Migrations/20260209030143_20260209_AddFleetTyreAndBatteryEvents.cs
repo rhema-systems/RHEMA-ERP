@@ -48,7 +48,7 @@ namespace ErpSystem.Data.Migrations
                         column: x => x.VehicleAssetId,
                         principalTable: "MaintenanceAssets",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_FleetBatteryEvents_Tenants_TenantId",
                         column: x => x.TenantId,
@@ -97,7 +97,7 @@ namespace ErpSystem.Data.Migrations
                         column: x => x.VehicleAssetId,
                         principalTable: "MaintenanceAssets",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_FleetTyreEvents_Tenants_TenantId",
                         column: x => x.TenantId,
@@ -157,4 +157,3 @@ namespace ErpSystem.Data.Migrations
         }
     }
 }
-

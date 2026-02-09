@@ -18,6 +18,11 @@ public sealed class FleetTyreEventConfiguration : IEntityTypeConfiguration<Fleet
         builder.Property(x => x.ToPosition).HasMaxLength(30);
         builder.Property(x => x.FromStatus).HasMaxLength(20);
         builder.Property(x => x.ToStatus).HasMaxLength(20);
+
+        // Avoid multiple cascade paths: FleetTyre -> FleetTyreEvents is cascaded, so VehicleAsset FK must not cascade.
+        builder.HasOne(x => x.VehicleAsset)
+            .WithMany()
+            .HasForeignKey(x => x.VehicleAssetId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
-
