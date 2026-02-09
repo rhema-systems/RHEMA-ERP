@@ -1263,11 +1263,6 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(wo => wo.Labor)
                 .HasForeignKey(wol => wol.WorkOrderId)
                 .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(wol => wol.Technician)
-                .WithMany()
-                .HasForeignKey(wol => wol.TechnicianId)
-                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // Configure WorkOrderDocument entity

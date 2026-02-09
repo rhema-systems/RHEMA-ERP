@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Services;
 using Microsoft.Extensions.Logging;
@@ -12,6 +13,7 @@ public class WorkOrderLaborService : IWorkOrderLaborService
 {
     private readonly IWorkOrderLaborRepository _laborRepository;
     private readonly IWorkOrderRepository _workOrderRepository;
+    private readonly ErpSystem.Core.Interfaces.HR.IEmployeeRepository _employeeRepository;
     private readonly IUserService _userService;
     private readonly ILogger<WorkOrderLaborService> _logger;
     private readonly ICurrentUserService _currentUserService;
@@ -20,6 +22,7 @@ public class WorkOrderLaborService : IWorkOrderLaborService
     public WorkOrderLaborService(
         IWorkOrderLaborRepository laborRepository,
         IWorkOrderRepository workOrderRepository,
+        ErpSystem.Core.Interfaces.HR.IEmployeeRepository employeeRepository,
         IUserService userService,
         ILogger<WorkOrderLaborService> logger,
         ICurrentUserService currentUserService,
@@ -27,6 +30,7 @@ public class WorkOrderLaborService : IWorkOrderLaborService
     {
         _laborRepository = laborRepository;
         _workOrderRepository = workOrderRepository;
+        _employeeRepository = employeeRepository;
         _userService = userService;
         _logger = logger;
         _currentUserService = currentUserService;
@@ -50,9 +54,13 @@ public class WorkOrderLaborService : IWorkOrderLaborService
                 throw new ArgumentException("Technician ID is required to log labor");
             }
 
-            // Verify the technician (user) exists
-            var technician = await _userService.GetUserByIdAsync(technicianId)
-                ?? throw new ArgumentException($"Technician with ID {technicianId} not found");
+            // Verify the technician (employee) exists
+            var technician = await _employeeRepository.GetByIdAsync(technicianId)
+                ?? throw new ArgumentException($"Technician with ID {technicianId} not found in HR system");
+            if (!technician.IsActive)
+                throw new InvalidOperationException($"Technician {technician.FullName} is not active");
+            if (!technician.CanBeAssignedToMaintenance)
+                throw new InvalidOperationException($"Employee {technician.FullName} is not qualified for maintenance assignments");
 
             var labor = new WorkOrderLabor
             {
@@ -225,9 +233,9 @@ public class WorkOrderLaborService : IWorkOrderLaborService
     {
         try
         {
-            // TechnicianId references ApplicationUser (Users table)
-            var technician = await _userService.GetUserByIdAsync(technicianId);
-            var technicianName = technician != null ? $"{technician.FirstName} {technician.LastName}" : "Unknown";
+            // TechnicianId references Employee (HR)
+            var technician = await _employeeRepository.GetByIdAsync(technicianId);
+            var technicianName = technician?.FullName ?? "Unknown";
 
             var totalHours = await _laborRepository.GetTotalHoursByTechnicianAsync(technicianId, startDate, endDate);
             var totalCost = await _laborRepository.GetTotalLaborCostByTechnicianAsync(technicianId, startDate, endDate);
@@ -258,9 +266,36 @@ public class WorkOrderLaborService : IWorkOrderLaborService
 
     private async Task<WorkOrderLaborDto> MapToDto(WorkOrderLabor labor)
     {
-        // TechnicianId references ApplicationUser (Users table), not Employee
-        var user = await _userService.GetUserByIdAsync(labor.TechnicianId);
-        var technicianName = user != null ? $"{user.FirstName} {user.LastName}" : null;
+        // TechnicianId is employee-driven (HR Employees table).
+        // Backward compatibility: if an old labor record still has a user-based TechnicianId, fall back to IUserService.
+        EmployeeDto? technicianDto = null;
+        try
+        {
+            var employee = await _employeeRepository.GetByIdAsync(labor.TechnicianId);
+            if (employee != null)
+            {
+                technicianDto = new EmployeeDto
+                {
+                    Id = employee.Id,
+                    FullName = employee.FullName,
+                    EmployeeNumber = employee.EmployeeNumber
+                };
+            }
+            else
+            {
+                var user = await _userService.GetUserByIdAsync(labor.TechnicianId);
+                if (user != null)
+                {
+                    technicianDto = new EmployeeDto
+                    {
+                        Id = user.Id,
+                        FullName = $"{user.FirstName} {user.LastName}",
+                        EmployeeNumber = user.UserName ?? string.Empty
+                    };
+                }
+            }
+        }
+        catch { }
 
         return new WorkOrderLaborDto
         {
@@ -274,12 +309,7 @@ public class WorkOrderLaborService : IWorkOrderLaborService
             TotalCost = labor.TotalCost,
             Notes = labor.Notes,
             LaborType = labor.LaborType ?? "Regular",
-            Technician = user != null ? new EmployeeDto
-            {
-                Id = user.Id,
-                FullName = technicianName ?? string.Empty,
-                EmployeeNumber = user.UserName ?? string.Empty
-            } : null,
+            Technician = technicianDto,
             CreatedAt = labor.CreatedAt,
             UpdatedAt = labor.UpdatedAt
         };

@@ -1366,7 +1366,7 @@ public class WorkOrderLabor : TenantEntity
     public Guid WorkOrderId { get; set; }
 
     /// <summary>
-    /// ID of the user (ApplicationUser) who performed the labor
+    /// ID of the employee (HR) who performed the labor
     /// </summary>
     [Required]
     public Guid TechnicianId { get; set; }
@@ -1391,8 +1391,8 @@ public class WorkOrderLabor : TenantEntity
     // Navigation properties
     public virtual WorkOrder WorkOrder { get; set; } = null!;
 
-    [ForeignKey("TechnicianId")]
-    public virtual ApplicationUser Technician { get; set; } = null!;
+    // NOTE: Technicians are now Employee-driven. We intentionally do not maintain an EF FK relationship here
+    // to allow a clean transition from previously user-based TechnicianId values.
 }
 
 public class WorkOrderDocument : TenantEntity

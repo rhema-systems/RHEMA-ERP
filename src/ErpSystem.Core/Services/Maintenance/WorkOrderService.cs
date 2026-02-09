@@ -1611,25 +1611,40 @@ public class WorkOrderService : IWorkOrderService
                     UpdatedAt = labor.UpdatedAt
                 };
 
-                // Look up technician information from ApplicationUser
+                // Look up technician information (Employee-driven). Backward compatibility: fall back to Users for legacy records.
                 try
                 {
                     _logger.LogInformation("Looking up technician with ID: {TechnicianId} for labor record {LaborId}", labor.TechnicianId, labor.Id);
-                    var user = await _userService.GetUserByIdAsync(labor.TechnicianId);
-                    if (user != null)
+                    var employee = await _employeeRepository.GetByIdAsync(labor.TechnicianId);
+                    if (employee != null)
                     {
-                        _logger.LogInformation("Found user: {UserId}, FirstName: {FirstName}, LastName: {LastName}, UserName: {UserName}",
-                            user.Id, user.FirstName, user.LastName, user.UserName);
+                        _logger.LogInformation("Found employee: {EmployeeId}, Name: {Name}, EmployeeNumber: {EmployeeNumber}",
+                            employee.Id, employee.FullName, employee.EmployeeNumber);
                         laborDto.Technician = new ErpSystem.Core.DTOs.HR.EmployeeDto
                         {
-                            Id = user.Id,
-                            FullName = $"{user.FirstName} {user.LastName}",
-                            EmployeeNumber = user.UserName ?? string.Empty
+                            Id = employee.Id,
+                            FullName = employee.FullName,
+                            EmployeeNumber = employee.EmployeeNumber
                         };
                     }
                     else
                     {
-                        _logger.LogWarning("No user found for TechnicianId: {TechnicianId}", labor.TechnicianId);
+                        var user = await _userService.GetUserByIdAsync(labor.TechnicianId);
+                        if (user != null)
+                        {
+                            _logger.LogInformation("Found user (legacy labor record): {UserId}, FirstName: {FirstName}, LastName: {LastName}, UserName: {UserName}",
+                                user.Id, user.FirstName, user.LastName, user.UserName);
+                            laborDto.Technician = new ErpSystem.Core.DTOs.HR.EmployeeDto
+                            {
+                                Id = user.Id,
+                                FullName = $"{user.FirstName} {user.LastName}",
+                                EmployeeNumber = user.UserName ?? string.Empty
+                            };
+                        }
+                        else
+                        {
+                            _logger.LogWarning("No employee or user found for TechnicianId: {TechnicianId}", labor.TechnicianId);
+                        }
                     }
                 }
                 catch (Exception ex)

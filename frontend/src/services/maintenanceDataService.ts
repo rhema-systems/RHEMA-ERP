@@ -160,59 +160,21 @@ class MaintenanceDataService {
   // Fetch technicians (users available for maintenance assignments)
   async getTechnicians(): Promise<Employee[]> {
     try {
-      // IMPORTANT:
-      // - Work Order scheduling (MaintenanceStaffSchedule) and WorkOrderLabor use ApplicationUser IDs.
-      // - Admins can map Users <-> Employees (UserEmployeeLink), and ApplicationUser has an EmployeeId field.
-      // Strategy:
-      //   1) Load maintenance-available Employees (HR) to get valid technician EmployeeIds.
-      //   2) Load Users (ApplicationUser) and keep only users linked to those EmployeeIds.
-      //   3) Fallback: if no maintenance employees exist (or endpoint fails), return all active users.
+      // Technicians are employee-driven (HR). Scheduling/labor now uses Employee IDs.
+      const response = await apiService.get('/employees/maintenance-available');
+      const employees = Array.isArray(response) ? response : [];
 
-      let maintenanceEmployees: any[] = [];
-      try {
-        const response = await apiService.get('/employees/maintenance-available');
-        maintenanceEmployees = Array.isArray(response) ? response : [];
-      } catch {
-        maintenanceEmployees = [];
-      }
-
-      const maintenanceEmployeeIds = new Set(
-        maintenanceEmployees
-          .map((e: any) => (e?.id ?? '').toString().trim())
-          .filter((x: string) => x.length > 0)
-      );
-
-      let users: any[] = [];
-      try {
-        const response = await apiService.get('/user');
-        users = Array.isArray(response) ? response : [];
-      } catch {
-        users = [];
-      }
-
-      const activeUsers = users.filter((u: any) => u && u.isActive !== false);
-
-      const linkedTechnicianUsers =
-        maintenanceEmployeeIds.size > 0
-          ? activeUsers.filter((u: any) => {
-              const employeeId = (u?.employeeId ?? u?.employeeID ?? u?.EmployeeId ?? '').toString().trim();
-              return employeeId && maintenanceEmployeeIds.has(employeeId);
-            })
-          : activeUsers;
-
-      // If HR has technician employees but no users are linked yet, don't block the UI;
-      // fallback to active users while the admin completes user-employee linking.
-      const effectiveUsers = maintenanceEmployeeIds.size > 0 && linkedTechnicianUsers.length === 0 ? activeUsers : linkedTechnicianUsers;
-
-      return effectiveUsers.map((user: any) => ({
-        id: user.id, // ApplicationUser ID (required by schedules/labor)
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        department: user.department || '',
-        position: user.position || '',
-        isActive: user.isActive !== false
-      }));
+      return employees
+        .filter((emp: any) => emp && emp.isActive !== false)
+        .map((emp: any) => ({
+          id: emp.id,
+          firstName: emp.firstName,
+          lastName: emp.lastName,
+          email: emp.emailAddress,
+          department: emp.departmentName,
+          position: emp.positionTitle,
+          isActive: emp.isActive !== false,
+        }));
       
     } catch (error) {
       console.error('❌ Error fetching technicians:', error);
