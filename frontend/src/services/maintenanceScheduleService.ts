@@ -112,6 +112,7 @@ class MaintenanceScheduleService {
     priority?: string;
     frequency?: string;
     isActive?: boolean;
+    assetId?: string;
   }): Promise<PagedResult<MaintenanceSchedule>> {
     try {
       const response = await apiService.get('/maintenance/schedules', params);

@@ -389,10 +389,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // Maintenance Settings
     public DbSet<MaintenanceSettings> MaintenanceSettings { get; set; }
 
+    // Distributed locks (global, non-tenant scoped)
+    public DbSet<DistributedLock> DistributedLocks { get; set; }
+
     // Fleet Management (Maintenance)
     public DbSet<FleetTrip> FleetTrips { get; set; }
     public DbSet<FleetComplianceItem> FleetComplianceItems { get; set; }
     public DbSet<FleetFuelTransaction> FleetFuelTransactions { get; set; }
+    public DbSet<FleetVehicleAssignment> FleetVehicleAssignments { get; set; }
+    public DbSet<FleetTripInspection> FleetTripInspections { get; set; }
+    public DbSet<FleetDefect> FleetDefects { get; set; }
+    public DbSet<FleetTyre> FleetTyres { get; set; }
+    public DbSet<FleetBattery> FleetBatteries { get; set; }
+    public DbSet<FleetExternalRepair> FleetExternalRepairs { get; set; }
+    public DbSet<FleetCostEntry> FleetCostEntries { get; set; }
 
     // Performance Tracking
     public DbSet<SupplierPerformanceMetric> SupplierPerformanceMetrics { get; set; }
@@ -438,6 +448,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new FleetTripConfiguration());
         builder.ApplyConfiguration(new FleetComplianceItemConfiguration());
         builder.ApplyConfiguration(new FleetFuelTransactionConfiguration());
+        builder.ApplyConfiguration(new FleetVehicleAssignmentConfiguration());
+        builder.ApplyConfiguration(new FleetTripInspectionConfiguration());
+        builder.ApplyConfiguration(new FleetDefectConfiguration());
+        builder.ApplyConfiguration(new FleetTyreConfiguration());
+        builder.ApplyConfiguration(new FleetBatteryConfiguration());
+        builder.ApplyConfiguration(new FleetExternalRepairConfiguration());
+        builder.ApplyConfiguration(new FleetCostEntryConfiguration());
 
         // Tender configurations
         builder.ApplyConfiguration(new TenderConfiguration());
@@ -458,6 +475,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new EmailCampaignConfiguration());
         builder.ApplyConfiguration(new EmailCampaignRecipientConfiguration());
         builder.ApplyConfiguration(new SystemExceptionLogConfiguration());
+        builder.ApplyConfiguration(new DistributedLockConfiguration());
         builder.ApplyConfiguration(new NotificationTopicConfiguration());
         builder.ApplyConfiguration(new NotificationTopicRecipientConfiguration());
 

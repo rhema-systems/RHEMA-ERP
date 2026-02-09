@@ -140,6 +140,27 @@ public class FleetFuelService : IFleetFuelService
         };
 
         await repo.AddAsync(entity);
+
+        // Auto-add cost entry (best-effort).
+        if (entity.TotalCost.HasValue && entity.TotalCost.Value > 0)
+        {
+            await _unitOfWork.Repository<FleetCostEntry>().AddAsync(new FleetCostEntry
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                VehicleAssetId = entity.VehicleAssetId,
+                FleetTripId = entity.FleetTripId,
+                FleetFuelTransactionId = entity.Id,
+                CostDateUtc = entity.FuelledAt,
+                CostType = "Fuel",
+                Amount = entity.TotalCost.Value,
+                CurrencyCode = null,
+                Notes = "Fuel transaction",
+                CreatedAt = DateTime.UtcNow,
+                CreatedById = _currentUserProvider.UserId
+            });
+        }
+
         await _unitOfWork.SaveChangesAsync();
 
         return (await GetByIdAsync(entity.Id))!;

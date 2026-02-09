@@ -61,6 +61,19 @@ public sealed class FleetComplianceReminderBackgroundService : BackgroundService
     private async Task ProcessAsync(CancellationToken cancellationToken)
     {
         using var scope = _serviceProvider.CreateScope();
+        var lockService = scope.ServiceProvider.GetRequiredService<IDistributedLockService>();
+
+        await using var leader = await lockService.TryAcquireAsync(
+            lockName: "bg:fleet-compliance-reminders",
+            leaseDuration: TimeSpan.FromMinutes(30),
+            cancellationToken: cancellationToken);
+
+        if (leader == null)
+        {
+            _logger.LogDebug("Skipping fleet compliance reminder run (lock not acquired)");
+            return;
+        }
+
         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
         var appEventBus = scope.ServiceProvider.GetRequiredService<IAppEventBus>();
 

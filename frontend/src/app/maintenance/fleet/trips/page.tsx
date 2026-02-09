@@ -16,7 +16,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 
-import fleetService, { CreateFleetTripDto, DispatchFleetTripDto, FleetTripDto, FleetVehicleListDto, PagedResult } from '@/services/fleetService';
+import fleetService, {
+  CompleteFleetTripInspectionDto,
+  CreateFleetTripDto,
+  DispatchFleetTripDto,
+  FleetTripDto,
+  FleetTripInspectionDto,
+  FleetVehicleListDto,
+  PagedResult,
+  StartFleetTripInspectionDto,
+} from '@/services/fleetService';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
 
@@ -36,6 +45,13 @@ type EmployeeDto = {
   lastName?: string | null;
   employeeNumber?: string | null;
   status?: string | null;
+};
+
+type InspectionTemplateLite = {
+  id: string;
+  name: string;
+  category?: string | null;
+  isActive?: boolean;
 };
 
 function formatDate(value?: string | null) {
@@ -83,6 +99,26 @@ function FleetTripsPageContent() {
   const [viewOpen, setViewOpen] = React.useState(false);
   const [selected, setSelected] = React.useState<FleetTripDto | null>(null);
 
+  const [inspections, setInspections] = React.useState<FleetTripInspectionDto[]>([]);
+  const [inspectionTemplates, setInspectionTemplates] = React.useState<InspectionTemplateLite[]>([]);
+  const [inspectionsLoading, setInspectionsLoading] = React.useState(false);
+
+  const [startInspectionOpen, setStartInspectionOpen] = React.useState(false);
+  const [completeInspectionOpen, setCompleteInspectionOpen] = React.useState(false);
+  const [selectedInspection, setSelectedInspection] = React.useState<FleetTripInspectionDto | null>(null);
+  const [startInspectionForm, setStartInspectionForm] = React.useState<StartFleetTripInspectionDto>({
+    fleetTripId: '',
+    inspectionTemplateId: '',
+    inspectorEmployeeId: null,
+    inspectionKind: 'PreTrip',
+  });
+  const [completeInspectionForm, setCompleteInspectionForm] = React.useState<CompleteFleetTripInspectionDto>({
+    completedAtUtc: null,
+    overallResult: 'Pass',
+    inspectionData: '{}',
+    notes: '',
+  });
+
   const [dispatchOpen, setDispatchOpen] = React.useState(false);
   const [dispatchForm, setDispatchForm] = React.useState<DispatchFleetTripDto>({
     dispatchedAt: toDatetimeLocal(new Date()),
@@ -122,6 +158,17 @@ function FleetTripsPageContent() {
       const rawEmployees: EmployeeDto[] = await eRes.json();
       const activeEmployees = (rawEmployees || []).filter((e) => (e.status || '').toLowerCase() !== 'inactive');
       setEmployees(activeEmployees);
+
+      // Inspection templates (for fleet pre/post inspections)
+      try {
+        const tRes = await fetch(`${API_BASE_URL}/inspection-templates?activeOnly=true`, { headers: getAuthHeaders() });
+        if (tRes.ok) {
+          const templates: InspectionTemplateLite[] = await tRes.json();
+          setInspectionTemplates((templates || []).filter((t) => t.isActive !== false));
+        }
+      } catch {
+        setInspectionTemplates([]);
+      }
     } catch (e: any) {
       toast({ title: 'Failed to load lookups', description: e?.message || String(e), variant: 'destructive' });
     }
@@ -165,6 +212,21 @@ function FleetTripsPageContent() {
       }
     })();
   }, [initialOpenId]);
+
+  React.useEffect(() => {
+    if (!viewOpen || !selected?.id) return;
+    (async () => {
+      setInspectionsLoading(true);
+      try {
+        const res = await fleetService.getTripInspections(selected.id);
+        setInspections(res || []);
+      } catch {
+        setInspections([]);
+      } finally {
+        setInspectionsLoading(false);
+      }
+    })();
+  }, [viewOpen, selected?.id]);
 
   const openView = async (id: string) => {
     try {
@@ -536,6 +598,82 @@ function FleetTripsPageContent() {
                     </div>
                   </CardContent>
                 </Card>
+
+                <Card>
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-base">Inspections</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3 pb-4 text-sm">
+                    {inspectionsLoading ? (
+                      <div className="text-muted-foreground">Loading…</div>
+                    ) : (
+                      <>
+                        {(['PreTrip', 'PostTrip'] as const).map((kind) => {
+                          const current = inspections
+                            .filter((i) => i.inspectionKind === kind && i.status !== 'Cancelled')
+                            .sort((a, b) => (a.startedAtUtc < b.startedAtUtc ? 1 : -1))[0];
+
+                          return (
+                            <div key={kind} className="rounded-md border p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="font-medium">{kind === 'PreTrip' ? 'Pre-trip' : 'Post-trip'}</div>
+                                  <div className="text-muted-foreground">
+                                    {current ? `${current.status}${current.overallResult ? ` (${current.overallResult})` : ''}` : 'Not started'}
+                                  </div>
+                                  {current?.inspectionTemplateName ? (
+                                    <div className="text-muted-foreground">Template: {current.inspectionTemplateName}</div>
+                                  ) : null}
+                                </div>
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      setStartInspectionForm({
+                                        fleetTripId: selected.id,
+                                        inspectionTemplateId: inspectionTemplates[0]?.id || '',
+                                        inspectorEmployeeId: selected.driverEmployeeId || null,
+                                        inspectionKind: kind,
+                                      });
+                                      setStartInspectionOpen(true);
+                                    }}
+                                    disabled={!inspectionTemplates.length || !!current}
+                                  >
+                                    Start
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      if (!current) return;
+                                      setSelectedInspection(current);
+                                      setCompleteInspectionForm({
+                                        completedAtUtc: toDatetimeLocal(new Date()),
+                                        overallResult: 'Pass',
+                                        inspectionData: current.inspectionData || '{}',
+                                        notes: current.notes || '',
+                                      });
+                                      setCompleteInspectionOpen(true);
+                                    }}
+                                    disabled={!current || current.status !== 'InProgress'}
+                                  >
+                                    Complete
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {!inspectionTemplates.length ? (
+                          <div className="text-xs text-muted-foreground">
+                            No inspection templates found. Create templates via `api/inspection-templates` (or seed them).
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -605,6 +743,131 @@ function FleetTripsPageContent() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setViewOpen(false)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={startInspectionOpen} onOpenChange={setStartInspectionOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Start Inspection</DialogTitle>
+            <DialogDescription>Create a {startInspectionForm.inspectionKind === 'PreTrip' ? 'pre-trip' : 'post-trip'} inspection record.</DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-4">
+            <div className="space-y-2">
+              <Label>Template</Label>
+              <Select
+                value={startInspectionForm.inspectionTemplateId || 'none'}
+                onValueChange={(v) => setStartInspectionForm((p) => ({ ...p, inspectionTemplateId: v === 'none' ? '' : v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select template" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Select template</SelectItem>
+                  {inspectionTemplates.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Inspector (optional)</Label>
+              <Select
+                value={startInspectionForm.inspectorEmployeeId || 'none'}
+                onValueChange={(v) => setStartInspectionForm((p) => ({ ...p, inspectorEmployeeId: v === 'none' ? null : v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select employee" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No inspector</SelectItem>
+                  {employees.map((e) => (
+                    <SelectItem key={e.id} value={e.id}>
+                      {(e.firstName || '').trim()} {(e.lastName || '').trim()} {e.employeeNumber ? `(${e.employeeNumber})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStartInspectionOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                try {
+                  await fleetService.startTripInspection(startInspectionForm);
+                  setStartInspectionOpen(false);
+                  if (selected?.id) setInspections(await fleetService.getTripInspections(selected.id));
+                } catch (e: any) {
+                  toast({ title: 'Failed to start inspection', description: e?.message || String(e), variant: 'destructive' });
+                }
+              }}
+              disabled={!startInspectionForm.fleetTripId || !startInspectionForm.inspectionTemplateId}
+            >
+              Start
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={completeInspectionOpen} onOpenChange={setCompleteInspectionOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Complete Inspection</DialogTitle>
+            <DialogDescription>{selectedInspection?.inspectionTemplateName}</DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 gap-4">
+            <div className="space-y-2">
+              <Label>Overall Result</Label>
+              <Select
+                value={completeInspectionForm.overallResult}
+                onValueChange={(v) => setCompleteInspectionForm((p) => ({ ...p, overallResult: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select result" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Pass">Pass</SelectItem>
+                  <SelectItem value="Fail">Fail</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea value={completeInspectionForm.notes || ''} onChange={(e) => setCompleteInspectionForm((p) => ({ ...p, notes: e.target.value }))} rows={5} />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCompleteInspectionOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!selectedInspection) return;
+                try {
+                  await fleetService.completeTripInspection(selectedInspection.id, {
+                    ...completeInspectionForm,
+                    completedAtUtc: completeInspectionForm.completedAtUtc || toDatetimeLocal(new Date()),
+                    inspectionData: completeInspectionForm.inspectionData || '{}',
+                  });
+                  setCompleteInspectionOpen(false);
+                  if (selected?.id) setInspections(await fleetService.getTripInspections(selected.id));
+                } catch (e: any) {
+                  toast({ title: 'Failed to complete inspection', description: e?.message || String(e), variant: 'destructive' });
+                }
+              }}
+              disabled={!selectedInspection}
+            >
+              Complete
             </Button>
           </DialogFooter>
         </DialogContent>

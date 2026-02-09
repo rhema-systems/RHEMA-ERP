@@ -12,7 +12,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
 
-import fleetService, { CreateFleetVehicleDto, FleetVehicleListDto, PagedResult, UpdateFleetVehicleDto } from '@/services/fleetService';
+import fleetService, {
+  CreateFleetVehicleDto,
+  EmployeeDto,
+  FleetVehicleAssignmentDto,
+  FleetVehicleListDto,
+  PagedResult,
+  UpdateFleetVehicleDto,
+} from '@/services/fleetService';
 
 type AssetCategoryDto = {
   id: string;
@@ -52,6 +59,13 @@ export default function FleetVehiclesPage() {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [editOpen, setEditOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<FleetVehicleListDto | null>(null);
+
+  const [assignOpen, setAssignOpen] = React.useState(false);
+  const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [selectedVehicle, setSelectedVehicle] = React.useState<FleetVehicleListDto | null>(null);
+  const [employees, setEmployees] = React.useState<EmployeeDto[]>([]);
+  const [selectedEmployeeId, setSelectedEmployeeId] = React.useState<string>('none');
+  const [assignmentHistory, setAssignmentHistory] = React.useState<FleetVehicleAssignmentDto[]>([]);
 
   const [createForm, setCreateForm] = React.useState<CreateFleetVehicleDto>({
     name: '',
@@ -183,6 +197,48 @@ export default function FleetVehiclesPage() {
   };
 
   const totalPages = Math.max(1, Math.ceil((result.totalCount || 0) / pageSize));
+
+  const loadEmployees = React.useCallback(async () => {
+    try {
+      const emps = await fleetService.getEmployees({ page: 1, pageSize: 100 });
+      setEmployees(emps || []);
+    } catch (e: any) {
+      toast({ title: 'Failed to load employees', description: e?.message || String(e), variant: 'destructive' });
+    }
+  }, [toast]);
+
+  const openAssign = async (v: FleetVehicleListDto) => {
+    setSelectedVehicle(v);
+    setSelectedEmployeeId('none');
+    setAssignOpen(true);
+    await loadEmployees();
+  };
+
+  const submitAssign = async () => {
+    if (!selectedVehicle) return;
+    if (selectedEmployeeId === 'none') return;
+
+    try {
+      await fleetService.assignDriver({ vehicleAssetId: selectedVehicle.id, employeeId: selectedEmployeeId });
+      toast({ title: 'Driver assigned' });
+      setAssignOpen(false);
+      await loadVehicles();
+    } catch (e: any) {
+      toast({ title: 'Failed to assign driver', description: e?.message || String(e), variant: 'destructive' });
+    }
+  };
+
+  const openHistory = async (v: FleetVehicleListDto) => {
+    setSelectedVehicle(v);
+    setHistoryOpen(true);
+    try {
+      const history = await fleetService.getAssignments(v.id);
+      setAssignmentHistory(history || []);
+    } catch (e: any) {
+      toast({ title: 'Failed to load assignment history', description: e?.message || String(e), variant: 'destructive' });
+      setAssignmentHistory([]);
+    }
+  };
 
   return (
     <div className="space-y-6 p-6">
@@ -330,6 +386,7 @@ export default function FleetVehiclesPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Plate</TableHead>
                   <TableHead>VIN</TableHead>
+                  <TableHead>Driver</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -337,13 +394,13 @@ export default function FleetVehiclesPage() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
                       Loading...
                     </TableCell>
                   </TableRow>
                 ) : result.items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
                       No vehicles found
                     </TableCell>
                   </TableRow>
@@ -354,11 +411,20 @@ export default function FleetVehiclesPage() {
                       <TableCell>{v.name}</TableCell>
                       <TableCell>{v.licensePlate || '-'}</TableCell>
                       <TableCell>{v.vin || '-'}</TableCell>
+                      <TableCell>{v.currentDriverEmployeeName || '-'}</TableCell>
                       <TableCell>{v.status}</TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(v)}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
+                        <div className="flex justify-end gap-1">
+                          <Button variant="outline" size="sm" onClick={() => openAssign(v)}>
+                            Assign
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => openHistory(v)}>
+                            History
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => openEdit(v)}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
@@ -368,6 +434,89 @@ export default function FleetVehiclesPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Assign Driver</DialogTitle>
+            <DialogDescription>Assign a primary driver for {selectedVehicle?.name}</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <Label>Employee</Label>
+            <Select value={selectedEmployeeId} onValueChange={setSelectedEmployeeId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select employee" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Select employee</SelectItem>
+                {employees.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.firstName} {e.lastName} ({e.employeeNumber})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAssignOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={submitAssign} disabled={!selectedVehicle || selectedEmployeeId === 'none'}>
+              Assign
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Assignment History</DialogTitle>
+            <DialogDescription>{selectedVehicle?.name}</DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Employee</TableHead>
+                  <TableHead>From</TableHead>
+                  <TableHead>To</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Active</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {assignmentHistory.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                      No assignments
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  assignmentHistory.map((a) => (
+                    <TableRow key={a.id}>
+                      <TableCell>{a.employeeName}</TableCell>
+                      <TableCell>{new Date(a.assignedFromUtc).toLocaleString()}</TableCell>
+                      <TableCell>{a.assignedToUtc ? new Date(a.assignedToUtc).toLocaleString() : '-'}</TableCell>
+                      <TableCell>{a.assignmentType}</TableCell>
+                      <TableCell>{a.isActive ? 'Yes' : 'No'}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHistoryOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-3xl">

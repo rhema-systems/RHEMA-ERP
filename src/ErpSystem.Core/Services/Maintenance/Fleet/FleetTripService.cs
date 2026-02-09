@@ -338,6 +338,50 @@ public class FleetTripService : IFleetTripService
                 $"Dispatch blocked: '{first.ComplianceType}' is {(first.ExpiryDate.Date < DateTime.UtcNow.Date ? "overdue" : "due soon")} (expires {first.ExpiryDate:yyyy-MM-dd}).");
         }
 
+        // Default driver from current assignment if not explicitly set on trip.
+        if (!trip.DriverEmployeeId.HasValue || trip.DriverEmployeeId.Value == Guid.Empty)
+        {
+            var assignment = await _unitOfWork.Repository<FleetVehicleAssignment>()
+                .GetQueryable(a => a.TenantId == tenantId && a.VehicleAssetId == trip.VehicleAssetId && a.IsActive && !a.IsDeleted)
+                .OrderByDescending(a => a.AssignedFromUtc)
+                .FirstOrDefaultAsync();
+
+            if (assignment != null)
+            {
+                trip.DriverEmployeeId = assignment.EmployeeId;
+            }
+        }
+
+        // Driver license expiry blocking (Driver's License in HR identification cards).
+        if (trip.DriverEmployeeId.HasValue && trip.DriverEmployeeId.Value != Guid.Empty)
+        {
+            var driverId = trip.DriverEmployeeId.Value;
+            var driver = await _unitOfWork.Repository<Employee>()
+                .FirstOrDefaultAsync(e => e.TenantId == tenantId && e.Id == driverId && !e.IsDeleted);
+
+            var license = await _unitOfWork.Repository<EmployeeIdentificationCard>()
+                .GetQueryable(c =>
+                    c.TenantId == tenantId &&
+                    c.EmployeeId == driverId &&
+                    !c.IsDeleted &&
+                    c.DocumentType.ToLower().Contains("driver"))
+                .OrderByDescending(c => c.ExpiryDate)
+                .FirstOrDefaultAsync();
+
+            if (license?.ExpiryDate == null)
+            {
+                var name = driver != null ? $"{driver.FirstName} {driver.LastName}" : driverId.ToString();
+                throw new InvalidOperationException($"Dispatch blocked: driver license record not found for '{name}'.");
+            }
+
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
+            if (license.ExpiryDate.Value < today)
+            {
+                var name = driver != null ? $"{driver.FirstName} {driver.LastName}" : driverId.ToString();
+                throw new InvalidOperationException($"Dispatch blocked: driver's license for '{name}' expired on {license.ExpiryDate.Value:yyyy-MM-dd}.");
+            }
+        }
+
         var vehicle = await RequireVehicleAsync(trip.VehicleAssetId);
 
         var dispatchedAt = (dto.DispatchedAt ?? DateTime.UtcNow).ToUniversalTime();

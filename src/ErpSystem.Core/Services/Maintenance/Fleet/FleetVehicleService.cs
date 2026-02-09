@@ -34,6 +34,7 @@ public class FleetVehicleService : IFleetVehicleService
 
         var tenantId = _currentUserProvider.TenantId;
         var assetRepo = _unitOfWork.Repository<MaintenanceAsset>();
+        var assignmentRepo = _unitOfWork.Repository<FleetVehicleAssignment>();
 
         var q = assetRepo.GetQueryable(a => a.TenantId == tenantId)
             .Include(a => a.AssetCategory)
@@ -73,7 +74,17 @@ public class FleetVehicleService : IFleetVehicleService
                 Manufacturer = a.Manufacturer,
                 Model = a.Model,
                 Mileage = a.Mileage,
-                OperatingHours = a.OperatingHours
+                OperatingHours = a.OperatingHours,
+                CurrentDriverEmployeeId = assignmentRepo.GetQueryable(x =>
+                        x.TenantId == tenantId && x.VehicleAssetId == a.Id && x.IsActive && !x.IsDeleted)
+                    .OrderByDescending(x => x.AssignedFromUtc)
+                    .Select(x => (Guid?)x.EmployeeId)
+                    .FirstOrDefault(),
+                CurrentDriverEmployeeName = assignmentRepo.GetQueryable(x =>
+                        x.TenantId == tenantId && x.VehicleAssetId == a.Id && x.IsActive && !x.IsDeleted)
+                    .OrderByDescending(x => x.AssignedFromUtc)
+                    .Select(x => x.Employee.FirstName + " " + x.Employee.LastName)
+                    .FirstOrDefault()
             })
             .ToListAsync();
 

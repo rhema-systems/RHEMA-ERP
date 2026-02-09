@@ -1607,6 +1607,10 @@ public class InspectionTemplate : TenantEntity
     [MaxLength(200)]
     public string Name { get; set; } = string.Empty;
 
+    [Required]
+    [MaxLength(20)]
+    public string Code { get; set; } = string.Empty;
+
     [MaxLength(1000)]
     public string? Description { get; set; }
 
@@ -1615,7 +1619,27 @@ public class InspectionTemplate : TenantEntity
 
     [Required]
     [MaxLength(50)]
-    public string InspectionType { get; set; } = "Safety"; // Safety, Quality, Regulatory, Maintenance
+    public string Frequency { get; set; } = "AdHoc"; // Daily, Weekly, Monthly, Quarterly, Yearly, AdHoc
+
+    [MaxLength(50)]
+    public string InspectionType { get; set; } = "General"; // Safety, Quality, Regulatory, Maintenance, Fleet
+
+    public int EstimatedDuration { get; set; } = 60; // minutes
+
+    public bool RequiresSignature { get; set; } = false;
+    public bool AllowPhotos { get; set; } = false;
+
+    [MaxLength(10)]
+    public string Version { get; set; } = "1.0";
+
+    [MaxLength(20)]
+    public string Priority { get; set; } = "Medium";
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string AssetTypes { get; set; } = "[]";
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string InspectorRoles { get; set; } = "[]";
 
     public bool IsActive { get; set; } = true;
 

@@ -664,6 +664,15 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetTripService, ErpSystem.Core.Services.Maintenance.Fleet.FleetTripService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetComplianceService, ErpSystem.Core.Services.Maintenance.Fleet.FleetComplianceService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetFuelService, ErpSystem.Core.Services.Maintenance.Fleet.FleetFuelService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetAssignmentService, ErpSystem.Core.Services.Maintenance.Fleet.FleetAssignmentService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetInspectionService, ErpSystem.Core.Services.Maintenance.Fleet.FleetInspectionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetDefectService, ErpSystem.Core.Services.Maintenance.Fleet.FleetDefectService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetTyreService, ErpSystem.Core.Services.Maintenance.Fleet.FleetTyreService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetBatteryService, ErpSystem.Core.Services.Maintenance.Fleet.FleetBatteryService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetExternalRepairService, ErpSystem.Core.Services.Maintenance.Fleet.FleetExternalRepairService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetDashboardService, ErpSystem.Core.Services.Maintenance.Fleet.FleetDashboardService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetCostService, ErpSystem.Core.Services.Maintenance.Fleet.FleetCostService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.IDistributedLockService, ErpSystem.Api.Services.DistributedLockService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IConsignmentSettlementService, ErpSystem.Core.Services.Procurement.ConsignmentSettlementService>();
 
             // RFQ (Request For Quotation) - separate from Tender

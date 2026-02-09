@@ -5,10 +5,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 export default function FleetPage() {
   const tiles = [
+    { title: 'Dashboard', href: '/maintenance/fleet/dashboard', description: 'KPIs and fleet analytics overview' },
     { title: 'Vehicles', href: '/maintenance/fleet/vehicles', description: 'Manage fleet vehicles (assets)' },
     { title: 'Trips', href: '/maintenance/fleet/trips', description: 'Trip requests, approvals and dispatch' },
     { title: 'Compliance', href: '/maintenance/fleet/compliance', description: 'Registrations, insurance, permits and reminders' },
     { title: 'Fuel', href: '/maintenance/fleet/fuel', description: 'Fuel transactions and consumption tracking' },
+    { title: 'Defects', href: '/maintenance/fleet/defects', description: 'Incidents/defects and conversion to Work Orders' },
+    { title: 'PM Plans', href: '/maintenance/fleet/pm', description: 'Preventive maintenance plans (schedules) per vehicle' },
+    { title: 'Tyres', href: '/maintenance/fleet/tyres', description: 'Tyre tracking per vehicle (positions, tread depth)' },
+    { title: 'Batteries', href: '/maintenance/fleet/batteries', description: 'Battery tracking per vehicle' },
+    { title: 'External Repairs', href: '/maintenance/fleet/external-repairs', description: 'Vendor repairs and external maintenance records' },
+    { title: 'Costs', href: '/maintenance/fleet/costs', description: 'Fleet cost ledger and KPIs' },
   ];
 
   return (
