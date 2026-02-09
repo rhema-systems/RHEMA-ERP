@@ -313,7 +313,12 @@ export default function FleetVehiclesPage() {
                           <Button variant="outline" size="sm" onClick={() => openHistory(v)}>
                             History
                           </Button>
-                          <Button variant="ghost" size="sm" onClick={() => openEdit(v)}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => window.open(`/maintenance/assets?id=${v.id}&edit=1`, '_blank')}
+                            title="Edit vehicle in Assets"
+                          >
                             <Edit className="h-4 w-4" />
                           </Button>
                         </div>

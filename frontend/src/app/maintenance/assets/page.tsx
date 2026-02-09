@@ -87,6 +87,7 @@ function AssetsPageContent() {
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [assetTypes, setAssetTypes] = useState<Array<{ id: string; name: string; description?: string; assetType?: string | null; isActive?: boolean }>>([]);
   const initialCreateHandledRef = useRef(false);
+  const initialEditHandledRef = useRef(false);
 
   const [newAsset, setNewAsset] = useState({
     name: '',
@@ -273,9 +274,11 @@ function AssetsPageContent() {
   useEffect(() => {
     const assetId = searchParams.get('id');
     const categoryParam = searchParams.get('category');
+    const editParam = (searchParams.get('edit') || '').trim().toLowerCase();
+    const shouldEdit = editParam === '1' || editParam === 'true';
 
     // If a specific asset ID is provided, open its details dialog once assets are loaded
-    if (assetId && assets.length > 0 && !isViewDialogOpen) {
+    if (assetId && assets.length > 0 && !isViewDialogOpen && !shouldEdit) {
       const asset = assets.find(a => a.id === assetId);
       if (asset) {
         console.log('Opening asset from URL:', asset);
@@ -548,6 +551,33 @@ function AssetsPageContent() {
     });
     setIsEditDialogOpen(true);
   };
+
+  // Deep-link helper to open edit dialog for a specific asset (e.g. /maintenance/assets?id={id}&edit=1)
+  useEffect(() => {
+    if (initialEditHandledRef.current) return;
+
+    const assetId = (searchParams.get('id') || '').trim();
+    const editParam = (searchParams.get('edit') || '').trim().toLowerCase();
+    const shouldEdit = editParam === '1' || editParam === 'true';
+
+    if (!shouldEdit) return;
+    if (!assetId) return;
+    if (assets.length === 0) return;
+
+    const asset = assets.find((a) => a.id === assetId);
+    initialEditHandledRef.current = true;
+
+    if (!asset) {
+      toast({
+        title: 'Asset not found',
+        description: 'The requested asset could not be found.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    handleEditAsset(asset);
+  }, [assets, searchParams, toast]);
 
   const handleUpdateAsset = async () => {
     if (!selectedAsset?.id) return;
