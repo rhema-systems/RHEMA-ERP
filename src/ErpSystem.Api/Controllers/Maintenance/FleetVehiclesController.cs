@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,11 +13,13 @@ public class FleetVehiclesController : ControllerBase
 {
     private readonly IFleetVehicleService _fleetVehicleService;
     private readonly ILogger<FleetVehiclesController> _logger;
+    private readonly IHostEnvironment _environment;
 
-    public FleetVehiclesController(IFleetVehicleService fleetVehicleService, ILogger<FleetVehiclesController> logger)
+    public FleetVehiclesController(IFleetVehicleService fleetVehicleService, ILogger<FleetVehiclesController> logger, IHostEnvironment environment)
     {
         _fleetVehicleService = fleetVehicleService;
         _logger = logger;
+        _environment = environment;
     }
 
     [HttpGet]
@@ -34,7 +37,23 @@ public class FleetVehiclesController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving fleet vehicles");
-            return StatusCode(500, "An error occurred while retrieving fleet vehicles");
+
+            var root = ex;
+            while (root.InnerException != null) root = root.InnerException;
+
+            if (root is SqlException sqlEx && sqlEx.Number == 208)
+            {
+                return Problem(
+                    statusCode: StatusCodes.Status500InternalServerError,
+                    title: "Fleet vehicles database schema is missing.",
+                    detail: "Run the latest EF Core migrations (dotnet ef database update) and restart the API.");
+            }
+
+            var detail = _environment.IsDevelopment()
+                ? $"{root.GetType().Name}: {root.Message}"
+                : "An error occurred while retrieving fleet vehicles.";
+
+            return Problem(statusCode: StatusCodes.Status500InternalServerError, title: "Error retrieving fleet vehicles", detail: detail);
         }
     }
 

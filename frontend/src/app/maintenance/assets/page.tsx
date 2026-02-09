@@ -114,8 +114,6 @@ function AssetsPageContent() {
       return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD format
     } catch {
       return '';
-  const router = useRouter();
-
     }
   };
 

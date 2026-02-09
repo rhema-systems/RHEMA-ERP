@@ -120,6 +120,7 @@ const navigationItems: NavItem[] = [
           { title: 'Job Cards', href: '/maintenance/job-cards', icon: FileText },
           { title: 'Work Orders', href: '/maintenance/work-orders', icon: FileText },
           { title: 'Assets', href: '/maintenance/assets', icon: Package },
+          { title: 'Asset Admission', href: '/maintenance/asset-admission', icon: ClipboardCheck },
           {
             title: 'Fleet',
             href: '/maintenance/fleet',
