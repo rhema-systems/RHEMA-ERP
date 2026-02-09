@@ -5,7 +5,7 @@ import { Plus, Search, Edit } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -13,7 +13,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 
 import fleetService, {
-  CreateFleetVehicleDto,
   EmployeeDto,
   FleetVehicleAssignmentDto,
   FleetVehicleListDto,
@@ -56,7 +55,6 @@ export default function FleetVehiclesPage() {
     pageSize,
   });
 
-  const [createOpen, setCreateOpen] = React.useState(false);
   const [editOpen, setEditOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<FleetVehicleListDto | null>(null);
 
@@ -66,19 +64,6 @@ export default function FleetVehiclesPage() {
   const [employees, setEmployees] = React.useState<EmployeeDto[]>([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = React.useState<string>('none');
   const [assignmentHistory, setAssignmentHistory] = React.useState<FleetVehicleAssignmentDto[]>([]);
-
-  const [createForm, setCreateForm] = React.useState<CreateFleetVehicleDto>({
-    name: '',
-    assetCategoryId: '',
-    licensePlate: '',
-    vin: '',
-    manufacturer: '',
-    model: '',
-    serialNumber: '',
-    location: '',
-    mileage: null,
-    operatingHours: null,
-  });
 
   const [editForm, setEditForm] = React.useState<UpdateFleetVehicleDto>({
     name: '',
@@ -157,25 +142,6 @@ export default function FleetVehiclesPage() {
     setEditOpen(true);
   };
 
-  const onCreate = async () => {
-    try {
-      if (!createForm.name.trim()) throw new Error('Name is required');
-      if (!createForm.assetCategoryId) throw new Error('Category is required');
-
-      await fleetService.createVehicle({
-        ...createForm,
-        name: createForm.name.trim(),
-      });
-
-      toast({ title: 'Vehicle created' });
-      setCreateOpen(false);
-      setCreateForm((p) => ({ ...p, name: '', licensePlate: '', vin: '' }));
-      await loadVehicles();
-    } catch (e: any) {
-      toast({ title: 'Failed to create vehicle', description: e?.message || String(e), variant: 'destructive' });
-    }
-  };
-
   const onUpdate = async () => {
     if (!editing) return;
     try {
@@ -245,87 +211,13 @@ export default function FleetVehiclesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Fleet Vehicles</h1>
-          <p className="text-muted-foreground">Vehicles are stored as Maintenance Assets (Vehicle type)</p>
+          <p className="text-muted-foreground">Vehicles are created as Maintenance Assets (Vehicle type) and managed here.</p>
         </div>
 
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              New Vehicle
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-3xl">
-            <DialogHeader>
-              <DialogTitle>Create Vehicle</DialogTitle>
-              <DialogDescription>Create a new fleet vehicle record.</DialogDescription>
-            </DialogHeader>
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Name</Label>
-                <Input value={createForm.name} onChange={(e) => setCreateForm((p) => ({ ...p, name: e.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Category</Label>
-                <Select value={createForm.assetCategoryId || undefined} onValueChange={(v) => setCreateForm((p) => ({ ...p, assetCategoryId: v }))}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categories.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>License Plate</Label>
-                <Input value={createForm.licensePlate || ''} onChange={(e) => setCreateForm((p) => ({ ...p, licensePlate: e.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>VIN</Label>
-                <Input value={createForm.vin || ''} onChange={(e) => setCreateForm((p) => ({ ...p, vin: e.target.value }))} />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Manufacturer</Label>
-                <Input value={createForm.manufacturer || ''} onChange={(e) => setCreateForm((p) => ({ ...p, manufacturer: e.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Model</Label>
-                <Input value={createForm.model || ''} onChange={(e) => setCreateForm((p) => ({ ...p, model: e.target.value }))} />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Initial Mileage</Label>
-                <Input
-                  type="number"
-                  value={createForm.mileage ?? ''}
-                  onChange={(e) => setCreateForm((p) => ({ ...p, mileage: e.target.value === '' ? null : Number(e.target.value) }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Initial Operating Hours</Label>
-                <Input
-                  type="number"
-                  value={createForm.operatingHours ?? ''}
-                  onChange={(e) => setCreateForm((p) => ({ ...p, operatingHours: e.target.value === '' ? null : Number(e.target.value) }))}
-                />
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setCreateOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={onCreate}>Create</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <Button onClick={() => window.open('/maintenance/assets?assetType=Vehicle&create=1', '_blank')} title="Create vehicles from the Maintenance Assets screen">
+          <Plus className="mr-2 h-4 w-4" />
+          Create in Assets
+        </Button>
       </div>
 
       <Card>

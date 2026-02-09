@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useRef, useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -82,7 +82,8 @@ function AssetsPageContent() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  const [assetTypes, setAssetTypes] = useState<Array<{id: string, name: string, description?: string}>>([]);
+  const [assetTypes, setAssetTypes] = useState<Array<{ id: string; name: string; description?: string; assetType?: string | null; isActive?: boolean }>>([]);
+  const initialCreateHandledRef = useRef(false);
 
   const [newAsset, setNewAsset] = useState({
     name: '',
@@ -282,6 +283,27 @@ function AssetsPageContent() {
       setCategoryFilter(categoryParam);
     }
   }, [assets, searchParams, isViewDialogOpen, toast, categoryFilter]);
+
+  // Optional: deep-link helper to open Create dialog pre-selected by asset type (e.g. /maintenance/assets?assetType=Vehicle&create=1)
+  useEffect(() => {
+    if (initialCreateHandledRef.current) return;
+
+    const createParam = (searchParams.get('create') || '').trim().toLowerCase();
+    if (createParam !== '1' && createParam !== 'true') return;
+    if (assetTypes.length === 0) return;
+
+    const assetTypeParam = (searchParams.get('assetType') || '').trim();
+    if (assetTypeParam) {
+      const match = assetTypes.find((t) => (t.assetType || '').toLowerCase() === assetTypeParam.toLowerCase());
+      if (match) {
+        setNewAsset((prev) => ({ ...prev, category: match.name }));
+        if (categoryFilter === 'all') setCategoryFilter(match.name);
+      }
+    }
+
+    initialCreateHandledRef.current = true;
+    setIsCreateDialogOpen(true);
+  }, [assetTypes, categoryFilter, searchParams]);
 
   // Filter assets
   useEffect(() => {
