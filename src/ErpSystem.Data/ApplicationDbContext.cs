@@ -400,7 +400,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<FleetTripInspection> FleetTripInspections { get; set; }
     public DbSet<FleetDefect> FleetDefects { get; set; }
     public DbSet<FleetTyre> FleetTyres { get; set; }
+    public DbSet<FleetTyreEvent> FleetTyreEvents { get; set; }
     public DbSet<FleetBattery> FleetBatteries { get; set; }
+    public DbSet<FleetBatteryEvent> FleetBatteryEvents { get; set; }
     public DbSet<FleetExternalRepair> FleetExternalRepairs { get; set; }
     public DbSet<FleetCostEntry> FleetCostEntries { get; set; }
 
@@ -452,7 +454,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new FleetTripInspectionConfiguration());
         builder.ApplyConfiguration(new FleetDefectConfiguration());
         builder.ApplyConfiguration(new FleetTyreConfiguration());
+        builder.ApplyConfiguration(new FleetTyreEventConfiguration());
         builder.ApplyConfiguration(new FleetBatteryConfiguration());
+        builder.ApplyConfiguration(new FleetBatteryEventConfiguration());
         builder.ApplyConfiguration(new FleetExternalRepairConfiguration());
         builder.ApplyConfiguration(new FleetCostEntryConfiguration());
 

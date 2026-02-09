@@ -95,6 +95,23 @@ public sealed class FleetAssignmentService : IFleetAssignmentService
 
         if (employee == null) throw new ArgumentException("Employee not found.");
 
+        // Block assignment when driver license is missing or expired (aligns with dispatch rules).
+        var license = await _unitOfWork.Repository<EmployeeIdentificationCard>()
+            .GetQueryable(c =>
+                c.TenantId == tenantId &&
+                c.EmployeeId == dto.EmployeeId &&
+                !c.IsDeleted &&
+                c.DocumentType.ToLower().Contains("driver"))
+            .OrderByDescending(c => c.ExpiryDate)
+            .FirstOrDefaultAsync();
+
+        if (license?.ExpiryDate == null)
+            throw new InvalidOperationException($"Cannot assign driver: driver's license record not found for '{employee.FirstName} {employee.LastName}'.");
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
+        if (license.ExpiryDate.Value < today)
+            throw new InvalidOperationException($"Cannot assign driver: driver's license for '{employee.FirstName} {employee.LastName}' expired on {license.ExpiryDate.Value:yyyy-MM-dd}.");
+
         var repo = _unitOfWork.Repository<FleetVehicleAssignment>();
         var existingActives = await repo.FindAsync(a =>
             a.TenantId == tenantId &&

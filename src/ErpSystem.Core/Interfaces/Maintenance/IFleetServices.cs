@@ -72,6 +72,7 @@ public interface IFleetTyreService
 {
     Task<PagedResult<FleetTyreDto>> GetPagedAsync(Guid vehicleAssetId, int page, int pageSize);
     Task<FleetTyreDto?> GetByIdAsync(Guid id);
+    Task<IReadOnlyList<FleetTyreEventDto>> GetEventsAsync(Guid fleetTyreId);
     Task<FleetTyreDto> CreateAsync(CreateFleetTyreDto dto);
     Task<FleetTyreDto> UpdateAsync(Guid id, CreateFleetTyreDto dto);
     Task<bool> DeleteAsync(Guid id);
@@ -81,6 +82,8 @@ public interface IFleetBatteryService
 {
     Task<PagedResult<FleetBatteryDto>> GetPagedAsync(Guid vehicleAssetId, int page, int pageSize);
     Task<FleetBatteryDto?> GetByIdAsync(Guid id);
+    Task<IReadOnlyList<FleetBatteryEventDto>> GetEventsAsync(Guid fleetBatteryId);
+    Task<FleetBatteryKpisDto> GetKpisAsync(Guid vehicleAssetId, DateTime? asAtUtc = null);
     Task<FleetBatteryDto> CreateAsync(CreateFleetBatteryDto dto);
     Task<FleetBatteryDto> UpdateAsync(Guid id, CreateFleetBatteryDto dto);
     Task<bool> DeleteAsync(Guid id);

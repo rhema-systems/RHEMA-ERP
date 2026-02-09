@@ -34,6 +34,36 @@ public class FleetBatteriesController : ControllerBase
         }
     }
 
+    [HttpGet("vehicle/{vehicleAssetId:guid}/kpis")]
+    public async Task<ActionResult<FleetBatteryKpisDto>> GetKpis(Guid vehicleAssetId)
+    {
+        try
+        {
+            var kpis = await _fleetBatteryService.GetKpisAsync(vehicleAssetId);
+            return Ok(kpis);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving fleet battery KPIs for vehicle {VehicleAssetId}", vehicleAssetId);
+            return StatusCode(500, "An error occurred while retrieving battery KPIs");
+        }
+    }
+
+    [HttpGet("{id:guid}/events")]
+    public async Task<ActionResult<IEnumerable<FleetBatteryEventDto>>> GetEvents(Guid id)
+    {
+        try
+        {
+            var items = await _fleetBatteryService.GetEventsAsync(id);
+            return Ok(items);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving fleet battery events {Id}", id);
+            return StatusCode(500, "An error occurred while retrieving battery history");
+        }
+    }
+
     [HttpPost]
     public async Task<ActionResult<FleetBatteryDto>> Create([FromBody] CreateFleetBatteryDto dto)
     {

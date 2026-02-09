@@ -17,6 +17,36 @@ public sealed class FleetTyreService : IFleetTyreService
         _currentUserProvider = currentUserProvider;
     }
 
+    public async Task<IReadOnlyList<FleetTyreEventDto>> GetEventsAsync(Guid fleetTyreId)
+    {
+        if (fleetTyreId == Guid.Empty) return Array.Empty<FleetTyreEventDto>();
+
+        var tenantId = _currentUserProvider.TenantId;
+        var repo = _unitOfWork.Repository<FleetTyreEvent>();
+
+        var items = await repo.GetQueryable(e => e.TenantId == tenantId && e.FleetTyreId == fleetTyreId && !e.IsDeleted)
+            .OrderByDescending(e => e.EventAtUtc)
+            .Select(e => new FleetTyreEventDto
+            {
+                Id = e.Id,
+                FleetTyreId = e.FleetTyreId,
+                VehicleAssetId = e.VehicleAssetId,
+                EventAtUtc = e.EventAtUtc,
+                EventType = e.EventType,
+                FromPosition = e.FromPosition,
+                ToPosition = e.ToPosition,
+                FromStatus = e.FromStatus,
+                ToStatus = e.ToStatus,
+                TreadDepthMm = e.TreadDepthMm,
+                Notes = e.Notes,
+                CreatedAt = e.CreatedAt,
+                CreatedByUserId = e.CreatedById,
+            })
+            .ToListAsync();
+
+        return items;
+    }
+
     public async Task<PagedResult<FleetTyreDto>> GetPagedAsync(Guid vehicleAssetId, int page, int pageSize)
     {
         if (vehicleAssetId == Guid.Empty) return new PagedResult<FleetTyreDto> { Items = new List<FleetTyreDto>(), TotalCount = 0, Page = 1, PageSize = pageSize };
@@ -93,6 +123,14 @@ public sealed class FleetTyreService : IFleetTyreService
         var userId = _currentUserProvider.UserId;
         var now = DateTime.UtcNow;
 
+        var status = string.IsNullOrWhiteSpace(dto.Status) ? "Installed" : dto.Status.Trim();
+        var position = string.IsNullOrWhiteSpace(dto.Position) ? null : dto.Position.Trim();
+
+        if (string.Equals(status, "Installed", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(position))
+        {
+            await EnsureNoOtherInstalledAtPositionAsync(dto.VehicleAssetId, position, excludeTyreId: null);
+        }
+
         var entity = new FleetTyre
         {
             Id = Guid.NewGuid(),
@@ -101,16 +139,35 @@ public sealed class FleetTyreService : IFleetTyreService
             SerialNumber = dto.SerialNumber.Trim(),
             Brand = string.IsNullOrWhiteSpace(dto.Brand) ? null : dto.Brand.Trim(),
             Size = string.IsNullOrWhiteSpace(dto.Size) ? null : dto.Size.Trim(),
-            Position = string.IsNullOrWhiteSpace(dto.Position) ? null : dto.Position.Trim(),
+            Position = position,
             TreadDepthMm = dto.TreadDepthMm,
             InstalledAtUtc = (dto.InstalledAtUtc ?? now).ToUniversalTime(),
-            Status = string.IsNullOrWhiteSpace(dto.Status) ? "Installed" : dto.Status.Trim(),
+            Status = status,
             Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim(),
             CreatedAt = now,
             CreatedById = userId
         };
 
         await _unitOfWork.Repository<FleetTyre>().AddAsync(entity);
+
+        await _unitOfWork.Repository<FleetTyreEvent>().AddAsync(new FleetTyreEvent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FleetTyreId = entity.Id,
+            VehicleAssetId = entity.VehicleAssetId,
+            EventAtUtc = now,
+            EventType = string.Equals(status, "Installed", StringComparison.OrdinalIgnoreCase) ? "Installed" : "Created",
+            FromPosition = null,
+            ToPosition = entity.Position,
+            FromStatus = null,
+            ToStatus = entity.Status,
+            TreadDepthMm = entity.TreadDepthMm,
+            Notes = entity.Notes,
+            CreatedAt = now,
+            CreatedById = userId,
+        });
+
         await _unitOfWork.SaveChangesAsync();
         return (await GetByIdAsync(entity.Id))!;
     }
@@ -128,6 +185,10 @@ public sealed class FleetTyreService : IFleetTyreService
         var entity = await repo.FirstOrDefaultAsync(t => t.TenantId == tenantId && t.Id == id && !t.IsDeleted)
             ?? throw new ArgumentException("Tyre not found.");
 
+        var fromPosition = entity.Position;
+        var fromStatus = entity.Status;
+        var fromTread = entity.TreadDepthMm;
+
         if (dto.VehicleAssetId != Guid.Empty) entity.VehicleAssetId = dto.VehicleAssetId;
         if (!string.IsNullOrWhiteSpace(dto.SerialNumber)) entity.SerialNumber = dto.SerialNumber.Trim();
         entity.Brand = string.IsNullOrWhiteSpace(dto.Brand) ? null : dto.Brand.Trim();
@@ -140,7 +201,45 @@ public sealed class FleetTyreService : IFleetTyreService
         entity.UpdatedAt = now;
         entity.LastModifiedById = userId;
 
+        if (string.Equals(entity.Status, "Installed", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(entity.Position))
+        {
+            await EnsureNoOtherInstalledAtPositionAsync(entity.VehicleAssetId, entity.Position, excludeTyreId: entity.Id);
+        }
+
+        if (string.Equals(entity.Status, "Removed", StringComparison.OrdinalIgnoreCase) || string.Equals(entity.Status, "Disposed", StringComparison.OrdinalIgnoreCase))
+        {
+            entity.RemovedAtUtc ??= now;
+        }
+        else if (string.Equals(entity.Status, "Installed", StringComparison.OrdinalIgnoreCase))
+        {
+            entity.RemovedAtUtc = null;
+        }
+
         await repo.UpdateAsync(entity);
+
+        if (!string.Equals(fromPosition, entity.Position, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(fromStatus, entity.Status, StringComparison.OrdinalIgnoreCase) ||
+            fromTread != entity.TreadDepthMm)
+        {
+            await _unitOfWork.Repository<FleetTyreEvent>().AddAsync(new FleetTyreEvent
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                FleetTyreId = entity.Id,
+                VehicleAssetId = entity.VehicleAssetId,
+                EventAtUtc = now,
+                EventType = ResolveEventType(fromPosition, entity.Position, fromStatus, entity.Status),
+                FromPosition = fromPosition,
+                ToPosition = entity.Position,
+                FromStatus = fromStatus,
+                ToStatus = entity.Status,
+                TreadDepthMm = entity.TreadDepthMm,
+                Notes = entity.Notes,
+                CreatedAt = now,
+                CreatedById = userId,
+            });
+        }
+
         await _unitOfWork.SaveChangesAsync();
         return (await GetByIdAsync(entity.Id))!;
     }
@@ -164,6 +263,47 @@ public sealed class FleetTyreService : IFleetTyreService
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         return true;
+    }
+
+    private async Task EnsureNoOtherInstalledAtPositionAsync(Guid vehicleAssetId, string position, Guid? excludeTyreId)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+
+        var q = _unitOfWork.Repository<FleetTyre>()
+            .GetQueryable(t =>
+                t.TenantId == tenantId &&
+                t.VehicleAssetId == vehicleAssetId &&
+                !t.IsDeleted &&
+                t.Status == "Installed" &&
+                t.Position != null &&
+                t.Position == position);
+
+        if (excludeTyreId.HasValue && excludeTyreId.Value != Guid.Empty)
+        {
+            q = q.Where(t => t.Id != excludeTyreId.Value);
+        }
+
+        var exists = await q.AnyAsync();
+        if (exists)
+            throw new InvalidOperationException($"Position '{position}' already has an installed tyre for this vehicle.");
+    }
+
+    private static string ResolveEventType(string? fromPosition, string? toPosition, string fromStatus, string toStatus)
+    {
+        if (!string.Equals(fromStatus, toStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(toStatus, "Installed", StringComparison.OrdinalIgnoreCase)) return "Installed";
+            if (string.Equals(toStatus, "Removed", StringComparison.OrdinalIgnoreCase)) return "Removed";
+            if (string.Equals(toStatus, "Disposed", StringComparison.OrdinalIgnoreCase)) return "Disposed";
+            return "StatusChanged";
+        }
+
+        if (!string.Equals(fromPosition, toPosition, StringComparison.OrdinalIgnoreCase))
+        {
+            return "Rotated";
+        }
+
+        return "Updated";
     }
 }
 

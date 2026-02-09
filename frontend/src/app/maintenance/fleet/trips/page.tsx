@@ -134,6 +134,9 @@ function FleetTripsPageContent() {
     notes: '' as string,
   });
 
+  const [cancelOpen, setCancelOpen] = React.useState(false);
+  const [cancelReason, setCancelReason] = React.useState('');
+
   const [createForm, setCreateForm] = React.useState<CreateFleetTripDto>({
     vehicleAssetId: '',
     driverEmployeeId: null,
@@ -703,6 +706,16 @@ function FleetTripsPageContent() {
 
                 <div className="flex items-center gap-2">
                   <Button
+                    variant="destructive"
+                    disabled={['Dispatched', 'Completed', 'Cancelled'].includes(selected.status)}
+                    onClick={() => {
+                      setCancelReason('');
+                      setCancelOpen(true);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
                     variant="outline"
                     disabled={selected.status !== 'Approved'}
                     onClick={() => {
@@ -868,6 +881,44 @@ function FleetTripsPageContent() {
               disabled={!selectedInspection}
             >
               Complete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Cancel Trip</DialogTitle>
+            <DialogDescription>Cancel this trip request before dispatch. This will set the trip status to Cancelled.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <Label>Reason (optional)</Label>
+            <Textarea value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="e.g. Trip no longer required" />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelOpen(false)}>
+              Close
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={!selected}
+              onClick={async () => {
+                if (!selected) return;
+                try {
+                  await fleetService.cancelTrip(selected.id, cancelReason.trim());
+                  toast({ title: 'Trip cancelled' });
+                  setCancelOpen(false);
+                  await refreshSelected();
+                  await loadTrips();
+                } catch (e: any) {
+                  toast({ title: 'Cancel failed', description: e?.message || String(e), variant: 'destructive' });
+                }
+              }}
+            >
+              Cancel Trip
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -17,6 +17,82 @@ public sealed class FleetBatteryService : IFleetBatteryService
         _currentUserProvider = currentUserProvider;
     }
 
+    public async Task<IReadOnlyList<FleetBatteryEventDto>> GetEventsAsync(Guid fleetBatteryId)
+    {
+        if (fleetBatteryId == Guid.Empty) return Array.Empty<FleetBatteryEventDto>();
+
+        var tenantId = _currentUserProvider.TenantId;
+        var repo = _unitOfWork.Repository<FleetBatteryEvent>();
+
+        var items = await repo.GetQueryable(e => e.TenantId == tenantId && e.FleetBatteryId == fleetBatteryId && !e.IsDeleted)
+            .OrderByDescending(e => e.EventAtUtc)
+            .Select(e => new FleetBatteryEventDto
+            {
+                Id = e.Id,
+                FleetBatteryId = e.FleetBatteryId,
+                VehicleAssetId = e.VehicleAssetId,
+                EventAtUtc = e.EventAtUtc,
+                EventType = e.EventType,
+                FromPosition = e.FromPosition,
+                ToPosition = e.ToPosition,
+                FromStatus = e.FromStatus,
+                ToStatus = e.ToStatus,
+                Notes = e.Notes,
+                CreatedAt = e.CreatedAt,
+                CreatedByUserId = e.CreatedById,
+            })
+            .ToListAsync();
+
+        return items;
+    }
+
+    public async Task<FleetBatteryKpisDto> GetKpisAsync(Guid vehicleAssetId, DateTime? asAtUtc = null)
+    {
+        if (vehicleAssetId == Guid.Empty)
+            return new FleetBatteryKpisDto { VehicleAssetId = vehicleAssetId };
+
+        var tenantId = _currentUserProvider.TenantId;
+        var now = asAtUtc?.ToUniversalTime() ?? DateTime.UtcNow;
+
+        var q = _unitOfWork.Repository<FleetBattery>()
+            .GetQueryable(b => b.TenantId == tenantId && b.VehicleAssetId == vehicleAssetId && !b.IsDeleted);
+
+        var rows = await q.Select(b => new { b.Status, b.InstalledAtUtc }).ToListAsync();
+
+        var installed = rows.Count(r => string.Equals(r.Status, "Installed", StringComparison.OrdinalIgnoreCase));
+        var inStock = rows.Count(r => string.Equals(r.Status, "InStock", StringComparison.OrdinalIgnoreCase));
+        var removed = rows.Count(r => string.Equals(r.Status, "Removed", StringComparison.OrdinalIgnoreCase));
+        var disposed = rows.Count(r => string.Equals(r.Status, "Disposed", StringComparison.OrdinalIgnoreCase));
+
+        double? avgAgeDays = null;
+        var installedAges = rows
+            .Where(r => string.Equals(r.Status, "Installed", StringComparison.OrdinalIgnoreCase))
+            .Select(r => (now - r.InstalledAtUtc.ToUniversalTime()).TotalDays)
+            .Where(d => d >= 0)
+            .ToList();
+
+        if (installedAges.Count > 0) avgAgeDays = installedAges.Average();
+
+        DateTime? latestInstalled = null;
+        var latest = rows
+            .Where(r => string.Equals(r.Status, "Installed", StringComparison.OrdinalIgnoreCase))
+            .Select(r => (DateTime?)r.InstalledAtUtc)
+            .Max();
+        if (latest.HasValue) latestInstalled = latest.Value;
+
+        return new FleetBatteryKpisDto
+        {
+            VehicleAssetId = vehicleAssetId,
+            Total = rows.Count,
+            Installed = installed,
+            InStock = inStock,
+            Removed = removed,
+            Disposed = disposed,
+            AverageInstalledAgeDays = avgAgeDays,
+            LatestInstalledAtUtc = latestInstalled
+        };
+    }
+
     public async Task<PagedResult<FleetBatteryDto>> GetPagedAsync(Guid vehicleAssetId, int page, int pageSize)
     {
         if (vehicleAssetId == Guid.Empty) return new PagedResult<FleetBatteryDto> { Items = new List<FleetBatteryDto>(), TotalCount = 0, Page = 1, PageSize = pageSize };
@@ -91,6 +167,14 @@ public sealed class FleetBatteryService : IFleetBatteryService
         var userId = _currentUserProvider.UserId;
         var now = DateTime.UtcNow;
 
+        var status = string.IsNullOrWhiteSpace(dto.Status) ? "Installed" : dto.Status.Trim();
+        var position = string.IsNullOrWhiteSpace(dto.Position) ? null : dto.Position.Trim();
+
+        if (string.Equals(status, "Installed", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(position))
+        {
+            await EnsureNoOtherInstalledAtPositionAsync(dto.VehicleAssetId, position, excludeBatteryId: null);
+        }
+
         var entity = new FleetBattery
         {
             Id = Guid.NewGuid(),
@@ -99,15 +183,33 @@ public sealed class FleetBatteryService : IFleetBatteryService
             SerialNumber = dto.SerialNumber.Trim(),
             Brand = string.IsNullOrWhiteSpace(dto.Brand) ? null : dto.Brand.Trim(),
             Spec = string.IsNullOrWhiteSpace(dto.Spec) ? null : dto.Spec.Trim(),
-            Position = string.IsNullOrWhiteSpace(dto.Position) ? null : dto.Position.Trim(),
+            Position = position,
             InstalledAtUtc = (dto.InstalledAtUtc ?? now).ToUniversalTime(),
-            Status = string.IsNullOrWhiteSpace(dto.Status) ? "Installed" : dto.Status.Trim(),
+            Status = status,
             Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim(),
             CreatedAt = now,
             CreatedById = userId
         };
 
         await _unitOfWork.Repository<FleetBattery>().AddAsync(entity);
+
+        await _unitOfWork.Repository<FleetBatteryEvent>().AddAsync(new FleetBatteryEvent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FleetBatteryId = entity.Id,
+            VehicleAssetId = entity.VehicleAssetId,
+            EventAtUtc = now,
+            EventType = string.Equals(status, "Installed", StringComparison.OrdinalIgnoreCase) ? "Installed" : "Created",
+            FromPosition = null,
+            ToPosition = entity.Position,
+            FromStatus = null,
+            ToStatus = entity.Status,
+            Notes = entity.Notes,
+            CreatedAt = now,
+            CreatedById = userId,
+        });
+
         await _unitOfWork.SaveChangesAsync();
         return (await GetByIdAsync(entity.Id))!;
     }
@@ -125,6 +227,9 @@ public sealed class FleetBatteryService : IFleetBatteryService
         var entity = await repo.FirstOrDefaultAsync(b => b.TenantId == tenantId && b.Id == id && !b.IsDeleted)
             ?? throw new ArgumentException("Battery not found.");
 
+        var fromPosition = entity.Position;
+        var fromStatus = entity.Status;
+
         if (dto.VehicleAssetId != Guid.Empty) entity.VehicleAssetId = dto.VehicleAssetId;
         if (!string.IsNullOrWhiteSpace(dto.SerialNumber)) entity.SerialNumber = dto.SerialNumber.Trim();
         entity.Brand = string.IsNullOrWhiteSpace(dto.Brand) ? null : dto.Brand.Trim();
@@ -136,7 +241,43 @@ public sealed class FleetBatteryService : IFleetBatteryService
         entity.UpdatedAt = now;
         entity.LastModifiedById = userId;
 
+        if (string.Equals(entity.Status, "Installed", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(entity.Position))
+        {
+            await EnsureNoOtherInstalledAtPositionAsync(entity.VehicleAssetId, entity.Position, excludeBatteryId: entity.Id);
+        }
+
+        if (string.Equals(entity.Status, "Removed", StringComparison.OrdinalIgnoreCase) || string.Equals(entity.Status, "Disposed", StringComparison.OrdinalIgnoreCase))
+        {
+            entity.RemovedAtUtc ??= now;
+        }
+        else if (string.Equals(entity.Status, "Installed", StringComparison.OrdinalIgnoreCase))
+        {
+            entity.RemovedAtUtc = null;
+        }
+
         await repo.UpdateAsync(entity);
+
+        if (!string.Equals(fromPosition, entity.Position, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(fromStatus, entity.Status, StringComparison.OrdinalIgnoreCase))
+        {
+            await _unitOfWork.Repository<FleetBatteryEvent>().AddAsync(new FleetBatteryEvent
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                FleetBatteryId = entity.Id,
+                VehicleAssetId = entity.VehicleAssetId,
+                EventAtUtc = now,
+                EventType = ResolveEventType(fromPosition, entity.Position, fromStatus, entity.Status),
+                FromPosition = fromPosition,
+                ToPosition = entity.Position,
+                FromStatus = fromStatus,
+                ToStatus = entity.Status,
+                Notes = entity.Notes,
+                CreatedAt = now,
+                CreatedById = userId,
+            });
+        }
+
         await _unitOfWork.SaveChangesAsync();
         return (await GetByIdAsync(entity.Id))!;
     }
@@ -161,6 +302,47 @@ public sealed class FleetBatteryService : IFleetBatteryService
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         return true;
+    }
+
+    private async Task EnsureNoOtherInstalledAtPositionAsync(Guid vehicleAssetId, string position, Guid? excludeBatteryId)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+
+        var q = _unitOfWork.Repository<FleetBattery>()
+            .GetQueryable(b =>
+                b.TenantId == tenantId &&
+                b.VehicleAssetId == vehicleAssetId &&
+                !b.IsDeleted &&
+                b.Status == "Installed" &&
+                b.Position != null &&
+                b.Position == position);
+
+        if (excludeBatteryId.HasValue && excludeBatteryId.Value != Guid.Empty)
+        {
+            q = q.Where(b => b.Id != excludeBatteryId.Value);
+        }
+
+        var exists = await q.AnyAsync();
+        if (exists)
+            throw new InvalidOperationException($"Position '{position}' already has an installed battery for this vehicle.");
+    }
+
+    private static string ResolveEventType(string? fromPosition, string? toPosition, string fromStatus, string toStatus)
+    {
+        if (!string.Equals(fromStatus, toStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(toStatus, "Installed", StringComparison.OrdinalIgnoreCase)) return "Installed";
+            if (string.Equals(toStatus, "Removed", StringComparison.OrdinalIgnoreCase)) return "Removed";
+            if (string.Equals(toStatus, "Disposed", StringComparison.OrdinalIgnoreCase)) return "Disposed";
+            return "StatusChanged";
+        }
+
+        if (!string.Equals(fromPosition, toPosition, StringComparison.OrdinalIgnoreCase))
+        {
+            return "Moved";
+        }
+
+        return "Updated";
     }
 }
 

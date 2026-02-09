@@ -389,6 +389,23 @@ public class FleetTyreDto
     public string? Notes { get; set; }
 }
 
+public class FleetTyreEventDto
+{
+    public Guid Id { get; set; }
+    public Guid FleetTyreId { get; set; }
+    public Guid VehicleAssetId { get; set; }
+    public DateTime EventAtUtc { get; set; }
+    public string EventType { get; set; } = string.Empty;
+    public string? FromPosition { get; set; }
+    public string? ToPosition { get; set; }
+    public string? FromStatus { get; set; }
+    public string? ToStatus { get; set; }
+    public decimal? TreadDepthMm { get; set; }
+    public string? Notes { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+}
+
 public class CreateFleetTyreDto
 {
     [Required]
@@ -421,6 +438,22 @@ public class FleetBatteryDto
     public string? Notes { get; set; }
 }
 
+public class FleetBatteryEventDto
+{
+    public Guid Id { get; set; }
+    public Guid FleetBatteryId { get; set; }
+    public Guid VehicleAssetId { get; set; }
+    public DateTime EventAtUtc { get; set; }
+    public string EventType { get; set; } = string.Empty;
+    public string? FromPosition { get; set; }
+    public string? ToPosition { get; set; }
+    public string? FromStatus { get; set; }
+    public string? ToStatus { get; set; }
+    public string? Notes { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+}
+
 public class CreateFleetBatteryDto
 {
     [Required]
@@ -435,6 +468,18 @@ public class CreateFleetBatteryDto
     public DateTime? InstalledAtUtc { get; set; }
     public string Status { get; set; } = "Installed";
     public string? Notes { get; set; }
+}
+
+public class FleetBatteryKpisDto
+{
+    public Guid VehicleAssetId { get; set; }
+    public int Total { get; set; }
+    public int Installed { get; set; }
+    public int InStock { get; set; }
+    public int Removed { get; set; }
+    public int Disposed { get; set; }
+    public double? AverageInstalledAgeDays { get; set; }
+    public DateTime? LatestInstalledAtUtc { get; set; }
 }
 
 public class FleetExternalRepairDto

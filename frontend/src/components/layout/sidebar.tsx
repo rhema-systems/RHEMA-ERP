@@ -438,7 +438,7 @@ const navigationItems: NavItem[] = [
               { title: 'Quality Checklists', href: '/administration/maintenance/quality-checklists', icon: CheckSquare },
               { title: 'Admission Checklists', href: '/administration/maintenance/admission-checklists', icon: ClipboardCheck },
               // The following advanced maintenance admin menus are temporarily hidden:
-              // { title: 'Inspection Templates', href: '/administration/maintenance/inspection-templates', icon: ClipboardCheck },
+              { title: 'Inspection Templates', href: '/administration/maintenance/inspection-templates', icon: ClipboardCheck },
               // { title: 'Inspectors', href: '/administration/maintenance/inspectors', icon: Users },
               // { title: 'Maintenance Schedules', href: '/administration/maintenance/schedules', icon: Calendar },
               // { title: 'Technician Skills', href: '/administration/maintenance/skills', icon: Users },

@@ -281,6 +281,22 @@ export interface FleetTyreDto {
   notes?: string | null;
 }
 
+export interface FleetTyreEventDto {
+  id: string;
+  fleetTyreId: string;
+  vehicleAssetId: string;
+  eventAtUtc: string;
+  eventType: string;
+  fromPosition?: string | null;
+  toPosition?: string | null;
+  fromStatus?: string | null;
+  toStatus?: string | null;
+  treadDepthMm?: number | null;
+  notes?: string | null;
+  createdAt: string;
+  createdByUserId?: string | null;
+}
+
 export interface CreateFleetTyreDto {
   vehicleAssetId: string;
   serialNumber: string;
@@ -305,6 +321,32 @@ export interface FleetBatteryDto {
   removedAtUtc?: string | null;
   status: string;
   notes?: string | null;
+}
+
+export interface FleetBatteryEventDto {
+  id: string;
+  fleetBatteryId: string;
+  vehicleAssetId: string;
+  eventAtUtc: string;
+  eventType: string;
+  fromPosition?: string | null;
+  toPosition?: string | null;
+  fromStatus?: string | null;
+  toStatus?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  createdByUserId?: string | null;
+}
+
+export interface FleetBatteryKpisDto {
+  vehicleAssetId: string;
+  total: number;
+  installed: number;
+  inStock: number;
+  removed: number;
+  disposed: number;
+  averageInstalledAgeDays?: number | null;
+  latestInstalledAtUtc?: string | null;
 }
 
 export interface CreateFleetBatteryDto {
@@ -769,11 +811,27 @@ export const fleetService = {
     if (!response.ok) throw new Error(await readError(response));
   },
 
+  async getTyreEvents(id: string): Promise<FleetTyreEventDto[]> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/tyres/${id}/events`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
   async getBatteries(vehicleAssetId: string, page = 1, pageSize = 25): Promise<PagedResult<FleetBatteryDto>> {
     const usp = new URLSearchParams();
     usp.set('page', String(page));
     usp.set('pageSize', String(pageSize));
     const response = await fetch(`${API_BASE_URL}/maintenance/fleet/batteries/vehicle/${vehicleAssetId}?${usp.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async getBatteryKpis(vehicleAssetId: string): Promise<FleetBatteryKpisDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/batteries/vehicle/${vehicleAssetId}/kpis`, {
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error(await readError(response));
@@ -806,6 +864,14 @@ export const fleetService = {
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error(await readError(response));
+  },
+
+  async getBatteryEvents(id: string): Promise<FleetBatteryEventDto[]> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/batteries/${id}/events`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
   },
 
   async getExternalRepairs(params?: { page?: number; pageSize?: number; vehicleAssetId?: string; status?: string }): Promise<PagedResult<FleetExternalRepairDto>> {

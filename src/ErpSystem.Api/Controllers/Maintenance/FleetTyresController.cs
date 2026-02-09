@@ -34,6 +34,21 @@ public class FleetTyresController : ControllerBase
         }
     }
 
+    [HttpGet("{id:guid}/events")]
+    public async Task<ActionResult<IEnumerable<FleetTyreEventDto>>> GetEvents(Guid id)
+    {
+        try
+        {
+            var items = await _fleetTyreService.GetEventsAsync(id);
+            return Ok(items);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving fleet tyre events {Id}", id);
+            return StatusCode(500, "An error occurred while retrieving tyre history");
+        }
+    }
+
     [HttpPost]
     public async Task<ActionResult<FleetTyreDto>> Create([FromBody] CreateFleetTyreDto dto)
     {

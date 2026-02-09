@@ -132,7 +132,7 @@ public class FleetTyre : TenantEntity
     [MaxLength(30)]
     public string? Position { get; set; } // FrontLeft, FrontRight, RearLeft, RearRight, Spare, etc.
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(18,4)")]
     public decimal? TreadDepthMm { get; set; }
 
     public DateTime InstalledAtUtc { get; set; } = DateTime.UtcNow;
@@ -143,6 +143,45 @@ public class FleetTyre : TenantEntity
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
+
+    [ForeignKey(nameof(VehicleAssetId))]
+    public virtual MaintenanceAsset VehicleAsset { get; set; } = null!;
+}
+
+public class FleetTyreEvent : TenantEntity
+{
+    [Required]
+    public Guid FleetTyreId { get; set; }
+
+    [Required]
+    public Guid VehicleAssetId { get; set; }
+
+    public DateTime EventAtUtc { get; set; } = DateTime.UtcNow;
+
+    [Required]
+    [MaxLength(30)]
+    public string EventType { get; set; } = "Updated"; // Installed, Removed, Rotated, StatusChanged, Updated
+
+    [MaxLength(30)]
+    public string? FromPosition { get; set; }
+
+    [MaxLength(30)]
+    public string? ToPosition { get; set; }
+
+    [MaxLength(20)]
+    public string? FromStatus { get; set; }
+
+    [MaxLength(20)]
+    public string? ToStatus { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? TreadDepthMm { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    [ForeignKey(nameof(FleetTyreId))]
+    public virtual FleetTyre FleetTyre { get; set; } = null!;
 
     [ForeignKey(nameof(VehicleAssetId))]
     public virtual MaintenanceAsset VehicleAsset { get; set; } = null!;
@@ -174,6 +213,42 @@ public class FleetBattery : TenantEntity
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
+
+    [ForeignKey(nameof(VehicleAssetId))]
+    public virtual MaintenanceAsset VehicleAsset { get; set; } = null!;
+}
+
+public class FleetBatteryEvent : TenantEntity
+{
+    [Required]
+    public Guid FleetBatteryId { get; set; }
+
+    [Required]
+    public Guid VehicleAssetId { get; set; }
+
+    public DateTime EventAtUtc { get; set; } = DateTime.UtcNow;
+
+    [Required]
+    [MaxLength(30)]
+    public string EventType { get; set; } = "Updated"; // Installed, Removed, Moved, StatusChanged, Updated
+
+    [MaxLength(30)]
+    public string? FromPosition { get; set; }
+
+    [MaxLength(30)]
+    public string? ToPosition { get; set; }
+
+    [MaxLength(20)]
+    public string? FromStatus { get; set; }
+
+    [MaxLength(20)]
+    public string? ToStatus { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    [ForeignKey(nameof(FleetBatteryId))]
+    public virtual FleetBattery FleetBattery { get; set; } = null!;
 
     [ForeignKey(nameof(VehicleAssetId))]
     public virtual MaintenanceAsset VehicleAsset { get; set; } = null!;
