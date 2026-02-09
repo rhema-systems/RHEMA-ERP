@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Maintenance;
@@ -120,6 +121,9 @@ public class FleetTripService : IFleetTripService
         var userId = _currentUserProvider.UserId;
 
         var vehicle = await RequireVehicleAsync(dto.VehicleAssetId);
+        if (vehicle.Status != AssetStatus.Active)
+            throw new InvalidOperationException($"Vehicle '{vehicle.Name}' ({vehicle.AssetNumber}) is currently {vehicle.Status} and cannot be assigned to a trip.");
+
         var driver = dto.DriverEmployeeId.HasValue && dto.DriverEmployeeId.Value != Guid.Empty
             ? await RequireEmployeeAsync(dto.DriverEmployeeId.Value)
             : null;
@@ -182,6 +186,9 @@ public class FleetTripService : IFleetTripService
             throw new InvalidOperationException("Only Draft or Rejected trips can be edited.");
 
         var vehicle = await RequireVehicleAsync(dto.VehicleAssetId);
+        if (dto.VehicleAssetId != trip.VehicleAssetId && vehicle.Status != AssetStatus.Active)
+            throw new InvalidOperationException($"Vehicle '{vehicle.Name}' ({vehicle.AssetNumber}) is currently {vehicle.Status} and cannot be assigned to a trip.");
+
         var driver = dto.DriverEmployeeId.HasValue && dto.DriverEmployeeId.Value != Guid.Empty
             ? await RequireEmployeeAsync(dto.DriverEmployeeId.Value)
             : null;
@@ -383,6 +390,12 @@ public class FleetTripService : IFleetTripService
         }
 
         var vehicle = await RequireVehicleAsync(trip.VehicleAssetId);
+        if (vehicle.Status != AssetStatus.Active)
+            throw new InvalidOperationException($"Dispatch blocked: vehicle '{vehicle.Name}' ({vehicle.AssetNumber}) is currently {vehicle.Status}.");
+
+        vehicle.Status = AssetStatus.InUse;
+        vehicle.UpdatedAt = DateTime.UtcNow;
+        vehicle.LastModifiedById = userId;
 
         var dispatchedAt = (dto.DispatchedAt ?? DateTime.UtcNow).ToUniversalTime();
         trip.DispatchedAt = dispatchedAt;
@@ -397,6 +410,7 @@ public class FleetTripService : IFleetTripService
         trip.LastModifiedById = userId;
 
         await repo.UpdateAsync(trip);
+        await _unitOfWork.Repository<MaintenanceAsset>().UpdateAsync(vehicle);
         await _unitOfWork.SaveChangesAsync();
 
         await _appEventBus.PublishAsync(new EntityActivityEvent
@@ -436,6 +450,7 @@ public class FleetTripService : IFleetTripService
             throw new InvalidOperationException("Trip must be Dispatched before completion.");
 
         var vehicle = await RequireVehicleAsync(trip.VehicleAssetId);
+        var shouldReleaseVehicle = vehicle.Status == AssetStatus.InUse && !await IsVehicleUsedByActiveWorkOrderAsync(vehicle.Id);
 
         var completedAt = (dto.CompletedAt ?? DateTime.UtcNow).ToUniversalTime();
         trip.CompletedAt = completedAt;
@@ -458,6 +473,15 @@ public class FleetTripService : IFleetTripService
         trip.LastModifiedById = userId;
 
         await repo.UpdateAsync(trip);
+
+        if (shouldReleaseVehicle)
+        {
+            vehicle.Status = AssetStatus.Active;
+            vehicle.UpdatedAt = DateTime.UtcNow;
+            vehicle.LastModifiedById = userId;
+            await _unitOfWork.Repository<MaintenanceAsset>().UpdateAsync(vehicle);
+        }
+
         await _unitOfWork.SaveChangesAsync();
 
         // Record usage reading (best-effort).
@@ -601,5 +625,31 @@ public class FleetTripService : IFleetTripService
 
         if (employee == null) throw new ArgumentException("Driver employee not found.");
         return employee;
+    }
+
+    private async Task<bool> IsVehicleUsedByActiveWorkOrderAsync(Guid vehicleAssetId)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+
+        var activeWorkOrdersQ = _unitOfWork.Repository<WorkOrder>()
+            .GetQueryable(w => w.TenantId == tenantId && !w.IsDeleted && w.Status != "Completed" && w.Status != "Cancelled" && w.Status != "Closed");
+
+        var scheduleVehicleUseQ = _unitOfWork.Repository<MaintenanceStaffSchedule>()
+            .GetQueryable(s => s.TenantId == tenantId && !s.IsDeleted && s.AssignedVehicleId == vehicleAssetId && s.WorkOrderId.HasValue);
+
+        var scheduleUse = await scheduleVehicleUseQ
+            .Join(activeWorkOrdersQ, s => s.WorkOrderId!.Value, w => w.Id, (_, w) => w.Id)
+            .AnyAsync();
+
+        if (scheduleUse) return true;
+
+        var expenseVehicleUseQ = _unitOfWork.Repository<MaintenanceExpense>()
+            .GetQueryable(e => e.TenantId == tenantId && !e.IsDeleted && e.VehicleId == vehicleAssetId);
+
+        var expenseUse = await expenseVehicleUseQ
+            .Join(activeWorkOrdersQ, e => e.WorkOrderId, w => w.Id, (_, w) => w.Id)
+            .AnyAsync();
+
+        return expenseUse;
     }
 }

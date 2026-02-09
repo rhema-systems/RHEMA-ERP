@@ -155,7 +155,8 @@ function FleetTripsPageContent() {
         fetch(`${API_BASE_URL}/employees?page=1&pageSize=100`, { headers: getAuthHeaders() }),
       ]);
 
-      setVehicles(vRes.items || []);
+      const activeVehicles = (vRes.items || []).filter((v) => (v.status || '').toLowerCase() === 'active');
+      setVehicles(activeVehicles);
 
       if (!eRes.ok) throw new Error(await eRes.text());
       const rawEmployees: EmployeeDto[] = await eRes.json();

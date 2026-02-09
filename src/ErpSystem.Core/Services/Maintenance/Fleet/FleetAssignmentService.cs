@@ -95,7 +95,7 @@ public sealed class FleetAssignmentService : IFleetAssignmentService
 
         if (employee == null) throw new ArgumentException("Employee not found.");
 
-        // Block assignment only when a driver's license record exists and is expired.
+        // Block assignment if driver's license record exists and is expired.
         // Missing license records are allowed at assignment time (dispatch is still blocked by FleetTripService).
         var license = await _unitOfWork.Repository<EmployeeIdentificationCard>()
             .GetQueryable(c =>
@@ -114,6 +114,28 @@ public sealed class FleetAssignmentService : IFleetAssignmentService
         }
 
         var repo = _unitOfWork.Repository<FleetVehicleAssignment>();
+
+        // Vehicle must not currently be in use (shared lock with work orders and fleet trips).
+        if (vehicle.Status != ErpSystem.Core.Enums.AssetStatus.Active)
+            throw new InvalidOperationException($"Cannot assign driver: vehicle '{vehicle.Name}' ({vehicle.AssetNumber}) is currently {vehicle.Status}.");
+
+        // Enforce: a driver can only have one active vehicle assignment at a time.
+        // If they are assigned elsewhere, automatically end the existing assignment(s) as a transfer.
+        var existingEmployeeActives = await repo.FindAsync(a =>
+            a.TenantId == tenantId &&
+            a.EmployeeId == dto.EmployeeId &&
+            a.IsActive &&
+            !a.IsDeleted);
+
+        foreach (var existing in existingEmployeeActives.Where(a => a.VehicleAssetId != dto.VehicleAssetId))
+        {
+            existing.IsActive = false;
+            existing.AssignedToUtc ??= now;
+            existing.UpdatedAt = now;
+            existing.LastModifiedById = userId;
+            await repo.UpdateAsync(existing);
+        }
+
         var existingActives = await repo.FindAsync(a =>
             a.TenantId == tenantId &&
             a.VehicleAssetId == dto.VehicleAssetId &&

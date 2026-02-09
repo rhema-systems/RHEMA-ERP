@@ -307,7 +307,7 @@ export default function FleetVehiclesPage() {
                       <TableCell>{v.status}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
-                          <Button variant="outline" size="sm" onClick={() => openAssign(v)}>
+                          <Button variant="outline" size="sm" onClick={() => openAssign(v)} disabled={(v.status || '').toLowerCase() !== 'active'}>
                             Assign
                           </Button>
                           <Button variant="outline" size="sm" onClick={() => openHistory(v)}>
