@@ -378,7 +378,8 @@ public class FleetTripService : IFleetTripService
             if (license?.ExpiryDate == null)
             {
                 var name = driver != null ? $"{driver.FirstName} {driver.LastName}" : driverId.ToString();
-                throw new InvalidOperationException($"Dispatch blocked: driver license record not found for '{name}'.");
+                throw new InvalidOperationException(
+                    $"Dispatch blocked: '{name}' must have a valid driver's license on file before a trip can be dispatched (no driver's license record found).");
             }
 
             var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);

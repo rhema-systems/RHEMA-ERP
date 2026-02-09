@@ -120,20 +120,26 @@ public sealed class FleetAssignmentService : IFleetAssignmentService
             throw new InvalidOperationException($"Cannot assign driver: vehicle '{vehicle.Name}' ({vehicle.AssetNumber}) is currently {vehicle.Status}.");
 
         // Enforce: a driver can only have one active vehicle assignment at a time.
-        // If they are assigned elsewhere, automatically end the existing assignment(s) as a transfer.
-        var existingEmployeeActives = await repo.FindAsync(a =>
-            a.TenantId == tenantId &&
-            a.EmployeeId == dto.EmployeeId &&
-            a.IsActive &&
-            !a.IsDeleted);
+        // Do not auto-transfer implicitly; require explicitly ending the existing assignment first.
+        var existingEmployeeActive = await repo.GetQueryable(a =>
+                a.TenantId == tenantId &&
+                a.EmployeeId == dto.EmployeeId &&
+                a.IsActive &&
+                !a.IsDeleted)
+            .OrderByDescending(a => a.AssignedFromUtc)
+            .FirstOrDefaultAsync();
 
-        foreach (var existing in existingEmployeeActives.Where(a => a.VehicleAssetId != dto.VehicleAssetId))
+        if (existingEmployeeActive != null && existingEmployeeActive.VehicleAssetId != dto.VehicleAssetId)
         {
-            existing.IsActive = false;
-            existing.AssignedToUtc ??= now;
-            existing.UpdatedAt = now;
-            existing.LastModifiedById = userId;
-            await repo.UpdateAsync(existing);
+            var existingVehicle = await _unitOfWork.Repository<MaintenanceAsset>()
+                .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == existingEmployeeActive.VehicleAssetId && !a.IsDeleted);
+
+            var existingVehicleLabel = existingVehicle != null
+                ? $"'{existingVehicle.Name}' ({existingVehicle.AssetNumber})"
+                : existingEmployeeActive.VehicleAssetId.ToString();
+
+            throw new InvalidOperationException(
+                $"Cannot assign driver: '{employee.FirstName} {employee.LastName}' is already assigned to vehicle {existingVehicleLabel}. End the current assignment first.");
         }
 
         var existingActives = await repo.FindAsync(a =>
