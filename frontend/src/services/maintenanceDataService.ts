@@ -162,23 +162,23 @@ class MaintenanceDataService {
     try {
       // IMPORTANT:
       // - Work Order scheduling (MaintenanceStaffSchedule) and WorkOrderLabor use ApplicationUser IDs.
-      // - We still want to restrict the dropdown to *maintenance technicians* (HR Employees) when HR is configured.
+      // - Admins can map Users <-> Employees (UserEmployeeLink), and ApplicationUser has an EmployeeId field.
       // Strategy:
-      //   1) Load maintenance-available Employees (HR).
-      //   2) Load Users (ApplicationUser) and keep only users whose email matches one of those employees.
+      //   1) Load maintenance-available Employees (HR) to get valid technician EmployeeIds.
+      //   2) Load Users (ApplicationUser) and keep only users linked to those EmployeeIds.
       //   3) Fallback: if no maintenance employees exist (or endpoint fails), return all active users.
 
       let maintenanceEmployees: any[] = [];
       try {
         const response = await apiService.get('/employees/maintenance-available');
         maintenanceEmployees = Array.isArray(response) ? response : [];
-      } catch (e) {
+      } catch {
         maintenanceEmployees = [];
       }
 
-      const maintenanceEmails = new Set(
+      const maintenanceEmployeeIds = new Set(
         maintenanceEmployees
-          .map((e: any) => (e?.emailAddress ?? e?.email ?? '').toString().trim().toLowerCase())
+          .map((e: any) => (e?.id ?? '').toString().trim())
           .filter((x: string) => x.length > 0)
       );
 
@@ -186,23 +186,23 @@ class MaintenanceDataService {
       try {
         const response = await apiService.get('/user');
         users = Array.isArray(response) ? response : [];
-      } catch (e) {
+      } catch {
         users = [];
       }
 
       const activeUsers = users.filter((u: any) => u && u.isActive !== false);
 
-      const technicianUsers =
-        maintenanceEmails.size > 0
+      const linkedTechnicianUsers =
+        maintenanceEmployeeIds.size > 0
           ? activeUsers.filter((u: any) => {
-              const email = (u?.email ?? u?.emailAddress ?? '').toString().trim().toLowerCase();
-              return email && maintenanceEmails.has(email);
+              const employeeId = (u?.employeeId ?? u?.employeeID ?? u?.EmployeeId ?? '').toString().trim();
+              return employeeId && maintenanceEmployeeIds.has(employeeId);
             })
           : activeUsers;
 
-      // If HR has technician employees but we can't match any users by email,
-      // fallback to all active users to avoid breaking scheduling/labor entry.
-      const effectiveUsers = maintenanceEmails.size > 0 && technicianUsers.length === 0 ? activeUsers : technicianUsers;
+      // If HR has technician employees but no users are linked yet, don't block the UI;
+      // fallback to active users while the admin completes user-employee linking.
+      const effectiveUsers = maintenanceEmployeeIds.size > 0 && linkedTechnicianUsers.length === 0 ? activeUsers : linkedTechnicianUsers;
 
       return effectiveUsers.map((user: any) => ({
         id: user.id, // ApplicationUser ID (required by schedules/labor)

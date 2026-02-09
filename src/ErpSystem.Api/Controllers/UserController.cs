@@ -52,6 +52,7 @@ public partial class UserController : ControllerBase
                 LastName = u.LastName,
                 PhoneNumber = u.PhoneNumber,
                 IsActive = u.IsActive,
+                EmployeeId = u.EmployeeId?.ToString(),
                 Roles = u.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>(),
                 CreatedAt = u.CreatedAt,
                 LastLoginAt = u.LastLoginDate,
@@ -111,6 +112,7 @@ public partial class UserController : ControllerBase
                 LastName = u.LastName,
                 PhoneNumber = u.PhoneNumber,
                 IsActive = u.IsActive,
+                EmployeeId = u.EmployeeId?.ToString(),
                 Roles = u.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>(),
                 CreatedAt = u.CreatedAt,
                 LastLoginAt = u.LastLoginDate,
@@ -161,6 +163,7 @@ public partial class UserController : ControllerBase
                 LastName = user.LastName,
                 PhoneNumber = user.PhoneNumber,
                 IsActive = user.IsActive,
+                EmployeeId = user.EmployeeId?.ToString(),
                 Roles = user.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>(),
                 CreatedAt = user.CreatedAt,
                 LastLoginAt = user.LastLoginDate,
@@ -681,6 +684,7 @@ public class UserDto
     public string? LastName { get; set; }
     public string? PhoneNumber { get; set; }
     public bool IsActive { get; set; }
+    public string? EmployeeId { get; set; }
     public string[] Roles { get; set; } = Array.Empty<string>();
     public DateTime CreatedAt { get; set; }
     public DateTime? LastLoginAt { get; set; }
