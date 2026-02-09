@@ -35,9 +35,9 @@ public class FleetVehicleService : IFleetVehicleService
         var tenantId = _currentUserProvider.TenantId;
         var assetRepo = _unitOfWork.Repository<MaintenanceAsset>();
         var assignmentRepo = _unitOfWork.Repository<FleetVehicleAssignment>();
+        var activeAssignmentsQ = assignmentRepo.GetQueryable(x => x.TenantId == tenantId && x.IsActive);
 
         var q = assetRepo.GetQueryable(a => a.TenantId == tenantId)
-            .Include(a => a.AssetCategory)
             .Where(a => a.AssetCategory != null && a.AssetCategory.AssetType == "Vehicle");
 
         if (categoryId.HasValue && categoryId.Value != Guid.Empty)
@@ -75,13 +75,13 @@ public class FleetVehicleService : IFleetVehicleService
                 Model = a.Model,
                 Mileage = a.Mileage,
                 OperatingHours = a.OperatingHours,
-                CurrentDriverEmployeeId = assignmentRepo.GetQueryable(x =>
-                        x.TenantId == tenantId && x.VehicleAssetId == a.Id && x.IsActive && !x.IsDeleted)
+                CurrentDriverEmployeeId = activeAssignmentsQ
+                    .Where(x => x.VehicleAssetId == a.Id)
                     .OrderByDescending(x => x.AssignedFromUtc)
                     .Select(x => (Guid?)x.EmployeeId)
                     .FirstOrDefault(),
-                CurrentDriverEmployeeName = assignmentRepo.GetQueryable(x =>
-                        x.TenantId == tenantId && x.VehicleAssetId == a.Id && x.IsActive && !x.IsDeleted)
+                CurrentDriverEmployeeName = activeAssignmentsQ
+                    .Where(x => x.VehicleAssetId == a.Id)
                     .OrderByDescending(x => x.AssignedFromUtc)
                     .Select(x => x.Employee.FirstName + " " + x.Employee.LastName)
                     .FirstOrDefault()
