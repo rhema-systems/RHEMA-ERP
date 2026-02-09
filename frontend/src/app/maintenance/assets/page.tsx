@@ -45,6 +45,8 @@ interface Asset {
   manufacturer: string;
   model: string;
   serialNumber: string;
+  licensePlate?: string;
+  vin?: string;
   purchaseDate: string;
   warrantyExpiry: string;
   lastMaintenanceDate: string;
@@ -52,6 +54,7 @@ interface Asset {
   condition: 'Excellent' | 'Good' | 'Fair' | 'Poor';
   criticality: 'Low' | 'Medium' | 'High' | 'Critical';
   value: number;
+  currentValue?: number;
 }
 
 interface MaintenanceHistory {
@@ -94,6 +97,8 @@ function AssetsPageContent() {
     manufacturer: '',
     model: '',
     serialNumber: '',
+    licensePlate: '',
+    vin: '',
     purchaseDate: '',
     warrantyExpiry: '',
     criticality: 'Medium' as const,
@@ -153,7 +158,10 @@ function AssetsPageContent() {
         ...asset,
         assetNumber: asset.assetNumber || asset.AssetNumber || 'N/A',
         value: asset.currentValue || asset.CurrentValue || 0,
+        currentValue: asset.currentValue || asset.CurrentValue || 0,
         category: asset.assetCategory?.name || asset.categoryName || asset.CategoryName || 'Unknown',
+        licensePlate: asset.licensePlate || asset.LicensePlate || '',
+        vin: asset.vin || asset.VIN || asset.Vin || '',
         // Map date fields with proper formatting
         purchaseDate: formatDateForInput(asset.purchaseDate || asset.PurchaseDate),
         warrantyExpiry: formatDateForInput(asset.warrantyEndDate || asset.WarrantyEndDate || asset.warrantyExpiry),
@@ -172,6 +180,14 @@ function AssetsPageContent() {
       return mapped;
     });
   };
+
+  const isVehicleCategoryName = (categoryName: string | null | undefined) => {
+    if (!categoryName) return false;
+    return (assetTypes.find((t) => t.name === categoryName)?.assetType || '').toLowerCase() === 'vehicle';
+  };
+
+  const showVehicleFields = isVehicleCategoryName(newAsset.category);
+  const selectedAssetIsVehicle = selectedAsset ? isVehicleCategoryName(selectedAsset.category) : false;
 
   // Load assets and maintenance history from API
   useEffect(() => {
@@ -333,6 +349,7 @@ function AssetsPageContent() {
       // Find the selected asset type
       const selectedType = assetTypes.find(type => type.name === newAsset.category);
       const typeId = selectedType?.id || assetTypes[0]?.id;
+      const isVehicleCategory = (selectedType?.assetType || '').toLowerCase() === 'vehicle';
 
       // Log debugging info
       console.log('Creating asset with data:', {
@@ -409,6 +426,8 @@ function AssetsPageContent() {
         manufacturer: newAsset.manufacturer?.trim() || null,
         model: newAsset.model?.trim() || null,
         serialNumber: newAsset.serialNumber?.trim() || null,
+        licensePlate: isVehicleCategory ? (newAsset.licensePlate?.trim() || null) : null,
+        vin: isVehicleCategory ? (newAsset.vin?.trim() || null) : null,
         location: newAsset.location?.trim() || null,
         status: 'Active',
         criticality: newAsset.criticality || 'Medium',
@@ -499,6 +518,8 @@ function AssetsPageContent() {
         manufacturer: '',
         model: '',
         serialNumber: '',
+        licensePlate: '',
+        vin: '',
         purchaseDate: '',
         warrantyExpiry: '',
         criticality: 'Medium',
@@ -520,6 +541,8 @@ function AssetsPageContent() {
       manufacturer: asset.manufacturer || '',
       model: asset.model || '',
       serialNumber: asset.serialNumber || '',
+      licensePlate: asset.licensePlate || '',
+      vin: asset.vin || '',
       purchaseDate: formatDateForInput(asset.purchaseDate),
       warrantyExpiry: formatDateForInput(asset.warrantyExpiry),
       criticality: asset.criticality || 'Medium',
@@ -533,6 +556,10 @@ function AssetsPageContent() {
 
     try {
       const token = localStorage.getItem('authToken');
+      const selectedType = assetTypes.find(type => type.name === newAsset.category);
+      const assetCategoryId = selectedType?.id || assetTypes[0]?.id || '';
+      const isVehicleCategory = (selectedType?.assetType || '').toLowerCase() === 'vehicle';
+
       const response = await fetch(`${API_URL}/maintenance/assets/${selectedAsset.id}`, {
         method: 'PUT',
         headers: {
@@ -542,10 +569,12 @@ function AssetsPageContent() {
         body: JSON.stringify({
           name: newAsset.name,
           description: newAsset.description,
-          assetCategoryId: assetTypes.find(type => type.name === newAsset.category)?.id || assetTypes[0]?.id || '',
+          assetCategoryId,
           manufacturer: newAsset.manufacturer,
           model: newAsset.model,
           serialNumber: newAsset.serialNumber,
+          licensePlate: isVehicleCategory ? (newAsset.licensePlate?.trim() || null) : null,
+          vin: isVehicleCategory ? (newAsset.vin?.trim() || null) : null,
           location: newAsset.location,
           status: 'Active',
           criticality: newAsset.criticality,
@@ -584,6 +613,8 @@ function AssetsPageContent() {
         manufacturer: '',
         model: '',
         serialNumber: '',
+        licensePlate: '',
+        vin: '',
         purchaseDate: '',
         warrantyExpiry: '',
         criticality: 'Medium',
@@ -842,6 +873,28 @@ function AssetsPageContent() {
                   />
                 </div>
               </div>
+              {showVehicleFields && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="licensePlate">Plate Number</Label>
+                    <Input
+                      id="licensePlate"
+                      value={newAsset.licensePlate}
+                      onChange={(e) => setNewAsset(prev => ({ ...prev, licensePlate: e.target.value }))}
+                      placeholder="Plate number"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="vin">VIN</Label>
+                    <Input
+                      id="vin"
+                      value={newAsset.vin}
+                      onChange={(e) => setNewAsset(prev => ({ ...prev, vin: e.target.value }))}
+                      placeholder="Vehicle identification number"
+                    />
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="purchaseDate">Purchase Date</Label>
@@ -992,6 +1045,28 @@ function AssetsPageContent() {
                   />
                 </div>
               </div>
+              {showVehicleFields && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-licensePlate">Plate Number</Label>
+                    <Input
+                      id="edit-licensePlate"
+                      value={newAsset.licensePlate}
+                      onChange={(e) => setNewAsset(prev => ({ ...prev, licensePlate: e.target.value }))}
+                      placeholder="Plate number"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-vin">VIN</Label>
+                    <Input
+                      id="edit-vin"
+                      value={newAsset.vin}
+                      onChange={(e) => setNewAsset(prev => ({ ...prev, vin: e.target.value }))}
+                      placeholder="Vehicle identification number"
+                    />
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="edit-purchaseDate">Purchase Date</Label>
@@ -1334,6 +1409,18 @@ function AssetsPageContent() {
                       <p className="text-sm">{selectedAsset.serialNumber || 'Not specified'}</p>
                     </div>
                   </div>
+                  {selectedAssetIsVehicle && (
+                    <div className="mt-4 grid grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Plate Number</Label>
+                        <p className="text-sm">{selectedAsset.licensePlate || 'Not specified'}</p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">VIN</Label>
+                        <p className="text-sm">{selectedAsset.vin || 'Not specified'}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="border-t pt-4">
