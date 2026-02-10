@@ -16,6 +16,7 @@ export default function FleetPage() {
     { title: 'Batteries', href: '/maintenance/fleet/batteries', description: 'Battery tracking per vehicle' },
     { title: 'External Repairs', href: '/maintenance/fleet/external-repairs', description: 'Vendor repairs and external maintenance records' },
     { title: 'Costs', href: '/maintenance/fleet/costs', description: 'Fleet cost ledger and KPIs' },
+    { title: 'Reports', href: '/maintenance/fleet/reports', description: 'Cost and utilization summaries (by vehicle)' },
   ];
 
   return (

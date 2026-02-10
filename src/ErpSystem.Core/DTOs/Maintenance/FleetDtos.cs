@@ -532,6 +532,8 @@ public class FleetDashboardSummaryDto
     public int ComplianceOverdue { get; set; }
     public decimal FuelCostThisMonth { get; set; }
     public decimal ExternalRepairCostThisMonth { get; set; }
+    public decimal InternalMaintenanceCostThisMonth { get; set; }
+    public decimal TotalCostThisMonth { get; set; }
     public decimal? AverageFuelCostPerKm { get; set; }
     public decimal? AverageKmPerLiter { get; set; }
 }

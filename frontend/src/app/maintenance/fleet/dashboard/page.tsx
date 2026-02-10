@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { fleetService, FleetDashboardSummaryDto, FleetVehicleListDto } from '@/services/fleetService';
+import { fleetService, FleetDashboardSummaryDto, FleetHealthDto, FleetVehicleListDto } from '@/services/fleetService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -15,6 +15,7 @@ export default function FleetDashboardPage() {
   const [vehicles, setVehicles] = React.useState<FleetVehicleListDto[]>([]);
   const [vehicleId, setVehicleId] = React.useState<string>('all');
   const [summary, setSummary] = React.useState<FleetDashboardSummaryDto | null>(null);
+  const [health, setHealth] = React.useState<FleetHealthDto | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -44,6 +45,16 @@ export default function FleetDashboardPage() {
   React.useEffect(() => {
     loadVehicles();
   }, [loadVehicles]);
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        setHealth(await fleetService.getHealth());
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+  }, []);
 
   React.useEffect(() => {
     loadSummary();
@@ -83,6 +94,21 @@ export default function FleetDashboardPage() {
           <CardContent>{error}</CardContent>
         </Card>
       )}
+
+      {health?.warnings?.length ? (
+        <Card className="border-amber-300">
+          <CardHeader>
+            <CardTitle>Setup Warnings</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <ul className="list-disc space-y-1 pl-5">
+              {health.warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card>
@@ -134,6 +160,22 @@ export default function FleetDashboardPage() {
           <CardContent className="text-3xl font-semibold">
             {loading ? '…' : formatNumber(summary?.externalRepairCostThisMonth ?? null, 2)}
           </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Internal Maintenance (This Month)</CardTitle>
+          </CardHeader>
+          <CardContent className="text-3xl font-semibold">
+            {loading ? '…' : formatNumber(summary?.internalMaintenanceCostThisMonth ?? null, 2)}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Total Cost (This Month)</CardTitle>
+          </CardHeader>
+          <CardContent className="text-3xl font-semibold">{loading ? '…' : formatNumber(summary?.totalCostThisMonth ?? null, 2)}</CardContent>
         </Card>
 
         <Card>

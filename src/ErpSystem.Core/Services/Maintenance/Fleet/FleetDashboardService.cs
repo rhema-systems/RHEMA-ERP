@@ -67,9 +67,34 @@ public sealed class FleetDashboardService : IFleetDashboardService
             .Where(f => f.FuelledAt >= monthStart)
             .SumAsync(f => (decimal?)(f.TotalCost ?? 0)) ?? 0m;
 
-        var externalRepairCostThisMonth = await _unitOfWork.Repository<FleetCostEntry>()
-            .GetQueryable(c => c.TenantId == tenantId && !c.IsDeleted && c.CostType == "ExternalRepair" && c.CostDateUtc >= monthStart)
+        var externalRepairCostThisMonthQ = _unitOfWork.Repository<FleetCostEntry>()
+            .GetQueryable(c => c.TenantId == tenantId && !c.IsDeleted && c.CostType == "ExternalRepair" && c.CostDateUtc >= monthStart);
+        if (vehicleAssetId.HasValue && vehicleAssetId.Value != Guid.Empty)
+            externalRepairCostThisMonthQ = externalRepairCostThisMonthQ.Where(c => c.VehicleAssetId == vehicleAssetId.Value);
+
+        var externalRepairCostThisMonth = await externalRepairCostThisMonthQ
             .SumAsync(c => (decimal?)c.Amount) ?? 0m;
+
+        var internalMaintenanceCostThisMonthQ = _unitOfWork.Repository<FleetCostEntry>()
+            .GetQueryable(c => c.TenantId == tenantId && !c.IsDeleted && c.CostType == "InternalMaintenance" && c.CostDateUtc >= monthStart);
+        if (vehicleAssetId.HasValue && vehicleAssetId.Value != Guid.Empty)
+            internalMaintenanceCostThisMonthQ = internalMaintenanceCostThisMonthQ.Where(c => c.VehicleAssetId == vehicleAssetId.Value);
+
+        var internalMaintenanceCostThisMonth = await internalMaintenanceCostThisMonthQ
+            .SumAsync(c => (decimal?)c.Amount) ?? 0m;
+
+        var otherCostThisMonthQ = _unitOfWork.Repository<FleetCostEntry>()
+            .GetQueryable(c =>
+                c.TenantId == tenantId &&
+                !c.IsDeleted &&
+                c.CostDateUtc >= monthStart &&
+                c.CostType != "Fuel" &&
+                c.CostType != "ExternalRepair" &&
+                c.CostType != "InternalMaintenance");
+        if (vehicleAssetId.HasValue && vehicleAssetId.Value != Guid.Empty)
+            otherCostThisMonthQ = otherCostThisMonthQ.Where(c => c.VehicleAssetId == vehicleAssetId.Value);
+
+        var otherCostThisMonth = await otherCostThisMonthQ.SumAsync(c => (decimal?)c.Amount) ?? 0m;
 
         // Simple KPIs: average km per liter and average fuel cost per km over completed trips this month.
         decimal? avgKmPerLiter = null;
@@ -100,6 +125,8 @@ public sealed class FleetDashboardService : IFleetDashboardService
             ComplianceOverdue = overdue,
             FuelCostThisMonth = fuelCostThisMonth,
             ExternalRepairCostThisMonth = externalRepairCostThisMonth,
+            InternalMaintenanceCostThisMonth = internalMaintenanceCostThisMonth,
+            TotalCostThisMonth = fuelCostThisMonth + externalRepairCostThisMonth + internalMaintenanceCostThisMonth + otherCostThisMonth,
             AverageFuelCostPerKm = avgFuelCostPerKm,
             AverageKmPerLiter = avgKmPerLiter
         };

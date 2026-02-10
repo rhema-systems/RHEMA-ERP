@@ -109,3 +109,13 @@ public interface IFleetCostService
     Task<bool> DeleteAsync(Guid id);
 }
 
+public interface IFleetReportsService
+{
+    Task<FleetCostSummaryDto> GetCostSummaryAsync(DateTime? fromUtc = null, DateTime? toUtc = null, int top = 10, Guid? vehicleAssetId = null);
+    Task<FleetUtilizationSummaryDto> GetUtilizationSummaryAsync(DateTime? fromUtc = null, DateTime? toUtc = null, int top = 10, Guid? vehicleAssetId = null);
+}
+
+public interface IFleetHealthService
+{
+    Task<FleetHealthDto> GetHealthAsync();
+}

@@ -398,8 +398,55 @@ export interface FleetDashboardSummaryDto {
   complianceOverdue: number;
   fuelCostThisMonth: number;
   externalRepairCostThisMonth: number;
+  internalMaintenanceCostThisMonth: number;
+  totalCostThisMonth: number;
   averageFuelCostPerKm?: number | null;
   averageKmPerLiter?: number | null;
+}
+
+export interface FleetCostSummaryRowDto {
+  vehicleAssetId: string;
+  vehicleName: string;
+  entryCount: number;
+  totalAmount: number;
+  fuelAmount: number;
+  externalRepairAmount: number;
+  internalMaintenanceAmount: number;
+  otherAmount: number;
+}
+
+export interface FleetCostSummaryDto {
+  fromUtc: string;
+  toUtc: string;
+  totalAmount: number;
+  rows: FleetCostSummaryRowDto[];
+}
+
+export interface FleetUtilizationRowDto {
+  vehicleAssetId: string;
+  vehicleName: string;
+  completedTrips: number;
+  totalKm: number;
+  totalHours: number;
+  averageKmPerTrip?: number | null;
+  averageHoursPerTrip?: number | null;
+}
+
+export interface FleetUtilizationSummaryDto {
+  fromUtc: string;
+  toUtc: string;
+  completedTrips: number;
+  totalKm: number;
+  totalHours: number;
+  rows: FleetUtilizationRowDto[];
+}
+
+export interface FleetHealthDto {
+  vehicleCategoriesCount: number;
+  vehiclesCount: number;
+  maintenanceEmployeesCount: number;
+  employeesWithDriverLicenseCount: number;
+  warnings: string[];
 }
 
 export interface FleetCostEntryDto {
@@ -952,6 +999,52 @@ export const fleetService = {
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error(await readError(response));
+  },
+
+  async getCostSummary(params?: {
+    fromUtc?: string;
+    toUtc?: string;
+    top?: number;
+    vehicleAssetId?: string;
+  }): Promise<FleetCostSummaryDto> {
+    const usp = new URLSearchParams();
+    if (params?.fromUtc) usp.set('fromUtc', params.fromUtc);
+    if (params?.toUtc) usp.set('toUtc', params.toUtc);
+    if (params?.top) usp.set('top', String(params.top));
+    if (params?.vehicleAssetId) usp.set('vehicleAssetId', params.vehicleAssetId);
+
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/reports/cost-summary?${usp.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async getUtilization(params?: {
+    fromUtc?: string;
+    toUtc?: string;
+    top?: number;
+    vehicleAssetId?: string;
+  }): Promise<FleetUtilizationSummaryDto> {
+    const usp = new URLSearchParams();
+    if (params?.fromUtc) usp.set('fromUtc', params.fromUtc);
+    if (params?.toUtc) usp.set('toUtc', params.toUtc);
+    if (params?.top) usp.set('top', String(params.top));
+    if (params?.vehicleAssetId) usp.set('vehicleAssetId', params.vehicleAssetId);
+
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/reports/utilization?${usp.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async getHealth(): Promise<FleetHealthDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/health`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
   },
 };
 

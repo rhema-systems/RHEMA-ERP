@@ -672,6 +672,8 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetExternalRepairService, ErpSystem.Core.Services.Maintenance.Fleet.FleetExternalRepairService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetDashboardService, ErpSystem.Core.Services.Maintenance.Fleet.FleetDashboardService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetCostService, ErpSystem.Core.Services.Maintenance.Fleet.FleetCostService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetReportsService, ErpSystem.Core.Services.Maintenance.Fleet.FleetReportsService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetHealthService, ErpSystem.Core.Services.Maintenance.Fleet.FleetHealthService>();
             services.AddScoped<ErpSystem.Core.Interfaces.IDistributedLockService, ErpSystem.Api.Services.DistributedLockService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IConsignmentSettlementService, ErpSystem.Core.Services.Procurement.ConsignmentSettlementService>();
 
@@ -740,7 +742,9 @@ namespace ErpSystem.Api.Extensions
                 .AddPolicy("Procurement", policy =>
                     policy.RequireClaim("module", "Procurement"))
                 .AddPolicy("Marketing", policy =>
-                    policy.RequireClaim("module", "Marketing"));
+                    policy.RequireClaim("module", "Marketing"))
+                .AddPolicy("MaintenanceAccess", policy =>
+                    policy.RequireRole("Employee", "Manager", "TenantAdmin", "SuperAdmin"));
 
             return services;
         }

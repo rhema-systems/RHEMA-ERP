@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 
 [ApiController]
 [Route("api/maintenance/fleet/assignments")]
-[Authorize]
+[Authorize(Policy = "MaintenanceAccess")]
 public class FleetAssignmentsController : ControllerBase
 {
     private readonly IFleetAssignmentService _fleetAssignmentService;

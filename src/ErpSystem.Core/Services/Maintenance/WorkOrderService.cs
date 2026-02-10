@@ -321,7 +321,15 @@ public class WorkOrderService : IWorkOrderService
             }
 
             // Calculate total costs
-            var actualCost = workOrder.Labor.Sum(l => l.TotalCost) + result.TotalPartsCost;
+            var laborCost = workOrder.Labor.Sum(l => l.TotalCost);
+            var usedPartsCost = CalculateUsedPartsCost(workOrder);
+            result.TotalPartsCost = usedPartsCost;
+            var approvedExpensesTotal = await _expenseRepository.GetTotalExpensesByWorkOrderIdAsync(completionDto.WorkOrderId);
+
+            var computedActualCost = Math.Round(laborCost + usedPartsCost + approvedExpensesTotal, 2, MidpointRounding.AwayFromZero);
+            var actualCost = completionDto.ActualCost.HasValue && completionDto.ActualCost.Value > 0
+                ? completionDto.ActualCost.Value
+                : computedActualCost;
 
             // Release vehicles back to Active status
             await UpdateVehicleStatusOnWorkOrderCompleteAsync(completionDto.WorkOrderId);
@@ -365,6 +373,9 @@ public class WorkOrderService : IWorkOrderService
             {
                 workOrder.ActionCode = completionDto.ActionCode;
             }
+
+            // Post internal maintenance cost to fleet ledger when this work order involves exactly one vehicle asset (best-effort).
+            await UpsertFleetInternalMaintenanceCostEntryAsync(workOrder, actualCost, result.CompletionDate, completedById);
 
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
@@ -1252,6 +1263,19 @@ public class WorkOrderService : IWorkOrderService
             workOrder.CauseCode = completeDto.CauseCode;
             workOrder.ActionCode = completeDto.ActionCode;
             workOrder.UpdatedAt = DateTime.UtcNow;
+
+            // Compute and store actual cost consistently (labor + used parts + approved expenses), unless explicitly provided.
+            var laborCost = workOrder.Labor.Sum(l => l.TotalCost);
+            var usedPartsCost = CalculateUsedPartsCost(workOrder);
+            var approvedExpensesTotal = await _expenseRepository.GetTotalExpensesByWorkOrderIdAsync(workOrder.Id);
+            var computedActualCost = Math.Round(laborCost + usedPartsCost + approvedExpensesTotal, 2, MidpointRounding.AwayFromZero);
+            workOrder.ActualCost = completeDto.ActualCost.HasValue && completeDto.ActualCost.Value > 0
+                ? completeDto.ActualCost.Value
+                : computedActualCost;
+
+            // Best-effort fleet cost posting for vehicle work orders.
+            var completedByUserId = Guid.TryParse(_currentUserService.UserId, out var uid) ? uid : (Guid?)null;
+            await UpsertFleetInternalMaintenanceCostEntryAsync(workOrder, workOrder.ActualCost, workOrder.ActualCompletionDate ?? DateTime.UtcNow, completedByUserId);
 
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
@@ -2516,6 +2540,119 @@ public class WorkOrderService : IWorkOrderService
                 workOrderId, ex.Message);
             // Don't throw - this shouldn't block work order completion
         }
+    }
+
+    private static decimal CalculateUsedPartsCost(WorkOrder workOrder)
+    {
+        if (workOrder.Parts == null || workOrder.Parts.Count == 0) return 0m;
+
+        // WorkOrderPart.TotalCost represents required cost (QuantityRequired * UnitCost).
+        // For actual costing we sum UnitCost * QuantityUsed to avoid over-counting unused/returned parts.
+        decimal sum = 0m;
+        foreach (var p in workOrder.Parts)
+        {
+            if (p.QuantityUsed <= 0) continue;
+            if (p.UnitCost <= 0) continue;
+            sum += p.UnitCost * p.QuantityUsed;
+        }
+
+        return Math.Round(sum, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private async Task UpsertFleetInternalMaintenanceCostEntryAsync(
+        WorkOrder workOrder,
+        decimal actualCost,
+        DateTime completedAtUtc,
+        Guid? createdByUserId)
+    {
+        try
+        {
+            if (workOrder == null) return;
+            if (actualCost <= 0) return;
+
+            var tenantId = workOrder.TenantId;
+            var now = DateTime.UtcNow;
+            var effectiveUserId = createdByUserId.HasValue && createdByUserId.Value != Guid.Empty
+                ? createdByUserId.Value
+                : (Guid.TryParse(_currentUserService.UserId, out var uid) ? uid : Guid.Empty);
+
+            var vehicleAssetId = await TryResolveSingleVehicleAssetIdForWorkOrderAsync(workOrder);
+            if (!vehicleAssetId.HasValue || vehicleAssetId.Value == Guid.Empty) return;
+
+            var repo = _unitOfWork.Repository<FleetCostEntry>();
+
+            var existing = await repo.FirstOrDefaultAsync(c =>
+                c.TenantId == tenantId &&
+                c.WorkOrderId == workOrder.Id &&
+                c.CostType == "InternalMaintenance" &&
+                !c.IsDeleted);
+
+            if (existing == null)
+            {
+                await repo.AddAsync(new FleetCostEntry
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    VehicleAssetId = vehicleAssetId.Value,
+                    WorkOrderId = workOrder.Id,
+                    CostDateUtc = completedAtUtc.ToUniversalTime(),
+                    CostType = "InternalMaintenance",
+                    Amount = Math.Round(actualCost, 2, MidpointRounding.AwayFromZero),
+                    CurrencyCode = null,
+                    Notes = $"Work Order {workOrder.WorkOrderNumber} completion cost",
+                    CreatedAt = now,
+                    CreatedById = effectiveUserId
+                });
+            }
+            else
+            {
+                existing.VehicleAssetId = vehicleAssetId.Value;
+                existing.CostDateUtc = completedAtUtc.ToUniversalTime();
+                existing.Amount = Math.Round(actualCost, 2, MidpointRounding.AwayFromZero);
+                existing.Notes = $"Work Order {workOrder.WorkOrderNumber} completion cost";
+                existing.UpdatedAt = now;
+                existing.LastModifiedById = effectiveUserId;
+                await repo.UpdateAsync(existing);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to upsert fleet internal maintenance cost entry for work order {WorkOrderId}", workOrder.Id);
+        }
+    }
+
+    private async Task<Guid?> TryResolveSingleVehicleAssetIdForWorkOrderAsync(WorkOrder workOrder)
+    {
+        // Primary: the work order asset itself is a vehicle.
+        if (workOrder.AssetId != Guid.Empty &&
+            string.Equals(workOrder.Asset?.AssetCategory?.AssetType, "Vehicle", StringComparison.OrdinalIgnoreCase))
+            return workOrder.AssetId;
+
+        // Fallback: if schedules/expenses reference exactly one vehicle, use it.
+        var schedules = await _scheduleRepository.GetByWorkOrderIdAsync(workOrder.Id);
+        var expenses = await _expenseRepository.GetByWorkOrderIdAsync(workOrder.Id);
+
+        var vehicleIds = new HashSet<Guid>();
+        foreach (var s in schedules)
+        {
+            if (s.AssignedVehicleId.HasValue && s.AssignedVehicleId.Value != Guid.Empty)
+                vehicleIds.Add(s.AssignedVehicleId.Value);
+        }
+
+        foreach (var e in expenses)
+        {
+            if (e.VehicleId.HasValue && e.VehicleId.Value != Guid.Empty)
+                vehicleIds.Add(e.VehicleId.Value);
+        }
+
+        if (vehicleIds.Count != 1)
+        {
+            if (vehicleIds.Count > 1)
+                _logger.LogInformation("Skipping fleet cost posting for work order {WorkOrderId} because multiple vehicles were referenced: {VehicleIds}", workOrder.Id, string.Join(", ", vehicleIds));
+            return null;
+        }
+
+        return vehicleIds.First();
     }
 
     #endregion

@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 
 [ApiController]
 [Route("api/maintenance/fleet/dashboard")]
-[Authorize]
+[Authorize(Policy = "MaintenanceAccess")]
 public class FleetDashboardController : ControllerBase
 {
     private readonly IFleetDashboardService _dashboard;

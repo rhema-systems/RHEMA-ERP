@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 
 [ApiController]
 [Route("api/maintenance/fleet/trips")]
-[Authorize]
+[Authorize(Policy = "MaintenanceAccess")]
 public class FleetTripsController : ControllerBase
 {
     private readonly IFleetTripService _fleetTripService;
