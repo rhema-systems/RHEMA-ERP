@@ -25,7 +25,10 @@ import {
   AlertCircle,
   AlertTriangle,
   Eye,
-  Copy
+  Copy,
+  ChevronUp,
+  ChevronDown,
+  X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { 
@@ -59,6 +62,7 @@ export default function InspectionTemplatesPage() {
     category: 'Safety',
     frequency: 'Monthly',
     estimatedDuration: 60,
+    isActive: true,
     requiresSignature: false,
     allowPhotos: false,
     version: '1.0',
@@ -67,6 +71,44 @@ export default function InspectionTemplatesPage() {
     priority: 'Medium',
     checklistItems: []
   });
+
+  const normalizeChecklistOrders = (items: CreateInspectionTemplateDto['checklistItems']) =>
+    (items || []).map((i, idx) => ({ ...i, order: idx + 1 }));
+
+  const addChecklistItem = () => {
+    setFormData((p) => {
+      const next = [...(p.checklistItems || [])];
+      next.push({ item: '', type: 'checklist', required: false, order: next.length + 1 });
+      return { ...p, checklistItems: next };
+    });
+  };
+
+  const removeChecklistItem = (index: number) => {
+    setFormData((p) => {
+      const next = (p.checklistItems || []).filter((_, i) => i !== index);
+      return { ...p, checklistItems: normalizeChecklistOrders(next) };
+    });
+  };
+
+  const moveChecklistItem = (index: number, direction: 'up' | 'down') => {
+    setFormData((p) => {
+      const items = [...(p.checklistItems || [])];
+      const target = direction === 'up' ? index - 1 : index + 1;
+      if (target < 0 || target >= items.length) return p;
+      const tmp = items[index];
+      items[index] = items[target];
+      items[target] = tmp;
+      return { ...p, checklistItems: normalizeChecklistOrders(items) };
+    });
+  };
+
+  const updateChecklistItem = (index: number, patch: Partial<CreateInspectionTemplateDto['checklistItems'][number]>) => {
+    setFormData((p) => {
+      const next = [...(p.checklistItems || [])];
+      next[index] = { ...next[index], ...patch };
+      return { ...p, checklistItems: normalizeChecklistOrders(next) };
+    });
+  };
 
   // Fetch templates from API
   const fetchTemplates = async () => {
@@ -145,16 +187,18 @@ export default function InspectionTemplatesPage() {
       category: template.category,
       frequency: template.frequency,
       estimatedDuration: template.estimatedDuration,
+      isActive: template.isActive,
       requiresSignature: template.requiresSignature,
       allowPhotos: template.allowPhotos,
       version: template.version,
       assetTypes: template.assetTypes,
       inspectorRoles: template.inspectorRoles,
       priority: template.priority,
-      checklistItems: template.checklistItems.map(item => ({
+      checklistItems: template.checklistItems.map((item, idx) => ({
         item: item.item,
         type: item.type,
-        required: item.required
+        required: item.required,
+        order: item.order ?? (idx + 1)
       }))
     });
     setIsEditDialogOpen(true);
@@ -172,8 +216,7 @@ export default function InspectionTemplatesPage() {
       setIsSubmitting(true);
       setError(null);
       const updateData: UpdateInspectionTemplateDto = {
-        ...formData,
-        isActive: selectedTemplate.isActive
+        ...formData
       };
       console.log('Updating inspection template with data:', updateData);
       
@@ -226,6 +269,7 @@ export default function InspectionTemplatesPage() {
       category: 'Safety',
       frequency: 'Monthly',
       estimatedDuration: 60,
+      isActive: true,
       requiresSignature: false,
       allowPhotos: false,
       version: '1.0',
@@ -320,6 +364,7 @@ export default function InspectionTemplatesPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="Safety">Safety</SelectItem>
+                      <SelectItem value="Fleet">Fleet</SelectItem>
                       <SelectItem value="HVAC">HVAC</SelectItem>
                       <SelectItem value="Electrical">Electrical</SelectItem>
                       <SelectItem value="Fire Safety">Fire Safety</SelectItem>
@@ -409,6 +454,74 @@ export default function InspectionTemplatesPage() {
                   />
                   <Label htmlFor="active">Active</Label>
                 </div>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Label>Checklist Items ({formData.checklistItems.length})</Label>
+                  <Button type="button" size="sm" variant="outline" onClick={addChecklistItem}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Item
+                  </Button>
+                </div>
+
+                {formData.checklistItems.length === 0 ? (
+                  <div className="rounded-md border p-3 text-sm text-muted-foreground">
+                    No checklist items yet. Add at least one for templates used in fleet pre/post trip inspections.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {formData.checklistItems.map((ci, idx) => (
+                      <div key={`${idx}-${ci.order}`} className="rounded-md border p-3">
+                        <div className="flex items-start gap-3">
+                          <div className="pt-2 text-sm font-medium text-muted-foreground w-8">{idx + 1}.</div>
+                          <div className="grid flex-1 grid-cols-1 gap-3 md:grid-cols-12">
+                            <div className="md:col-span-7 space-y-1">
+                              <Label className="text-xs text-muted-foreground">Item</Label>
+                              <Input
+                                value={ci.item}
+                                onChange={(e) => updateChecklistItem(idx, { item: e.target.value })}
+                                placeholder="e.g. Check tyres condition"
+                              />
+                            </div>
+                            <div className="md:col-span-3 space-y-1">
+                              <Label className="text-xs text-muted-foreground">Type</Label>
+                              <Select value={ci.type} onValueChange={(v) => updateChecklistItem(idx, { type: v as any })}>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Type" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="checklist">Checklist</SelectItem>
+                                  <SelectItem value="text">Text</SelectItem>
+                                  <SelectItem value="number">Number</SelectItem>
+                                  <SelectItem value="measurement">Measurement</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="md:col-span-2 space-y-1">
+                              <Label className="text-xs text-muted-foreground">Required</Label>
+                              <div className="flex h-10 items-center gap-2">
+                                <Switch checked={!!ci.required} onCheckedChange={(checked) => updateChecklistItem(idx, { required: checked })} />
+                                <span className="text-xs text-muted-foreground">{ci.required ? 'Yes' : 'No'}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <Button type="button" size="icon" variant="ghost" onClick={() => moveChecklistItem(idx, 'up')} disabled={idx === 0}>
+                              <ChevronUp className="h-4 w-4" />
+                            </Button>
+                            <Button type="button" size="icon" variant="ghost" onClick={() => moveChecklistItem(idx, 'down')} disabled={idx === formData.checklistItems.length - 1}>
+                              <ChevronDown className="h-4 w-4" />
+                            </Button>
+                            <Button type="button" size="icon" variant="ghost" onClick={() => removeChecklistItem(idx)}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <DialogFooter>
@@ -548,10 +661,13 @@ export default function InspectionTemplatesPage() {
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
                 <SelectItem value="Safety">Safety</SelectItem>
+                <SelectItem value="Fleet">Fleet</SelectItem>
                 <SelectItem value="HVAC">HVAC</SelectItem>
                 <SelectItem value="Electrical">Electrical</SelectItem>
                 <SelectItem value="Fire Safety">Fire Safety</SelectItem>
                 <SelectItem value="Operations">Operations</SelectItem>
+                <SelectItem value="Quality">Quality</SelectItem>
+                <SelectItem value="Environmental">Environmental</SelectItem>
               </SelectContent>
             </Select>
 
@@ -782,17 +898,18 @@ export default function InspectionTemplatesPage() {
                   <SelectTrigger>
                     <SelectValue placeholder="Select category" />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Safety">Safety</SelectItem>
-                    <SelectItem value="HVAC">HVAC</SelectItem>
-                    <SelectItem value="Electrical">Electrical</SelectItem>
-                    <SelectItem value="Fire Safety">Fire Safety</SelectItem>
-                    <SelectItem value="Operations">Operations</SelectItem>
-                    <SelectItem value="Quality">Quality</SelectItem>
-                    <SelectItem value="Environmental">Environmental</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                    <SelectContent>
+                      <SelectItem value="Safety">Safety</SelectItem>
+                      <SelectItem value="Fleet">Fleet</SelectItem>
+                      <SelectItem value="HVAC">HVAC</SelectItem>
+                      <SelectItem value="Electrical">Electrical</SelectItem>
+                      <SelectItem value="Fire Safety">Fire Safety</SelectItem>
+                      <SelectItem value="Operations">Operations</SelectItem>
+                      <SelectItem value="Quality">Quality</SelectItem>
+                      <SelectItem value="Environmental">Environmental</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               <div className="space-y-2">
                 <Label htmlFor="edit-frequency">Frequency</Label>
                 <Select value={formData.frequency} onValueChange={(value) => setFormData({...formData, frequency: value})}>
@@ -873,6 +990,74 @@ export default function InspectionTemplatesPage() {
                 />
                 <Label htmlFor="edit-active">Active</Label>
               </div>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label>Checklist Items ({formData.checklistItems.length})</Label>
+                <Button type="button" size="sm" variant="outline" onClick={addChecklistItem}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Item
+                </Button>
+              </div>
+
+              {formData.checklistItems.length === 0 ? (
+                <div className="rounded-md border p-3 text-sm text-muted-foreground">
+                  No checklist items yet. Add items to make this template usable for inspections.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {formData.checklistItems.map((ci, idx) => (
+                    <div key={`${idx}-${ci.order}`} className="rounded-md border p-3">
+                      <div className="flex items-start gap-3">
+                        <div className="pt-2 text-sm font-medium text-muted-foreground w-8">{idx + 1}.</div>
+                        <div className="grid flex-1 grid-cols-1 gap-3 md:grid-cols-12">
+                          <div className="md:col-span-7 space-y-1">
+                            <Label className="text-xs text-muted-foreground">Item</Label>
+                            <Input
+                              value={ci.item}
+                              onChange={(e) => updateChecklistItem(idx, { item: e.target.value })}
+                              placeholder="e.g. Check tyres condition"
+                            />
+                          </div>
+                          <div className="md:col-span-3 space-y-1">
+                            <Label className="text-xs text-muted-foreground">Type</Label>
+                            <Select value={ci.type} onValueChange={(v) => updateChecklistItem(idx, { type: v as any })}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="checklist">Checklist</SelectItem>
+                                <SelectItem value="text">Text</SelectItem>
+                                <SelectItem value="number">Number</SelectItem>
+                                <SelectItem value="measurement">Measurement</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="md:col-span-2 space-y-1">
+                            <Label className="text-xs text-muted-foreground">Required</Label>
+                            <div className="flex h-10 items-center gap-2">
+                              <Switch checked={!!ci.required} onCheckedChange={(checked) => updateChecklistItem(idx, { required: checked })} />
+                              <span className="text-xs text-muted-foreground">{ci.required ? 'Yes' : 'No'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <Button type="button" size="icon" variant="ghost" onClick={() => moveChecklistItem(idx, 'up')} disabled={idx === 0}>
+                            <ChevronUp className="h-4 w-4" />
+                          </Button>
+                          <Button type="button" size="icon" variant="ghost" onClick={() => moveChecklistItem(idx, 'down')} disabled={idx === formData.checklistItems.length - 1}>
+                            <ChevronDown className="h-4 w-4" />
+                          </Button>
+                          <Button type="button" size="icon" variant="ghost" onClick={() => removeChecklistItem(idx)}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter>
