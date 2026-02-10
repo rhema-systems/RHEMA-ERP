@@ -40,7 +40,7 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
     {
         try
         {
-            var technician = await _employeeRepository.GetByIdAsync(createDto.TechnicianId);
+            var technician = await _employeeRepository.GetByIdAsync(createDto.TechnicianId, e => e.Department);
             if (technician == null)
                 throw new ArgumentException($"Technician with ID {createDto.TechnicianId} not found in HR system");
             if (!technician.IsActive)

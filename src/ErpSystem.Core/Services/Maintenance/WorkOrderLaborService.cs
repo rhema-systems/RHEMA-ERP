@@ -55,7 +55,7 @@ public class WorkOrderLaborService : IWorkOrderLaborService
             }
 
             // Verify the technician (employee) exists
-            var technician = await _employeeRepository.GetByIdAsync(technicianId)
+            var technician = await _employeeRepository.GetByIdAsync(technicianId, e => e.Department)
                 ?? throw new ArgumentException($"Technician with ID {technicianId} not found in HR system");
             if (!technician.IsActive)
                 throw new InvalidOperationException($"Technician {technician.FullName} is not active");

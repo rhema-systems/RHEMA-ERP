@@ -1107,7 +1107,8 @@ public class WorkOrderService : IWorkOrderService
             // Validate technician exists and can be assigned to maintenance if provided
             if (technicianId.HasValue)
             {
-                var technician = await _employeeRepository.GetByIdAsync(technicianId.Value) ?? throw new ArgumentException($"Technician with ID {technicianId.Value} not found in HR system");
+                var technician = await _employeeRepository.GetByIdAsync(technicianId.Value, e => e.Department)
+                    ?? throw new ArgumentException($"Technician with ID {technicianId.Value} not found in HR system");
                 if (!technician.IsActive)
                 {
                     throw new InvalidOperationException($"Technician {technician.FirstName} {technician.LastName} is not active");
