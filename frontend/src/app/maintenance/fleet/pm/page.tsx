@@ -11,12 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-
-function formatDate(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString();
-}
+import { formatFleetDate } from '@/lib/date-format';
 
 export default function FleetPmPlansPage() {
   const [vehicles, setVehicles] = React.useState<FleetVehicleListDto[]>([]);
@@ -187,7 +182,7 @@ export default function FleetPmPlansPage() {
             <div className="overflow-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b text-left text-muted-foreground">
+                  <tr className="border-b bg-muted/40 text-left text-muted-foreground">
                     <th className="py-2">Code</th>
                     <th className="py-2">Name</th>
                     <th className="py-2">Frequency</th>
@@ -196,14 +191,14 @@ export default function FleetPmPlansPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((s) => (
-                    <tr key={s.id} className="border-b">
+                  {items.map((s, idx) => (
+                    <tr key={s.id} className={idx % 2 === 1 ? 'border-b bg-muted/10 hover:bg-muted/30' : 'border-b hover:bg-muted/30'}>
                       <td className="py-2">{s.code}</td>
                       <td className="py-2">{s.name}</td>
                       <td className="py-2">
                         {s.primaryTriggerType === 'Usage' ? `Usage (km:${s.mileageTrigger ?? '—'}, hrs:${s.operatingHoursTrigger ?? '—'})` : s.frequency}
                       </td>
-                      <td className="py-2">{formatDate(s.nextDueDate)}</td>
+                      <td className="py-2">{formatFleetDate(s.nextDueDate)}</td>
                       <td className="py-2">{s.isActive ? 'Yes' : 'No'}</td>
                     </tr>
                   ))}

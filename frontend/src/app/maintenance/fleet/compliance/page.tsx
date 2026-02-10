@@ -2,11 +2,11 @@
 
 import React from 'react';
 import { Plus } from 'lucide-react';
-import { format } from 'date-fns';
 
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -14,17 +14,28 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
 import fleetService, {
   CreateFleetComplianceItemDto,
   FleetComplianceItemDto,
   FleetVehicleListDto,
 } from '@/services/fleetService';
+import maintenanceSettingsService from '@/services/maintenanceSettingsService';
+import { formatFleetDate } from '@/lib/date-format';
 
-function formatDate(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return format(d, 'dd MMM yyyy');
+function getDueStatus(expiryDateIso: string, dueSoonDays: number): 'Overdue' | 'DueSoon' | 'Ok' {
+  const expiry = new Date(expiryDateIso);
+  if (Number.isNaN(expiry.getTime())) return 'Ok';
+
+  const now = new Date();
+  const expiryDateOnlyUtc = Date.UTC(expiry.getFullYear(), expiry.getMonth(), expiry.getDate());
+  const nowDateOnlyUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const diffDays = Math.floor((expiryDateOnlyUtc - nowDateOnlyUtc) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) return 'Overdue';
+  if (diffDays <= Math.max(0, dueSoonDays)) return 'DueSoon';
+  return 'Ok';
 }
 
 export default function FleetCompliancePage() {
@@ -32,6 +43,7 @@ export default function FleetCompliancePage() {
 
   const [vehicles, setVehicles] = React.useState<FleetVehicleListDto[]>([]);
   const [vehicleId, setVehicleId] = React.useState<string>('');
+  const [dueSoonDays, setDueSoonDays] = React.useState<number>(7);
 
   const [loading, setLoading] = React.useState(false);
   const [items, setItems] = React.useState<FleetComplianceItemDto[]>([]);
@@ -39,6 +51,9 @@ export default function FleetCompliancePage() {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [editOpen, setEditOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<FleetComplianceItemDto | null>(null);
+
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState<FleetComplianceItemDto | null>(null);
 
   const [form, setForm] = React.useState<CreateFleetComplianceItemDto>({
     vehicleAssetId: '',
@@ -76,6 +91,17 @@ export default function FleetCompliancePage() {
   React.useEffect(() => {
     loadVehicles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const s = await maintenanceSettingsService.getSettings();
+        if (typeof s.fleetComplianceDueSoonDays === 'number') setDueSoonDays(s.fleetComplianceDueSoonDays);
+      } catch {
+        // best-effort (use fallback)
+      }
+    })();
   }, []);
 
   React.useEffect(() => {
@@ -193,10 +219,12 @@ export default function FleetCompliancePage() {
           <div className="rounded-md border">
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="bg-muted/40">
                   <TableHead>Type</TableHead>
                   <TableHead>Ref</TableHead>
+                  <TableHead>Issue</TableHead>
                   <TableHead>Expiry</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead>Critical</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -204,45 +232,83 @@ export default function FleetCompliancePage() {
               <TableBody>
                 {!vehicleId ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
                       Select a vehicle to view compliance items
                     </TableCell>
                   </TableRow>
                 ) : loading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
                       Loading...
                     </TableCell>
                   </TableRow>
                 ) : items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
                       No compliance items
                     </TableCell>
                   </TableRow>
                 ) : (
-                  items.map((i) => (
-                    <TableRow key={i.id}>
-                      <TableCell className="font-medium">{i.complianceType}</TableCell>
-                      <TableCell>{i.referenceNumber || '-'}</TableCell>
-                      <TableCell>{formatDate(i.expiryDate)}</TableCell>
-                      <TableCell>{i.isCritical ? 'Yes' : 'No'}</TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(i)}>
-                          Edit
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => remove(i.id)}>
-                          Delete
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  items.map((i, idx) => {
+                    const dueStatus = getDueStatus(i.expiryDate, dueSoonDays);
+                    return (
+                      <TableRow key={i.id} className={idx % 2 === 1 ? 'bg-muted/10 hover:bg-muted/30' : 'hover:bg-muted/30'}>
+                        <TableCell className="font-medium">{i.complianceType}</TableCell>
+                        <TableCell>{i.referenceNumber || '-'}</TableCell>
+                        <TableCell>{formatFleetDate(i.issueDate)}</TableCell>
+                        <TableCell>{formatFleetDate(i.expiryDate)}</TableCell>
+                        <TableCell>
+                          {dueStatus === 'Overdue' ? (
+                            <Badge variant="destructive">Overdue</Badge>
+                          ) : dueStatus === 'DueSoon' ? (
+                            <Badge variant="secondary">Due soon</Badge>
+                          ) : (
+                            <Badge variant="outline">OK</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {i.isCritical ? <Badge variant="secondary">Critical</Badge> : <span className="text-muted-foreground">No</span>}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="sm" onClick={() => openEdit(i)}>
+                            Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setDeleting(i);
+                              setDeleteOpen(true);
+                            }}
+                          >
+                            Delete
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
           </div>
         </CardContent>
       </Card>
+
+      <ConfirmationDialog
+        open={deleteOpen}
+        onOpenChange={(o) => {
+          setDeleteOpen(o);
+          if (!o) setDeleting(null);
+        }}
+        title="Delete compliance record?"
+        description={deleting ? `${deleting.complianceType} (${formatFleetDate(deleting.expiryDate)}) will be removed.` : undefined}
+        confirmText="Delete"
+        variant="destructive"
+        onConfirm={async () => {
+          if (!deleting) return;
+          await remove(deleting.id);
+        }}
+      />
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-3xl">

@@ -74,6 +74,26 @@ public class FleetFuelController : ControllerBase
         }
     }
 
+    [HttpPut("{id:guid}")]
+    [Authorize(Policy = "MaintenanceWrite")]
+    public async Task<ActionResult<FleetFuelTransactionDto>> Update(Guid id, [FromBody] UpdateFleetFuelTransactionDto dto)
+    {
+        try
+        {
+            var updated = await _fleetFuelService.UpdateAsync(id, dto);
+            return Ok(updated);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating fleet fuel transaction {Id}", id);
+            return StatusCode(500, "An error occurred while updating the fuel transaction");
+        }
+    }
+
     [HttpDelete("{id:guid}")]
     [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult> Delete(Guid id)

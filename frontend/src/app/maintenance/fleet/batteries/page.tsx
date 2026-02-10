@@ -9,12 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-
-function formatDate(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString();
-}
+import { formatFleetDateTime } from '@/lib/date-format';
 
 const BATTERY_POSITIONS = [
   { value: 'Main', label: 'Main' },
@@ -201,7 +196,7 @@ export default function FleetBatteriesPage() {
             <div className="overflow-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b text-left text-muted-foreground">
+                  <tr className="border-b bg-muted/40 text-left text-muted-foreground">
                     <th className="py-2">Serial</th>
                     <th className="py-2">Position</th>
                     <th className="py-2">Brand</th>
@@ -212,13 +207,13 @@ export default function FleetBatteriesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((b) => (
-                    <tr key={b.id} className="border-b">
+                  {items.map((b, idx) => (
+                    <tr key={b.id} className={idx % 2 === 1 ? 'border-b bg-muted/10 hover:bg-muted/30' : 'border-b hover:bg-muted/30'}>
                       <td className="py-2">{b.serialNumber}</td>
                       <td className="py-2">{b.position ?? '—'}</td>
                       <td className="py-2">{b.brand ?? '—'}</td>
                       <td className="py-2">{b.spec ?? '—'}</td>
-                      <td className="py-2">{formatDate(b.installedAtUtc)}</td>
+                      <td className="py-2">{formatFleetDateTime(b.installedAtUtc)}</td>
                       <td className="py-2">{b.status}</td>
                       <td className="py-2 text-right">
                         <div className="flex justify-end gap-2">
@@ -386,7 +381,7 @@ export default function FleetBatteriesPage() {
               <div className="max-h-[360px] overflow-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b text-left text-muted-foreground">
+                    <tr className="border-b bg-muted/40 text-left text-muted-foreground">
                       <th className="py-2 px-3">When</th>
                       <th className="py-2 px-3">Event</th>
                       <th className="py-2 px-3">Position</th>
@@ -396,9 +391,9 @@ export default function FleetBatteriesPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {historyEvents.map((e) => (
-                      <tr key={e.id} className="border-b align-top">
-                        <td className="py-2 px-3 whitespace-nowrap">{formatDate(e.eventAtUtc)}</td>
+                    {historyEvents.map((e, idx) => (
+                      <tr key={e.id} className={idx % 2 === 1 ? 'border-b bg-muted/10 align-top hover:bg-muted/30' : 'border-b align-top hover:bg-muted/30'}>
+                        <td className="py-2 px-3 whitespace-nowrap">{formatFleetDateTime(e.eventAtUtc)}</td>
                         <td className="py-2 px-3 whitespace-nowrap">{e.eventType}</td>
                         <td className="py-2 px-3 whitespace-nowrap">
                           {(e.fromPosition || '—') + ' → ' + (e.toPosition || '—')}

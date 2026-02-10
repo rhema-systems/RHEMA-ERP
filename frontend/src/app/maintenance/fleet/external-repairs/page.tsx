@@ -10,12 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-
-function formatDate(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString();
-}
+import { formatFleetDateTime } from '@/lib/date-format';
 
 export default function FleetExternalRepairsPage() {
   const [vehicles, setVehicles] = React.useState<FleetVehicleListDto[]>([]);
@@ -212,7 +207,7 @@ export default function FleetExternalRepairsPage() {
             <div className="overflow-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b text-left text-muted-foreground">
+                  <tr className="border-b bg-muted/40 text-left text-muted-foreground">
                     <th className="py-2">Requested</th>
                     <th className="py-2">Vehicle</th>
                     <th className="py-2">Vendor</th>
@@ -224,9 +219,9 @@ export default function FleetExternalRepairsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((r) => (
-                    <tr key={r.id} className="border-b">
-                      <td className="py-2">{formatDate(r.requestedAtUtc)}</td>
+                  {items.map((r, idx) => (
+                    <tr key={r.id} className={idx % 2 === 1 ? 'border-b bg-muted/10 hover:bg-muted/30' : 'border-b hover:bg-muted/30'}>
+                      <td className="py-2">{formatFleetDateTime(r.requestedAtUtc)}</td>
                       <td className="py-2">{r.vehicleName}</td>
                       <td className="py-2">{r.vendorBusinessPartnerName ?? '—'}</td>
                       <td className="py-2">{r.title}</td>

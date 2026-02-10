@@ -238,6 +238,10 @@ public class CreateFleetFuelTransactionDto
     public string? Notes { get; set; }
 }
 
+public class UpdateFleetFuelTransactionDto : CreateFleetFuelTransactionDto
+{
+}
+
 public class FleetVehicleAssignmentDto
 {
     public Guid Id { get; set; }

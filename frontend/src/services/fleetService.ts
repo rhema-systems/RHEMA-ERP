@@ -164,6 +164,8 @@ export interface CreateFleetFuelTransactionDto {
   notes?: string | null;
 }
 
+export interface UpdateFleetFuelTransactionDto extends CreateFleetFuelTransactionDto {}
+
 export interface EmployeeDto {
   id: string;
   employeeNumber: string;
@@ -781,6 +783,16 @@ export const fleetService = {
   async createFuel(dto: CreateFleetFuelTransactionDto): Promise<FleetFuelTransactionDto> {
     const response = await fetch(`${API_BASE_URL}/maintenance/fleet/fuel`, {
       method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async updateFuel(id: string, dto: UpdateFleetFuelTransactionDto): Promise<FleetFuelTransactionDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/fuel/${id}`, {
+      method: 'PUT',
       headers: getAuthHeaders(),
       body: JSON.stringify(dto),
     });

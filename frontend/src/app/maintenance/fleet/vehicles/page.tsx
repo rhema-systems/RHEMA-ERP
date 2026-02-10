@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
+import { formatFleetDateTime } from '@/lib/date-format';
 
 import fleetService, {
   EmployeeDto,
@@ -421,8 +422,8 @@ export default function FleetVehiclesPage() {
                   assignmentHistory.map((a) => (
                     <TableRow key={a.id}>
                       <TableCell>{a.employeeName}</TableCell>
-                      <TableCell>{new Date(a.assignedFromUtc).toLocaleString()}</TableCell>
-                      <TableCell>{a.assignedToUtc ? new Date(a.assignedToUtc).toLocaleString() : '-'}</TableCell>
+                      <TableCell>{formatFleetDateTime(a.assignedFromUtc)}</TableCell>
+                      <TableCell>{a.assignedToUtc ? formatFleetDateTime(a.assignedToUtc) : '-'}</TableCell>
                       <TableCell>{a.assignmentType}</TableCell>
                       <TableCell>{a.isActive ? 'Yes' : 'No'}</TableCell>
                     </TableRow>

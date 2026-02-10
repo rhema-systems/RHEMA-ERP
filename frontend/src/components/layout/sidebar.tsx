@@ -101,17 +101,6 @@ const navigationItems: NavItem[] = [
     icon: Building,
     children: [
       {
-        title: 'Project Mngt',
-        href: '/development/project-management',
-        icon: Briefcase,
-        children: [
-          { title: 'Projects', href: '/development/projects', icon: Briefcase },
-          { title: 'Tasks', href: '/development/tasks', icon: FileText },
-          { title: 'Resources', href: '/development/resources', icon: Users },
-          { title: 'Timeline', href: '/development/timeline', icon: BarChart3 },
-        ],
-      },
-      {
         title: 'Maintenance Mngt',
         href: '/maintenance',
         icon: Wrench,
@@ -148,11 +137,22 @@ const navigationItems: NavItem[] = [
           { title: 'Compliance', href: '/maintenance/fleet/compliance', icon: ShieldCheck },
           { title: 'Fuel', href: '/maintenance/fleet/fuel', icon: Droplet },
           { title: 'Defects', href: '/maintenance/fleet/defects', icon: AlertTriangle },
-          { title: 'PM Plans', href: '/maintenance/fleet/pm', icon: Calendar },
           { title: 'Tyres', href: '/maintenance/fleet/tyres', icon: Package },
           { title: 'Batteries', href: '/maintenance/fleet/batteries', icon: Package },
           { title: 'External Repairs', href: '/maintenance/fleet/external-repairs', icon: Wrench },
           { title: 'Costs', href: '/maintenance/fleet/costs', icon: DollarSign },
+          { title: 'PM Plans', href: '/maintenance/fleet/pm', icon: Calendar },
+        ],
+      },
+      {
+        title: 'Project Mngt',
+        href: '/development/project-management',
+        icon: Briefcase,
+        children: [
+          { title: 'Projects', href: '/development/projects', icon: Briefcase },
+          { title: 'Tasks', href: '/development/tasks', icon: FileText },
+          { title: 'Resources', href: '/development/resources', icon: Users },
+          { title: 'Timeline', href: '/development/timeline', icon: BarChart3 },
         ],
       },
     ],

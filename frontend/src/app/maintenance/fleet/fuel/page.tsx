@@ -1,8 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Plus } from 'lucide-react';
-import { format } from 'date-fns';
+import { Edit, Plus, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,14 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
-import fleetService, { CreateFleetFuelTransactionDto, FleetFuelTransactionDto, FleetVehicleListDto } from '@/services/fleetService';
-
-function formatDateTime(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return format(d, 'dd MMM yyyy, HH:mm');
-}
+import fleetService, { CreateFleetFuelTransactionDto, FleetFuelTransactionDto, FleetVehicleListDto, UpdateFleetFuelTransactionDto } from '@/services/fleetService';
+import { formatFleetDateTime } from '@/lib/date-format';
 
 function toDatetimeLocal(value: Date) {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -37,6 +32,11 @@ export default function FleetFuelPage() {
   const [items, setItems] = React.useState<FleetFuelTransactionDto[]>([]);
 
   const [createOpen, setCreateOpen] = React.useState(false);
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState<FleetFuelTransactionDto | null>(null);
+
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState<FleetFuelTransactionDto | null>(null);
 
   const [form, setForm] = React.useState<CreateFleetFuelTransactionDto>({
     vehicleAssetId: '',
@@ -105,13 +105,31 @@ export default function FleetFuelPage() {
     setCreateOpen(true);
   };
 
-  const save = async () => {
+  const openEdit = (item: FleetFuelTransactionDto) => {
+    setEditing(item);
+    setForm({
+      vehicleAssetId: item.vehicleAssetId,
+      fleetTripId: item.fleetTripId ?? null,
+      fuelledAt: item.fuelledAt,
+      quantity: item.quantity,
+      unit: item.unit || 'L',
+      unitCost: item.unitCost ?? null,
+      mileageAtFuel: item.mileageAtFuel ?? null,
+      operatingHoursAtFuel: item.operatingHoursAtFuel ?? null,
+      vendorName: item.vendorName ?? '',
+      receiptReference: item.receiptReference ?? '',
+      notes: item.notes ?? '',
+    });
+    setEditOpen(true);
+  };
+
+  const save = async (mode: 'create' | 'edit') => {
     try {
       if (!form.vehicleAssetId) throw new Error('Vehicle is required');
       if (!form.fuelledAt) throw new Error('Fuelled at is required');
       if (!form.quantity || form.quantity <= 0) throw new Error('Quantity must be greater than 0');
 
-      const dto: CreateFleetFuelTransactionDto = {
+      const dto: UpdateFleetFuelTransactionDto = {
         ...form,
         fuelledAt: new Date(form.fuelledAt).toISOString(),
         unit: (form.unit || 'L').trim(),
@@ -120,9 +138,18 @@ export default function FleetFuelPage() {
         notes: form.notes?.trim() || null,
       };
 
-      await fleetService.createFuel(dto);
-      toast({ title: 'Fuel transaction created' });
-      setCreateOpen(false);
+      if (mode === 'create') {
+        await fleetService.createFuel(dto);
+        toast({ title: 'Fuel transaction created' });
+        setCreateOpen(false);
+      } else {
+        if (!editing) throw new Error('No record selected');
+        await fleetService.updateFuel(editing.id, dto);
+        toast({ title: 'Fuel transaction updated' });
+        setEditOpen(false);
+        setEditing(null);
+      }
+
       await loadFuel();
     } catch (e: any) {
       toast({ title: 'Save failed', description: e?.message || String(e), variant: 'destructive' });
@@ -173,7 +200,7 @@ export default function FleetFuelPage() {
           <div className="rounded-md border">
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="bg-muted/40">
                   <TableHead>Fuelled At</TableHead>
                   <TableHead>Qty</TableHead>
                   <TableHead>Unit Cost</TableHead>
@@ -202,9 +229,9 @@ export default function FleetFuelPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  items.map((i) => (
-                    <TableRow key={i.id}>
-                      <TableCell>{formatDateTime(i.fuelledAt)}</TableCell>
+                  items.map((i, idx) => (
+                    <TableRow key={i.id} className={idx % 2 === 1 ? 'bg-muted/10 hover:bg-muted/30' : 'hover:bg-muted/30'}>
+                      <TableCell>{formatFleetDateTime(i.fuelledAt)}</TableCell>
                       <TableCell>
                         {i.quantity} {i.unit}
                       </TableCell>
@@ -212,9 +239,22 @@ export default function FleetFuelPage() {
                       <TableCell>{i.totalCost ?? '-'}</TableCell>
                       <TableCell>{i.vendorName || '-'}</TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => remove(i.id)}>
-                          Delete
-                        </Button>
+                        <div className="flex justify-end gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => openEdit(i)} title="Edit">
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setDeleting(i);
+                              setDeleteOpen(true);
+                            }}
+                            title="Delete"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
@@ -224,6 +264,22 @@ export default function FleetFuelPage() {
           </div>
         </CardContent>
       </Card>
+
+      <ConfirmationDialog
+        open={deleteOpen}
+        onOpenChange={(o) => {
+          setDeleteOpen(o);
+          if (!o) setDeleting(null);
+        }}
+        title="Delete fuel transaction?"
+        description={deleting ? `${formatFleetDateTime(deleting.fuelledAt)} • ${deleting.quantity} ${deleting.unit}` : undefined}
+        confirmText="Delete"
+        variant="destructive"
+        onConfirm={async () => {
+          if (!deleting) return;
+          await remove(deleting.id);
+        }}
+      />
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-3xl">
@@ -305,7 +361,98 @@ export default function FleetFuelPage() {
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={save}>Save</Button>
+            <Button onClick={() => save('create')}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={editOpen}
+        onOpenChange={(o) => {
+          setEditOpen(o);
+          if (!o) setEditing(null);
+        }}
+      >
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Edit Fuel Transaction</DialogTitle>
+            <DialogDescription>Update the selected fuel transaction.</DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="space-y-2 md:col-span-2">
+              <Label>Fuelled At</Label>
+              <Input
+                type="datetime-local"
+                value={toDatetimeLocal(new Date(form.fuelledAt))}
+                onChange={(e) => setForm((p) => ({ ...p, fuelledAt: new Date(e.target.value).toISOString() }))}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Quantity</Label>
+              <Input type="number" value={form.quantity} onChange={(e) => setForm((p) => ({ ...p, quantity: Number(e.target.value) }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Unit</Label>
+              <Select value={form.unit || 'L'} onValueChange={(v) => setForm((p) => ({ ...p, unit: v }))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Unit" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="L">Liters (L)</SelectItem>
+                  <SelectItem value="Gal">Gallons (Gal)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Unit Cost</Label>
+              <Input
+                type="number"
+                value={form.unitCost ?? ''}
+                onChange={(e) => setForm((p) => ({ ...p, unitCost: e.target.value === '' ? null : Number(e.target.value) }))}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Vendor</Label>
+              <Input value={form.vendorName || ''} onChange={(e) => setForm((p) => ({ ...p, vendorName: e.target.value }))} />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Mileage at fuel (km)</Label>
+              <Input
+                type="number"
+                value={form.mileageAtFuel ?? ''}
+                onChange={(e) => setForm((p) => ({ ...p, mileageAtFuel: e.target.value === '' ? null : Number(e.target.value) }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Operating hours at fuel</Label>
+              <Input
+                type="number"
+                value={form.operatingHoursAtFuel ?? ''}
+                onChange={(e) => setForm((p) => ({ ...p, operatingHoursAtFuel: e.target.value === '' ? null : Number(e.target.value) }))}
+              />
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <Label>Receipt Reference</Label>
+              <Input value={form.receiptReference || ''} onChange={(e) => setForm((p) => ({ ...p, receiptReference: e.target.value }))} />
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <Label>Notes</Label>
+              <Textarea value={form.notes || ''} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => save('edit')}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

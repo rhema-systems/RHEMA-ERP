@@ -3,7 +3,6 @@
 import React from 'react';
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { format } from 'date-fns';
 import { Plus, Search, Eye, Truck, CheckCircle2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +29,7 @@ import fleetService, {
 } from '@/services/fleetService';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { formatFleetDateTime } from '@/lib/date-format';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
@@ -75,13 +75,6 @@ type InspectionTemplateDetail = {
   isActive?: boolean;
   checklistItems: InspectionChecklistItem[];
 };
-
-function formatDate(value?: string | null) {
-  if (!value) return '-';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '-';
-  return format(d, 'dd MMM yyyy, HH:mm');
-}
 
 function toDatetimeLocal(value: Date) {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -643,11 +636,11 @@ function FleetTripsPageContent() {
                         {t.driverEmployeeName ? <Badge variant="outline">{t.driverEmployeeName}</Badge> : <span className="text-muted-foreground">-</span>}
                       </TableCell>
                       <TableCell className="text-sm">
-                        {t.plannedStartAt ? formatDate(t.plannedStartAt) : <span className="text-muted-foreground">-</span>}
+                        {t.plannedStartAt ? formatFleetDateTime(t.plannedStartAt) : <span className="text-muted-foreground">-</span>}
                         {t.plannedEndAt ? <span className="text-muted-foreground"> → </span> : null}
-                        {t.plannedEndAt ? formatDate(t.plannedEndAt) : null}
+                        {t.plannedEndAt ? formatFleetDateTime(t.plannedEndAt) : null}
                       </TableCell>
-                      <TableCell className="text-sm">{formatDate(t.createdAt)}</TableCell>
+                      <TableCell className="text-sm">{formatFleetDateTime(t.createdAt)}</TableCell>
                       <TableCell className="text-right">
                         <Button variant="ghost" size="sm" onClick={() => openView(t.id)} title="View trip">
                           <Eye className="h-4 w-4" />
@@ -733,7 +726,7 @@ function FleetTripsPageContent() {
                             <span className="text-muted-foreground">Destination:</span> {selected.destination || '-'}
                           </div>
                           <div>
-                            <span className="text-muted-foreground">Planned:</span> {formatDate(selected.plannedStartAt)} → {formatDate(selected.plannedEndAt)}
+                            <span className="text-muted-foreground">Planned:</span> {formatFleetDateTime(selected.plannedStartAt)} → {formatFleetDateTime(selected.plannedEndAt)}
                           </div>
                         </CardContent>
                       </Card>
@@ -744,10 +737,10 @@ function FleetTripsPageContent() {
                         </CardHeader>
                         <CardContent className="space-y-2 pb-4 text-sm">
                           <div>
-                            <span className="text-muted-foreground">Dispatched:</span> {formatDate(selected.dispatchedAt)}
+                            <span className="text-muted-foreground">Dispatched:</span> {formatFleetDateTime(selected.dispatchedAt)}
                           </div>
                           <div>
-                            <span className="text-muted-foreground">Completed:</span> {formatDate(selected.completedAt)}
+                            <span className="text-muted-foreground">Completed:</span> {formatFleetDateTime(selected.completedAt)}
                           </div>
                           <div>
                             <span className="text-muted-foreground">Start odometer:</span> {selected.startMileage ?? '-'} km
@@ -1011,8 +1004,8 @@ function FleetTripsPageContent() {
               {selectedInspection ? (
                 <div className="text-xs text-muted-foreground">
                   Status: {selectedInspection.status}
-                  {selectedInspection.startedAtUtc ? ` • Started: ${formatDate(selectedInspection.startedAtUtc)}` : ''}
-                  {selectedInspection.completedAtUtc ? ` • Completed: ${formatDate(selectedInspection.completedAtUtc)}` : ''}
+                  {selectedInspection.startedAtUtc ? ` • Started: ${formatFleetDateTime(selectedInspection.startedAtUtc)}` : ''}
+                  {selectedInspection.completedAtUtc ? ` • Completed: ${formatFleetDateTime(selectedInspection.completedAtUtc)}` : ''}
                 </div>
               ) : null}
               <Label>Overall Result</Label>

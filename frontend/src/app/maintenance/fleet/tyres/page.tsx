@@ -9,12 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-
-function formatDate(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString();
-}
+import { formatFleetDateTime } from '@/lib/date-format';
 
 const TYRE_POSITIONS = [
   { value: 'FrontLeft', label: 'Front Left' },
@@ -213,7 +208,7 @@ export default function FleetTyresPage() {
             <div className="overflow-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b text-left text-muted-foreground">
+                  <tr className="border-b bg-muted/40 text-left text-muted-foreground">
                     <th className="py-2">Serial</th>
                     <th className="py-2">Position</th>
                     <th className="py-2">Brand</th>
@@ -225,14 +220,14 @@ export default function FleetTyresPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((t) => (
-                    <tr key={t.id} className="border-b">
+                  {items.map((t, idx) => (
+                    <tr key={t.id} className={idx % 2 === 1 ? 'border-b bg-muted/10 hover:bg-muted/30' : 'border-b hover:bg-muted/30'}>
                       <td className="py-2">{t.serialNumber}</td>
                       <td className="py-2">{t.position ?? '—'}</td>
                       <td className="py-2">{t.brand ?? '—'}</td>
                       <td className="py-2">{t.size ?? '—'}</td>
                       <td className="py-2">{t.treadDepthMm ?? '—'}</td>
-                      <td className="py-2">{formatDate(t.installedAtUtc)}</td>
+                      <td className="py-2">{formatFleetDateTime(t.installedAtUtc)}</td>
                       <td className="py-2">{t.status}</td>
                       <td className="py-2 text-right">
                         <div className="flex justify-end gap-2">
@@ -378,7 +373,7 @@ export default function FleetTyresPage() {
               <div className="max-h-[360px] overflow-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b text-left text-muted-foreground">
+                    <tr className="border-b bg-muted/40 text-left text-muted-foreground">
                       <th className="py-2 px-3">When</th>
                       <th className="py-2 px-3">Event</th>
                       <th className="py-2 px-3">Position</th>
@@ -389,9 +384,9 @@ export default function FleetTyresPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {historyEvents.map((e) => (
-                      <tr key={e.id} className="border-b align-top">
-                        <td className="py-2 px-3 whitespace-nowrap">{formatDate(e.eventAtUtc)}</td>
+                    {historyEvents.map((e, idx) => (
+                      <tr key={e.id} className={idx % 2 === 1 ? 'border-b bg-muted/10 align-top hover:bg-muted/30' : 'border-b align-top hover:bg-muted/30'}>
+                        <td className="py-2 px-3 whitespace-nowrap">{formatFleetDateTime(e.eventAtUtc)}</td>
                         <td className="py-2 px-3 whitespace-nowrap">{e.eventType}</td>
                         <td className="py-2 px-3 whitespace-nowrap">
                           {(e.fromPosition || '—') + ' → ' + (e.toPosition || '—')}

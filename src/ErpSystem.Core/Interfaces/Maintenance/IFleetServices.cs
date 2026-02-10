@@ -39,6 +39,7 @@ public interface IFleetFuelService
     Task<PagedResult<FleetFuelTransactionDto>> GetFuelTransactionsPagedAsync(Guid vehicleAssetId, int page, int pageSize);
     Task<FleetFuelTransactionDto?> GetByIdAsync(Guid id);
     Task<FleetFuelTransactionDto> CreateAsync(CreateFleetFuelTransactionDto dto);
+    Task<FleetFuelTransactionDto> UpdateAsync(Guid id, UpdateFleetFuelTransactionDto dto);
     Task<bool> DeleteAsync(Guid id);
 }
 
