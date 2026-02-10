@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Notifications;
@@ -138,6 +139,27 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
 
                 if (wantEmail && !string.IsNullOrWhiteSpace(user.Email))
                     emailAddresses.Add(user.Email);
+
+                continue;
+            }
+
+            if (string.Equals(kind, "UserFromEmployeeIdData", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryGetGuidFromData(data, value, out var employeeId))
+                    continue;
+
+                var users = await _userManager.Users
+                    .Where(u => u.TenantId == evt.TenantId && u.IsActive && u.EmployeeId == employeeId)
+                    .ToListAsync(cancellationToken);
+
+                foreach (var user in users)
+                {
+                    if (wantInApp)
+                        inAppUserIds.Add(user.Id);
+
+                    if (wantEmail && !string.IsNullOrWhiteSpace(user.Email))
+                        emailAddresses.Add(user.Email);
+                }
 
                 continue;
             }

@@ -159,11 +159,14 @@ public class FleetTripService : IFleetTripService
             TriggeredByUserId = userId,
             Data = new Dictionary<string, object>
             {
+                ["TripId"] = trip.Id,
                 ["VehicleAssetId"] = trip.VehicleAssetId,
                 ["VehicleName"] = vehicle.Name,
                 ["VehicleAssetNumber"] = vehicle.AssetNumber,
                 ["VehicleLicensePlate"] = vehicle.LicensePlate ?? string.Empty,
-                ["RequestedByUserId"] = trip.RequestedByUserId
+                ["RequestedByUserId"] = trip.RequestedByUserId,
+                ["PlannedStartAtUtc"] = trip.PlannedStartAt?.ToString("o") ?? string.Empty,
+                ["PlannedEndAtUtc"] = trip.PlannedEndAt?.ToString("o") ?? string.Empty
             }
         });
 
@@ -424,11 +427,13 @@ public class FleetTripService : IFleetTripService
             TriggeredByUserId = userId,
             Data = new Dictionary<string, object>
             {
+                ["TripId"] = trip.Id,
                 ["VehicleAssetId"] = trip.VehicleAssetId,
                 ["VehicleName"] = vehicle.Name,
                 ["VehicleAssetNumber"] = vehicle.AssetNumber,
                 ["VehicleLicensePlate"] = vehicle.LicensePlate ?? string.Empty,
-                ["RequestedByUserId"] = trip.RequestedByUserId
+                ["RequestedByUserId"] = trip.RequestedByUserId,
+                ["DispatchedAtUtc"] = dispatchedAt.ToString("o")
             }
         });
 
@@ -524,11 +529,13 @@ public class FleetTripService : IFleetTripService
             TriggeredByUserId = userId,
             Data = new Dictionary<string, object>
             {
+                ["TripId"] = trip.Id,
                 ["VehicleAssetId"] = trip.VehicleAssetId,
                 ["VehicleName"] = vehicle.Name,
                 ["VehicleAssetNumber"] = vehicle.AssetNumber,
                 ["VehicleLicensePlate"] = vehicle.LicensePlate ?? string.Empty,
-                ["RequestedByUserId"] = trip.RequestedByUserId
+                ["RequestedByUserId"] = trip.RequestedByUserId,
+                ["CompletedAtUtc"] = completedAt.ToString("o")
             }
         });
 

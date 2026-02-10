@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,13 +10,17 @@ namespace ErpSystem.Core.Services.Maintenance.Fleet;
 
 public sealed class FleetAssignmentService : IFleetAssignmentService
 {
+    private const string EntityType = "FleetVehicle";
+
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IAppEventBus _appEventBus;
 
-    public FleetAssignmentService(IUnitOfWork unitOfWork, ICurrentUserProvider currentUserProvider)
+    public FleetAssignmentService(IUnitOfWork unitOfWork, ICurrentUserProvider currentUserProvider, IAppEventBus appEventBus)
     {
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _appEventBus = appEventBus;
     }
 
     public async Task<IReadOnlyList<FleetVehicleAssignmentDto>> GetAssignmentsAsync(Guid vehicleAssetId)
@@ -176,6 +181,35 @@ public sealed class FleetAssignmentService : IFleetAssignmentService
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
 
+        // Publish event for admin-configurable notification topics (best-effort).
+        try
+        {
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = tenantId,
+                EntityType = EntityType,
+                Activity = "DriverAssigned",
+                Audience = "Internal",
+                EntityId = vehicle.Id,
+                TriggeredByUserId = userId,
+                Data = new Dictionary<string, object>
+                {
+                    ["VehicleAssetId"] = vehicle.Id,
+                    ["VehicleName"] = vehicle.Name,
+                    ["VehicleAssetNumber"] = vehicle.AssetNumber ?? string.Empty,
+                    ["VehicleLicensePlate"] = vehicle.LicensePlate ?? string.Empty,
+                    ["EmployeeId"] = employee.Id,
+                    ["EmployeeName"] = $"{employee.FirstName} {employee.LastName}",
+                    ["AssignedFromUtc"] = assignedFrom.ToString("o"),
+                    ["AssignedByUserId"] = userId
+                }
+            });
+        }
+        catch
+        {
+            // Best-effort.
+        }
+
         return new FleetVehicleAssignmentDto
         {
             Id = entity.Id,
@@ -213,6 +247,45 @@ public sealed class FleetAssignmentService : IFleetAssignmentService
 
         await repo.UpdateAsync(existing);
         await _unitOfWork.SaveChangesAsync();
+
+        // Publish event for admin-configurable notification topics (best-effort).
+        try
+        {
+            var vehicle = await _unitOfWork.Repository<MaintenanceAsset>()
+                .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == existing.VehicleAssetId && !a.IsDeleted);
+
+            var employee = await _unitOfWork.Repository<Employee>()
+                .FirstOrDefaultAsync(e => e.TenantId == tenantId && e.Id == existing.EmployeeId && !e.IsDeleted);
+
+            if (vehicle != null && employee != null)
+            {
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = tenantId,
+                    EntityType = EntityType,
+                    Activity = "DriverUnassigned",
+                    Audience = "Internal",
+                    EntityId = vehicle.Id,
+                    TriggeredByUserId = userId,
+                    Data = new Dictionary<string, object>
+                    {
+                        ["VehicleAssetId"] = vehicle.Id,
+                        ["VehicleName"] = vehicle.Name,
+                        ["VehicleAssetNumber"] = vehicle.AssetNumber ?? string.Empty,
+                        ["VehicleLicensePlate"] = vehicle.LicensePlate ?? string.Empty,
+                        ["EmployeeId"] = employee.Id,
+                        ["EmployeeName"] = $"{employee.FirstName} {employee.LastName}",
+                        ["UnassignedAtUtc"] = existing.AssignedToUtc?.ToString("o") ?? DateTime.UtcNow.ToString("o"),
+                        ["UnassignedByUserId"] = userId
+                    }
+                });
+            }
+        }
+        catch
+        {
+            // Best-effort.
+        }
+
         return true;
     }
 }

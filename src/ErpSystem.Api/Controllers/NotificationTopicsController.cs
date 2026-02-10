@@ -16,6 +16,20 @@ public class NotificationTopicsController : ControllerBase
     private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<NotificationTopicsController> _logger;
 
+    private sealed class SystemTopicSeed
+    {
+        public string EntityType { get; init; } = string.Empty;
+        public string Activity { get; init; } = string.Empty;
+        public string Audience { get; init; } = string.Empty;
+        public string Name { get; init; } = string.Empty;
+        public string? Description { get; init; }
+        public bool EnableEmail { get; init; }
+        public string? InAppTitleTemplate { get; init; }
+        public string? InAppBodyTemplate { get; init; }
+        public string? ActionUrlTemplate { get; init; }
+        public List<(string Kind, string Value)> SystemRecipients { get; init; } = new();
+    }
+
     public NotificationTopicsController(
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
@@ -503,9 +517,9 @@ public class NotificationTopicsController : ControllerBase
 
             // Seed non-workflow system topics used by background jobs / global event publishing.
             // These are system-provided defaults but remain configurable by admins (recipients/templates/channels).
-            var additionalTopics = new[]
+            var additionalTopics = new List<SystemTopicSeed>
             {
-                new
+                new SystemTopicSeed
                 {
                     EntityType = "FleetCompliance",
                     Activity = "ComplianceDueSoon",
@@ -517,7 +531,7 @@ public class NotificationTopicsController : ControllerBase
                     InAppBodyTemplate = "{{ComplianceType}} expires on {{ExpiryDate}} ({{DaysToExpiry}} days).",
                     ActionUrlTemplate = "/maintenance/fleet/compliance?vehicleAssetId={{VehicleAssetId}}"
                 },
-                new
+                new SystemTopicSeed
                 {
                     EntityType = "FleetCompliance",
                     Activity = "ComplianceOverdue",
@@ -528,6 +542,88 @@ public class NotificationTopicsController : ControllerBase
                     InAppTitleTemplate = "Fleet compliance overdue: {{VehicleName}}",
                     InAppBodyTemplate = "{{ComplianceType}} expired on {{ExpiryDate}} ({{DaysOverdue}} days overdue).",
                     ActionUrlTemplate = "/maintenance/fleet/compliance?vehicleAssetId={{VehicleAssetId}}"
+                },
+
+                // Fleet assignments / dispatch notifications (admin-configurable but system-seeded).
+                new SystemTopicSeed
+                {
+                    EntityType = "FleetVehicle",
+                    Activity = "DriverAssigned",
+                    Audience = "Internal",
+                    Name = "Fleet Vehicle: Driver Assigned",
+                    Description = "System-seeded fleet notification when a driver is assigned to a vehicle.",
+                    EnableEmail = true,
+                    InAppTitleTemplate = "Driver assigned: {{VehicleName}}",
+                    InAppBodyTemplate = "{{EmployeeName}} assigned to {{VehicleName}} ({{VehicleLicensePlate}}).",
+                    ActionUrlTemplate = "/maintenance/assets?id={{VehicleAssetId}}&edit=1",
+                    SystemRecipients = new List<(string Kind, string Value)>
+                    {
+                        ("UserFromEmployeeIdData", "EmployeeId")
+                    }
+                },
+                new SystemTopicSeed
+                {
+                    EntityType = "FleetVehicle",
+                    Activity = "DriverUnassigned",
+                    Audience = "Internal",
+                    Name = "Fleet Vehicle: Driver Unassigned",
+                    Description = "System-seeded fleet notification when a driver is unassigned from a vehicle.",
+                    EnableEmail = true,
+                    InAppTitleTemplate = "Driver unassigned: {{VehicleName}}",
+                    InAppBodyTemplate = "{{EmployeeName}} unassigned from {{VehicleName}} ({{VehicleLicensePlate}}).",
+                    ActionUrlTemplate = "/maintenance/assets?id={{VehicleAssetId}}&edit=1",
+                    SystemRecipients = new List<(string Kind, string Value)>
+                    {
+                        ("UserFromEmployeeIdData", "EmployeeId")
+                    }
+                },
+                new SystemTopicSeed
+                {
+                    EntityType = "FleetTrip",
+                    Activity = "TripRequested",
+                    Audience = "Internal",
+                    Name = "Fleet Trip: Requested",
+                    Description = "System-seeded fleet notification when a trip is requested.",
+                    EnableEmail = true,
+                    InAppTitleTemplate = "Trip requested: {{VehicleName}}",
+                    InAppBodyTemplate = "Trip requested for {{VehicleName}} ({{VehicleLicensePlate}}).",
+                    ActionUrlTemplate = "/maintenance/fleet/trips?id={{TripId}}",
+                    SystemRecipients = new List<(string Kind, string Value)>
+                    {
+                        ("UserFromData", "RequestedByUserId")
+                    }
+                },
+                new SystemTopicSeed
+                {
+                    EntityType = "FleetTrip",
+                    Activity = "TripDispatched",
+                    Audience = "Internal",
+                    Name = "Fleet Trip: Dispatched",
+                    Description = "System-seeded fleet notification when a trip is dispatched.",
+                    EnableEmail = true,
+                    InAppTitleTemplate = "Trip dispatched: {{VehicleName}}",
+                    InAppBodyTemplate = "Trip dispatched for {{VehicleName}} at {{DispatchedAtUtc}}.",
+                    ActionUrlTemplate = "/maintenance/fleet/trips?id={{TripId}}",
+                    SystemRecipients = new List<(string Kind, string Value)>
+                    {
+                        ("UserFromData", "RequestedByUserId")
+                    }
+                },
+                new SystemTopicSeed
+                {
+                    EntityType = "FleetTrip",
+                    Activity = "TripCompleted",
+                    Audience = "Internal",
+                    Name = "Fleet Trip: Completed",
+                    Description = "System-seeded fleet notification when a trip is completed.",
+                    EnableEmail = true,
+                    InAppTitleTemplate = "Trip completed: {{VehicleName}}",
+                    InAppBodyTemplate = "Trip completed for {{VehicleName}} at {{CompletedAtUtc}}.",
+                    ActionUrlTemplate = "/maintenance/fleet/trips?id={{TripId}}",
+                    SystemRecipients = new List<(string Kind, string Value)>
+                    {
+                        ("UserFromData", "RequestedByUserId")
+                    }
                 }
             };
 
@@ -565,7 +661,7 @@ public class NotificationTopicsController : ControllerBase
                     };
 
                     await topicRepo.AddAsync(topic);
-                    createdTopics++;
+                        createdTopics++;
                 }
                 else
                 {
@@ -587,6 +683,38 @@ public class NotificationTopicsController : ControllerBase
                         topic.LastModifiedById = userId;
                         await topicRepo.UpdateAsync(topic);
                         updatedTopics++;
+                    }
+                }
+
+                // Ensure any system recipient rules exist.
+                if (t.SystemRecipients.Count > 0)
+                {
+                    var recipients = (topic.Recipients ?? new List<NotificationTopicRecipient>())
+                        .Where(r => !r.IsDeleted)
+                        .ToList();
+
+                    foreach (var rule in t.SystemRecipients)
+                    {
+                        var exists = recipients.Any(r =>
+                            r.IsSystem &&
+                            string.Equals(r.RecipientKind, rule.Kind, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(r.RecipientValue, rule.Value, StringComparison.OrdinalIgnoreCase));
+                        if (exists) continue;
+
+                        await recipientRepo.AddAsync(new NotificationTopicRecipient
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenantId.Value,
+                            TopicId = topic.Id,
+                            RecipientKind = rule.Kind,
+                            RecipientValue = rule.Value,
+                            IsSystem = true,
+                            SendInApp = true,
+                            SendEmail = true,
+                            CreatedAt = DateTime.UtcNow,
+                            CreatedById = userId
+                        });
+                        createdRecipients++;
                     }
                 }
             }
