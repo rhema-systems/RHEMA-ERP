@@ -529,7 +529,11 @@ public class NotificationTopicsController : ControllerBase
                     EnableEmail = true,
                     InAppTitleTemplate = "Fleet compliance due soon: {{VehicleName}}",
                     InAppBodyTemplate = "{{ComplianceType}} expires on {{ExpiryDate}} ({{DaysToExpiry}} days).",
-                    ActionUrlTemplate = "/maintenance/fleet/compliance?vehicleAssetId={{VehicleAssetId}}"
+                    ActionUrlTemplate = "/maintenance/fleet/compliance?vehicleAssetId={{VehicleAssetId}}",
+                    SystemRecipients = new List<(string Kind, string Value)>
+                    {
+                        ("DepartmentType", "Maintenance")
+                    }
                 },
                 new SystemTopicSeed
                 {
@@ -541,7 +545,11 @@ public class NotificationTopicsController : ControllerBase
                     EnableEmail = true,
                     InAppTitleTemplate = "Fleet compliance overdue: {{VehicleName}}",
                     InAppBodyTemplate = "{{ComplianceType}} expired on {{ExpiryDate}} ({{DaysOverdue}} days overdue).",
-                    ActionUrlTemplate = "/maintenance/fleet/compliance?vehicleAssetId={{VehicleAssetId}}"
+                    ActionUrlTemplate = "/maintenance/fleet/compliance?vehicleAssetId={{VehicleAssetId}}",
+                    SystemRecipients = new List<(string Kind, string Value)>
+                    {
+                        ("DepartmentType", "Maintenance")
+                    }
                 },
 
                 // Fleet assignments / dispatch notifications (admin-configurable but system-seeded).

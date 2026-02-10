@@ -75,7 +75,8 @@ public class NotificationTopicRecipient : TenantEntity
     public virtual NotificationTopic Topic { get; set; } = null!;
 
     /// <summary>
-    /// Supported kinds: "User", "Role", "BusinessPartnerFromData", "EmailFromData".
+    /// Supported kinds: "User", "Role", "UserFromData", "UserFromEmployeeIdData", "UsersFromData",
+    /// "RoleFromData", "BusinessPartner", "BusinessPartnerFromData", "EmailFromData", "DepartmentType".
     /// </summary>
     [Required]
     [MaxLength(40)]

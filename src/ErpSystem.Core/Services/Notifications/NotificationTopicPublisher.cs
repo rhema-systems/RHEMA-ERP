@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Identity;
@@ -337,6 +339,48 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
                 {
                     emailAddresses.Add(email);
                 }
+
+                continue;
+            }
+
+            if (string.Equals(kind, "DepartmentType", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!wantInApp && !wantEmail)
+                    continue;
+
+                if (!TryParseDepartmentType(value, out var deptType))
+                    continue;
+
+                // Resolve all active employees in the requested department type, then map to active users by EmployeeId.
+                var employeeIds = await _unitOfWork.Repository<Employee>()
+                    .GetQueryable(e =>
+                        e.TenantId == evt.TenantId &&
+                        !e.IsDeleted &&
+                        e.IsActive &&
+                        e.Department != null &&
+                        e.Department.DepartmentType == deptType)
+                    .Select(e => e.Id)
+                    .ToListAsync(cancellationToken);
+
+                if (employeeIds.Count == 0)
+                    continue;
+
+                var users = await _userManager.Users
+                    .Where(u =>
+                        u.TenantId == evt.TenantId &&
+                        u.IsActive &&
+                        u.EmployeeId.HasValue &&
+                        employeeIds.Contains(u.EmployeeId.Value))
+                    .ToListAsync(cancellationToken);
+
+                foreach (var user in users)
+                {
+                    if (wantInApp)
+                        inAppUserIds.Add(user.Id);
+
+                    if (wantEmail && !string.IsNullOrWhiteSpace(user.Email))
+                        emailAddresses.Add(user.Email);
+                }
             }
         }
 
@@ -482,6 +526,23 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
         }
 
         return false;
+    }
+
+    private static bool TryParseDepartmentType(string raw, out DepartmentType departmentType)
+    {
+        departmentType = default;
+        if (string.IsNullOrWhiteSpace(raw)) return false;
+
+        var s = raw.Trim();
+
+        // Accept numeric values (e.g., "6") or enum names (e.g., "Maintenance").
+        if (int.TryParse(s, out var i) && Enum.IsDefined(typeof(DepartmentType), i))
+        {
+            departmentType = (DepartmentType)i;
+            return true;
+        }
+
+        return Enum.TryParse(s, ignoreCase: true, out departmentType);
     }
 
     private static bool TryGetGuidsFromData(Dictionary<string, object> data, string key, out List<Guid> ids)
