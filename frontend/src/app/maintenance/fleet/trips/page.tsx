@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 
 import fleetService, {
@@ -639,231 +640,248 @@ function FleetTripsPageContent() {
             <DialogDescription>View trip information, approvals, and dispatch/completion.</DialogDescription>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto pr-1">
-            {!selected ? (
-              <div className="py-10 text-center text-muted-foreground">No trip selected</div>
-            ) : (
-              <div className="space-y-4">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                <Card>
-                  <CardHeader className="py-3">
-                    <CardTitle className="text-base">Status</CardTitle>
-                  </CardHeader>
-                  <CardContent className="pb-4">{selected.status}</CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="py-3">
-                    <CardTitle className="text-base">Vehicle</CardTitle>
-                  </CardHeader>
-                  <CardContent className="pb-4">
-                    {selected.vehicleAssetNumber ? `${selected.vehicleAssetNumber} — ` : ''}
-                    {selected.vehicleName}
-                    {selected.vehicleLicensePlate ? ` (${selected.vehicleLicensePlate})` : ''}
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="py-3">
-                    <CardTitle className="text-base">Driver</CardTitle>
-                  </CardHeader>
-                  <CardContent className="pb-4">{selected.driverEmployeeName || 'Unassigned'}</CardContent>
-                </Card>
-              </div>
+          <Tabs defaultValue="details" className="flex flex-1 flex-col overflow-hidden">
+            <TabsList className="w-fit">
+              <TabsTrigger value="details">Details</TabsTrigger>
+              <TabsTrigger value="approvals">Approval History</TabsTrigger>
+            </TabsList>
 
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Card>
-                  <CardHeader className="py-3">
-                    <CardTitle className="text-base">Plan</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2 pb-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Purpose:</span> {selected.purpose || '-'}
+            <TabsContent value="details" className="mt-4 flex-1 overflow-hidden">
+              <div className="h-full overflow-y-auto pr-1">
+                {!selected ? (
+                  <div className="py-10 text-center text-muted-foreground">No trip selected</div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                      <Card>
+                        <CardHeader className="py-3">
+                          <CardTitle className="text-base">Status</CardTitle>
+                        </CardHeader>
+                        <CardContent className="pb-4">{selected.status}</CardContent>
+                      </Card>
+                      <Card>
+                        <CardHeader className="py-3">
+                          <CardTitle className="text-base">Vehicle</CardTitle>
+                        </CardHeader>
+                        <CardContent className="pb-4">
+                          {selected.vehicleAssetNumber ? `${selected.vehicleAssetNumber} — ` : ''}
+                          {selected.vehicleName}
+                          {selected.vehicleLicensePlate ? ` (${selected.vehicleLicensePlate})` : ''}
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardHeader className="py-3">
+                          <CardTitle className="text-base">Driver</CardTitle>
+                        </CardHeader>
+                        <CardContent className="pb-4">{selected.driverEmployeeName || 'Unassigned'}</CardContent>
+                      </Card>
                     </div>
-                    <div>
-                      <span className="text-muted-foreground">Origin:</span> {selected.origin || '-'}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Destination:</span> {selected.destination || '-'}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Planned:</span> {formatDate(selected.plannedStartAt)} → {formatDate(selected.plannedEndAt)}
-                    </div>
-                  </CardContent>
-                </Card>
 
-                <Card>
-                  <CardHeader className="py-3">
-                    <CardTitle className="text-base">Execution</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2 pb-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Dispatched:</span> {formatDate(selected.dispatchedAt)}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Completed:</span> {formatDate(selected.completedAt)}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Start meters:</span> {selected.startMileage ?? '-'} km / {selected.startOperatingHours ?? '-'} hrs
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">End meters:</span> {selected.endMileage ?? '-'} km / {selected.endOperatingHours ?? '-'} hrs
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="py-3">
-                    <CardTitle className="text-base">Inspections</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3 pb-4 text-sm">
-                    {inspectionsLoading ? (
-                      <div className="text-muted-foreground">Loading…</div>
-                    ) : (
-                      <>
-                        {(['PreTrip', 'PostTrip'] as const).map((kind) => {
-                          const current = inspections
-                            .filter((i) => i.inspectionKind === kind && i.status !== 'Cancelled')
-                            .sort((a, b) => (a.startedAtUtc < b.startedAtUtc ? 1 : -1))[0];
-
-                          return (
-                            <div key={kind} className="rounded-md border p-3">
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <div className="font-medium">{kind === 'PreTrip' ? 'Pre-trip' : 'Post-trip'}</div>
-                                  <div className="text-muted-foreground">
-                                    {current ? `${current.status}${current.overallResult ? ` (${current.overallResult})` : ''}` : 'Not started'}
-                                  </div>
-                                  {current?.inspectionTemplateName ? (
-                                    <div className="text-muted-foreground">Template: {current.inspectionTemplateName}</div>
-                                  ) : null}
-                                </div>
-                                <div className="flex gap-2">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                      setStartInspectionForm({
-                                        fleetTripId: selected.id,
-                                        inspectionTemplateId: inspectionTemplates[0]?.id || '',
-                                        inspectorEmployeeId: selected.driverEmployeeId || null,
-                                        inspectionKind: kind,
-                                      });
-                                      setStartInspectionOpen(true);
-                                    }}
-                                    disabled={!inspectionTemplates.length || !!current}
-                                  >
-                                    Start
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                      if (!current) return;
-                                      setSelectedInspection(current);
-                                      setCompleteInspectionForm({
-                                        completedAtUtc:
-                                          current.status === 'InProgress'
-                                            ? toDatetimeLocal(new Date())
-                                            : (current.completedAtUtc ?? null),
-                                        overallResult: current.overallResult || 'Pass',
-                                        inspectionData: current.inspectionData || '{}',
-                                        notes: current.notes || '',
-                                      });
-                                      setCompleteInspectionOpen(true);
-                                    }}
-                                    disabled={!current}
-                                  >
-                                    {current?.status === 'InProgress' ? 'Complete' : 'View'}
-                                  </Button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {!inspectionTemplates.length ? (
-                          <div className="text-xs text-muted-foreground">
-                            No inspection templates found. Create templates via `api/inspection-templates` (or seed them).
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <Card>
+                        <CardHeader className="py-3">
+                          <CardTitle className="text-base">Plan</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2 pb-4 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">Purpose:</span> {selected.purpose || '-'}
                           </div>
-                        ) : null}
-                      </>
-                    )}
-                  </CardContent>
-                </Card>
+                          <div>
+                            <span className="text-muted-foreground">Origin:</span> {selected.origin || '-'}
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Destination:</span> {selected.destination || '-'}
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Planned:</span> {formatDate(selected.plannedStartAt)} → {formatDate(selected.plannedEndAt)}
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardHeader className="py-3">
+                          <CardTitle className="text-base">Execution</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2 pb-4 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">Dispatched:</span> {formatDate(selected.dispatchedAt)}
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Completed:</span> {formatDate(selected.completedAt)}
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Start meters:</span> {selected.startMileage ?? '-'} km / {selected.startOperatingHours ?? '-'} hrs
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">End meters:</span> {selected.endMileage ?? '-'} km / {selected.endOperatingHours ?? '-'} hrs
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardHeader className="py-3">
+                          <CardTitle className="text-base">Inspections</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3 pb-4 text-sm">
+                          {inspectionsLoading ? (
+                            <div className="text-muted-foreground">Loading…</div>
+                          ) : (
+                            <>
+                              {(['PreTrip', 'PostTrip'] as const).map((kind) => {
+                                const current = inspections
+                                  .filter((i) => i.inspectionKind === kind && i.status !== 'Cancelled')
+                                  .sort((a, b) => (a.startedAtUtc < b.startedAtUtc ? 1 : -1))[0];
+
+                                return (
+                                  <div key={kind} className="rounded-md border p-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div>
+                                        <div className="font-medium">{kind === 'PreTrip' ? 'Pre-trip' : 'Post-trip'}</div>
+                                        <div className="text-muted-foreground">
+                                          {current ? `${current.status}${current.overallResult ? ` (${current.overallResult})` : ''}` : 'Not started'}
+                                        </div>
+                                        {current?.inspectionTemplateName ? (
+                                          <div className="text-muted-foreground">Template: {current.inspectionTemplateName}</div>
+                                        ) : null}
+                                      </div>
+                                      <div className="flex gap-2">
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => {
+                                            setStartInspectionForm({
+                                              fleetTripId: selected.id,
+                                              inspectionTemplateId: inspectionTemplates[0]?.id || '',
+                                              inspectorEmployeeId: selected.driverEmployeeId || null,
+                                              inspectionKind: kind,
+                                            });
+                                            setStartInspectionOpen(true);
+                                          }}
+                                          disabled={!inspectionTemplates.length || !!current}
+                                        >
+                                          Start
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => {
+                                            if (!current) return;
+                                            setSelectedInspection(current);
+                                            setCompleteInspectionForm({
+                                              completedAtUtc:
+                                                current.status === 'InProgress'
+                                                  ? toDatetimeLocal(new Date())
+                                                  : (current.completedAtUtc ?? null),
+                                              overallResult: current.overallResult || 'Pass',
+                                              inspectionData: current.inspectionData || '{}',
+                                              notes: current.notes || '',
+                                            });
+                                            setCompleteInspectionOpen(true);
+                                          }}
+                                          disabled={!current}
+                                        >
+                                          {current?.status === 'InProgress' ? 'Complete' : 'View'}
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                              {!inspectionTemplates.length ? (
+                                <div className="text-xs text-muted-foreground">
+                                  No inspection templates found. Create templates via `api/inspection-templates` (or seed them).
+                                </div>
+                              ) : null}
+                            </>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <WorkflowApprovalActions
+                        entityType="FleetTrip"
+                        entityId={selected.id}
+                        entityLabel="Fleet Trip"
+                        entityNumber={selected.vehicleAssetNumber || undefined}
+                        status={selected.status}
+                        loadWorkflowSummary
+                        onSubmit={async () => {
+                          await fleetService.submitTrip(selected.id);
+                          await refreshSelected();
+                          await loadTrips();
+                        }}
+                        onApprove={async (comments) => {
+                          await fleetService.approveTrip(selected.id, comments);
+                          await refreshSelected();
+                          await loadTrips();
+                        }}
+                        onReject={async (comments) => {
+                          await fleetService.rejectTrip(selected.id, 'Rejected', comments);
+                          await refreshSelected();
+                          await loadTrips();
+                        }}
+                      />
+
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="destructive"
+                          disabled={['Dispatched', 'Completed', 'Cancelled'].includes(selected.status)}
+                          onClick={() => {
+                            setCancelReason('');
+                            setCancelOpen(true);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          variant="outline"
+                          disabled={selected.status !== 'Approved'}
+                          onClick={() => {
+                            setDispatchForm({
+                              dispatchedAt: toDatetimeLocal(new Date()),
+                              startMileage: selected.startMileage ?? null,
+                              startOperatingHours: selected.startOperatingHours ?? null,
+                            });
+                            setDispatchOpen(true);
+                          }}
+                        >
+                          <Truck className="mr-2 h-4 w-4" />
+                          Dispatch
+                        </Button>
+                        <Button
+                          variant="outline"
+                          disabled={selected.status !== 'Dispatched'}
+                          onClick={() => {
+                            setCompleteForm({
+                              completedAt: toDatetimeLocal(new Date()),
+                              endMileage: selected.endMileage ?? null,
+                              endOperatingHours: selected.endOperatingHours ?? null,
+                              notes: selected.notes || '',
+                            });
+                            setCompleteOpen(true);
+                          }}
+                        >
+                          <CheckCircle2 className="mr-2 h-4 w-4" />
+                          Complete
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
+            </TabsContent>
 
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <WorkflowApprovalActions
-                  entityType="FleetTrip"
-                  entityId={selected.id}
-                  entityLabel="Fleet Trip"
-                  entityNumber={selected.vehicleAssetNumber || undefined}
-                  status={selected.status}
-                  loadWorkflowSummary
-                  onSubmit={async () => {
-                    await fleetService.submitTrip(selected.id);
-                    await refreshSelected();
-                    await loadTrips();
-                  }}
-                  onApprove={async (comments) => {
-                    await fleetService.approveTrip(selected.id, comments);
-                    await refreshSelected();
-                    await loadTrips();
-                  }}
-                  onReject={async (comments) => {
-                    await fleetService.rejectTrip(selected.id, 'Rejected', comments);
-                    await refreshSelected();
-                    await loadTrips();
-                  }}
-                />
-
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="destructive"
-                    disabled={['Dispatched', 'Completed', 'Cancelled'].includes(selected.status)}
-                    onClick={() => {
-                      setCancelReason('');
-                      setCancelOpen(true);
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={selected.status !== 'Approved'}
-                    onClick={() => {
-                      setDispatchForm({
-                        dispatchedAt: toDatetimeLocal(new Date()),
-                        startMileage: selected.startMileage ?? null,
-                        startOperatingHours: selected.startOperatingHours ?? null,
-                      });
-                      setDispatchOpen(true);
-                    }}
-                  >
-                    <Truck className="mr-2 h-4 w-4" />
-                    Dispatch
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={selected.status !== 'Dispatched'}
-                    onClick={() => {
-                      setCompleteForm({
-                        completedAt: toDatetimeLocal(new Date()),
-                        endMileage: selected.endMileage ?? null,
-                        endOperatingHours: selected.endOperatingHours ?? null,
-                        notes: selected.notes || '',
-                      });
-                      setCompleteOpen(true);
-                    }}
-                  >
-                    <CheckCircle2 className="mr-2 h-4 w-4" />
-                    Complete
-                  </Button>
-                </div>
+            <TabsContent value="approvals" className="mt-4 flex-1 overflow-hidden">
+              <div className="h-full overflow-y-auto pr-1">
+                {!selected ? (
+                  <div className="py-10 text-center text-muted-foreground">No trip selected</div>
+                ) : (
+                  <WorkflowApprovalHistoryPanel entityType="FleetTrip" entityId={selected.id} />
+                )}
               </div>
-
-              <WorkflowApprovalHistoryPanel entityType="FleetTrip" entityId={selected.id} />
-            </div>
-            )}
-          </div>
+            </TabsContent>
+          </Tabs>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setViewOpen(false)}>
