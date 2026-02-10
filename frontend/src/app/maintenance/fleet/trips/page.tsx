@@ -243,7 +243,6 @@ function FleetTripsPageContent() {
   const [completeForm, setCompleteForm] = React.useState({
     completedAt: toDatetimeLocal(new Date()),
     endMileage: null as number | null,
-    endOperatingHours: null as number | null,
     notes: '' as string,
   });
 
@@ -398,7 +397,6 @@ function FleetTripsPageContent() {
       const dto: DispatchFleetTripDto = {
         dispatchedAt: dispatchForm.dispatchedAt ? new Date(dispatchForm.dispatchedAt).toISOString() : null,
         startMileage: dispatchForm.startMileage ?? null,
-        startOperatingHours: dispatchForm.startOperatingHours ?? null,
       };
       const updated = await fleetService.dispatchTrip(selected.id, dto);
       toast({ title: 'Trip dispatched' });
@@ -416,7 +414,6 @@ function FleetTripsPageContent() {
       const dto = {
         completedAt: completeForm.completedAt ? new Date(completeForm.completedAt).toISOString() : null,
         endMileage: completeForm.endMileage ?? null,
-        endOperatingHours: completeForm.endOperatingHours ?? null,
         notes: completeForm.notes?.trim() || null,
       };
       const updated = await fleetService.completeTrip(selected.id, dto);
@@ -753,10 +750,10 @@ function FleetTripsPageContent() {
                             <span className="text-muted-foreground">Completed:</span> {formatDate(selected.completedAt)}
                           </div>
                           <div>
-                            <span className="text-muted-foreground">Start meters:</span> {selected.startMileage ?? '-'} km / {selected.startOperatingHours ?? '-'} hrs
+                            <span className="text-muted-foreground">Start odometer:</span> {selected.startMileage ?? '-'} km
                           </div>
                           <div>
-                            <span className="text-muted-foreground">End meters:</span> {selected.endMileage ?? '-'} km / {selected.endOperatingHours ?? '-'} hrs
+                            <span className="text-muted-foreground">End odometer:</span> {selected.endMileage ?? '-'} km
                           </div>
                         </CardContent>
                       </Card>
@@ -884,7 +881,6 @@ function FleetTripsPageContent() {
                             setDispatchForm({
                               dispatchedAt: toDatetimeLocal(new Date()),
                               startMileage: selected.startMileage ?? null,
-                              startOperatingHours: selected.startOperatingHours ?? null,
                             });
                             setDispatchOpen(true);
                           }}
@@ -899,7 +895,6 @@ function FleetTripsPageContent() {
                             setCompleteForm({
                               completedAt: toDatetimeLocal(new Date()),
                               endMileage: selected.endMileage ?? null,
-                              endOperatingHours: selected.endOperatingHours ?? null,
                               notes: selected.notes || '',
                             });
                             setCompleteOpen(true);
@@ -1242,17 +1237,6 @@ function FleetTripsPageContent() {
                 onChange={(e) => setDispatchForm((p) => ({ ...p, startMileage: e.target.value === '' ? null : Number(e.target.value) }))}
               />
             </div>
-            <div className="space-y-2">
-              <Label>Start Operating Hours</Label>
-              <p className="text-xs text-muted-foreground">
-                Hour-meter reading at dispatch (common for forklifts/plant). Leave blank to use the vehicle’s current operating hours.
-              </p>
-              <Input
-                type="number"
-                value={dispatchForm.startOperatingHours ?? ''}
-                onChange={(e) => setDispatchForm((p) => ({ ...p, startOperatingHours: e.target.value === '' ? null : Number(e.target.value) }))}
-              />
-            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDispatchOpen(false)}>
@@ -1267,7 +1251,7 @@ function FleetTripsPageContent() {
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>Complete Trip</DialogTitle>
-            <DialogDescription>Capture end readings (odometer/hour-meter). These update the vehicle metrics.</DialogDescription>
+            <DialogDescription>Capture end odometer reading. This updates the vehicle metrics.</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="space-y-2 md:col-span-2">
@@ -1284,14 +1268,6 @@ function FleetTripsPageContent() {
                 type="number"
                 value={completeForm.endMileage ?? ''}
                 onChange={(e) => setCompleteForm((p) => ({ ...p, endMileage: e.target.value === '' ? null : Number(e.target.value) }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>End Operating Hours</Label>
-              <Input
-                type="number"
-                value={completeForm.endOperatingHours ?? ''}
-                onChange={(e) => setCompleteForm((p) => ({ ...p, endOperatingHours: e.target.value === '' ? null : Number(e.target.value) }))}
               />
             </div>
             <div className="space-y-2 md:col-span-2">
