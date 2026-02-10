@@ -138,7 +138,7 @@ const navigationItems: NavItem[] = [
         ],
       },
       {
-        title: 'Fleet Management',
+        title: 'Fleet management',
         href: '/maintenance/fleet',
         icon: Truck,
         children: [
