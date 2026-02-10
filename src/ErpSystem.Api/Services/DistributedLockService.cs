@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Api.Services;
@@ -29,95 +30,106 @@ public sealed class DistributedLockService : IDistributedLockService
         if (string.IsNullOrWhiteSpace(lockName)) return null;
 
         var name = lockName.Trim();
-        var now = DateTime.UtcNow;
-        var leaseUntil = now.Add(leaseDuration <= TimeSpan.Zero ? TimeSpan.FromMinutes(5) : leaseDuration);
+        var effectiveLeaseDuration = leaseDuration <= TimeSpan.Zero ? TimeSpan.FromMinutes(5) : leaseDuration;
 
-        for (var attempt = 0; attempt < 2; attempt++)
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync<int, IAsyncDisposable?>(0, async (dbContext, _, ct) =>
         {
-            await using var tx = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            var now = DateTime.UtcNow;
+            var leaseUntil = now.Add(effectiveLeaseDuration);
 
-            try
+            for (var attempt = 0; attempt < 2; attempt++)
             {
-                var row = await _db.Set<DistributedLock>()
-                    .SingleOrDefaultAsync(l => l.LockName == name, cancellationToken);
+                await using var tx = await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
 
-                if (row == null)
+                try
                 {
-                    row = new DistributedLock
+                    var row = await dbContext.Set<DistributedLock>()
+                        .SingleOrDefaultAsync(l => l.LockName == name, ct);
+
+                    if (row == null)
                     {
-                        Id = Guid.NewGuid(),
-                        LockName = name,
-                        AcquiredBy = _instanceId,
-                        AcquiredAtUtc = now,
-                        LastHeartbeatUtc = now,
-                        LeaseUntilUtc = leaseUntil,
-                        CreatedAt = now,
-                    };
+                        row = new DistributedLock
+                        {
+                            Id = Guid.NewGuid(),
+                            LockName = name,
+                            AcquiredBy = _instanceId,
+                            AcquiredAtUtc = now,
+                            LastHeartbeatUtc = now,
+                            LeaseUntilUtc = leaseUntil,
+                            CreatedAt = now,
+                        };
 
-                    await _db.AddAsync(row, cancellationToken);
-                    await _db.SaveChangesAsync(cancellationToken);
-                    await tx.CommitAsync(cancellationToken);
+                        await dbContext.AddAsync(row, ct);
+                        await dbContext.SaveChangesAsync(ct);
+                        await tx.CommitAsync(ct);
 
-                    return new Handle(this, name, _instanceId);
+                        return new Handle(this, name, _instanceId);
+                    }
+
+                    if (row.LeaseUntilUtc <= now || string.IsNullOrWhiteSpace(row.AcquiredBy) || string.Equals(row.AcquiredBy, _instanceId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var wasExpired = row.LeaseUntilUtc <= now || string.IsNullOrWhiteSpace(row.AcquiredBy);
+                        row.AcquiredBy = _instanceId;
+                        row.LeaseUntilUtc = leaseUntil;
+                        row.LastHeartbeatUtc = now;
+                        if (wasExpired) row.AcquiredAtUtc = now;
+                        row.UpdatedAt = now;
+
+                        dbContext.Update(row);
+                        await dbContext.SaveChangesAsync(ct);
+                        await tx.CommitAsync(ct);
+
+                        return new Handle(this, name, _instanceId);
+                    }
+
+                    await tx.RollbackAsync(ct);
+                    return null;
                 }
-
-                if (row.LeaseUntilUtc <= now || string.IsNullOrWhiteSpace(row.AcquiredBy) || string.Equals(row.AcquiredBy, _instanceId, StringComparison.OrdinalIgnoreCase))
+                catch (DbUpdateException ex)
                 {
-                    var wasExpired = row.LeaseUntilUtc <= now || string.IsNullOrWhiteSpace(row.AcquiredBy);
-                    row.AcquiredBy = _instanceId;
-                    row.LeaseUntilUtc = leaseUntil;
-                    row.LastHeartbeatUtc = now;
-                    if (wasExpired) row.AcquiredAtUtc = now;
-                    row.UpdatedAt = now;
-
-                    _db.Update(row);
-                    await _db.SaveChangesAsync(cancellationToken);
-                    await tx.CommitAsync(cancellationToken);
-
-                    return new Handle(this, name, _instanceId);
+                    // Unique index race on first insert; retry once.
+                    await tx.RollbackAsync(ct);
+                    _logger.LogDebug(ex, "Distributed lock acquisition race for {LockName} (attempt {Attempt})", name, attempt + 1);
                 }
-
-                await tx.RollbackAsync(cancellationToken);
-                return null;
             }
-            catch (DbUpdateException ex)
-            {
-                // Unique index race on first insert; retry once.
-                await tx.RollbackAsync(cancellationToken);
-                _logger.LogDebug(ex, "Distributed lock acquisition race for {LockName} (attempt {Attempt})", name, attempt + 1);
-            }
-        }
 
-        return null;
+            return null;
+        }, null, cancellationToken);
     }
 
     private async Task ReleaseAsync(string lockName, string instanceId, CancellationToken cancellationToken = default)
     {
-        var now = DateTime.UtcNow;
-
-        await using var tx = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-        var row = await _db.Set<DistributedLock>().SingleOrDefaultAsync(l => l.LockName == lockName, cancellationToken);
-        if (row == null)
+        var strategy = _db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync<int, int>(0, async (dbContext, _, ct) =>
         {
-            await tx.CommitAsync(cancellationToken);
-            return;
-        }
+            var now = DateTime.UtcNow;
 
-        if (!string.Equals(row.AcquiredBy, instanceId, StringComparison.OrdinalIgnoreCase))
-        {
-            await tx.CommitAsync(cancellationToken);
-            return;
-        }
+            await using var tx = await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            var row = await dbContext.Set<DistributedLock>().SingleOrDefaultAsync(l => l.LockName == lockName, ct);
+            if (row == null)
+            {
+                await tx.CommitAsync(ct);
+                return 0;
+            }
 
-        row.AcquiredBy = null;
-        row.AcquiredAtUtc = null;
-        row.LastHeartbeatUtc = null;
-        row.LeaseUntilUtc = now.AddSeconds(-1);
-        row.UpdatedAt = now;
+            if (!string.Equals(row.AcquiredBy, instanceId, StringComparison.OrdinalIgnoreCase))
+            {
+                await tx.CommitAsync(ct);
+                return 0;
+            }
 
-        _db.Update(row);
-        await _db.SaveChangesAsync(cancellationToken);
-        await tx.CommitAsync(cancellationToken);
+            row.AcquiredBy = null;
+            row.AcquiredAtUtc = null;
+            row.LastHeartbeatUtc = null;
+            row.LeaseUntilUtc = now.AddSeconds(-1);
+            row.UpdatedAt = now;
+
+            dbContext.Update(row);
+            await dbContext.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            return 0;
+        }, null, cancellationToken);
     }
 
     private sealed class Handle : IAsyncDisposable
