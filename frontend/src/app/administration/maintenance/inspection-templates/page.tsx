@@ -53,6 +53,7 @@ export default function InspectionTemplatesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formFieldErrors, setFormFieldErrors] = useState<Record<string, string>>({});
   
   // Form state
   const [formData, setFormData] = useState<CreateInspectionTemplateDto>({
@@ -71,6 +72,73 @@ export default function InspectionTemplatesPage() {
     priority: 'Medium',
     checklistItems: []
   });
+
+  const apiFieldToFormField: Record<string, string> = {
+    Name: 'name',
+    Code: 'code',
+    Description: 'description',
+    Category: 'category',
+    Frequency: 'frequency',
+    EstimatedDuration: 'estimatedDuration',
+    Priority: 'priority',
+    Version: 'version'
+  };
+
+  const clearFormErrors = () => setFormFieldErrors({});
+
+  const applyApiValidationErrors = (apiErrors: Record<string, string[]>) => {
+    const next: Record<string, string> = {};
+    for (const [apiField, messages] of Object.entries(apiErrors || {})) {
+      if (!messages?.length) continue;
+      const formField = apiFieldToFormField[apiField] ?? apiField;
+      next[formField] = messages.join(' ');
+    }
+    setFormFieldErrors(next);
+  };
+
+  const getFriendlyErrorMessage = (err: unknown) => {
+    const anyErr = err as any;
+    const apiResponse = anyErr?.response;
+    const apiErrors: Record<string, string[]> | undefined = apiResponse?.errors;
+
+    if (apiErrors && Object.keys(apiErrors).length > 0) {
+      const flattened = Object.entries(apiErrors)
+        .flatMap(([field, messages]) => (messages || []).map((m) => `${field}: ${m}`))
+        .filter(Boolean);
+      if (flattened.length > 0) return flattened.join(' ');
+    }
+
+    return (
+      apiResponse?.detail ||
+      apiResponse?.message ||
+      apiResponse?.title ||
+      (err instanceof Error ? err.message : null) ||
+      'An unexpected error occurred.'
+    );
+  };
+
+  const validateTemplateForm = (data: CreateInspectionTemplateDto) => {
+    const nextErrors: Record<string, string> = {};
+    const name = (data.name || '').trim();
+    const code = (data.code || '').trim();
+    const category = (data.category || '').trim();
+    const frequency = (data.frequency || '').trim();
+    const priority = (data.priority || '').trim();
+    const estimatedDuration = Number(data.estimatedDuration);
+
+    if (!name) nextErrors.name = 'Template name is required.';
+    if (!code) nextErrors.code = 'Template code is required.';
+    if (!category) nextErrors.category = 'Category is required.';
+    if (!frequency) nextErrors.frequency = 'Frequency is required.';
+    if (!priority) nextErrors.priority = 'Priority is required.';
+
+    if (!Number.isFinite(estimatedDuration) || estimatedDuration < 1 || estimatedDuration > 1440) {
+      nextErrors.estimatedDuration = 'Estimated duration must be between 1 and 1440 minutes.';
+    }
+
+    const isValid = Object.keys(nextErrors).length === 0;
+    return { isValid, nextErrors };
+  };
 
   const normalizeChecklistOrders = (items: CreateInspectionTemplateDto['checklistItems']) =>
     (items || []).map((i, idx) => ({ ...i, order: idx + 1 }));
@@ -165,6 +233,15 @@ export default function InspectionTemplatesPage() {
     try {
       setIsSubmitting(true);
       setError(null);
+      clearFormErrors();
+
+      const { isValid, nextErrors } = validateTemplateForm(formData);
+      if (!isValid) {
+        setFormFieldErrors(nextErrors);
+        setError('Please fix the highlighted fields and try again.');
+        return;
+      }
+
       console.log('Creating inspection template with data:', formData);
       const newTemplate = await inspectionTemplateService.createTemplate(formData);
       setTemplatesData([...templatesData, newTemplate]);
@@ -172,7 +249,9 @@ export default function InspectionTemplatesPage() {
       resetForm();
     } catch (error) {
       console.error('Error creating inspection template:', error);
-      setError('Failed to create inspection template. Please try again.');
+      const apiErrors: Record<string, string[]> | undefined = (error as any)?.response?.errors;
+      if (apiErrors) applyApiValidationErrors(apiErrors);
+      setError(getFriendlyErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
@@ -181,19 +260,19 @@ export default function InspectionTemplatesPage() {
   const handleEdit = (template: InspectionTemplate) => {
     setSelectedTemplate(template);
     setFormData({
-      name: template.name,
-      code: template.code,
-      description: template.description,
-      category: template.category,
-      frequency: template.frequency,
-      estimatedDuration: template.estimatedDuration,
-      isActive: template.isActive,
-      requiresSignature: template.requiresSignature,
-      allowPhotos: template.allowPhotos,
-      version: template.version,
-      assetTypes: template.assetTypes,
-      inspectorRoles: template.inspectorRoles,
-      priority: template.priority,
+      name: template.name ?? '',
+      code: template.code ?? '',
+      description: template.description ?? '',
+      category: template.category || 'Safety',
+      frequency: template.frequency || 'Monthly',
+      estimatedDuration: template.estimatedDuration && template.estimatedDuration > 0 ? template.estimatedDuration : 60,
+      isActive: !!template.isActive,
+      requiresSignature: !!template.requiresSignature,
+      allowPhotos: !!template.allowPhotos,
+      version: template.version || '1.0',
+      assetTypes: template.assetTypes || [],
+      inspectorRoles: template.inspectorRoles || [],
+      priority: template.priority || 'Medium',
       checklistItems: template.checklistItems.map((item, idx) => ({
         item: item.item,
         type: item.type,
@@ -201,6 +280,8 @@ export default function InspectionTemplatesPage() {
         order: item.order ?? (idx + 1)
       }))
     });
+    clearFormErrors();
+    setError(null);
     setIsEditDialogOpen(true);
   };
 
@@ -215,6 +296,14 @@ export default function InspectionTemplatesPage() {
     try {
       setIsSubmitting(true);
       setError(null);
+      clearFormErrors();
+
+      const { isValid, nextErrors } = validateTemplateForm(formData);
+      if (!isValid) {
+        setFormFieldErrors(nextErrors);
+        setError('Please fix the highlighted fields and try again.');
+        return;
+      }
       const updateData: UpdateInspectionTemplateDto = {
         ...formData
       };
@@ -226,7 +315,9 @@ export default function InspectionTemplatesPage() {
       resetForm();
     } catch (error) {
       console.error('Error updating inspection template:', error);
-      setError('Failed to update inspection template. Please try again.');
+      const apiErrors: Record<string, string[]> | undefined = (error as any)?.response?.errors;
+      if (apiErrors) applyApiValidationErrors(apiErrors);
+      setError(getFriendlyErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
@@ -278,6 +369,7 @@ export default function InspectionTemplatesPage() {
       priority: 'Medium',
       checklistItems: []
     });
+    clearFormErrors();
     setSelectedTemplate(null);
   };
 
@@ -377,7 +469,7 @@ export default function InspectionTemplatesPage() {
                 <div className="space-y-2">
                   <Label htmlFor="frequency">Frequency</Label>
                   <Select value={formData.frequency} onValueChange={(value) => setFormData({...formData, frequency: value})}>
-                    <SelectTrigger>
+                    <SelectTrigger className={formFieldErrors.frequency ? 'border-red-500' : undefined}>
                       <SelectValue placeholder="Select frequency" />
                     </SelectTrigger>
                     <SelectContent>
@@ -389,6 +481,9 @@ export default function InspectionTemplatesPage() {
                       <SelectItem value="Annual">Annual</SelectItem>
                     </SelectContent>
                   </Select>
+                  {formFieldErrors.frequency && (
+                    <p className="text-sm text-red-600">{formFieldErrors.frequency}</p>
+                  )}
                 </div>
               </div>
 
@@ -399,14 +494,18 @@ export default function InspectionTemplatesPage() {
                     id="duration"
                     type="number"
                     value={formData.estimatedDuration}
-                    onChange={(e) => setFormData({...formData, estimatedDuration: parseInt(e.target.value) || 60})}
+                    onChange={(e) => setFormData({...formData, estimatedDuration: parseInt(e.target.value) || 0})}
                     placeholder="60"
+                    className={formFieldErrors.estimatedDuration ? 'border-red-500' : undefined}
                   />
+                  {formFieldErrors.estimatedDuration && (
+                    <p className="text-sm text-red-600">{formFieldErrors.estimatedDuration}</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="priority">Priority</Label>
                   <Select value={formData.priority} onValueChange={(value) => setFormData({...formData, priority: value})}>
-                    <SelectTrigger>
+                    <SelectTrigger className={formFieldErrors.priority ? 'border-red-500' : undefined}>
                       <SelectValue placeholder="Select priority" />
                     </SelectTrigger>
                     <SelectContent>
@@ -416,6 +515,9 @@ export default function InspectionTemplatesPage() {
                       <SelectItem value="Low">Low</SelectItem>
                     </SelectContent>
                   </Select>
+                  {formFieldErrors.priority && (
+                    <p className="text-sm text-red-600">{formFieldErrors.priority}</p>
+                  )}
                 </div>
               </div>
 
@@ -913,7 +1015,7 @@ export default function InspectionTemplatesPage() {
               <div className="space-y-2">
                 <Label htmlFor="edit-frequency">Frequency</Label>
                 <Select value={formData.frequency} onValueChange={(value) => setFormData({...formData, frequency: value})}>
-                  <SelectTrigger>
+                  <SelectTrigger className={formFieldErrors.frequency ? 'border-red-500' : undefined}>
                     <SelectValue placeholder="Select frequency" />
                   </SelectTrigger>
                   <SelectContent>
@@ -925,6 +1027,9 @@ export default function InspectionTemplatesPage() {
                     <SelectItem value="Annual">Annual</SelectItem>
                   </SelectContent>
                 </Select>
+                {formFieldErrors.frequency && (
+                  <p className="text-sm text-red-600">{formFieldErrors.frequency}</p>
+                )}
               </div>
             </div>
 
@@ -935,14 +1040,18 @@ export default function InspectionTemplatesPage() {
                   id="edit-duration"
                   type="number"
                   value={formData.estimatedDuration}
-                  onChange={(e) => setFormData({...formData, estimatedDuration: parseInt(e.target.value) || 60})}
+                  onChange={(e) => setFormData({...formData, estimatedDuration: parseInt(e.target.value) || 0})}
                   placeholder="60"
+                  className={formFieldErrors.estimatedDuration ? 'border-red-500' : undefined}
                 />
+                {formFieldErrors.estimatedDuration && (
+                  <p className="text-sm text-red-600">{formFieldErrors.estimatedDuration}</p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit-priority">Priority</Label>
                 <Select value={formData.priority} onValueChange={(value) => setFormData({...formData, priority: value})}>
-                  <SelectTrigger>
+                  <SelectTrigger className={formFieldErrors.priority ? 'border-red-500' : undefined}>
                     <SelectValue placeholder="Select priority" />
                   </SelectTrigger>
                   <SelectContent>
@@ -952,6 +1061,9 @@ export default function InspectionTemplatesPage() {
                     <SelectItem value="Low">Low</SelectItem>
                   </SelectContent>
                 </Select>
+                {formFieldErrors.priority && (
+                  <p className="text-sm text-red-600">{formFieldErrors.priority}</p>
+                )}
               </div>
             </div>
 
