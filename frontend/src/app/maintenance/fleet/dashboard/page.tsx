@@ -166,10 +166,10 @@ export default function FleetDashboardPage() {
 
   const costBreakdown = React.useMemo(() => {
     if (!summary) return [];
-    const fuel = summary.fuelCostThisMonth ?? 0;
-    const external = summary.externalRepairCostThisMonth ?? 0;
-    const internal = summary.internalMaintenanceCostThisMonth ?? 0;
-    const total = summary.totalCostThisMonth ?? 0;
+    const fuel = Number(summary.fuelCostThisMonth ?? 0);
+    const external = Number(summary.externalRepairCostThisMonth ?? 0);
+    const internal = Number(summary.internalMaintenanceCostThisMonth ?? 0);
+    const total = Number(summary.totalCostThisMonth ?? 0);
     const other = Math.max(0, total - (fuel + external + internal));
 
     const rows = [
@@ -179,8 +179,10 @@ export default function FleetDashboardPage() {
       { name: 'Other', value: other, color: '#a855f7' },
     ];
 
-    return rows.filter((r) => r.value > 0);
+    return rows;
   }, [summary]);
+
+  const costBreakdownChartData = React.useMemo(() => costBreakdown.filter((r) => r.value > 0), [costBreakdown]);
 
   const topCostRows = React.useMemo(() => (costSummary?.rows || []).slice(0, 7), [costSummary]);
   const topUtilRows = React.useMemo(() => (utilization?.rows || []).slice(0, 7), [utilization]);
@@ -307,14 +309,14 @@ export default function FleetDashboardPage() {
           <CardContent className="space-y-4">
             {!summary ? (
               <div className="py-10 text-center text-sm text-muted-foreground">No data</div>
-            ) : costBreakdown.length === 0 ? (
+            ) : costBreakdownChartData.length === 0 ? (
               <div className="py-10 text-center text-sm text-muted-foreground">No costs recorded for this month</div>
             ) : (
               <div className="h-[240px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={costBreakdown} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2}>
-                      {costBreakdown.map((entry) => (
+                    <Pie data={costBreakdownChartData} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2}>
+                      {costBreakdownChartData.map((entry) => (
                         <Cell key={entry.name} fill={entry.color} />
                       ))}
                     </Pie>
@@ -323,6 +325,20 @@ export default function FleetDashboardPage() {
                 </ResponsiveContainer>
               </div>
             )}
+
+            {summary ? (
+              <div className="space-y-2 text-sm">
+                {costBreakdown.map((row) => (
+                  <div key={row.name} className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: row.color }} />
+                      <span className="truncate text-muted-foreground">{row.name}</span>
+                    </div>
+                    <span className="font-medium">{formatNumber(row.value, 2)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             {summary ? (
               <div className="grid grid-cols-2 gap-3 text-sm">
