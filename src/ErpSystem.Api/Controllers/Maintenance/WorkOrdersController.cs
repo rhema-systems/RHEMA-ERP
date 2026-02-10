@@ -262,8 +262,24 @@ public class WorkOrdersController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error updating status for work order with ID {id}");
-            return StatusCode(500, $"An error occurred while updating status for work order with ID {id}");
+            _logger.LogError(ex, "Error updating status for work order with ID {WorkOrderId}", id);
+
+            if (ex is ArgumentException)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+
+            if (ex is UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+
+            if (ex is InvalidOperationException)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+
+            return StatusCode(500, new { message = "An unexpected error occurred while updating the work order status." });
         }
     }
 

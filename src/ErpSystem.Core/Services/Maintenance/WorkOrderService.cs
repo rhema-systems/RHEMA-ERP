@@ -108,7 +108,7 @@ public class WorkOrderService : IWorkOrderService
             };
 
             // Validate vehicle availability before starting
-            var (vehiclesAvailable, unavailableVehicles) = await ValidateVehicleAvailabilityAsync(workOrderId);
+            var (vehiclesAvailable, unavailableVehicles) = await ValidateVehicleAvailabilityAsync(workOrder);
             if (!vehiclesAvailable)
             {
                 result.Success = false;
@@ -1090,12 +1090,21 @@ public class WorkOrderService : IWorkOrderService
         try
         {
             var workOrder = await _workOrderRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Work order {id} not found");
+            var previousStatus = workOrder.Status;
             workOrder.Status = status;
             // Note: Notes functionality would need to be implemented via WorkOrderComment entity
 
             workOrder.UpdatedAt = DateTime.UtcNow;
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
+
+            // If a work order is put on hold, release any assigned vehicles back to Active so they can be used elsewhere.
+            // This prevents a stale "InUse" lock from blocking future resume/start actions.
+            if (string.Equals(status, "OnHold", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(previousStatus, "InProgress", StringComparison.OrdinalIgnoreCase))
+            {
+                await UpdateVehicleStatusOnWorkOrderCompleteAsync(id);
+            }
 
             return await MapToWorkOrderDtoAsync(workOrder);
         }
@@ -1193,8 +1202,15 @@ public class WorkOrderService : IWorkOrderService
         {
             var workOrder = await _workOrderRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Work order {id} not found");
 
+            if (string.Equals(workOrder.Status, "InProgress", StringComparison.OrdinalIgnoreCase))
+            {
+                return await MapToWorkOrderDtoAsync(workOrder);
+            }
+
+            var isResume = string.Equals(workOrder.Status, "OnHold", StringComparison.OrdinalIgnoreCase);
+
             // Validate vehicle availability before starting
-            var (vehiclesAvailable, unavailableVehicles) = await ValidateVehicleAvailabilityAsync(id);
+            var (vehiclesAvailable, unavailableVehicles) = await ValidateVehicleAvailabilityAsync(workOrder, allowInUseWhenResuming: isResume);
             if (!vehiclesAvailable)
             {
                 var errorMessage = $"Cannot start work order: Some vehicles are not available. " +
@@ -1211,7 +1227,7 @@ public class WorkOrderService : IWorkOrderService
             await UpdateVehicleStatusOnWorkOrderStartAsync(id);
 
             workOrder.Status = "InProgress";
-            workOrder.ActualStartDate = DateTime.UtcNow;
+            workOrder.ActualStartDate ??= DateTime.UtcNow;
             workOrder.UpdatedAt = DateTime.UtcNow;
 
             await _workOrderRepository.UpdateAsync(workOrder);
@@ -2287,13 +2303,13 @@ public class WorkOrderService : IWorkOrderService
     /// <summary>
     /// Validates that all assigned vehicles are available (Active status)
     /// </summary>
-    private async Task<(bool IsValid, List<string> UnavailableVehicles)> ValidateVehicleAvailabilityAsync(Guid workOrderId)
+    private async Task<(bool IsValid, List<string> UnavailableVehicles)> ValidateVehicleAvailabilityAsync(WorkOrder workOrder, bool allowInUseWhenResuming = false)
     {
         try
         {
             // Get all schedules and expenses for this work order
-            var schedules = await _scheduleRepository.GetByWorkOrderIdAsync(workOrderId);
-            var expenses = await _expenseRepository.GetByWorkOrderIdAsync(workOrderId);
+            var schedules = await _scheduleRepository.GetByWorkOrderIdAsync(workOrder.Id);
+            var expenses = await _expenseRepository.GetByWorkOrderIdAsync(workOrder.Id);
 
             // Collect all vehicle IDs from schedules and expenses
             var vehicleIds = new List<Guid>();
@@ -2328,10 +2344,23 @@ public class WorkOrderService : IWorkOrderService
                 }
                 else if (vehicle.Status != ErpSystem.Core.Enums.AssetStatus.Active)
                 {
+                    // Resume special-case: if the work order is resuming from OnHold, allow a stale InUse state as long as
+                    // the vehicle isn't actively in a fleet trip and isn't being used by another InProgress work order.
+                    if (allowInUseWhenResuming && vehicle.Status == ErpSystem.Core.Enums.AssetStatus.InUse)
+                    {
+                        var inFleetTrip = await IsVehicleInActiveFleetTripAsync(vehicleId, workOrder.TenantId);
+                        var inOtherWorkOrder = await IsVehicleInUseByOtherInProgressWorkOrderAsync(vehicleId, workOrder.TenantId, workOrder.Id);
+
+                        if (!inFleetTrip && !inOtherWorkOrder)
+                        {
+                            continue;
+                        }
+                    }
+
                     var statusName = vehicle.Status.ToString();
                     unavailableVehicles.Add($"{vehicle.Name} ({vehicle.AssetNumber}) is currently {statusName}");
                     _logger.LogWarning("Vehicle {VehicleId} ({VehicleName}) is not available for work order {WorkOrderId}. Current status: {Status}",
-                        vehicleId, vehicle.Name, workOrderId, statusName);
+                        vehicleId, vehicle.Name, workOrder.Id, statusName);
                 }
             }
 
@@ -2340,20 +2369,90 @@ public class WorkOrderService : IWorkOrderService
             if (isValid)
             {
                 _logger.LogInformation("All {Count} vehicle(s) are available for work order {WorkOrderId}",
-                    vehicleIds.Count, workOrderId);
+                    vehicleIds.Count, workOrder.Id);
             }
             else
             {
                 _logger.LogWarning("{Count} vehicle(s) are unavailable for work order {WorkOrderId}",
-                    unavailableVehicles.Count, workOrderId);
+                    unavailableVehicles.Count, workOrder.Id);
             }
 
             return (isValid, unavailableVehicles);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error validating vehicle availability for work order {WorkOrderId}", workOrderId);
+            _logger.LogError(ex, "Error validating vehicle availability for work order {WorkOrderId}", workOrder.Id);
             throw;
+        }
+    }
+
+    private async Task<bool> IsVehicleInActiveFleetTripAsync(Guid vehicleAssetId, Guid tenantId)
+    {
+        try
+        {
+            var q = _unitOfWork.Repository<ErpSystem.Core.Entities.Maintenance.FleetTrip>()
+                .GetQueryable(t =>
+                    t.TenantId == tenantId &&
+                    !t.IsDeleted &&
+                    t.VehicleAssetId == vehicleAssetId &&
+                    t.Status == ErpSystem.Core.Entities.Maintenance.FleetTripStatuses.Dispatched);
+
+            return await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.AnyAsync(q);
+        }
+        catch
+        {
+            // Best-effort: if we can't validate, be conservative and block resume/start.
+            return true;
+        }
+    }
+
+    private async Task<bool> IsVehicleInUseByOtherInProgressWorkOrderAsync(Guid vehicleAssetId, Guid tenantId, Guid currentWorkOrderId)
+    {
+        try
+        {
+            var scheduleWorkOrderIds = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToListAsync(
+                _scheduleRepository
+                    .GetQueryable(s =>
+                        s.TenantId == tenantId &&
+                        !s.IsDeleted &&
+                        s.AssignedVehicleId.HasValue &&
+                        s.AssignedVehicleId.Value == vehicleAssetId &&
+                        s.WorkOrderId.HasValue &&
+                        s.WorkOrderId.Value != currentWorkOrderId)
+                    .Select(s => s.WorkOrderId!.Value)
+                    .Distinct());
+
+            var expenseWorkOrderIds = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToListAsync(
+                _unitOfWork.Repository<MaintenanceExpense>()
+                    .GetQueryable(e =>
+                        e.TenantId == tenantId &&
+                        !e.IsDeleted &&
+                        e.VehicleId.HasValue &&
+                        e.VehicleId.Value == vehicleAssetId &&
+                        e.WorkOrderId != currentWorkOrderId)
+                    .Select(e => e.WorkOrderId)
+                    .Distinct());
+
+            var otherIds = scheduleWorkOrderIds
+                .Concat(expenseWorkOrderIds)
+                .Distinct()
+                .ToList();
+
+            if (otherIds.Count == 0) return false;
+
+            var q = _unitOfWork.Repository<WorkOrder>()
+                .GetQueryable(w =>
+                    w.TenantId == tenantId &&
+                    !w.IsDeleted &&
+                    otherIds.Contains(w.Id) &&
+                    w.Status == "InProgress");
+
+            return await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.AnyAsync(q);
+        }
+        catch
+        {
+            // Best-effort: if we can't validate, be conservative and block resume/start.
+            return true;
         }
     }
 
