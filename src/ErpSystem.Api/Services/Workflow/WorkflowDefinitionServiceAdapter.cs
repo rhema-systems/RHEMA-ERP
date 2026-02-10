@@ -188,14 +188,57 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
 
     public async Task SetWorkflowDefinitionActiveAsync(Guid id, bool isActive, Guid modifiedById)
     {
-        if (isActive)
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
         {
-            await _coreService.ActivateDefinitionAsync(id);
+            throw new InvalidOperationException("Tenant ID is required to update workflow definition status");
         }
-        else
+
+        if (!isActive)
         {
-            await _coreService.DeactivateDefinitionAsync(id);
+            // Deactivation does not require workflow structure validation.
+            var definition = await _workflowDefinitionRepository.GetByIdAsync(id)
+                             ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
+            definition.IsActive = false;
+            definition.UpdatedAt = DateTime.UtcNow;
+            definition.UpdatedBy = _currentUserService.UserName ?? "System";
+            definition.LastModifiedById = modifiedById;
+            await _workflowDefinitionRepository.UpdateAsync(definition);
+            await _workflowDefinitionRepository.SaveChangesAsync();
+            return;
         }
+
+        // IMPORTANT:
+        // When a workflow definition is updated, we soft-delete and recreate steps/transitions in the same request scope.
+        // EF may keep the previous (now soft-deleted) steps in the tracked navigation collection, which then causes
+        // activation validation to falsely report duplicate step names / multiple start steps / non-sequential orders.
+        // To avoid that, validate using a no-tracking query that reflects the persisted database state.
+        var definitionForValidation = await _workflowDefinitionRepository
+            .GetQueryable(d => d.Id == id && d.TenantId == tenantId)
+            .AsNoTracking()
+            .Include(wd => wd.Steps.OrderBy(s => s.Order))
+            .ThenInclude(s => s.OutgoingTransitions)
+            .Include(wd => wd.Steps)
+            .ThenInclude(s => s.IncomingTransitions)
+            .Include(wd => wd.EntityType)
+            .FirstOrDefaultAsync()
+            ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
+
+        var (isValid, errors) = await _coreService.ValidateDefinitionAsync(definitionForValidation);
+        if (!isValid)
+        {
+            throw new InvalidOperationException(
+                $"Cannot activate invalid workflow definition: {string.Join(", ", errors)}");
+        }
+
+        var definitionToActivate = await _workflowDefinitionRepository.GetByIdAsync(id)
+                                 ?? throw new InvalidOperationException($"Workflow definition with ID {id} not found");
+        definitionToActivate.IsActive = true;
+        definitionToActivate.UpdatedAt = DateTime.UtcNow;
+        definitionToActivate.UpdatedBy = _currentUserService.UserName ?? "System";
+        definitionToActivate.LastModifiedById = modifiedById;
+        await _workflowDefinitionRepository.UpdateAsync(definitionToActivate);
+        await _workflowDefinitionRepository.SaveChangesAsync();
     }
 
     public async Task DeleteWorkflowDefinitionAsync(Guid id)
