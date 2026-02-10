@@ -841,22 +841,17 @@ public class WorkOrderService : IWorkOrderService
             _logger.LogDebug("CreateWorkOrderDto: Title={Title}, AssetId={AssetId}, WorkOrderTypeId={WorkOrderTypeId}, MaintenanceTypeId={MaintenanceTypeId}, PriorityLevelId={PriorityLevelId}",
                 createDto.Title, createDto.AssetId, createDto.WorkOrderTypeId, createDto.MaintenanceTypeId, createDto.PriorityLevelId);
 
-            // Determine RequestedById - use current user's employee ID or user ID
-            // For background services (e.g., auto-generated from schedules), this will be null
-            Guid? requestedById = _currentUserService.EmployeeId;
-            if (!requestedById.HasValue || requestedById.Value == Guid.Empty)
+            // Determine RequestedById (ApplicationUser.Id).
+            // WorkOrders.RequestedById is a FK to Users, so do NOT use EmployeeId here.
+            // For background services (e.g., auto-generated from schedules), this will be null.
+            Guid? requestedById = null;
+            if (_currentUserService.UserId != null && Guid.TryParse(_currentUserService.UserId, out var userId) && userId != Guid.Empty)
             {
-                // Try user ID
-                if (_currentUserService.UserId != null && Guid.TryParse(_currentUserService.UserId, out var userId) && userId != Guid.Empty)
-                {
-                    requestedById = userId;
-                }
-                else
-                {
-                    // For background service context (auto-generated work orders), leave as null
-                    requestedById = null;
-                    _logger.LogInformation("Creating work order without RequestedById (background service context)");
-                }
+                requestedById = userId;
+            }
+            else
+            {
+                _logger.LogInformation("Creating work order without RequestedById (background service context)");
             }
 
             var workOrder = new WorkOrder

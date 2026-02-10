@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -110,6 +111,16 @@ public class FleetDefectsController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (DbUpdateException ex)
+        {
+            // Friendly message for known persistence errors.
+            _logger.LogWarning(ex, "Database update error creating work order from fleet defect {DefectId}", dto.DefectId);
+            return BadRequest("Unable to create the work order due to a database constraint. Please refresh and try again.");
         }
         catch (Exception ex)
         {
