@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
 import { Plus, Search, Eye, Truck, CheckCircle2 } from 'lucide-react';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -85,6 +86,22 @@ function formatDate(value?: string | null) {
 function toDatetimeLocal(value: Date) {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+}
+
+function getTripStatusBadge(statusRaw: string | null | undefined) {
+  const status = (statusRaw || '').trim() || 'Unknown';
+  const colors: Record<string, string> = {
+    Draft: 'bg-gray-100 text-gray-800',
+    Submitted: 'bg-blue-100 text-blue-800',
+    Approved: 'bg-purple-100 text-purple-800',
+    Rejected: 'bg-red-100 text-red-800',
+    Dispatched: 'bg-yellow-100 text-yellow-800',
+    Completed: 'bg-green-100 text-green-800',
+    Cancelled: 'bg-gray-100 text-gray-800',
+    Unknown: 'bg-gray-100 text-gray-800',
+  };
+
+  return <Badge className={colors[status] ?? 'bg-gray-100 text-gray-800'}>{status}</Badge>;
 }
 
 export default function FleetTripsPage() {
@@ -583,7 +600,7 @@ function FleetTripsPageContent() {
           <div className="rounded-md border">
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="bg-muted/40">
                   <TableHead>Status</TableHead>
                   <TableHead>Vehicle</TableHead>
                   <TableHead>Driver</TableHead>
@@ -606,21 +623,36 @@ function FleetTripsPageContent() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  result.items.map((t) => (
-                    <TableRow key={t.id}>
-                      <TableCell>{t.status}</TableCell>
+                  result.items.map((t, idx) => (
+                    <TableRow key={t.id} className={idx % 2 === 1 ? 'bg-muted/10 hover:bg-muted/30' : 'hover:bg-muted/30'}>
+                      <TableCell>{getTripStatusBadge(t.status)}</TableCell>
                       <TableCell>
-                        {t.vehicleAssetNumber ? `${t.vehicleAssetNumber} — ` : ''}
-                        {t.vehicleName}
+                        <div className="flex flex-col">
+                          <span className="font-medium">{t.vehicleName}</span>
+                          {t.vehicleAssetNumber || t.vehicleLicensePlate ? (
+                            <span className="text-xs text-muted-foreground">
+                              {t.vehicleAssetNumber ? <span className="font-mono">{t.vehicleAssetNumber}</span> : null}
+                              {t.vehicleLicensePlate ? (
+                                <>
+                                  {t.vehicleAssetNumber ? <span> • </span> : null}
+                                  <span className="font-mono">{t.vehicleLicensePlate}</span>
+                                </>
+                              ) : null}
+                            </span>
+                          ) : null}
+                        </div>
                       </TableCell>
-                      <TableCell>{t.driverEmployeeName || '-'}</TableCell>
                       <TableCell>
-                        {t.plannedStartAt ? formatDate(t.plannedStartAt) : '-'}
-                        {t.plannedEndAt ? ` → ${formatDate(t.plannedEndAt)}` : ''}
+                        {t.driverEmployeeName ? <Badge variant="outline">{t.driverEmployeeName}</Badge> : <span className="text-muted-foreground">-</span>}
                       </TableCell>
-                      <TableCell>{formatDate(t.createdAt)}</TableCell>
+                      <TableCell className="text-sm">
+                        {t.plannedStartAt ? formatDate(t.plannedStartAt) : <span className="text-muted-foreground">-</span>}
+                        {t.plannedEndAt ? <span className="text-muted-foreground"> → </span> : null}
+                        {t.plannedEndAt ? formatDate(t.plannedEndAt) : null}
+                      </TableCell>
+                      <TableCell className="text-sm">{formatDate(t.createdAt)}</TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => openView(t.id)}>
+                        <Button variant="ghost" size="sm" onClick={() => openView(t.id)} title="View trip">
                           <Eye className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -657,23 +689,34 @@ function FleetTripsPageContent() {
                         <CardHeader className="py-3">
                           <CardTitle className="text-base">Status</CardTitle>
                         </CardHeader>
-                        <CardContent className="pb-4">{selected.status}</CardContent>
+                        <CardContent className="pb-4">{getTripStatusBadge(selected.status)}</CardContent>
                       </Card>
                       <Card>
                         <CardHeader className="py-3">
                           <CardTitle className="text-base">Vehicle</CardTitle>
                         </CardHeader>
                         <CardContent className="pb-4">
-                          {selected.vehicleAssetNumber ? `${selected.vehicleAssetNumber} — ` : ''}
-                          {selected.vehicleName}
-                          {selected.vehicleLicensePlate ? ` (${selected.vehicleLicensePlate})` : ''}
+                          <div className="font-medium">{selected.vehicleName}</div>
+                          {selected.vehicleAssetNumber || selected.vehicleLicensePlate ? (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {selected.vehicleAssetNumber ? <span className="font-mono">{selected.vehicleAssetNumber}</span> : null}
+                              {selected.vehicleLicensePlate ? (
+                                <>
+                                  {selected.vehicleAssetNumber ? <span> • </span> : null}
+                                  <span className="font-mono">{selected.vehicleLicensePlate}</span>
+                                </>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </CardContent>
                       </Card>
                       <Card>
                         <CardHeader className="py-3">
                           <CardTitle className="text-base">Driver</CardTitle>
                         </CardHeader>
-                        <CardContent className="pb-4">{selected.driverEmployeeName || 'Unassigned'}</CardContent>
+                        <CardContent className="pb-4">
+                          {selected.driverEmployeeName ? <Badge variant="outline">{selected.driverEmployeeName}</Badge> : <span className="text-muted-foreground">Unassigned</span>}
+                        </CardContent>
                       </Card>
                     </div>
 
