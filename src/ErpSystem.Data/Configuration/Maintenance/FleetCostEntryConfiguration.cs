@@ -14,6 +14,7 @@ public sealed class FleetCostEntryConfiguration : IEntityTypeConfiguration<Fleet
         builder.HasIndex(x => new { x.TenantId, x.CostType, x.IsDeleted });
 
         builder.Property(x => x.CostType).HasMaxLength(50);
+        builder.Property(x => x.Source).HasMaxLength(50).HasDefaultValue("Manual");
         builder.Property(x => x.CurrencyCode).HasMaxLength(10);
     }
 }

@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Services;
 using ErpSystem.Shared;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using WorkOrderTaskDtoFull = ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto;
 
@@ -2673,6 +2674,21 @@ public class WorkOrderService : IWorkOrderService
             var vehicleAssetId = await TryResolveSingleVehicleAssetIdForWorkOrderAsync(workOrder);
             if (!vehicleAssetId.HasValue || vehicleAssetId.Value == Guid.Empty) return;
 
+            // If this work order came from a fleet defect linked to a trip, carry the trip ID onto the cost entry (best-effort).
+            Guid? fleetTripId = null;
+            try
+            {
+                fleetTripId = await _unitOfWork.Repository<FleetDefect>()
+                    .GetQueryable(d => d.TenantId == tenantId && !d.IsDeleted && d.WorkOrderId == workOrder.Id && d.FleetTripId.HasValue)
+                    .OrderByDescending(d => d.ReportedAtUtc)
+                    .Select(d => d.FleetTripId)
+                    .FirstOrDefaultAsync();
+            }
+            catch
+            {
+                // best-effort
+            }
+
             var repo = _unitOfWork.Repository<FleetCostEntry>();
 
             var existing = await repo.FirstOrDefaultAsync(c =>
@@ -2688,9 +2704,11 @@ public class WorkOrderService : IWorkOrderService
                     Id = Guid.NewGuid(),
                     TenantId = tenantId,
                     VehicleAssetId = vehicleAssetId.Value,
+                    FleetTripId = fleetTripId,
                     WorkOrderId = workOrder.Id,
                     CostDateUtc = completedAtUtc.ToUniversalTime(),
                     CostType = "InternalMaintenance",
+                    Source = "WorkOrderCompletion",
                     Amount = Math.Round(actualCost, 2, MidpointRounding.AwayFromZero),
                     CurrencyCode = null,
                     Notes = $"Work Order {workOrder.WorkOrderNumber} completion cost",
@@ -2701,9 +2719,11 @@ public class WorkOrderService : IWorkOrderService
             else
             {
                 existing.VehicleAssetId = vehicleAssetId.Value;
+                existing.FleetTripId = fleetTripId;
                 existing.CostDateUtc = completedAtUtc.ToUniversalTime();
                 existing.Amount = Math.Round(actualCost, 2, MidpointRounding.AwayFromZero);
                 existing.Notes = $"Work Order {workOrder.WorkOrderNumber} completion cost";
+                existing.Source = "WorkOrderCompletion";
                 existing.UpdatedAt = now;
                 existing.LastModifiedById = effectiveUserId;
                 await repo.UpdateAsync(existing);

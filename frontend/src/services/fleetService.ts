@@ -474,6 +474,7 @@ export interface FleetCostEntryDto {
   vehicleName: string;
   costDateUtc: string;
   costType: string;
+  source: string;
   amount: number;
   currencyCode?: string | null;
   notes?: string | null;

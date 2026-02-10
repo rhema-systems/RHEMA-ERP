@@ -153,6 +153,7 @@ public class FleetFuelService : IFleetFuelService
                 FleetFuelTransactionId = entity.Id,
                 CostDateUtc = entity.FuelledAt,
                 CostType = "Fuel",
+                Source = "FuelTransaction",
                 Amount = entity.TotalCost.Value,
                 CurrencyCode = null,
                 Notes = "Fuel transaction",

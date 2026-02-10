@@ -345,6 +345,7 @@ public sealed class FleetTyreService : IFleetTyreService
                 FleetTyreEventId = ev.Id,
                 CostDateUtc = ev.EventAtUtc,
                 CostType = "Tyre",
+                Source = "TyreEvent",
                 Amount = ev.CostAmount.Value,
                 CurrencyCode = ev.CurrencyCode,
                 Notes = $"Tyre {ev.EventType}: {ev.FleetTyreId}",
@@ -360,6 +361,7 @@ public sealed class FleetTyreService : IFleetTyreService
             existing.Amount = ev.CostAmount.Value;
             existing.CurrencyCode = ev.CurrencyCode;
             existing.Notes = $"Tyre {ev.EventType}: {ev.FleetTyreId}";
+            existing.Source = "TyreEvent";
             existing.UpdatedAt = nowUtc;
             existing.LastModifiedById = userId;
             await repo.UpdateAsync(existing);

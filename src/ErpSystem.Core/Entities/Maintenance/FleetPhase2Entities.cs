@@ -330,6 +330,13 @@ public class FleetCostEntry : TenantEntity
     [MaxLength(50)]
     public string CostType { get; set; } = "Fuel"; // Fuel, ExternalRepair, InternalMaintenance, Tyre, Battery, Other
 
+    /// <summary>
+    /// Origin of this cost entry. Used for clarity in reporting/UX.
+    /// </summary>
+    [Required]
+    [MaxLength(50)]
+    public string Source { get; set; } = "Manual"; // Manual, WorkOrderCompletion, FuelTransaction, ExternalRepair, TyreEvent, BatteryEvent
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal Amount { get; set; }
 

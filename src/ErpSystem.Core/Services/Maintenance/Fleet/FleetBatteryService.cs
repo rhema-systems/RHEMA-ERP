@@ -382,6 +382,7 @@ public sealed class FleetBatteryService : IFleetBatteryService
                 FleetBatteryEventId = ev.Id,
                 CostDateUtc = ev.EventAtUtc,
                 CostType = "Battery",
+                Source = "BatteryEvent",
                 Amount = ev.CostAmount.Value,
                 CurrencyCode = ev.CurrencyCode,
                 Notes = $"Battery {ev.EventType}: {ev.FleetBatteryId}",
@@ -397,6 +398,7 @@ public sealed class FleetBatteryService : IFleetBatteryService
             existing.Amount = ev.CostAmount.Value;
             existing.CurrencyCode = ev.CurrencyCode;
             existing.Notes = $"Battery {ev.EventType}: {ev.FleetBatteryId}";
+            existing.Source = "BatteryEvent";
             existing.UpdatedAt = nowUtc;
             existing.LastModifiedById = userId;
             await repo.UpdateAsync(existing);

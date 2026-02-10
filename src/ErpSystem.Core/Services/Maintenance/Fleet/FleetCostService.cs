@@ -46,6 +46,7 @@ public sealed class FleetCostService : IFleetCostService
                 VehicleName = c.VehicleAsset.Name,
                 CostDateUtc = c.CostDateUtc,
                 CostType = c.CostType,
+                Source = c.Source,
                 Amount = c.Amount,
                 CurrencyCode = c.CurrencyCode,
                 Notes = c.Notes,
@@ -76,6 +77,7 @@ public sealed class FleetCostService : IFleetCostService
             VehicleAssetId = dto.VehicleAssetId,
             CostDateUtc = (dto.CostDateUtc ?? now).ToUniversalTime(),
             CostType = string.IsNullOrWhiteSpace(dto.CostType) ? "Other" : dto.CostType.Trim(),
+            Source = "Manual",
             Amount = dto.Amount,
             CurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? null : dto.CurrencyCode.Trim(),
             Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim(),
@@ -94,6 +96,7 @@ public sealed class FleetCostService : IFleetCostService
             VehicleName = vehicle?.Name ?? string.Empty,
             CostDateUtc = entity.CostDateUtc,
             CostType = entity.CostType,
+            Source = entity.Source,
             Amount = entity.Amount,
             CurrencyCode = entity.CurrencyCode,
             Notes = entity.Notes

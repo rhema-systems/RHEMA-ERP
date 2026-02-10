@@ -564,6 +564,7 @@ public class FleetCostEntryDto
     public string VehicleName { get; set; } = string.Empty;
     public DateTime CostDateUtc { get; set; }
     public string CostType { get; set; } = string.Empty;
+    public string Source { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public string? CurrencyCode { get; set; }
     public string? Notes { get; set; }

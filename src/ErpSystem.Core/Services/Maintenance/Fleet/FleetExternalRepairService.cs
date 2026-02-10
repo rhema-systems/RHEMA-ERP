@@ -147,6 +147,7 @@ public sealed class FleetExternalRepairService : IFleetExternalRepairService
                 FleetExternalRepairId = entity.Id,
                 CostDateUtc = now,
                 CostType = "ExternalRepair",
+                Source = "ExternalRepair",
                 Amount = entity.EstimatedCost.Value,
                 CurrencyCode = entity.CurrencyCode,
                 Notes = "Estimated external repair cost",
@@ -217,6 +218,7 @@ public sealed class FleetExternalRepairService : IFleetExternalRepairService
                     FleetExternalRepairId = entity.Id,
                     CostDateUtc = now,
                     CostType = "ExternalRepair",
+                    Source = "ExternalRepair",
                     Amount = Math.Round(amount.Value, 2, MidpointRounding.AwayFromZero),
                     CurrencyCode = entity.CurrencyCode,
                     Notes = entity.ActualCost.HasValue ? "Actual external repair cost" : "Estimated external repair cost",
@@ -231,6 +233,7 @@ public sealed class FleetExternalRepairService : IFleetExternalRepairService
                 cost.Amount = Math.Round(amount.Value, 2, MidpointRounding.AwayFromZero);
                 cost.CurrencyCode = entity.CurrencyCode;
                 cost.Notes = entity.ActualCost.HasValue ? "Actual external repair cost" : "Estimated external repair cost";
+                cost.Source = "ExternalRepair";
                 cost.UpdatedAt = now;
                 cost.LastModifiedById = userId;
                 await costRepo.UpdateAsync(cost);

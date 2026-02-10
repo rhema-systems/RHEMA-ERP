@@ -144,6 +144,7 @@ export default function FleetCostsPage() {
                   <tr className="border-b text-left text-muted-foreground">
                     <th className="py-2">Date</th>
                     <th className="py-2">Type</th>
+                    <th className="py-2">Source</th>
                     <th className="py-2">Amount</th>
                     <th className="py-2">Notes</th>
                     <th className="py-2" />
@@ -154,6 +155,17 @@ export default function FleetCostsPage() {
                     <tr key={c.id} className="border-b">
                       <td className="py-2">{formatDate(c.costDateUtc)}</td>
                       <td className="py-2">{c.costType}</td>
+                      <td className="py-2">
+                        {c.source === 'WorkOrderCompletion' && c.workOrderId ? (
+                          <a className="text-primary underline" href={`/maintenance/work-orders?id=${c.workOrderId}`} target="_blank" rel="noreferrer">
+                            Work Order
+                          </a>
+                        ) : c.source ? (
+                          c.source
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td className="py-2">
                         {c.amount.toLocaleString()} {c.currencyCode ?? ''}
                       </td>
