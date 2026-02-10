@@ -2624,21 +2624,26 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         foreach (var entityType in builder.Model.GetEntityTypes())
         {
             var type = entityType.ClrType;
+
+            // IMPORTANT:
+            // EF Core supports only one query filter per entity. Multiple calls to HasQueryFilter overwrite.
+            // Because TenantEntity inherits BaseEntity, we must apply a single combined filter when tenant scoping is enabled,
+            // otherwise the tenant filter would override the soft delete filter (and soft-deleted records will reappear).
+            if (typeof(TenantEntity).IsAssignableFrom(type) && _tenantId.HasValue)
+            {
+                var method = typeof(ApplicationDbContext)
+                    .GetMethod(nameof(SetTenantSoftDeleteFilter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                    .MakeGenericMethod(type);
+                method.Invoke(null, new object[] { builder, entityType, _tenantId.Value });
+                continue;
+            }
+
             if (typeof(BaseEntity).IsAssignableFrom(type))
             {
                 var method = typeof(ApplicationDbContext)
                     .GetMethod(nameof(SetSoftDeleteFilter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
                     .MakeGenericMethod(type);
                 method.Invoke(null, new object[] { builder, entityType });
-            }
-
-            // Apply tenant filter to all entities that inherit from TenantEntity
-            if (typeof(TenantEntity).IsAssignableFrom(type) && _tenantId.HasValue)
-            {
-                var method = typeof(ApplicationDbContext)
-                    .GetMethod(nameof(SetTenantFilter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
-                    .MakeGenericMethod(type);
-                method.Invoke(null, new object[] { builder, entityType, _tenantId.Value });
             }
         }
     }
@@ -2649,10 +2654,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<TEntity>().HasQueryFilter(e => !e.IsDeleted);
     }
 
-    private static void SetTenantFilter<TEntity>(ModelBuilder builder, Microsoft.EntityFrameworkCore.Metadata.IMutableEntityType entityType, Guid tenantId)
+    private static void SetTenantSoftDeleteFilter<TEntity>(ModelBuilder builder, Microsoft.EntityFrameworkCore.Metadata.IMutableEntityType entityType, Guid tenantId)
         where TEntity : TenantEntity
     {
-        builder.Entity<TEntity>().HasQueryFilter(e => e.TenantId == tenantId);
+        builder.Entity<TEntity>().HasQueryFilter(e => !e.IsDeleted && e.TenantId == tenantId);
     }
 
     private void SeedData(ModelBuilder builder)
