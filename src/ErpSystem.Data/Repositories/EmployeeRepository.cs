@@ -98,8 +98,7 @@ namespace ErpSystem.Data.Repositories
                 .Include(e => e.Position)
                 .Where(e => e.IsActive &&
                            !e.IsDeleted &&
-                           (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation) &&
-                           e.Department.DepartmentType == DepartmentType.Maintenance)
+                           (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation))
                 .OrderBy(e => e.LastName)
                 .ThenBy(e => e.FirstName)
                 .ToListAsync();
@@ -173,8 +172,7 @@ namespace ErpSystem.Data.Repositories
                 .Include(e => e.Position)
                 .Where(e => e.IsActive &&
                            !e.IsDeleted &&
-                           e.StaffStatus == StaffStatus.Active &&
-                           e.Department.DepartmentType == DepartmentType.Maintenance)
+                           e.StaffStatus == StaffStatus.Active)
                 .OrderBy(e => e.LastName)
                 .ThenBy(e => e.FirstName)
                 .ToListAsync();

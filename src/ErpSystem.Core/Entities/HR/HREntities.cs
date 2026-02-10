@@ -188,8 +188,8 @@ public class Employee : TenantEntity
 
     [NotMapped]
     public bool CanBeAssignedToMaintenance => IsActive &&
-        (StaffStatus == StaffStatus.Active || StaffStatus == StaffStatus.Probation) &&
-        Department?.DepartmentType == DepartmentType.Maintenance;
+        !IsDeleted &&
+        (StaffStatus == StaffStatus.Active || StaffStatus == StaffStatus.Probation);
 
     // Alias properties for service compatibility
     /// <summary>
