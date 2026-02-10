@@ -140,6 +140,7 @@ function FleetTripsPageContent() {
     inspectionData: '{}',
     notes: '',
   });
+  const inspectionReadOnly = !!selectedInspection && selectedInspection.status !== 'InProgress';
 
   const loadInspectionTemplate = React.useCallback(
     async (templateId: string) => {
@@ -759,16 +760,19 @@ function FleetTripsPageContent() {
                                       if (!current) return;
                                       setSelectedInspection(current);
                                       setCompleteInspectionForm({
-                                        completedAtUtc: toDatetimeLocal(new Date()),
-                                        overallResult: 'Pass',
+                                        completedAtUtc:
+                                          current.status === 'InProgress'
+                                            ? toDatetimeLocal(new Date())
+                                            : (current.completedAtUtc ?? null),
+                                        overallResult: current.overallResult || 'Pass',
                                         inspectionData: current.inspectionData || '{}',
                                         notes: current.notes || '',
                                       });
                                       setCompleteInspectionOpen(true);
                                     }}
-                                    disabled={!current || current.status !== 'InProgress'}
+                                    disabled={!current}
                                   >
-                                    Complete
+                                    {current?.status === 'InProgress' ? 'Complete' : 'View'}
                                   </Button>
                                 </div>
                               </div>
@@ -948,10 +952,18 @@ function FleetTripsPageContent() {
           <div className="flex-1 overflow-y-auto pr-1">
           <div className="grid grid-cols-1 gap-4">
             <div className="space-y-2">
+              {selectedInspection ? (
+                <div className="text-xs text-muted-foreground">
+                  Status: {selectedInspection.status}
+                  {selectedInspection.startedAtUtc ? ` • Started: ${formatDate(selectedInspection.startedAtUtc)}` : ''}
+                  {selectedInspection.completedAtUtc ? ` • Completed: ${formatDate(selectedInspection.completedAtUtc)}` : ''}
+                </div>
+              ) : null}
               <Label>Overall Result</Label>
               <Select
                 value={completeInspectionForm.overallResult}
                 onValueChange={(v) => setCompleteInspectionForm((p) => ({ ...p, overallResult: v }))}
+                disabled={inspectionReadOnly}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select result" />
@@ -985,6 +997,7 @@ function FleetTripsPageContent() {
                           <Select
                             value={value || 'none'}
                             onValueChange={(v) => {
+                              if (inspectionReadOnly) return;
                               const next = { ...inspectionAnswers, [i.id]: v === 'none' ? '' : v };
                               setInspectionAnswers(next);
                               const derived = deriveOverallResult(selectedInspectionTemplate, next);
@@ -994,6 +1007,7 @@ function FleetTripsPageContent() {
                                 inspectionData: buildInspectionDataJson(selectedInspectionTemplate, next),
                               }));
                             }}
+                            disabled={inspectionReadOnly}
                           >
                             <SelectTrigger>
                               <SelectValue placeholder="Select result" />
@@ -1009,6 +1023,7 @@ function FleetTripsPageContent() {
                             type="number"
                             value={value}
                             onChange={(e) => {
+                              if (inspectionReadOnly) return;
                               const next = { ...inspectionAnswers, [i.id]: e.target.value };
                               setInspectionAnswers(next);
                               setCompleteInspectionForm((p) => ({
@@ -1017,11 +1032,13 @@ function FleetTripsPageContent() {
                               }));
                             }}
                             placeholder="Enter value"
+                            disabled={inspectionReadOnly}
                           />
                         ) : (
                           <Textarea
                             value={value}
                             onChange={(e) => {
+                              if (inspectionReadOnly) return;
                               const next = { ...inspectionAnswers, [i.id]: e.target.value };
                               setInspectionAnswers(next);
                               setCompleteInspectionForm((p) => ({
@@ -1031,6 +1048,7 @@ function FleetTripsPageContent() {
                             }}
                             placeholder="Enter response"
                             rows={2}
+                            disabled={inspectionReadOnly}
                           />
                         )}
                       </div>
@@ -1045,52 +1063,59 @@ function FleetTripsPageContent() {
 
             <div className="space-y-2">
               <Label>Notes</Label>
-              <Textarea value={completeInspectionForm.notes || ''} onChange={(e) => setCompleteInspectionForm((p) => ({ ...p, notes: e.target.value }))} rows={5} />
+              <Textarea
+                value={completeInspectionForm.notes || ''}
+                onChange={(e) => setCompleteInspectionForm((p) => ({ ...p, notes: e.target.value }))}
+                rows={5}
+                disabled={inspectionReadOnly}
+              />
             </div>
           </div>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setCompleteInspectionOpen(false)}>
-              Cancel
+              {inspectionReadOnly ? 'Close' : 'Cancel'}
             </Button>
-            <Button
-              onClick={async () => {
-                if (!selectedInspection) return;
-                try {
-                  if (selectedInspectionTemplate?.checklistItems?.length) {
-                    const missing = selectedInspectionTemplate.checklistItems
-                      .filter((i) => i.required)
-                      .filter((i) => {
-                        const v = (inspectionAnswers[i.id] || '').trim();
-                        return !v;
-                      });
+            {!inspectionReadOnly ? (
+              <Button
+                onClick={async () => {
+                  if (!selectedInspection) return;
+                  try {
+                    if (selectedInspectionTemplate?.checklistItems?.length) {
+                      const missing = selectedInspectionTemplate.checklistItems
+                        .filter((i) => i.required)
+                        .filter((i) => {
+                          const v = (inspectionAnswers[i.id] || '').trim();
+                          return !v;
+                        });
 
-                    if (missing.length > 0) {
-                      toast({
-                        title: 'Checklist incomplete',
-                        description: `Please complete required items (${missing.length}) before finishing the inspection.`,
-                        variant: 'destructive',
-                      });
-                      return;
+                      if (missing.length > 0) {
+                        toast({
+                          title: 'Checklist incomplete',
+                          description: `Please complete required items (${missing.length}) before finishing the inspection.`,
+                          variant: 'destructive',
+                        });
+                        return;
+                      }
                     }
-                  }
 
-                  await fleetService.completeTripInspection(selectedInspection.id, {
-                    ...completeInspectionForm,
-                    completedAtUtc: completeInspectionForm.completedAtUtc || toDatetimeLocal(new Date()),
-                    inspectionData: completeInspectionForm.inspectionData || '{}',
-                  });
-                  setCompleteInspectionOpen(false);
-                  if (selected?.id) setInspections(await fleetService.getTripInspections(selected.id));
-                } catch (e: any) {
-                  toast({ title: 'Failed to complete inspection', description: e?.message || String(e), variant: 'destructive' });
-                }
-              }}
-              disabled={!selectedInspection}
-            >
-              Complete
-            </Button>
+                    await fleetService.completeTripInspection(selectedInspection.id, {
+                      ...completeInspectionForm,
+                      completedAtUtc: completeInspectionForm.completedAtUtc || toDatetimeLocal(new Date()),
+                      inspectionData: completeInspectionForm.inspectionData || '{}',
+                    });
+                    setCompleteInspectionOpen(false);
+                    if (selected?.id) setInspections(await fleetService.getTripInspections(selected.id));
+                  } catch (e: any) {
+                    toast({ title: 'Failed to complete inspection', description: e?.message || String(e), variant: 'destructive' });
+                  }
+                }}
+                disabled={!selectedInspection}
+              >
+                Complete
+              </Button>
+            ) : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>
