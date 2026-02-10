@@ -215,7 +215,9 @@ public class WorkflowDefinitionServiceAdapter : ErpSystem.Core.Interfaces.Workfl
         // To avoid that, validate using a no-tracking query that reflects the persisted database state.
         var definitionForValidation = await _workflowDefinitionRepository
             .GetQueryable(d => d.Id == id && d.TenantId == tenantId)
-            .AsNoTracking()
+            // Use identity resolution to avoid duplicate step entities when including transitions.
+            .AsNoTrackingWithIdentityResolution()
+            .AsSplitQuery()
             .Include(wd => wd.Steps.OrderBy(s => s.Order))
             .ThenInclude(s => s.OutgoingTransitions)
             .Include(wd => wd.Steps)
