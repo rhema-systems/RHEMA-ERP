@@ -200,6 +200,14 @@ public sealed class FleetDefectService : IFleetDefectService
 
         if (defect.WorkOrderId.HasValue) return defect.WorkOrderId.Value;
 
+        var billingType = string.IsNullOrWhiteSpace(dto.BillingType) ? "Repairs" : dto.BillingType.Trim();
+        if (!string.Equals(billingType, "Repairs", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(billingType, "Maintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            billingType = "Repairs";
+        }
+        billingType = string.Equals(billingType, "Maintenance", StringComparison.OrdinalIgnoreCase) ? "Maintenance" : "Repairs";
+
         var create = new CreateWorkOrderDto
         {
             Title = string.IsNullOrWhiteSpace(dto.TitleOverride) ? defect.Title : dto.TitleOverride.Trim(),
@@ -209,6 +217,7 @@ public sealed class FleetDefectService : IFleetDefectService
             MaintenanceTypeId = dto.MaintenanceTypeId,
             PriorityLevelId = dto.PriorityLevelId,
             MaintenanceLocation = "Internal",
+            BillingType = billingType,
             RequestedStartDate = DateTime.UtcNow,
             RequestedCompletionDate = DateTime.UtcNow.AddDays(1)
         };

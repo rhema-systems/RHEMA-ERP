@@ -369,6 +369,12 @@ public class CreateWorkOrderFromFleetDefectDto
     [Required]
     public Guid PriorityLevelId { get; set; }
 
+    /// <summary>
+    /// Work order billing type: "Maintenance" (fixed amount) or "Repairs" (itemized costs)
+    /// </summary>
+    [StringLength(20)]
+    public string BillingType { get; set; } = "Repairs";
+
     public string? TitleOverride { get; set; }
     public string? DescriptionOverride { get; set; }
 }

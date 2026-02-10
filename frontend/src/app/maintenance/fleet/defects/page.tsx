@@ -19,6 +19,8 @@ function formatDate(value: string) {
 }
 
 export default function FleetDefectsPage() {
+  type BillingType = 'Maintenance' | 'Repairs';
+
   const [vehicles, setVehicles] = React.useState<FleetVehicleListDto[]>([]);
   const [vehicleId, setVehicleId] = React.useState<string>('all');
   const [status, setStatus] = React.useState<string>('all');
@@ -44,6 +46,7 @@ export default function FleetDefectsPage() {
     workOrderTypeId: '',
     maintenanceTypeId: '',
     priorityLevelId: '',
+    billingType: 'Repairs' as BillingType,
   });
 
   const loadVehicles = React.useCallback(async () => {
@@ -85,7 +88,7 @@ export default function FleetDefectsPage() {
 
   const openWorkOrder = async (d: FleetDefectDto) => {
     setSelectedDefect(d);
-    setWoForm({ workOrderTypeId: '', maintenanceTypeId: '', priorityLevelId: '' });
+    setWoForm({ workOrderTypeId: '', maintenanceTypeId: '', priorityLevelId: '', billingType: 'Repairs' });
     setOpenWo(true);
     try {
       const [types, mtypes, pri] = await Promise.all([
@@ -93,19 +96,9 @@ export default function FleetDefectsPage() {
         maintenanceApiService.getMaintenanceTypes(),
         maintenanceApiService.getPriorityLevels(),
       ]);
-      const nextTypes = types ?? [];
-      setWorkOrderTypes(nextTypes);
+      setWorkOrderTypes(types ?? []);
       setMaintenanceTypes(mtypes ?? []);
       setPriorityLevels(pri ?? []);
-
-      // Default to "Repairs" when converting a defect into a work order.
-      const pick = (v: any) => String(v ?? '').toLowerCase();
-      const repairs = nextTypes.find((t) => `${pick(t.code)} ${pick(t.name)}`.includes('repair'));
-      const corrective = nextTypes.find((t) => `${pick(t.code)} ${pick(t.name)}`.includes('correct'));
-      const defaultTypeId = repairs?.id || corrective?.id || '';
-      if (defaultTypeId) {
-        setWoForm((p) => ({ ...p, workOrderTypeId: defaultTypeId }));
-      }
     } catch (e) {
       console.error(e);
     }
@@ -137,6 +130,7 @@ export default function FleetDefectsPage() {
         workOrderTypeId: woForm.workOrderTypeId,
         maintenanceTypeId: woForm.maintenanceTypeId,
         priorityLevelId: woForm.priorityLevelId,
+        billingType: woForm.billingType,
       });
       setOpenWo(false);
       await load();
@@ -329,10 +323,9 @@ export default function FleetDefectsPage() {
             <DialogTitle>Create Work Order</DialogTitle>
           </DialogHeader>
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Work Order Type</Label>
-              <p className="text-xs text-muted-foreground">Defaults to Repairs because this work order is created from a defect.</p>
               <Select value={woForm.workOrderTypeId} onValueChange={(v) => setWoForm((p) => ({ ...p, workOrderTypeId: v }))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select type" />
@@ -373,6 +366,19 @@ export default function FleetDefectsPage() {
                       {p.name}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Billing Type</Label>
+              <p className="text-xs text-muted-foreground">Defaults to Repairs for defects (itemized costs).</p>
+              <Select value={woForm.billingType} onValueChange={(v) => setWoForm((p) => ({ ...p, billingType: v as BillingType }))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select billing type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Repairs">Repairs</SelectItem>
+                  <SelectItem value="Maintenance">Maintenance</SelectItem>
                 </SelectContent>
               </Select>
             </div>

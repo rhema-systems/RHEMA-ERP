@@ -262,6 +262,8 @@ export interface CreateWorkOrderFromFleetDefectDto {
   workOrderTypeId: string;
   maintenanceTypeId: string;
   priorityLevelId: string;
+  /** Work order billing type: "Maintenance" (fixed price) or "Repairs" (itemized costs) */
+  billingType?: 'Maintenance' | 'Repairs';
   titleOverride?: string | null;
   descriptionOverride?: string | null;
 }
