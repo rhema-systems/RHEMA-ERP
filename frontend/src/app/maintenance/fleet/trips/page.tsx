@@ -427,80 +427,91 @@ function FleetTripsPageContent() {
               New Trip
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-4xl">
+          <DialogContent className="flex max-h-[90vh] w-[95vw] max-w-5xl flex-col overflow-hidden">
             <DialogHeader>
               <DialogTitle>Create Trip</DialogTitle>
               <DialogDescription>Create a draft trip request, then submit for workflow approval.</DialogDescription>
             </DialogHeader>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Vehicle</Label>
-                <Select value={createForm.vehicleAssetId || undefined} onValueChange={(v) => setCreateForm((p) => ({ ...p, vehicleAssetId: v }))}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select vehicle" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {vehicles.map((v) => (
-                      <SelectItem key={v.id} value={v.id}>
-                        {v.assetNumber} — {v.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="flex-1 overflow-y-auto pr-1">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-6">
+                <div className="space-y-2 md:col-span-3">
+                  <Label>Vehicle</Label>
+                  <Select value={createForm.vehicleAssetId || undefined} onValueChange={(v) => setCreateForm((p) => ({ ...p, vehicleAssetId: v }))}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select vehicle" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {vehicles.map((v) => (
+                        <SelectItem key={v.id} value={v.id}>
+                          {v.assetNumber} — {v.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              <div className="space-y-2">
-                <Label>Driver</Label>
-                <Select
-                  value={createForm.driverEmployeeId || 'none'}
-                  onValueChange={(v) => setCreateForm((p) => ({ ...p, driverEmployeeId: v === 'none' ? null : v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select driver (optional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Unassigned</SelectItem>
-                    {employees.map((e) => (
-                      <SelectItem key={e.id} value={e.id}>
-                        {(e.firstName || '').trim()} {(e.lastName || '').trim()} {e.employeeNumber ? `(${e.employeeNumber})` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                <div className="space-y-2 md:col-span-3">
+                  <Label>Driver</Label>
+                  <Select
+                    value={createForm.driverEmployeeId || 'none'}
+                    onValueChange={(v) => setCreateForm((p) => ({ ...p, driverEmployeeId: v === 'none' ? null : v }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select driver (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Unassigned</SelectItem>
+                      {employees.map((e) => (
+                        <SelectItem key={e.id} value={e.id}>
+                          {(e.firstName || '').trim()} {(e.lastName || '').trim()} {e.employeeNumber ? `(${e.employeeNumber})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              <div className="space-y-2">
-                <Label>Purpose</Label>
-                <Input value={createForm.purpose || ''} onChange={(e) => setCreateForm((p) => ({ ...p, purpose: e.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Origin</Label>
-                <Input value={createForm.origin || ''} onChange={(e) => setCreateForm((p) => ({ ...p, origin: e.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Destination</Label>
-                <Input value={createForm.destination || ''} onChange={(e) => setCreateForm((p) => ({ ...p, destination: e.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Planned Start</Label>
-                <Input
-                  type="datetime-local"
-                  value={createForm.plannedStartAt || ''}
-                  onChange={(e) => setCreateForm((p) => ({ ...p, plannedStartAt: e.target.value || null }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Planned End</Label>
-                <Input
-                  type="datetime-local"
-                  value={createForm.plannedEndAt || ''}
-                  onChange={(e) => setCreateForm((p) => ({ ...p, plannedEndAt: e.target.value || null }))}
-                />
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label>Notes</Label>
-                <Textarea value={createForm.notes || ''} onChange={(e) => setCreateForm((p) => ({ ...p, notes: e.target.value }))} />
+                <div className="space-y-2 md:col-span-6">
+                  <Label>Purpose</Label>
+                  <Input value={createForm.purpose || ''} onChange={(e) => setCreateForm((p) => ({ ...p, purpose: e.target.value }))} />
+                </div>
+
+                <div className="space-y-2 md:col-span-3">
+                  <Label>Origin</Label>
+                  <Input value={createForm.origin || ''} onChange={(e) => setCreateForm((p) => ({ ...p, origin: e.target.value }))} />
+                </div>
+
+                <div className="space-y-2 md:col-span-3">
+                  <Label>Destination</Label>
+                  <Input value={createForm.destination || ''} onChange={(e) => setCreateForm((p) => ({ ...p, destination: e.target.value }))} />
+                </div>
+
+                <div className="space-y-2 md:col-span-3">
+                  <Label>Planned Start</Label>
+                  <Input
+                    type="datetime-local"
+                    value={createForm.plannedStartAt || ''}
+                    onChange={(e) => setCreateForm((p) => ({ ...p, plannedStartAt: e.target.value || null }))}
+                  />
+                </div>
+
+                <div className="space-y-2 md:col-span-3">
+                  <Label>Planned End</Label>
+                  <Input
+                    type="datetime-local"
+                    value={createForm.plannedEndAt || ''}
+                    onChange={(e) => setCreateForm((p) => ({ ...p, plannedEndAt: e.target.value || null }))}
+                  />
+                </div>
+
+                <div className="space-y-2 md:col-span-6">
+                  <Label>Notes</Label>
+                  <Textarea
+                    className="min-h-28"
+                    value={createForm.notes || ''}
+                    onChange={(e) => setCreateForm((p) => ({ ...p, notes: e.target.value }))}
+                  />
+                </div>
               </div>
             </div>
 
@@ -621,16 +632,17 @@ function FleetTripsPageContent() {
       </Card>
 
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
-        <DialogContent className="max-w-5xl">
+        <DialogContent className="flex max-h-[90vh] w-[95vw] max-w-6xl flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>Trip Details</DialogTitle>
             <DialogDescription>View trip information, approvals, and dispatch/completion.</DialogDescription>
           </DialogHeader>
 
-          {!selected ? (
-            <div className="py-10 text-center text-muted-foreground">No trip selected</div>
-          ) : (
-            <div className="space-y-4">
+          <div className="flex-1 overflow-y-auto pr-1">
+            {!selected ? (
+              <div className="py-10 text-center text-muted-foreground">No trip selected</div>
+            ) : (
+              <div className="space-y-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <Card>
                   <CardHeader className="py-3">
@@ -846,7 +858,8 @@ function FleetTripsPageContent() {
 
               <WorkflowApprovalHistoryPanel entityType="FleetTrip" entityId={selected.id} />
             </div>
-          )}
+            )}
+          </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setViewOpen(false)}>
@@ -926,12 +939,13 @@ function FleetTripsPageContent() {
       </Dialog>
 
       <Dialog open={completeInspectionOpen} onOpenChange={setCompleteInspectionOpen}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="flex max-h-[90vh] w-[95vw] max-w-4xl flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>Complete Inspection</DialogTitle>
             <DialogDescription>{selectedInspection?.inspectionTemplateName}</DialogDescription>
           </DialogHeader>
 
+          <div className="flex-1 overflow-y-auto pr-1">
           <div className="grid grid-cols-1 gap-4">
             <div className="space-y-2">
               <Label>Overall Result</Label>
@@ -1033,6 +1047,7 @@ function FleetTripsPageContent() {
               <Label>Notes</Label>
               <Textarea value={completeInspectionForm.notes || ''} onChange={(e) => setCompleteInspectionForm((p) => ({ ...p, notes: e.target.value }))} rows={5} />
             </div>
+          </div>
           </div>
 
           <DialogFooter>
