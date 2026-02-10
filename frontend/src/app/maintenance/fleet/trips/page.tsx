@@ -1244,6 +1244,9 @@ function FleetTripsPageContent() {
             </div>
             <div className="space-y-2">
               <Label>Start Operating Hours</Label>
+              <p className="text-xs text-muted-foreground">
+                Hour-meter reading at dispatch (common for forklifts/plant). Leave blank to use the vehicle’s current operating hours.
+              </p>
               <Input
                 type="number"
                 value={dispatchForm.startOperatingHours ?? ''}
