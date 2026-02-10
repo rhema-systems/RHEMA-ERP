@@ -3,6 +3,7 @@
 import React from 'react';
 import { Plus, Search, Edit } from 'lucide-react';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -35,6 +36,21 @@ function getAuthHeaders(): HeadersInit {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
+}
+
+function getVehicleStatusBadge(statusRaw: string | null | undefined) {
+  const status = (statusRaw || '').trim() || 'Unknown';
+
+  const colors: Record<string, string> = {
+    Active: 'bg-green-100 text-green-800',
+    InUse: 'bg-blue-100 text-blue-800',
+    Maintenance: 'bg-yellow-100 text-yellow-800',
+    OutOfService: 'bg-red-100 text-red-800',
+    Retired: 'bg-gray-100 text-gray-800',
+    Unknown: 'bg-gray-100 text-gray-800',
+  };
+
+  return <Badge className={colors[status] ?? 'bg-gray-100 text-gray-800'}>{status === 'OutOfService' ? 'Out of Service' : status}</Badge>;
 }
 
 export default function FleetVehiclesPage() {
@@ -273,7 +289,7 @@ export default function FleetVehiclesPage() {
           <div className="rounded-md border">
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="bg-muted/40">
                   <TableHead>Asset #</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Plate</TableHead>
@@ -297,14 +313,23 @@ export default function FleetVehiclesPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  result.items.map((v) => (
-                    <TableRow key={v.id}>
-                      <TableCell className="font-medium">{v.assetNumber}</TableCell>
-                      <TableCell>{v.name}</TableCell>
-                      <TableCell>{v.licensePlate || '-'}</TableCell>
-                      <TableCell>{v.vin || '-'}</TableCell>
-                      <TableCell>{v.currentDriverEmployeeName || '-'}</TableCell>
-                      <TableCell>{v.status}</TableCell>
+                  result.items.map((v, idx) => (
+                    <TableRow key={v.id} className={idx % 2 === 1 ? 'bg-muted/10 hover:bg-muted/30' : 'hover:bg-muted/30'}>
+                      <TableCell className="font-medium font-mono">{v.assetNumber}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{v.name}</span>
+                          {v.categoryName ? <span className="text-xs text-muted-foreground">{v.categoryName}</span> : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-sm">{v.licensePlate || <span className="text-muted-foreground">-</span>}</TableCell>
+                      <TableCell className="max-w-[220px] truncate font-mono text-sm" title={v.vin || ''}>
+                        {v.vin || <span className="text-muted-foreground">-</span>}
+                      </TableCell>
+                      <TableCell>
+                        {v.currentDriverEmployeeName ? <Badge variant="outline">{v.currentDriverEmployeeName}</Badge> : <span className="text-muted-foreground">-</span>}
+                      </TableCell>
+                      <TableCell>{getVehicleStatusBadge(v.status)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
                           <Button variant="outline" size="sm" onClick={() => openAssign(v)} disabled={(v.status || '').toLowerCase() !== 'active'}>
