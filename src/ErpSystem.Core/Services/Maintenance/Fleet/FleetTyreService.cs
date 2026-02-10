@@ -38,6 +38,8 @@ public sealed class FleetTyreService : IFleetTyreService
                 FromStatus = e.FromStatus,
                 ToStatus = e.ToStatus,
                 TreadDepthMm = e.TreadDepthMm,
+                CostAmount = e.CostAmount,
+                CurrencyCode = e.CurrencyCode,
                 Notes = e.Notes,
                 CreatedAt = e.CreatedAt,
                 CreatedByUserId = e.CreatedById,
@@ -150,7 +152,7 @@ public sealed class FleetTyreService : IFleetTyreService
 
         await _unitOfWork.Repository<FleetTyre>().AddAsync(entity);
 
-        await _unitOfWork.Repository<FleetTyreEvent>().AddAsync(new FleetTyreEvent
+        var ev = new FleetTyreEvent
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
@@ -163,10 +165,16 @@ public sealed class FleetTyreService : IFleetTyreService
             FromStatus = null,
             ToStatus = entity.Status,
             TreadDepthMm = entity.TreadDepthMm,
+            CostAmount = (dto.CostAmount.HasValue && dto.CostAmount.Value > 0) ? Math.Round(dto.CostAmount.Value, 2, MidpointRounding.AwayFromZero) : null,
+            CurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? null : dto.CurrencyCode.Trim(),
             Notes = entity.Notes,
             CreatedAt = now,
             CreatedById = userId,
-        });
+        };
+
+        await _unitOfWork.Repository<FleetTyreEvent>().AddAsync(ev);
+
+        await UpsertTyreCostEntryAsync(entity.VehicleAssetId, ev, userId, now);
 
         await _unitOfWork.SaveChangesAsync();
         return (await GetByIdAsync(entity.Id))!;
@@ -217,27 +225,38 @@ public sealed class FleetTyreService : IFleetTyreService
 
         await repo.UpdateAsync(entity);
 
+        var hasCost = dto.CostAmount.HasValue && dto.CostAmount.Value > 0;
         if (!string.Equals(fromPosition, entity.Position, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(fromStatus, entity.Status, StringComparison.OrdinalIgnoreCase) ||
-            fromTread != entity.TreadDepthMm)
+            fromTread != entity.TreadDepthMm ||
+            hasCost)
         {
-            await _unitOfWork.Repository<FleetTyreEvent>().AddAsync(new FleetTyreEvent
+            var ev = new FleetTyreEvent
             {
                 Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 FleetTyreId = entity.Id,
                 VehicleAssetId = entity.VehicleAssetId,
                 EventAtUtc = now,
-                EventType = ResolveEventType(fromPosition, entity.Position, fromStatus, entity.Status),
+                EventType = hasCost && string.Equals(fromPosition, entity.Position, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(fromStatus, entity.Status, StringComparison.OrdinalIgnoreCase) &&
+                            fromTread == entity.TreadDepthMm
+                    ? "CostRecorded"
+                    : ResolveEventType(fromPosition, entity.Position, fromStatus, entity.Status),
                 FromPosition = fromPosition,
                 ToPosition = entity.Position,
                 FromStatus = fromStatus,
                 ToStatus = entity.Status,
                 TreadDepthMm = entity.TreadDepthMm,
+                CostAmount = hasCost ? Math.Round(dto.CostAmount!.Value, 2, MidpointRounding.AwayFromZero) : null,
+                CurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? null : dto.CurrencyCode.Trim(),
                 Notes = entity.Notes,
                 CreatedAt = now,
                 CreatedById = userId,
-            });
+            };
+
+            await _unitOfWork.Repository<FleetTyreEvent>().AddAsync(ev);
+            await UpsertTyreCostEntryAsync(entity.VehicleAssetId, ev, userId, now);
         }
 
         await _unitOfWork.SaveChangesAsync();
@@ -304,6 +323,47 @@ public sealed class FleetTyreService : IFleetTyreService
         }
 
         return "Updated";
+    }
+
+    private async Task UpsertTyreCostEntryAsync(Guid vehicleAssetId, FleetTyreEvent ev, Guid userId, DateTime nowUtc)
+    {
+        if (ev.CostAmount == null || ev.CostAmount.Value <= 0) return;
+
+        var repo = _unitOfWork.Repository<FleetCostEntry>();
+        var existing = await repo.FirstOrDefaultAsync(c =>
+            c.TenantId == ev.TenantId &&
+            c.FleetTyreEventId == ev.Id &&
+            !c.IsDeleted);
+
+        if (existing == null)
+        {
+            await repo.AddAsync(new FleetCostEntry
+            {
+                Id = Guid.NewGuid(),
+                TenantId = ev.TenantId,
+                VehicleAssetId = vehicleAssetId,
+                FleetTyreEventId = ev.Id,
+                CostDateUtc = ev.EventAtUtc,
+                CostType = "Tyre",
+                Amount = ev.CostAmount.Value,
+                CurrencyCode = ev.CurrencyCode,
+                Notes = $"Tyre {ev.EventType}: {ev.FleetTyreId}",
+                CreatedAt = nowUtc,
+                CreatedById = userId
+            });
+        }
+        else
+        {
+            existing.VehicleAssetId = vehicleAssetId;
+            existing.CostDateUtc = ev.EventAtUtc;
+            existing.CostType = "Tyre";
+            existing.Amount = ev.CostAmount.Value;
+            existing.CurrencyCode = ev.CurrencyCode;
+            existing.Notes = $"Tyre {ev.EventType}: {ev.FleetTyreId}";
+            existing.UpdatedAt = nowUtc;
+            existing.LastModifiedById = userId;
+            await repo.UpdateAsync(existing);
+        }
     }
 }
 

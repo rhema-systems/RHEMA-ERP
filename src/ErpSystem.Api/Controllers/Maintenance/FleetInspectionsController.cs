@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 
 [ApiController]
 [Route("api/maintenance/fleet/inspections")]
-[Authorize(Policy = "MaintenanceAccess")]
+[Authorize(Policy = "MaintenanceRead")]
 public class FleetInspectionsController : ControllerBase
 {
     private readonly IFleetInspectionService _fleetInspectionService;
@@ -35,6 +35,7 @@ public class FleetInspectionsController : ControllerBase
     }
 
     [HttpPost("start")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetTripInspectionDto>> Start([FromBody] StartFleetTripInspectionDto dto)
     {
         try
@@ -54,6 +55,7 @@ public class FleetInspectionsController : ControllerBase
     }
 
     [HttpPost("{inspectionId:guid}/complete")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetTripInspectionDto>> Complete(Guid inspectionId, [FromBody] CompleteFleetTripInspectionDto dto)
     {
         try
@@ -73,6 +75,7 @@ public class FleetInspectionsController : ControllerBase
     }
 
     [HttpPost("{inspectionId:guid}/cancel")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult> Cancel(Guid inspectionId, [FromQuery] string? notes = null)
     {
         try

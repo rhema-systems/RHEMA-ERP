@@ -35,6 +35,48 @@ public sealed class FleetReportsService : IFleetReportsService
         if (vehicleAssetId.HasValue && vehicleAssetId.Value != Guid.Empty)
             costsQ = costsQ.Where(c => c.VehicleAssetId == vehicleAssetId.Value);
 
+        var utilQ = _unitOfWork.Repository<FleetTrip>()
+            .GetQueryable(t =>
+                t.TenantId == tenantId &&
+                !t.IsDeleted &&
+                t.Status == FleetTripStatuses.Completed &&
+                t.CompletedAt.HasValue &&
+                t.CompletedAt.Value >= from &&
+                t.CompletedAt.Value <= to);
+
+        if (vehicleAssetId.HasValue && vehicleAssetId.Value != Guid.Empty)
+            utilQ = utilQ.Where(t => t.VehicleAssetId == vehicleAssetId.Value);
+
+        var utilRows = await utilQ
+            .GroupBy(t => t.VehicleAssetId)
+            .Select(g => new
+            {
+                VehicleAssetId = g.Key,
+                CompletedTrips = g.Count(),
+                TotalKm = g.Sum(t =>
+                    t.StartMileage.HasValue &&
+                    t.EndMileage.HasValue &&
+                    t.EndMileage.Value >= t.StartMileage.Value
+                        ? (t.EndMileage.Value - t.StartMileage.Value)
+                        : 0d),
+                TotalHours = g.Sum(t =>
+                    t.StartOperatingHours.HasValue &&
+                    t.EndOperatingHours.HasValue &&
+                    t.EndOperatingHours.Value >= t.StartOperatingHours.Value
+                        ? (t.EndOperatingHours.Value - t.StartOperatingHours.Value)
+                        : 0d)
+            })
+            .ToListAsync();
+
+        var utilByVehicle = utilRows.ToDictionary(
+            x => x.VehicleAssetId,
+            x => new
+            {
+                x.CompletedTrips,
+                TotalKm = (decimal)Math.Round(x.TotalKm, 2, MidpointRounding.AwayFromZero),
+                TotalHours = (decimal)Math.Round(x.TotalHours, 2, MidpointRounding.AwayFromZero)
+            });
+
         var assetsQ = _unitOfWork.Repository<MaintenanceAsset>()
             .GetQueryable(a => a.TenantId == tenantId && !a.IsDeleted);
 
@@ -69,7 +111,16 @@ public sealed class FleetReportsService : IFleetReportsService
             FuelAmount = Math.Round(r.FuelAmount, 2, MidpointRounding.AwayFromZero),
             ExternalRepairAmount = Math.Round(r.ExternalRepairAmount, 2, MidpointRounding.AwayFromZero),
             InternalMaintenanceAmount = Math.Round(r.InternalMaintenanceAmount, 2, MidpointRounding.AwayFromZero),
-            OtherAmount = Math.Round(r.OtherAmount, 2, MidpointRounding.AwayFromZero)
+            OtherAmount = Math.Round(r.OtherAmount, 2, MidpointRounding.AwayFromZero),
+            CompletedTrips = utilByVehicle.TryGetValue(r.VehicleAssetId, out var u) ? u.CompletedTrips : 0,
+            TotalKm = utilByVehicle.TryGetValue(r.VehicleAssetId, out var u2) ? u2.TotalKm : 0m,
+            TotalHours = utilByVehicle.TryGetValue(r.VehicleAssetId, out var u3) ? u3.TotalHours : 0m,
+            CostPerKm = utilByVehicle.TryGetValue(r.VehicleAssetId, out var u4) && u4.TotalKm > 0
+                ? Math.Round(Math.Round(r.TotalAmount, 2, MidpointRounding.AwayFromZero) / u4.TotalKm, 4, MidpointRounding.AwayFromZero)
+                : null,
+            CostPerHour = utilByVehicle.TryGetValue(r.VehicleAssetId, out var u5) && u5.TotalHours > 0
+                ? Math.Round(Math.Round(r.TotalAmount, 2, MidpointRounding.AwayFromZero) / u5.TotalHours, 4, MidpointRounding.AwayFromZero)
+                : null
         }).ToList();
 
         var totalAmount = rows.Sum(r => r.TotalAmount);
@@ -180,4 +231,3 @@ public sealed class FleetReportsService : IFleetReportsService
         };
     }
 }
-

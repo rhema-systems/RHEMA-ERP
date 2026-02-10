@@ -10,6 +10,12 @@ public sealed class FleetCostSummaryRowDto
     public decimal ExternalRepairAmount { get; set; }
     public decimal InternalMaintenanceAmount { get; set; }
     public decimal OtherAmount { get; set; }
+
+    public int CompletedTrips { get; set; }
+    public decimal TotalKm { get; set; }
+    public decimal TotalHours { get; set; }
+    public decimal? CostPerKm { get; set; }
+    public decimal? CostPerHour { get; set; }
 }
 
 public sealed class FleetCostSummaryDto

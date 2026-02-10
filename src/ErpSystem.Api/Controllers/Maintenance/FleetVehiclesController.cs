@@ -8,7 +8,7 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 
 [ApiController]
 [Route("api/maintenance/fleet/vehicles")]
-[Authorize(Policy = "MaintenanceAccess")]
+[Authorize(Policy = "MaintenanceRead")]
 public class FleetVehiclesController : ControllerBase
 {
     private readonly IFleetVehicleService _fleetVehicleService;
@@ -74,6 +74,7 @@ public class FleetVehiclesController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<MaintenanceAssetDto>> Create([FromBody] CreateFleetVehicleDto dto)
     {
         try
@@ -97,6 +98,7 @@ public class FleetVehiclesController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<MaintenanceAssetDto>> Update(Guid id, [FromBody] UpdateFleetVehicleDto dto)
     {
         try

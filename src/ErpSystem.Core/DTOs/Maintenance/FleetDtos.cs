@@ -401,6 +401,8 @@ public class FleetTyreEventDto
     public string? FromStatus { get; set; }
     public string? ToStatus { get; set; }
     public decimal? TreadDepthMm { get; set; }
+    public decimal? CostAmount { get; set; }
+    public string? CurrencyCode { get; set; }
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
     public Guid? CreatedByUserId { get; set; }
@@ -420,6 +422,8 @@ public class CreateFleetTyreDto
     public decimal? TreadDepthMm { get; set; }
     public DateTime? InstalledAtUtc { get; set; }
     public string Status { get; set; } = "Installed";
+    public decimal? CostAmount { get; set; }
+    public string? CurrencyCode { get; set; }
     public string? Notes { get; set; }
 }
 
@@ -449,6 +453,8 @@ public class FleetBatteryEventDto
     public string? ToPosition { get; set; }
     public string? FromStatus { get; set; }
     public string? ToStatus { get; set; }
+    public decimal? CostAmount { get; set; }
+    public string? CurrencyCode { get; set; }
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
     public Guid? CreatedByUserId { get; set; }
@@ -467,6 +473,8 @@ public class CreateFleetBatteryDto
     public string? Position { get; set; }
     public DateTime? InstalledAtUtc { get; set; }
     public string Status { get; set; } = "Installed";
+    public decimal? CostAmount { get; set; }
+    public string? CurrencyCode { get; set; }
     public string? Notes { get; set; }
 }
 
@@ -493,10 +501,12 @@ public class FleetExternalRepairDto
     public string? Description { get; set; }
     public string Status { get; set; } = string.Empty;
     public decimal? EstimatedCost { get; set; }
+    public decimal? ActualCost { get; set; }
     public string? CurrencyCode { get; set; }
     public DateTime RequestedAtUtc { get; set; }
     public DateTime? ApprovedAtUtc { get; set; }
     public DateTime? CompletedAtUtc { get; set; }
+    public DateTime? InvoicedAtUtc { get; set; }
     public Guid? WorkOrderId { get; set; }
 }
 
@@ -521,6 +531,9 @@ public class UpdateFleetExternalRepairStatusDto
 {
     [Required, StringLength(20)]
     public string Status { get; set; } = "Requested";
+
+    public decimal? ActualCost { get; set; }
+    public string? CurrencyCode { get; set; }
 }
 
 public class FleetDashboardSummaryDto

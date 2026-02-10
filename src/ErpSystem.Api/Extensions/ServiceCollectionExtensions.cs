@@ -744,7 +744,13 @@ namespace ErpSystem.Api.Extensions
                 .AddPolicy("Marketing", policy =>
                     policy.RequireClaim("module", "Marketing"))
                 .AddPolicy("MaintenanceAccess", policy =>
-                    policy.RequireRole("Employee", "Manager", "TenantAdmin", "SuperAdmin"));
+                    policy.RequireRole("Employee", "Manager", "TenantAdmin", "SuperAdmin"))
+                .AddPolicy("MaintenanceRead", policy =>
+                    policy.RequireRole("Employee", "Manager", "TenantAdmin", "SuperAdmin"))
+                .AddPolicy("MaintenanceWrite", policy =>
+                    policy.RequireRole("Manager", "TenantAdmin", "SuperAdmin"))
+                .AddPolicy("MaintenanceApprove", policy =>
+                    policy.RequireRole("Manager", "TenantAdmin", "SuperAdmin"));
 
             return services;
         }

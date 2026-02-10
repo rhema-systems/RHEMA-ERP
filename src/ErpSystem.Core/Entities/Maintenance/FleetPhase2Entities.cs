@@ -177,6 +177,12 @@ public class FleetTyreEvent : TenantEntity
     [Column(TypeName = "decimal(18,4)")]
     public decimal? TreadDepthMm { get; set; }
 
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? CostAmount { get; set; }
+
+    [MaxLength(10)]
+    public string? CurrencyCode { get; set; }
+
     [MaxLength(2000)]
     public string? Notes { get; set; }
 
@@ -244,6 +250,12 @@ public class FleetBatteryEvent : TenantEntity
     [MaxLength(20)]
     public string? ToStatus { get; set; }
 
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? CostAmount { get; set; }
+
+    [MaxLength(10)]
+    public string? CurrencyCode { get; set; }
+
     [MaxLength(2000)]
     public string? Notes { get; set; }
 
@@ -274,12 +286,16 @@ public class FleetExternalRepair : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal? EstimatedCost { get; set; }
 
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ActualCost { get; set; }
+
     [MaxLength(10)]
     public string? CurrencyCode { get; set; }
 
     public DateTime RequestedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime? ApprovedAtUtc { get; set; }
     public DateTime? CompletedAtUtc { get; set; }
+    public DateTime? InvoicedAtUtc { get; set; }
 
     public Guid? WorkOrderId { get; set; }
 
@@ -305,6 +321,8 @@ public class FleetCostEntry : TenantEntity
     public Guid? WorkOrderId { get; set; }
     public Guid? FleetExternalRepairId { get; set; }
     public Guid? FleetFuelTransactionId { get; set; }
+    public Guid? FleetTyreEventId { get; set; }
+    public Guid? FleetBatteryEventId { get; set; }
 
     public DateTime CostDateUtc { get; set; } = DateTime.UtcNow;
 
@@ -335,5 +353,11 @@ public class FleetCostEntry : TenantEntity
 
     [ForeignKey(nameof(FleetFuelTransactionId))]
     public virtual FleetFuelTransaction? FleetFuelTransaction { get; set; }
+
+    [ForeignKey(nameof(FleetTyreEventId))]
+    public virtual FleetTyreEvent? FleetTyreEvent { get; set; }
+
+    [ForeignKey(nameof(FleetBatteryEventId))]
+    public virtual FleetBatteryEvent? FleetBatteryEvent { get; set; }
 }
 

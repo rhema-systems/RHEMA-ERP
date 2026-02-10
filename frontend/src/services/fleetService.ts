@@ -292,6 +292,8 @@ export interface FleetTyreEventDto {
   fromStatus?: string | null;
   toStatus?: string | null;
   treadDepthMm?: number | null;
+  costAmount?: number | null;
+  currencyCode?: string | null;
   notes?: string | null;
   createdAt: string;
   createdByUserId?: string | null;
@@ -306,6 +308,8 @@ export interface CreateFleetTyreDto {
   treadDepthMm?: number | null;
   installedAtUtc?: string | null;
   status: string;
+  costAmount?: number | null;
+  currencyCode?: string | null;
   notes?: string | null;
 }
 
@@ -333,6 +337,8 @@ export interface FleetBatteryEventDto {
   toPosition?: string | null;
   fromStatus?: string | null;
   toStatus?: string | null;
+  costAmount?: number | null;
+  currencyCode?: string | null;
   notes?: string | null;
   createdAt: string;
   createdByUserId?: string | null;
@@ -357,6 +363,8 @@ export interface CreateFleetBatteryDto {
   position?: string | null;
   installedAtUtc?: string | null;
   status: string;
+  costAmount?: number | null;
+  currencyCode?: string | null;
   notes?: string | null;
 }
 
@@ -370,10 +378,12 @@ export interface FleetExternalRepairDto {
   description?: string | null;
   status: string;
   estimatedCost?: number | null;
+  actualCost?: number | null;
   currencyCode?: string | null;
   requestedAtUtc: string;
   approvedAtUtc?: string | null;
   completedAtUtc?: string | null;
+  invoicedAtUtc?: string | null;
   workOrderId?: string | null;
 }
 
@@ -388,6 +398,8 @@ export interface CreateFleetExternalRepairDto {
 
 export interface UpdateFleetExternalRepairStatusDto {
   status: string;
+  actualCost?: number | null;
+  currencyCode?: string | null;
 }
 
 export interface FleetDashboardSummaryDto {
@@ -413,6 +425,11 @@ export interface FleetCostSummaryRowDto {
   externalRepairAmount: number;
   internalMaintenanceAmount: number;
   otherAmount: number;
+  completedTrips: number;
+  totalKm: number;
+  totalHours: number;
+  costPerKm?: number | null;
+  costPerHour?: number | null;
 }
 
 export interface FleetCostSummaryDto {

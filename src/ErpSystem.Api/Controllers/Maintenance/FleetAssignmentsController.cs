@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 
 [ApiController]
 [Route("api/maintenance/fleet/assignments")]
-[Authorize(Policy = "MaintenanceAccess")]
+[Authorize(Policy = "MaintenanceRead")]
 public class FleetAssignmentsController : ControllerBase
 {
     private readonly IFleetAssignmentService _fleetAssignmentService;
@@ -50,6 +50,7 @@ public class FleetAssignmentsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetVehicleAssignmentDto>> Assign([FromBody] AssignFleetDriverDto dto)
     {
         try
@@ -73,6 +74,7 @@ public class FleetAssignmentsController : ControllerBase
     }
 
     [HttpPost("{assignmentId:guid}/end")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult> End(Guid assignmentId, [FromBody] EndFleetDriverAssignmentDto dto)
     {
         try

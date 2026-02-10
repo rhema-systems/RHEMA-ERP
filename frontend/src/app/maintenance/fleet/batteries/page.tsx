@@ -37,6 +37,8 @@ export default function FleetBatteriesPage() {
     brand: '',
     spec: '',
     position: '',
+    costAmount: '',
+    currencyCode: '',
     status: 'Installed',
     notes: '',
   });
@@ -85,7 +87,7 @@ export default function FleetBatteriesPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ serialNumber: '', brand: '', spec: '', position: '', status: 'Installed', notes: '' });
+    setForm({ serialNumber: '', brand: '', spec: '', position: '', costAmount: '', currencyCode: '', status: 'Installed', notes: '' });
     setOpen(true);
   };
 
@@ -96,6 +98,8 @@ export default function FleetBatteriesPage() {
       brand: b.brand ?? '',
       spec: b.spec ?? '',
       position: b.position ?? '',
+      costAmount: '',
+      currencyCode: '',
       status: b.status,
       notes: b.notes ?? '',
     });
@@ -120,6 +124,8 @@ export default function FleetBatteriesPage() {
   const save = async () => {
     if (vehicleId === 'none') return;
     if (!form.serialNumber.trim()) return;
+    const costAmount = form.costAmount ? Number(form.costAmount) : undefined;
+    const parsedCost = Number.isFinite(costAmount) && costAmount && costAmount > 0 ? costAmount : undefined;
     const dto = {
       vehicleAssetId: vehicleId,
       serialNumber: form.serialNumber.trim(),
@@ -128,6 +134,8 @@ export default function FleetBatteriesPage() {
       position: form.position || undefined,
       installedAtUtc: undefined,
       status: form.status,
+      costAmount: parsedCost,
+      currencyCode: form.currencyCode || undefined,
       notes: form.notes || undefined,
     };
     try {
@@ -329,6 +337,15 @@ export default function FleetBatteriesPage() {
               <Input value={form.spec} onChange={(e) => setForm((p) => ({ ...p, spec: e.target.value }))} placeholder="12V 100Ah" />
             </div>
 
+            <div className="space-y-2">
+              <Label>Cost (optional)</Label>
+              <Input value={form.costAmount} onChange={(e) => setForm((p) => ({ ...p, costAmount: e.target.value }))} placeholder="0.00" />
+            </div>
+            <div className="space-y-2">
+              <Label>Currency</Label>
+              <Input value={form.currencyCode} onChange={(e) => setForm((p) => ({ ...p, currencyCode: e.target.value }))} placeholder="USD" />
+            </div>
+
             <div className="space-y-2 md:col-span-3">
               <Label>Notes</Label>
               <Textarea value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} rows={4} />
@@ -374,6 +391,7 @@ export default function FleetBatteriesPage() {
                       <th className="py-2 px-3">Event</th>
                       <th className="py-2 px-3">Position</th>
                       <th className="py-2 px-3">Status</th>
+                      <th className="py-2 px-3">Cost</th>
                       <th className="py-2 px-3">Notes</th>
                     </tr>
                   </thead>
@@ -387,6 +405,9 @@ export default function FleetBatteriesPage() {
                         </td>
                         <td className="py-2 px-3 whitespace-nowrap">
                           {(e.fromStatus || '—') + ' → ' + (e.toStatus || '—')}
+                        </td>
+                        <td className="py-2 px-3 whitespace-nowrap">
+                          {e.costAmount ? `${e.costAmount.toLocaleString()}${e.currencyCode ? ` ${e.currencyCode}` : ''}` : '—'}
                         </td>
                         <td className="py-2 px-3">
                           <div className="max-w-[520px] whitespace-pre-wrap break-words">{e.notes || '—'}</div>

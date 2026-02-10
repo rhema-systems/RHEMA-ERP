@@ -37,6 +37,8 @@ public sealed class FleetBatteryService : IFleetBatteryService
                 ToPosition = e.ToPosition,
                 FromStatus = e.FromStatus,
                 ToStatus = e.ToStatus,
+                CostAmount = e.CostAmount,
+                CurrencyCode = e.CurrencyCode,
                 Notes = e.Notes,
                 CreatedAt = e.CreatedAt,
                 CreatedByUserId = e.CreatedById,
@@ -193,7 +195,7 @@ public sealed class FleetBatteryService : IFleetBatteryService
 
         await _unitOfWork.Repository<FleetBattery>().AddAsync(entity);
 
-        await _unitOfWork.Repository<FleetBatteryEvent>().AddAsync(new FleetBatteryEvent
+        var ev = new FleetBatteryEvent
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
@@ -205,10 +207,15 @@ public sealed class FleetBatteryService : IFleetBatteryService
             ToPosition = entity.Position,
             FromStatus = null,
             ToStatus = entity.Status,
+            CostAmount = (dto.CostAmount.HasValue && dto.CostAmount.Value > 0) ? Math.Round(dto.CostAmount.Value, 2, MidpointRounding.AwayFromZero) : null,
+            CurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? null : dto.CurrencyCode.Trim(),
             Notes = entity.Notes,
             CreatedAt = now,
             CreatedById = userId,
-        });
+        };
+
+        await _unitOfWork.Repository<FleetBatteryEvent>().AddAsync(ev);
+        await UpsertBatteryCostEntryAsync(entity.VehicleAssetId, ev, userId, now);
 
         await _unitOfWork.SaveChangesAsync();
         return (await GetByIdAsync(entity.Id))!;
@@ -257,25 +264,35 @@ public sealed class FleetBatteryService : IFleetBatteryService
 
         await repo.UpdateAsync(entity);
 
+        var hasCost = dto.CostAmount.HasValue && dto.CostAmount.Value > 0;
         if (!string.Equals(fromPosition, entity.Position, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(fromStatus, entity.Status, StringComparison.OrdinalIgnoreCase))
+            !string.Equals(fromStatus, entity.Status, StringComparison.OrdinalIgnoreCase) ||
+            hasCost)
         {
-            await _unitOfWork.Repository<FleetBatteryEvent>().AddAsync(new FleetBatteryEvent
+            var ev = new FleetBatteryEvent
             {
                 Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 FleetBatteryId = entity.Id,
                 VehicleAssetId = entity.VehicleAssetId,
                 EventAtUtc = now,
-                EventType = ResolveEventType(fromPosition, entity.Position, fromStatus, entity.Status),
+                EventType = hasCost && string.Equals(fromPosition, entity.Position, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(fromStatus, entity.Status, StringComparison.OrdinalIgnoreCase)
+                    ? "CostRecorded"
+                    : ResolveEventType(fromPosition, entity.Position, fromStatus, entity.Status),
                 FromPosition = fromPosition,
                 ToPosition = entity.Position,
                 FromStatus = fromStatus,
                 ToStatus = entity.Status,
+                CostAmount = hasCost ? Math.Round(dto.CostAmount!.Value, 2, MidpointRounding.AwayFromZero) : null,
+                CurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? null : dto.CurrencyCode.Trim(),
                 Notes = entity.Notes,
                 CreatedAt = now,
                 CreatedById = userId,
-            });
+            };
+
+            await _unitOfWork.Repository<FleetBatteryEvent>().AddAsync(ev);
+            await UpsertBatteryCostEntryAsync(entity.VehicleAssetId, ev, userId, now);
         }
 
         await _unitOfWork.SaveChangesAsync();
@@ -343,6 +360,47 @@ public sealed class FleetBatteryService : IFleetBatteryService
         }
 
         return "Updated";
+    }
+
+    private async Task UpsertBatteryCostEntryAsync(Guid vehicleAssetId, FleetBatteryEvent ev, Guid userId, DateTime nowUtc)
+    {
+        if (ev.CostAmount == null || ev.CostAmount.Value <= 0) return;
+
+        var repo = _unitOfWork.Repository<FleetCostEntry>();
+        var existing = await repo.FirstOrDefaultAsync(c =>
+            c.TenantId == ev.TenantId &&
+            c.FleetBatteryEventId == ev.Id &&
+            !c.IsDeleted);
+
+        if (existing == null)
+        {
+            await repo.AddAsync(new FleetCostEntry
+            {
+                Id = Guid.NewGuid(),
+                TenantId = ev.TenantId,
+                VehicleAssetId = vehicleAssetId,
+                FleetBatteryEventId = ev.Id,
+                CostDateUtc = ev.EventAtUtc,
+                CostType = "Battery",
+                Amount = ev.CostAmount.Value,
+                CurrencyCode = ev.CurrencyCode,
+                Notes = $"Battery {ev.EventType}: {ev.FleetBatteryId}",
+                CreatedAt = nowUtc,
+                CreatedById = userId
+            });
+        }
+        else
+        {
+            existing.VehicleAssetId = vehicleAssetId;
+            existing.CostDateUtc = ev.EventAtUtc;
+            existing.CostType = "Battery";
+            existing.Amount = ev.CostAmount.Value;
+            existing.CurrencyCode = ev.CurrencyCode;
+            existing.Notes = $"Battery {ev.EventType}: {ev.FleetBatteryId}";
+            existing.UpdatedAt = nowUtc;
+            existing.LastModifiedById = userId;
+            await repo.UpdateAsync(existing);
+        }
     }
 }
 

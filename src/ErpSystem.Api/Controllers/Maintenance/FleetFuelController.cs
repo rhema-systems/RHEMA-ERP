@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 
 [ApiController]
 [Route("api/maintenance/fleet/fuel")]
-[Authorize(Policy = "MaintenanceAccess")]
+[Authorize(Policy = "MaintenanceRead")]
 public class FleetFuelController : ControllerBase
 {
     private readonly IFleetFuelService _fleetFuelService;
@@ -55,6 +55,7 @@ public class FleetFuelController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetFuelTransactionDto>> Create([FromBody] CreateFleetFuelTransactionDto dto)
     {
         try
@@ -74,6 +75,7 @@ public class FleetFuelController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult> Delete(Guid id)
     {
         try

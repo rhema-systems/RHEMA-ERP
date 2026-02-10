@@ -35,6 +35,14 @@ export default function FleetExternalRepairsPage() {
     currencyCode: '',
   });
 
+  const [statusOpen, setStatusOpen] = React.useState(false);
+  const [statusEditing, setStatusEditing] = React.useState<FleetExternalRepairDto | null>(null);
+  const [statusForm, setStatusForm] = React.useState({
+    status: 'Requested',
+    actualCost: '',
+    currencyCode: '',
+  });
+
   const loadVehicles = React.useCallback(async () => {
     try {
       const res = await fleetService.getVehicles({ page: 1, pageSize: 100 });
@@ -101,6 +109,34 @@ export default function FleetExternalRepairsPage() {
       await load();
     } catch (e: any) {
       alert(e?.message || 'Failed to create');
+    }
+  };
+
+  const openStatusDialog = (r: FleetExternalRepairDto, nextStatus?: string) => {
+    setStatusEditing(r);
+    setStatusForm({
+      status: nextStatus ?? r.status,
+      actualCost: r.actualCost?.toString() ?? '',
+      currencyCode: r.currencyCode ?? '',
+    });
+    setStatusOpen(true);
+  };
+
+  const saveStatus = async () => {
+    if (!statusEditing) return;
+    const actualCost = statusForm.actualCost ? Number(statusForm.actualCost) : undefined;
+    const parsedCost = Number.isFinite(actualCost) && actualCost && actualCost > 0 ? actualCost : undefined;
+    try {
+      await fleetService.updateExternalRepairStatus(statusEditing.id, {
+        status: statusForm.status,
+        actualCost: parsedCost,
+        currencyCode: statusForm.currencyCode || undefined,
+      });
+      setStatusOpen(false);
+      setStatusEditing(null);
+      await load();
+    } catch (e: any) {
+      alert(e?.message || 'Failed to update status');
     }
   };
 
@@ -183,6 +219,7 @@ export default function FleetExternalRepairsPage() {
                     <th className="py-2">Title</th>
                     <th className="py-2">Status</th>
                     <th className="py-2">Est. Cost</th>
+                    <th className="py-2">Actual Cost</th>
                     <th className="py-2" />
                   </tr>
                 </thead>
@@ -197,27 +234,34 @@ export default function FleetExternalRepairsPage() {
                       <td className="py-2">
                         {r.estimatedCost ? `${r.estimatedCost.toLocaleString()}${r.currencyCode ? ` ${r.currencyCode}` : ''}` : '—'}
                       </td>
+                      <td className="py-2">
+                        {r.actualCost ? `${r.actualCost.toLocaleString()}${r.currencyCode ? ` ${r.currencyCode}` : ''}` : '—'}
+                      </td>
                       <td className="py-2 text-right">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={async () => {
-                            const next =
-                              r.status === 'Requested'
-                                ? 'Quoted'
-                                : r.status === 'Quoted'
-                                  ? 'Approved'
-                                  : r.status === 'Approved'
-                                    ? 'InProgress'
-                                    : r.status === 'InProgress'
-                                      ? 'Completed'
-                                      : 'Invoiced';
-                            await fleetService.updateExternalRepairStatus(r.id, { status: next });
-                            await load();
-                          }}
-                        >
-                          Next Status
-                        </Button>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const next =
+                                r.status === 'Requested'
+                                  ? 'Quoted'
+                                  : r.status === 'Quoted'
+                                    ? 'Approved'
+                                    : r.status === 'Approved'
+                                      ? 'InProgress'
+                                      : r.status === 'InProgress'
+                                        ? 'Completed'
+                                        : 'Invoiced';
+                              openStatusDialog(r, next);
+                            }}
+                          >
+                            Next Status
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => openStatusDialog(r)}>
+                            Update
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -227,6 +271,62 @@ export default function FleetExternalRepairsPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={statusOpen} onOpenChange={setStatusOpen}>
+        <DialogContent className="sm:max-w-[760px]">
+          <DialogHeader>
+            <DialogTitle>Update Status</DialogTitle>
+          </DialogHeader>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select value={statusForm.status} onValueChange={(v) => setStatusForm((p) => ({ ...p, status: v }))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Requested">Requested</SelectItem>
+                  <SelectItem value="Quoted">Quoted</SelectItem>
+                  <SelectItem value="Approved">Approved</SelectItem>
+                  <SelectItem value="InProgress">In Progress</SelectItem>
+                  <SelectItem value="Completed">Completed</SelectItem>
+                  <SelectItem value="Invoiced">Invoiced</SelectItem>
+                  <SelectItem value="Cancelled">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Actual Cost (optional)</Label>
+              <Input value={statusForm.actualCost} onChange={(e) => setStatusForm((p) => ({ ...p, actualCost: e.target.value }))} placeholder="0.00" />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Currency</Label>
+              <Input value={statusForm.currencyCode} onChange={(e) => setStatusForm((p) => ({ ...p, currencyCode: e.target.value }))} placeholder="USD" />
+            </div>
+            <div className="text-sm text-muted-foreground md:col-span-2">
+              If you enter an actual cost, the system updates the Fleet cost ledger for this external repair (reconciling the earlier estimate).
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setStatusOpen(false);
+                setStatusEditing(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={saveStatus} disabled={!statusForm.status}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-[760px]">

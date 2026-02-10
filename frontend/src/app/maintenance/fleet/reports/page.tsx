@@ -182,6 +182,10 @@ export default function FleetReportsPage() {
                     <tr className="border-b text-left text-muted-foreground">
                       <th className="py-2">Vehicle</th>
                       <th className="py-2 text-right">Total</th>
+                      <th className="py-2 text-right">Km</th>
+                      <th className="py-2 text-right">Hours</th>
+                      <th className="py-2 text-right">Cost/km</th>
+                      <th className="py-2 text-right">Cost/hr</th>
                       <th className="py-2 text-right">Fuel</th>
                       <th className="py-2 text-right">External</th>
                       <th className="py-2 text-right">Internal</th>
@@ -194,6 +198,10 @@ export default function FleetReportsPage() {
                       <tr key={r.vehicleAssetId} className="border-b">
                         <td className="py-2">{r.vehicleName}</td>
                         <td className="py-2 text-right">{formatNumber(r.totalAmount, 2)}</td>
+                        <td className="py-2 text-right">{formatNumber(r.totalKm, 2)}</td>
+                        <td className="py-2 text-right">{formatNumber(r.totalHours, 2)}</td>
+                        <td className="py-2 text-right">{formatNumber(r.costPerKm ?? null, 4)}</td>
+                        <td className="py-2 text-right">{formatNumber(r.costPerHour ?? null, 4)}</td>
                         <td className="py-2 text-right">{formatNumber(r.fuelAmount, 2)}</td>
                         <td className="py-2 text-right">{formatNumber(r.externalRepairAmount, 2)}</td>
                         <td className="py-2 text-right">{formatNumber(r.internalMaintenanceAmount, 2)}</td>
@@ -253,4 +261,3 @@ export default function FleetReportsPage() {
     </div>
   );
 }
-

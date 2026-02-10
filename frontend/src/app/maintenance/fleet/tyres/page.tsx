@@ -40,6 +40,8 @@ export default function FleetTyresPage() {
     size: '',
     position: '',
     treadDepthMm: '',
+    costAmount: '',
+    currencyCode: '',
     status: 'Installed',
     notes: '',
   });
@@ -85,7 +87,17 @@ export default function FleetTyresPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ serialNumber: '', brand: '', size: '', position: '', treadDepthMm: '', status: 'Installed', notes: '' });
+    setForm({
+      serialNumber: '',
+      brand: '',
+      size: '',
+      position: '',
+      treadDepthMm: '',
+      costAmount: '',
+      currencyCode: '',
+      status: 'Installed',
+      notes: '',
+    });
     setOpen(true);
   };
 
@@ -97,6 +109,8 @@ export default function FleetTyresPage() {
       size: t.size ?? '',
       position: t.position ?? '',
       treadDepthMm: t.treadDepthMm?.toString() ?? '',
+      costAmount: '',
+      currencyCode: '',
       status: t.status,
       notes: t.notes ?? '',
     });
@@ -121,6 +135,8 @@ export default function FleetTyresPage() {
   const save = async () => {
     if (vehicleId === 'none') return;
     if (!form.serialNumber.trim()) return;
+    const costAmount = form.costAmount ? Number(form.costAmount) : undefined;
+    const parsedCost = Number.isFinite(costAmount) && costAmount && costAmount > 0 ? costAmount : undefined;
     const dto = {
       vehicleAssetId: vehicleId,
       serialNumber: form.serialNumber.trim(),
@@ -130,6 +146,8 @@ export default function FleetTyresPage() {
       treadDepthMm: form.treadDepthMm ? Number(form.treadDepthMm) : undefined,
       installedAtUtc: undefined,
       status: form.status,
+      costAmount: parsedCost,
+      currencyCode: form.currencyCode || undefined,
       notes: form.notes || undefined,
     };
     try {
@@ -312,6 +330,14 @@ export default function FleetTyresPage() {
               <Label>Tread Depth (mm)</Label>
               <Input value={form.treadDepthMm} onChange={(e) => setForm((p) => ({ ...p, treadDepthMm: e.target.value }))} />
             </div>
+            <div className="space-y-2">
+              <Label>Cost (optional)</Label>
+              <Input value={form.costAmount} onChange={(e) => setForm((p) => ({ ...p, costAmount: e.target.value }))} placeholder="0.00" />
+            </div>
+            <div className="space-y-2">
+              <Label>Currency</Label>
+              <Input value={form.currencyCode} onChange={(e) => setForm((p) => ({ ...p, currencyCode: e.target.value }))} placeholder="USD" />
+            </div>
             <div className="space-y-2 md:col-span-3">
               <Label>Notes</Label>
               <Textarea value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} rows={4} />
@@ -358,6 +384,7 @@ export default function FleetTyresPage() {
                       <th className="py-2 px-3">Position</th>
                       <th className="py-2 px-3">Status</th>
                       <th className="py-2 px-3">Tread</th>
+                      <th className="py-2 px-3">Cost</th>
                       <th className="py-2 px-3">Notes</th>
                     </tr>
                   </thead>
@@ -373,6 +400,9 @@ export default function FleetTyresPage() {
                           {(e.fromStatus || '—') + ' → ' + (e.toStatus || '—')}
                         </td>
                         <td className="py-2 px-3 whitespace-nowrap">{e.treadDepthMm ?? '—'}</td>
+                        <td className="py-2 px-3 whitespace-nowrap">
+                          {e.costAmount ? `${e.costAmount.toLocaleString()}${e.currencyCode ? ` ${e.currencyCode}` : ''}` : '—'}
+                        </td>
                         <td className="py-2 px-3">
                           <div className="max-w-[420px] whitespace-pre-wrap break-words">{e.notes || '—'}</div>
                         </td>

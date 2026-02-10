@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 
 [ApiController]
 [Route("api/maintenance/fleet/trips")]
-[Authorize(Policy = "MaintenanceAccess")]
+[Authorize(Policy = "MaintenanceRead")]
 public class FleetTripsController : ControllerBase
 {
     private readonly IFleetTripService _fleetTripService;
@@ -56,6 +56,7 @@ public class FleetTripsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetTripDto>> Create([FromBody] CreateFleetTripDto dto)
     {
         try
@@ -79,6 +80,7 @@ public class FleetTripsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetTripDto>> Update(Guid id, [FromBody] UpdateFleetTripDto dto)
     {
         try
@@ -102,6 +104,7 @@ public class FleetTripsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/submit-for-approval")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult> SubmitForApproval(Guid id)
     {
         try
@@ -121,6 +124,7 @@ public class FleetTripsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/approve")]
+    [Authorize(Policy = "MaintenanceApprove")]
     public async Task<ActionResult> Approve(Guid id, [FromBody] ApprovalRequest? request)
     {
         try
@@ -144,6 +148,7 @@ public class FleetTripsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/reject")]
+    [Authorize(Policy = "MaintenanceApprove")]
     public async Task<ActionResult> Reject(Guid id, [FromBody] RejectRequest request)
     {
         try
@@ -167,6 +172,7 @@ public class FleetTripsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/dispatch")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetTripDto>> Dispatch(Guid id, [FromBody] DispatchFleetTripDto dto)
     {
         try
@@ -186,6 +192,7 @@ public class FleetTripsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/complete")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetTripDto>> Complete(Guid id, [FromBody] CompleteFleetTripDto dto)
     {
         try
@@ -205,6 +212,7 @@ public class FleetTripsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/cancel")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult> Cancel(Guid id, [FromBody] CancelRequest request)
     {
         try

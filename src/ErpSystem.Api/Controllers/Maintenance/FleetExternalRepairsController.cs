@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 
 [ApiController]
 [Route("api/maintenance/fleet/external-repairs")]
-[Authorize(Policy = "MaintenanceAccess")]
+[Authorize(Policy = "MaintenanceRead")]
 public class FleetExternalRepairsController : ControllerBase
 {
     private readonly IFleetExternalRepairService _service;
@@ -54,6 +54,7 @@ public class FleetExternalRepairsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetExternalRepairDto>> Create([FromBody] CreateFleetExternalRepairDto dto)
     {
         try
@@ -73,6 +74,7 @@ public class FleetExternalRepairsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/status")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetExternalRepairDto>> UpdateStatus(Guid id, [FromBody] UpdateFleetExternalRepairStatusDto dto)
     {
         try

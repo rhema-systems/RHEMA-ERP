@@ -53,10 +53,12 @@ public sealed class FleetExternalRepairService : IFleetExternalRepairService
                 Description = r.Description,
                 Status = r.Status,
                 EstimatedCost = r.EstimatedCost,
+                ActualCost = r.ActualCost,
                 CurrencyCode = r.CurrencyCode,
                 RequestedAtUtc = r.RequestedAtUtc,
                 ApprovedAtUtc = r.ApprovedAtUtc,
                 CompletedAtUtc = r.CompletedAtUtc,
+                InvoicedAtUtc = r.InvoicedAtUtc,
                 WorkOrderId = r.WorkOrderId
             })
             .ToListAsync();
@@ -88,10 +90,12 @@ public sealed class FleetExternalRepairService : IFleetExternalRepairService
             Description = r.Description,
             Status = r.Status,
             EstimatedCost = r.EstimatedCost,
+            ActualCost = r.ActualCost,
             CurrencyCode = r.CurrencyCode,
             RequestedAtUtc = r.RequestedAtUtc,
             ApprovedAtUtc = r.ApprovedAtUtc,
             CompletedAtUtc = r.CompletedAtUtc,
+            InvoicedAtUtc = r.InvoicedAtUtc,
             WorkOrderId = r.WorkOrderId
         };
     }
@@ -169,15 +173,70 @@ public sealed class FleetExternalRepairService : IFleetExternalRepairService
             ?? throw new ArgumentException("External repair not found.");
 
         entity.Status = dto.Status.Trim();
+
+        if (dto.ActualCost.HasValue && dto.ActualCost.Value > 0)
+        {
+            entity.ActualCost = Math.Round(dto.ActualCost.Value, 2, MidpointRounding.AwayFromZero);
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.CurrencyCode))
+        {
+            entity.CurrencyCode = dto.CurrencyCode.Trim();
+        }
+
         if (string.Equals(entity.Status, "Approved", StringComparison.OrdinalIgnoreCase) && !entity.ApprovedAtUtc.HasValue)
             entity.ApprovedAtUtc = now;
         if (string.Equals(entity.Status, "Completed", StringComparison.OrdinalIgnoreCase) && !entity.CompletedAtUtc.HasValue)
             entity.CompletedAtUtc = now;
+        if (string.Equals(entity.Status, "Invoiced", StringComparison.OrdinalIgnoreCase) && !entity.InvoicedAtUtc.HasValue)
+            entity.InvoicedAtUtc = now;
 
         entity.UpdatedAt = now;
         entity.LastModifiedById = userId;
 
         await repo.UpdateAsync(entity);
+
+        // Reconcile external repair cost entry (estimated -> actual) when actual cost is provided.
+        var amount = entity.ActualCost ?? entity.EstimatedCost;
+        if (amount.HasValue && amount.Value > 0)
+        {
+            var costRepo = _unitOfWork.Repository<FleetCostEntry>();
+            var cost = await costRepo.FirstOrDefaultAsync(c =>
+                c.TenantId == tenantId &&
+                c.FleetExternalRepairId == entity.Id &&
+                c.CostType == "ExternalRepair" &&
+                !c.IsDeleted);
+
+            if (cost == null)
+            {
+                await costRepo.AddAsync(new FleetCostEntry
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    VehicleAssetId = entity.VehicleAssetId,
+                    FleetExternalRepairId = entity.Id,
+                    CostDateUtc = now,
+                    CostType = "ExternalRepair",
+                    Amount = Math.Round(amount.Value, 2, MidpointRounding.AwayFromZero),
+                    CurrencyCode = entity.CurrencyCode,
+                    Notes = entity.ActualCost.HasValue ? "Actual external repair cost" : "Estimated external repair cost",
+                    CreatedAt = now,
+                    CreatedById = userId
+                });
+            }
+            else
+            {
+                cost.VehicleAssetId = entity.VehicleAssetId;
+                cost.CostDateUtc = now;
+                cost.Amount = Math.Round(amount.Value, 2, MidpointRounding.AwayFromZero);
+                cost.CurrencyCode = entity.CurrencyCode;
+                cost.Notes = entity.ActualCost.HasValue ? "Actual external repair cost" : "Estimated external repair cost";
+                cost.UpdatedAt = now;
+                cost.LastModifiedById = userId;
+                await costRepo.UpdateAsync(cost);
+            }
+        }
+
         await _unitOfWork.SaveChangesAsync();
         return (await GetByIdAsync(entity.Id))!;
     }

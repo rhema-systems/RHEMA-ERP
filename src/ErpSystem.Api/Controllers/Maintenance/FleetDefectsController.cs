@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 
 [ApiController]
 [Route("api/maintenance/fleet/defects")]
-[Authorize(Policy = "MaintenanceAccess")]
+[Authorize(Policy = "MaintenanceRead")]
 public class FleetDefectsController : ControllerBase
 {
     private readonly IFleetDefectService _fleetDefectService;
@@ -55,6 +55,7 @@ public class FleetDefectsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetDefectDto>> Create([FromBody] CreateFleetDefectDto dto)
     {
         try
@@ -78,6 +79,7 @@ public class FleetDefectsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/status")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetDefectDto>> UpdateStatus(Guid id, [FromBody] UpdateFleetDefectStatusDto dto)
     {
         try
@@ -97,6 +99,7 @@ public class FleetDefectsController : ControllerBase
     }
 
     [HttpPost("work-orders")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult> CreateWorkOrder([FromBody] CreateWorkOrderFromFleetDefectDto dto)
     {
         try

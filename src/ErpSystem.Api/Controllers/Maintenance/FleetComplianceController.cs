@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 
 [ApiController]
 [Route("api/maintenance/fleet/compliance")]
-[Authorize(Policy = "MaintenanceAccess")]
+[Authorize(Policy = "MaintenanceRead")]
 public class FleetComplianceController : ControllerBase
 {
     private readonly IFleetComplianceService _fleetComplianceService;
@@ -55,6 +55,7 @@ public class FleetComplianceController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetComplianceItemDto>> Create([FromBody] CreateFleetComplianceItemDto dto)
     {
         try
@@ -74,6 +75,7 @@ public class FleetComplianceController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetComplianceItemDto>> Update(Guid id, [FromBody] UpdateFleetComplianceItemDto dto)
     {
         try
@@ -93,6 +95,7 @@ public class FleetComplianceController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult> Delete(Guid id)
     {
         try
