@@ -93,9 +93,19 @@ export default function FleetDefectsPage() {
         maintenanceApiService.getMaintenanceTypes(),
         maintenanceApiService.getPriorityLevels(),
       ]);
-      setWorkOrderTypes(types ?? []);
+      const nextTypes = types ?? [];
+      setWorkOrderTypes(nextTypes);
       setMaintenanceTypes(mtypes ?? []);
       setPriorityLevels(pri ?? []);
+
+      // Default to "Repairs" when converting a defect into a work order.
+      const pick = (v: any) => String(v ?? '').toLowerCase();
+      const repairs = nextTypes.find((t) => `${pick(t.code)} ${pick(t.name)}`.includes('repair'));
+      const corrective = nextTypes.find((t) => `${pick(t.code)} ${pick(t.name)}`.includes('correct'));
+      const defaultTypeId = repairs?.id || corrective?.id || '';
+      if (defaultTypeId) {
+        setWoForm((p) => ({ ...p, workOrderTypeId: defaultTypeId }));
+      }
     } catch (e) {
       console.error(e);
     }
@@ -322,6 +332,7 @@ export default function FleetDefectsPage() {
           <div className="grid gap-4 md:grid-cols-3">
             <div className="space-y-2">
               <Label>Work Order Type</Label>
+              <p className="text-xs text-muted-foreground">Defaults to Repairs because this work order is created from a defect.</p>
               <Select value={woForm.workOrderTypeId} onValueChange={(v) => setWoForm((p) => ({ ...p, workOrderTypeId: v }))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select type" />
