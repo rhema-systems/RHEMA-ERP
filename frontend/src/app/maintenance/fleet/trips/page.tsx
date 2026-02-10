@@ -54,6 +54,26 @@ type InspectionTemplateLite = {
   isActive?: boolean;
 };
 
+type InspectionChecklistItem = {
+  id: string;
+  item: string;
+  type: string;
+  required: boolean;
+  order: number;
+};
+
+type InspectionTemplateDetail = {
+  id: string;
+  name: string;
+  code: string;
+  description?: string | null;
+  category?: string | null;
+  frequency?: string | null;
+  estimatedDuration?: number | null;
+  isActive?: boolean;
+  checklistItems: InspectionChecklistItem[];
+};
+
 function formatDate(value?: string | null) {
   if (!value) return '-';
   const d = new Date(value);
@@ -106,6 +126,8 @@ function FleetTripsPageContent() {
   const [startInspectionOpen, setStartInspectionOpen] = React.useState(false);
   const [completeInspectionOpen, setCompleteInspectionOpen] = React.useState(false);
   const [selectedInspection, setSelectedInspection] = React.useState<FleetTripInspectionDto | null>(null);
+  const [selectedInspectionTemplate, setSelectedInspectionTemplate] = React.useState<InspectionTemplateDetail | null>(null);
+  const [inspectionAnswers, setInspectionAnswers] = React.useState<Record<string, string>>({});
   const [startInspectionForm, setStartInspectionForm] = React.useState<StartFleetTripInspectionDto>({
     fleetTripId: '',
     inspectionTemplateId: '',
@@ -118,6 +140,78 @@ function FleetTripsPageContent() {
     inspectionData: '{}',
     notes: '',
   });
+
+  const loadInspectionTemplate = React.useCallback(
+    async (templateId: string) => {
+      if (!templateId) return null;
+      const res = await fetch(`${API_BASE_URL}/inspection-templates/${templateId}`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error(await res.text());
+      const t: InspectionTemplateDetail = await res.json();
+      t.checklistItems = (t.checklistItems || []).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      return t;
+    },
+    []
+  );
+
+  function buildInspectionDataJson(template: InspectionTemplateDetail | null, answers: Record<string, string>) {
+    const payload = {
+      schema: 'FleetTripInspectionChecklist.v1',
+      templateId: template?.id || null,
+      templateCode: template?.code || null,
+      checklist: (template?.checklistItems || []).map((i) => ({
+        id: i.id,
+        item: i.item,
+        type: i.type,
+        required: !!i.required,
+        order: i.order,
+        value: answers[i.id] ?? '',
+      })),
+    };
+    return JSON.stringify(payload);
+  }
+
+  function deriveOverallResult(template: InspectionTemplateDetail | null, answers: Record<string, string>) {
+    const items = template?.checklistItems || [];
+    const anyFail = items.some((i) => (answers[i.id] || '').toLowerCase() === 'fail');
+    return anyFail ? 'Fail' : 'Pass';
+  }
+
+  React.useEffect(() => {
+    if (!completeInspectionOpen || !selectedInspection) return;
+    (async () => {
+      try {
+        const template = await loadInspectionTemplate(selectedInspection.inspectionTemplateId);
+        setSelectedInspectionTemplate(template);
+
+        // Attempt to hydrate answers from stored inspectionData if it matches our schema.
+        const nextAnswers: Record<string, string> = {};
+        try {
+          const raw = selectedInspection.inspectionData || '{}';
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.schema === 'FleetTripInspectionChecklist.v1' && Array.isArray(parsed.checklist)) {
+            for (const row of parsed.checklist) {
+              if (!row?.id) continue;
+              nextAnswers[String(row.id)] = row.value != null ? String(row.value) : '';
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        setInspectionAnswers(nextAnswers);
+        setCompleteInspectionForm((p) => ({
+          ...p,
+          inspectionData: buildInspectionDataJson(template, nextAnswers),
+          overallResult: deriveOverallResult(template, nextAnswers),
+        }));
+      } catch (e: any) {
+        setSelectedInspectionTemplate(null);
+        setInspectionAnswers({});
+        toast({ title: 'Failed to load inspection template', description: e?.message || String(e), variant: 'destructive' });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [completeInspectionOpen, selectedInspection?.inspectionTemplateId]);
 
   const [dispatchOpen, setDispatchOpen] = React.useState(false);
   const [dispatchForm, setDispatchForm] = React.useState<DispatchFleetTripDto>({
@@ -854,6 +948,87 @@ function FleetTripsPageContent() {
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="space-y-2">
+              <Label>Checklist</Label>
+              {!selectedInspectionTemplate ? (
+                <div className="text-sm text-muted-foreground">Loading template…</div>
+              ) : selectedInspectionTemplate.checklistItems.length === 0 ? (
+                <div className="rounded-md border p-3 text-sm text-muted-foreground">
+                  This template has no checklist items. Configure items in Administration → Maintenance → Inspection Templates.
+                </div>
+              ) : (
+                <div className="space-y-3 rounded-md border p-3">
+                  {selectedInspectionTemplate.checklistItems.map((i, idx) => {
+                    const type = (i.type || '').toLowerCase();
+                    const value = inspectionAnswers[i.id] ?? '';
+                    return (
+                      <div key={i.id} className="space-y-1">
+                        <div className="text-sm font-medium">
+                          {idx + 1}. {i.item} {i.required ? <span className="text-destructive">*</span> : null}
+                        </div>
+                        {type === 'checklist' ? (
+                          <Select
+                            value={value || 'none'}
+                            onValueChange={(v) => {
+                              const next = { ...inspectionAnswers, [i.id]: v === 'none' ? '' : v };
+                              setInspectionAnswers(next);
+                              const derived = deriveOverallResult(selectedInspectionTemplate, next);
+                              setCompleteInspectionForm((p) => ({
+                                ...p,
+                                overallResult: derived,
+                                inspectionData: buildInspectionDataJson(selectedInspectionTemplate, next),
+                              }));
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select result" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Select…</SelectItem>
+                              <SelectItem value="Pass">Pass</SelectItem>
+                              <SelectItem value="Fail">Fail</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : type === 'number' || type === 'measurement' ? (
+                          <Input
+                            type="number"
+                            value={value}
+                            onChange={(e) => {
+                              const next = { ...inspectionAnswers, [i.id]: e.target.value };
+                              setInspectionAnswers(next);
+                              setCompleteInspectionForm((p) => ({
+                                ...p,
+                                inspectionData: buildInspectionDataJson(selectedInspectionTemplate, next),
+                              }));
+                            }}
+                            placeholder="Enter value"
+                          />
+                        ) : (
+                          <Textarea
+                            value={value}
+                            onChange={(e) => {
+                              const next = { ...inspectionAnswers, [i.id]: e.target.value };
+                              setInspectionAnswers(next);
+                              setCompleteInspectionForm((p) => ({
+                                ...p,
+                                inspectionData: buildInspectionDataJson(selectedInspectionTemplate, next),
+                              }));
+                            }}
+                            placeholder="Enter response"
+                            rows={2}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {selectedInspectionTemplate?.checklistItems?.length ? (
+                <div className="text-xs text-muted-foreground">Overall result auto-derives from item results (any Fail → Fail).</div>
+              ) : null}
+            </div>
+
             <div className="space-y-2">
               <Label>Notes</Label>
               <Textarea value={completeInspectionForm.notes || ''} onChange={(e) => setCompleteInspectionForm((p) => ({ ...p, notes: e.target.value }))} rows={5} />
@@ -868,6 +1043,24 @@ function FleetTripsPageContent() {
               onClick={async () => {
                 if (!selectedInspection) return;
                 try {
+                  if (selectedInspectionTemplate?.checklistItems?.length) {
+                    const missing = selectedInspectionTemplate.checklistItems
+                      .filter((i) => i.required)
+                      .filter((i) => {
+                        const v = (inspectionAnswers[i.id] || '').trim();
+                        return !v;
+                      });
+
+                    if (missing.length > 0) {
+                      toast({
+                        title: 'Checklist incomplete',
+                        description: `Please complete required items (${missing.length}) before finishing the inspection.`,
+                        variant: 'destructive',
+                      });
+                      return;
+                    }
+                  }
+
                   await fleetService.completeTripInspection(selectedInspection.id, {
                     ...completeInspectionForm,
                     completedAtUtc: completeInspectionForm.completedAtUtc || toDatetimeLocal(new Date()),

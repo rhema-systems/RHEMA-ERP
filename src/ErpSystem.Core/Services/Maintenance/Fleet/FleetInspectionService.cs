@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace ErpSystem.Core.Services.Maintenance.Fleet;
 
@@ -150,6 +151,39 @@ public sealed class FleetInspectionService : IFleetInspectionService
         var entity = await repo.FirstOrDefaultAsync(i => i.TenantId == tenantId && i.Id == inspectionId && !i.IsDeleted)
             ?? throw new ArgumentException("Inspection not found.");
 
+        // Validate checklist completion if template has required items.
+        var template = await _unitOfWork.Repository<InspectionTemplate>()
+            .FirstOrDefaultAsync(t => t.TenantId == tenantId && t.Id == entity.InspectionTemplateId && !t.IsDeleted);
+        if (template != null)
+        {
+            var checklistItems = ParseChecklistItems(template.ChecklistItems);
+            if (checklistItems.Count > 0)
+            {
+                var responses = ParseChecklistResponses(dto.InspectionData);
+                if (responses == null)
+                {
+                    throw new InvalidOperationException("This inspection template requires a checklist. Please complete the checklist before finishing the inspection.");
+                }
+
+                var missingRequired = checklistItems
+                    .Where(i => i.Required)
+                    .Where(i => !responses.TryGetValue(i.Id, out var v) || string.IsNullOrWhiteSpace(v))
+                    .ToList();
+
+                if (missingRequired.Count > 0)
+                {
+                    throw new InvalidOperationException($"Checklist incomplete. Please complete required items ({missingRequired.Count}) before finishing the inspection.");
+                }
+
+                // Enforce consistent overall result: any item Fail -> overall Fail.
+                var anyFail = responses.Values.Any(v => string.Equals(v?.Trim(), "Fail", StringComparison.OrdinalIgnoreCase));
+                if (anyFail)
+                {
+                    dto.OverallResult = "Fail";
+                }
+            }
+        }
+
         entity.CompletedAtUtc = (dto.CompletedAtUtc ?? now).ToUniversalTime();
         entity.Status = "Completed";
         entity.OverallResult = dto.OverallResult.Trim();
@@ -196,6 +230,99 @@ public sealed class FleetInspectionService : IFleetInspectionService
 
         await _unitOfWork.SaveChangesAsync();
         return (await GetByIdAsync(entity.Id))!;
+    }
+
+    private sealed class ChecklistItem
+    {
+        public Guid Id { get; set; }
+        public bool Required { get; set; }
+    }
+
+    private static List<ChecklistItem> ParseChecklistItems(string? json)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(json)) return new List<ChecklistItem>();
+
+            var items = JsonSerializer.Deserialize<List<JsonElement>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                ?? new List<JsonElement>();
+
+            var result = new List<ChecklistItem>();
+            foreach (var el in items)
+            {
+                if (el.ValueKind != JsonValueKind.Object) continue;
+
+                Guid id = Guid.Empty;
+                if (el.TryGetProperty("id", out var idProp))
+                {
+                    if (idProp.ValueKind == JsonValueKind.String)
+                        Guid.TryParse(idProp.GetString(), out id);
+                    else if (idProp.ValueKind == JsonValueKind.Undefined || idProp.ValueKind == JsonValueKind.Null)
+                        id = Guid.Empty;
+                }
+                if (id == Guid.Empty) continue;
+
+                var required = false;
+                if (el.TryGetProperty("required", out var reqProp))
+                {
+                    if (reqProp.ValueKind == JsonValueKind.True) required = true;
+                    else if (reqProp.ValueKind == JsonValueKind.False) required = false;
+                }
+
+                result.Add(new ChecklistItem { Id = id, Required = required });
+            }
+
+            return result;
+        }
+        catch
+        {
+            return new List<ChecklistItem>();
+        }
+    }
+
+    private static Dictionary<Guid, string>? ParseChecklistResponses(string? inspectionDataJson)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(inspectionDataJson)) return null;
+
+            var root = JsonSerializer.Deserialize<JsonElement>(inspectionDataJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (root.ValueKind != JsonValueKind.Object) return null;
+
+            if (!root.TryGetProperty("schema", out var schemaProp) || schemaProp.ValueKind != JsonValueKind.String)
+                return null;
+
+            var schema = schemaProp.GetString() ?? string.Empty;
+            if (!string.Equals(schema, "FleetTripInspectionChecklist.v1", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            if (!root.TryGetProperty("checklist", out var listProp) || listProp.ValueKind != JsonValueKind.Array)
+                return null;
+
+            var dict = new Dictionary<Guid, string>();
+            foreach (var row in listProp.EnumerateArray())
+            {
+                if (row.ValueKind != JsonValueKind.Object) continue;
+
+                if (!row.TryGetProperty("id", out var idProp) || idProp.ValueKind != JsonValueKind.String) continue;
+                if (!Guid.TryParse(idProp.GetString(), out var id) || id == Guid.Empty) continue;
+
+                string value = string.Empty;
+                if (row.TryGetProperty("value", out var vProp))
+                {
+                    if (vProp.ValueKind == JsonValueKind.String) value = vProp.GetString() ?? string.Empty;
+                    else value = vProp.ToString() ?? string.Empty;
+                }
+
+                dict[id] = value;
+            }
+
+            return dict;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public async Task<bool> CancelAsync(Guid inspectionId, string? notes = null)
