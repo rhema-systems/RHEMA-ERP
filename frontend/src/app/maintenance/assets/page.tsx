@@ -809,7 +809,7 @@ function AssetsPageContent() {
               Add Asset
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="w-[95vw] max-w-5xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Add New Asset</DialogTitle>
               <DialogDescription>
@@ -867,7 +867,7 @@ function AssetsPageContent() {
                   rows={3}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="location">Location</Label>
                   <Input
@@ -892,7 +892,7 @@ function AssetsPageContent() {
                   </Select>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="manufacturer">Manufacturer</Label>
                   <Input
@@ -922,7 +922,7 @@ function AssetsPageContent() {
                 </div>
               </div>
               {showVehicleFields && (
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
                   <div className="space-y-2">
                     <Label htmlFor="licensePlate">Plate Number</Label>
                     <Input
@@ -968,7 +968,7 @@ function AssetsPageContent() {
                   </div>
                 </div>
               )}
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="purchaseDate">Purchase Date</Label>
                   <Input
@@ -1014,7 +1014,7 @@ function AssetsPageContent() {
 
         {/* Edit Asset Dialog */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="w-[95vw] max-w-5xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit Asset</DialogTitle>
               <DialogDescription>
@@ -1064,7 +1064,7 @@ function AssetsPageContent() {
                   rows={3}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="edit-location">Location</Label>
                   <Input
@@ -1089,7 +1089,7 @@ function AssetsPageContent() {
                   </Select>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="edit-manufacturer">Manufacturer</Label>
                   <Input
@@ -1119,7 +1119,7 @@ function AssetsPageContent() {
                 </div>
               </div>
               {showVehicleFields && (
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
                   <div className="space-y-2">
                     <Label htmlFor="edit-licensePlate">Plate Number</Label>
                     <Input
@@ -1176,7 +1176,7 @@ function AssetsPageContent() {
                   </Button>
                 </div>
               ) : null}
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="edit-purchaseDate">Purchase Date</Label>
                   <Input
