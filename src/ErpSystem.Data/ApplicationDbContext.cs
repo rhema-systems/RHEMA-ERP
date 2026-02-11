@@ -139,6 +139,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<UserTechnicianSkill> UserTechnicianSkills { get; set; }
     public DbSet<AssetDowntime> AssetDowntimes { get; set; }
     public DbSet<MaintenanceAttachment> MaintenanceAttachments { get; set; }
+    public DbSet<MaintenanceAttachmentAccess> MaintenanceAttachmentAccessLogs { get; set; }
 
     public DbSet<AssetAdmission> AssetAdmissions { get; set; }
     public DbSet<AssetDischarge> AssetDischarges { get; set; }
@@ -484,6 +485,21 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new DistributedLockConfiguration());
         builder.ApplyConfiguration(new NotificationTopicConfiguration());
         builder.ApplyConfiguration(new NotificationTopicRecipientConfiguration());
+
+        builder.Entity<MaintenanceAttachmentAccess>(entity =>
+        {
+            entity.ToTable("MaintenanceAttachmentAccessLogs");
+            entity.HasIndex(x => x.AttachmentId);
+            entity.HasIndex(x => x.AccessedByUserId);
+            entity.HasOne(x => x.Attachment)
+                .WithMany()
+                .HasForeignKey(x => x.AttachmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.AccessedByUser)
+                .WithMany()
+                .HasForeignKey(x => x.AccessedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         builder.Entity<ConsignmentSettlement>(entity =>
         {

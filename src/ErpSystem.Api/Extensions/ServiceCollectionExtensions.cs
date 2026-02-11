@@ -658,6 +658,7 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderNegotiationService, ErpSystem.Core.Services.Procurement.TenderNegotiationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSettingsService, ErpSystem.Core.Services.Procurement.ProcurementSettingsService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceSettingsService, ErpSystem.Core.Services.Maintenance.MaintenanceSettingsService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAttachmentService, ErpSystem.Core.Services.Maintenance.MaintenanceAttachmentService>();
 
             // Fleet (Maintenance)
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetVehicleService, ErpSystem.Core.Services.Maintenance.Fleet.FleetVehicleService>();

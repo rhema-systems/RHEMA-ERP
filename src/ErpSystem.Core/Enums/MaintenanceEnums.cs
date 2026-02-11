@@ -18,7 +18,9 @@ public enum AttachmentEntityType
 {
     WorkOrder = 0,
     Asset = 1,
-    Inspection = 2
+    Inspection = 2,
+    FleetCompliance = 3,
+    FleetIncident = 4
 }
 
 /// <summary>
