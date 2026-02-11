@@ -21,11 +21,13 @@ type RecipientKind =
   | 'User'
   | 'Role'
   | 'UserFromData'
+  | 'UserFromEmployeeIdData'
   | 'UsersFromData'
   | 'RoleFromData'
   | 'BusinessPartner'
   | 'BusinessPartnerFromData'
   | 'EmailFromData'
+  | 'DepartmentType'
 type TopicActivity = string
 type TopicAudience = string
 
@@ -112,8 +114,10 @@ const kindOptions: { value: RecipientKind; label: string; hint: string }[] = [
   { value: 'User', label: 'User', hint: 'RecipientValue = UserId (GUID)' },
   { value: 'Role', label: 'Role', hint: 'RecipientValue = Role name (e.g. TenantAdmin)' },
   { value: 'UserFromData', label: 'User (from event data)', hint: 'RecipientValue = data key (e.g. TargetUserId)' },
+  { value: 'UserFromEmployeeIdData', label: 'User (from employeeId data)', hint: 'RecipientValue = data key (e.g. EmployeeId)' },
   { value: 'UsersFromData', label: 'Users (from event data)', hint: 'RecipientValue = data key (e.g. TargetUserIds)' },
   { value: 'RoleFromData', label: 'Role (from event data)', hint: 'RecipientValue = data key (e.g. ApproverRole)' },
+  { value: 'DepartmentType', label: 'Department', hint: 'RecipientValue = DepartmentType (e.g. Maintenance)' },
   { value: 'BusinessPartner', label: 'Business Partner', hint: 'RecipientValue = BusinessPartnerId' },
   { value: 'BusinessPartnerFromData', label: 'Business Partner (from event data)', hint: 'RecipientValue = data key (e.g. BusinessPartnerId)' },
   { value: 'EmailFromData', label: 'Email(s) (from event data)', hint: 'RecipientValue = data key (e.g. SupplierEmail or Emails)' },
@@ -173,6 +177,13 @@ const userIdsDataKeys: string[] = [
   'UserIds',
 ]
 
+const employeeIdDataKeys: string[] = [
+  'EmployeeId',
+  'DriverEmployeeId',
+  'TechnicianEmployeeId',
+  'InspectorEmployeeId',
+]
+
 const roleDataKeys: string[] = [
   'ApproverRole',
   'TargetRole',
@@ -184,6 +195,20 @@ const emailDataKeys: string[] = [
   'Emails',
   'SupplierEmail',
   'CustomerEmail',
+]
+
+const departmentTypeOptions: { value: string; label: string }[] = [
+  { value: 'Operations', label: 'Operations' },
+  { value: 'Administration', label: 'Administration' },
+  { value: 'HumanResources', label: 'Human Resources' },
+  { value: 'Finance', label: 'Finance' },
+  { value: 'IT', label: 'IT' },
+  { value: 'Maintenance', label: 'Maintenance' },
+  { value: 'Safety', label: 'Safety' },
+  { value: 'QualityAssurance', label: 'Quality Assurance' },
+  { value: 'RnD', label: 'R&D' },
+  { value: 'Marketing', label: 'Marketing' },
+  { value: 'Sales', label: 'Sales' },
 ]
 
 const workflowEventKeysByActivity: Record<string, string[]> = {
@@ -1081,6 +1106,22 @@ const TopicForm: React.FC<{
                             ))}
                           </SelectContent>
                         </Select>
+                      ) : kind === 'UserFromEmployeeIdData' ? (
+                        <Select
+                          value={r.recipientValue ? r.recipientValue : '__none__'}
+                          onValueChange={v => onUpdateRecipient(idx, { recipientValue: v === '__none__' ? '' : v })}
+                          disabled={isSystemRule}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a data key..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Select a data key...</SelectItem>
+                            {employeeIdDataKeys.map(k => (
+                              <SelectItem key={k} value={k}>{k}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       ) : kind === 'UsersFromData' ? (
                         <Select
                           value={r.recipientValue ? r.recipientValue : '__none__'}
@@ -1110,6 +1151,22 @@ const TopicForm: React.FC<{
                             <SelectItem value="__none__">Select a data key...</SelectItem>
                             {roleDataKeys.map(k => (
                               <SelectItem key={k} value={k}>{k}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : kind === 'DepartmentType' ? (
+                        <Select
+                          value={r.recipientValue ? r.recipientValue : '__none__'}
+                          onValueChange={v => onUpdateRecipient(idx, { recipientValue: v === '__none__' ? '' : v })}
+                          disabled={isSystemRule}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a department..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Select a department...</SelectItem>
+                            {departmentTypeOptions.map(o => (
+                              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
