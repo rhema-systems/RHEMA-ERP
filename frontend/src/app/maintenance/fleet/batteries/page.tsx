@@ -4,6 +4,7 @@ import * as React from 'react';
 import { fleetService, FleetBatteryDto, FleetBatteryEventDto, FleetBatteryKpisDto, FleetVehicleListDto } from '@/services/fleetService';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,6 +25,11 @@ export default function FleetBatteriesPage() {
   const [items, setItems] = React.useState<FleetBatteryDto[]>([]);
   const [kpis, setKpis] = React.useState<FleetBatteryKpisDto | null>(null);
   const [loading, setLoading] = React.useState(false);
+
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState<FleetBatteryDto | null>(null);
+  const [deleteBusy, setDeleteBusy] = React.useState(false);
+  const [deleteError, setDeleteError] = React.useState<string>('');
 
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<FleetBatteryDto | null>(null);
@@ -226,10 +232,10 @@ export default function FleetBatteriesPage() {
                           <Button
                             variant="destructive"
                             size="sm"
-                            onClick={async () => {
-                              if (!confirm('Delete this battery record?')) return;
-                              await fleetService.deleteBattery(b.id);
-                              await load();
+                            onClick={() => {
+                              setDeleteError('');
+                              setDeleting(b);
+                              setDeleteOpen(true);
                             }}
                           >
                             Delete
@@ -242,6 +248,47 @@ export default function FleetBatteriesPage() {
               </table>
             </div>
           )}
+
+          <ConfirmationDialog
+            open={deleteOpen}
+            onOpenChange={(o) => {
+              setDeleteOpen(o);
+              if (!o) {
+                setDeleting(null);
+                setDeleteError('');
+              }
+            }}
+            title="Delete battery record?"
+            description={
+              <div className="space-y-2">
+                <div>
+                  {deleting ? (
+                    <>
+                      This will delete battery <span className="font-medium">{deleting.serialNumber}</span>.
+                    </>
+                  ) : null}
+                </div>
+                {deleteError ? <div className="text-sm text-destructive">{deleteError}</div> : null}
+              </div>
+            }
+            confirmText="Delete"
+            variant="destructive"
+            isLoading={deleteBusy}
+            onConfirm={async () => {
+              if (!deleting) return;
+              setDeleteBusy(true);
+              setDeleteError('');
+              try {
+                await fleetService.deleteBattery(deleting.id);
+                await load();
+              } catch (e: any) {
+                setDeleteError(e?.message || 'Failed to delete battery record');
+                return false;
+              } finally {
+                setDeleteBusy(false);
+              }
+            }}
+          />
 
           {vehicleId !== 'none' && !loading && kpis ? (
             <div className="grid grid-cols-2 gap-3 pt-3 text-sm md:grid-cols-6">

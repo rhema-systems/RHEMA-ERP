@@ -4,6 +4,7 @@ import * as React from 'react';
 import { fleetService, FleetTyreDto, FleetTyreEventDto, FleetVehicleListDto } from '@/services/fleetService';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -26,6 +27,11 @@ export default function FleetTyresPage() {
   const [vehicleId, setVehicleId] = React.useState<string>('none');
   const [items, setItems] = React.useState<FleetTyreDto[]>([]);
   const [loading, setLoading] = React.useState(false);
+
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState<FleetTyreDto | null>(null);
+  const [deleteBusy, setDeleteBusy] = React.useState(false);
+  const [deleteError, setDeleteError] = React.useState<string>('');
 
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<FleetTyreDto | null>(null);
@@ -240,10 +246,10 @@ export default function FleetTyresPage() {
                           <Button
                             variant="destructive"
                             size="sm"
-                            onClick={async () => {
-                              if (!confirm('Delete this tyre record?')) return;
-                              await fleetService.deleteTyre(t.id);
-                              await load();
+                            onClick={() => {
+                              setDeleteError('');
+                              setDeleting(t);
+                              setDeleteOpen(true);
                             }}
                           >
                             Delete
@@ -258,6 +264,47 @@ export default function FleetTyresPage() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmationDialog
+        open={deleteOpen}
+        onOpenChange={(o) => {
+          setDeleteOpen(o);
+          if (!o) {
+            setDeleting(null);
+            setDeleteError('');
+          }
+        }}
+        title="Delete tyre record?"
+        description={
+          <div className="space-y-2">
+            <div>
+              {deleting ? (
+                <>
+                  This will delete tyre <span className="font-medium">{deleting.serialNumber}</span>.
+                </>
+              ) : null}
+            </div>
+            {deleteError ? <div className="text-sm text-destructive">{deleteError}</div> : null}
+          </div>
+        }
+        confirmText="Delete"
+        variant="destructive"
+        isLoading={deleteBusy}
+        onConfirm={async () => {
+          if (!deleting) return;
+          setDeleteBusy(true);
+          setDeleteError('');
+          try {
+            await fleetService.deleteTyre(deleting.id);
+            await load();
+          } catch (e: any) {
+            setDeleteError(e?.message || 'Failed to delete tyre record');
+            return false;
+          } finally {
+            setDeleteBusy(false);
+          }
+        }}
+      />
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-[760px]">

@@ -4,6 +4,7 @@ import * as React from 'react';
 import { fleetService, FleetCostEntryDto, FleetVehicleListDto } from '@/services/fleetService';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,6 +18,10 @@ export default function FleetCostsPage() {
   const [items, setItems] = React.useState<FleetCostEntryDto[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState<FleetCostEntryDto | null>(null);
+  const [deletingBusy, setDeletingBusy] = React.useState(false);
 
   const [open, setOpen] = React.useState(false);
   const [form, setForm] = React.useState({
@@ -171,10 +176,10 @@ export default function FleetCostsPage() {
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={async () => {
-                            if (!confirm('Delete this cost entry?')) return;
-                            await fleetService.deleteCost(c.id);
-                            await load();
+                          onClick={() => {
+                            setError(null);
+                            setDeleting(c);
+                            setDeleteOpen(true);
                           }}
                         >
                           Delete
@@ -188,6 +193,32 @@ export default function FleetCostsPage() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmationDialog
+        open={deleteOpen}
+        onOpenChange={(o) => {
+          setDeleteOpen(o);
+          if (!o) setDeleting(null);
+        }}
+        title="Delete cost entry?"
+        description={deleting ? `This will permanently delete the "${deleting.costType}" cost entry.` : undefined}
+        confirmText="Delete"
+        variant="destructive"
+        isLoading={deletingBusy}
+        onConfirm={async () => {
+          if (!deleting) return;
+          setDeletingBusy(true);
+          try {
+            await fleetService.deleteCost(deleting.id);
+            await load();
+          } catch (e: any) {
+            setError(e?.message || 'Failed to delete cost entry');
+            return false;
+          } finally {
+            setDeletingBusy(false);
+          }
+        }}
+      />
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-[760px]">
