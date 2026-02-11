@@ -270,6 +270,71 @@ export interface CreateWorkOrderFromFleetDefectDto {
   descriptionOverride?: string | null;
 }
 
+export interface FleetIncidentDto {
+  id: string;
+  vehicleAssetId: string;
+  vehicleName: string;
+  fleetTripId?: string | null;
+  driverEmployeeId?: string | null;
+  driverEmployeeName?: string | null;
+  occurredAtUtc: string;
+  incidentType: string;
+  title: string;
+  description?: string | null;
+  location?: string | null;
+  severity: string;
+  status: string;
+  damageAssessment?: string | null;
+  estimatedRepairCost?: number | null;
+  actualRepairCost?: number | null;
+  currencyCode?: string | null;
+  insuranceCompany?: string | null;
+  policyNumber?: string | null;
+  claimNumber?: string | null;
+  claimStatus?: string | null;
+  claimAmount?: number | null;
+  claimSubmittedAtUtc?: string | null;
+  claimSettledAtUtc?: string | null;
+  workOrderId?: string | null;
+  createdAt: string;
+}
+
+export interface CreateFleetIncidentDto {
+  vehicleAssetId: string;
+  fleetTripId?: string | null;
+  driverEmployeeId?: string | null;
+  occurredAtUtc?: string | null;
+  incidentType: string;
+  title: string;
+  description?: string | null;
+  location?: string | null;
+  severity: string;
+  status: string;
+  damageAssessment?: string | null;
+  estimatedRepairCost?: number | null;
+  actualRepairCost?: number | null;
+  currencyCode?: string | null;
+  insuranceCompany?: string | null;
+  policyNumber?: string | null;
+  claimNumber?: string | null;
+  claimStatus?: string | null;
+  claimAmount?: number | null;
+  claimSubmittedAtUtc?: string | null;
+  claimSettledAtUtc?: string | null;
+}
+
+export interface UpdateFleetIncidentDto extends CreateFleetIncidentDto {}
+
+export interface CreateWorkOrderFromFleetIncidentDto {
+  incidentId: string;
+  workOrderTypeId: string;
+  maintenanceTypeId: string;
+  priorityLevelId: string;
+  billingType?: 'Maintenance' | 'Repairs';
+  titleOverride?: string | null;
+  descriptionOverride?: string | null;
+}
+
 export interface FleetTyreDto {
   id: string;
   vehicleAssetId: string;
@@ -843,6 +908,57 @@ export const fleetService = {
 
   async createWorkOrderFromDefect(dto: CreateWorkOrderFromFleetDefectDto): Promise<{ workOrderId: string }> {
     const response = await fetch(`${API_BASE_URL}/maintenance/fleet/defects/work-orders`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async getIncidents(params?: {
+    page?: number;
+    pageSize?: number;
+    vehicleAssetId?: string;
+    status?: string;
+    searchTerm?: string;
+  }): Promise<PagedResult<FleetIncidentDto>> {
+    const usp = new URLSearchParams();
+    usp.set('page', String(params?.page ?? 1));
+    usp.set('pageSize', String(params?.pageSize ?? 25));
+    if (params?.vehicleAssetId) usp.set('vehicleAssetId', params.vehicleAssetId);
+    if (params?.status) usp.set('status', params.status);
+    if (params?.searchTerm) usp.set('searchTerm', params.searchTerm);
+
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/incidents?${usp.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async createIncident(dto: CreateFleetIncidentDto): Promise<FleetIncidentDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/incidents`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async updateIncident(id: string, dto: UpdateFleetIncidentDto): Promise<FleetIncidentDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/incidents/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async createWorkOrderFromIncident(dto: CreateWorkOrderFromFleetIncidentDto): Promise<{ workOrderId: string }> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/incidents/work-orders`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify(dto),

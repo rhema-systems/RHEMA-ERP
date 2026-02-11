@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Maintenance;
 
@@ -1973,6 +1974,8 @@ public class MaintenanceAssetDto
     public Guid AssetCategoryId { get; set; }
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
+    public int? Year { get; set; }
+    public AssetOwnershipType OwnershipType { get; set; } = AssetOwnershipType.Owned;
     public string? SerialNumber { get; set; }
     public string? LicensePlate { get; set; }
     public string? VIN { get; set; }
@@ -2017,6 +2020,8 @@ public class MaintenanceAssetListDto
     public string? AssetType { get; set; }
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
+    public int? Year { get; set; }
+    public AssetOwnershipType OwnershipType { get; set; } = AssetOwnershipType.Owned;
     public string? LicensePlate { get; set; }
     public string? VIN { get; set; }
     public string Status { get; set; } = string.Empty;
@@ -2052,6 +2057,10 @@ public class CreateMaintenanceAssetDto
 
     [StringLength(100)]
     public string? Model { get; set; }
+
+    public int? Year { get; set; }
+
+    public AssetOwnershipType OwnershipType { get; set; } = AssetOwnershipType.Owned;
 
     [StringLength(50)]
     public string? SerialNumber { get; set; }
@@ -2108,6 +2117,10 @@ public class UpdateMaintenanceAssetDto
 
     [StringLength(100)]
     public string? Model { get; set; }
+
+    public int? Year { get; set; }
+
+    public AssetOwnershipType OwnershipType { get; set; } = AssetOwnershipType.Owned;
 
     [StringLength(50)]
     public string? SerialNumber { get; set; }

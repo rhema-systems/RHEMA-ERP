@@ -399,6 +399,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<FleetVehicleAssignment> FleetVehicleAssignments { get; set; }
     public DbSet<FleetTripInspection> FleetTripInspections { get; set; }
     public DbSet<FleetDefect> FleetDefects { get; set; }
+    public DbSet<FleetIncident> FleetIncidents { get; set; }
     public DbSet<FleetTyre> FleetTyres { get; set; }
     public DbSet<FleetTyreEvent> FleetTyreEvents { get; set; }
     public DbSet<FleetBattery> FleetBatteries { get; set; }
@@ -453,6 +454,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new FleetVehicleAssignmentConfiguration());
         builder.ApplyConfiguration(new FleetTripInspectionConfiguration());
         builder.ApplyConfiguration(new FleetDefectConfiguration());
+        builder.ApplyConfiguration(new FleetIncidentConfiguration());
         builder.ApplyConfiguration(new FleetTyreConfiguration());
         builder.ApplyConfiguration(new FleetTyreEventConfiguration());
         builder.ApplyConfiguration(new FleetBatteryConfiguration());
@@ -2689,11 +2691,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             new ApplicationRole { Id = employeeRoleId, Name = Shared.Constants.Roles.Employee, NormalizedName = Shared.Constants.Roles.Employee.ToUpper(), IsSystemRole = true }
         );
 
-        // Seed default modules for default tenant
-        var moduleIds = new List<Guid>
+        var seedDateUtc = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        // Seed default modules for default tenant (use stable IDs to avoid migration churn)
+        var moduleIds = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase)
         {
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()
+            { Shared.Constants.Modules.Finance, Guid.Parse("00000000-0000-0000-0000-000000010001") },
+            { Shared.Constants.Modules.HR, Guid.Parse("00000000-0000-0000-0000-000000010002") },
+            { Shared.Constants.Modules.Sales, Guid.Parse("00000000-0000-0000-0000-000000010003") },
+            { Shared.Constants.Modules.Procurement, Guid.Parse("00000000-0000-0000-0000-000000010004") },
+            { Shared.Constants.Modules.Inventory, Guid.Parse("00000000-0000-0000-0000-000000010005") },
+            { Shared.Constants.Modules.Marketing, Guid.Parse("00000000-0000-0000-0000-000000010006") },
+            { Shared.Constants.Modules.WorkflowEngine, Guid.Parse("00000000-0000-0000-0000-000000010007") }
         };
 
         var modules = new[]
@@ -2712,12 +2721,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             builder.Entity<TenantModule>().HasData(
                 new TenantModule
                 {
-                    Id = moduleIds[i],
+                    Id = moduleIds[modules[i]],
                     TenantId = defaultTenantId,
                     ModuleName = modules[i],
                     Status = Shared.ModuleStatus.Enabled,
-                    EnabledDate = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow
+                    EnabledDate = seedDateUtc,
+                    CreatedAt = seedDateUtc
                 }
             );
         }

@@ -69,6 +69,15 @@ public interface IFleetDefectService
     Task<Guid> CreateWorkOrderAsync(CreateWorkOrderFromFleetDefectDto dto);
 }
 
+public interface IFleetIncidentService
+{
+    Task<PagedResult<FleetIncidentDto>> GetPagedAsync(int page, int pageSize, Guid? vehicleAssetId = null, string? status = null, string? searchTerm = null);
+    Task<FleetIncidentDto?> GetByIdAsync(Guid id);
+    Task<FleetIncidentDto> CreateAsync(CreateFleetIncidentDto dto);
+    Task<FleetIncidentDto> UpdateAsync(Guid id, UpdateFleetIncidentDto dto);
+    Task<Guid> CreateWorkOrderAsync(CreateWorkOrderFromFleetIncidentDto dto);
+}
+
 public interface IFleetTyreService
 {
     Task<PagedResult<FleetTyreDto>> GetPagedAsync(Guid vehicleAssetId, int page, int pageSize);

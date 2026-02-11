@@ -23,6 +23,7 @@ import fleetService, {
 } from '@/services/fleetService';
 import maintenanceSettingsService from '@/services/maintenanceSettingsService';
 import { formatFleetDate } from '@/lib/date-format';
+import MaintenanceAttachmentsPanel from '@/components/maintenance/MaintenanceAttachmentsPanel';
 
 function getDueStatus(expiryDateIso: string, dueSoonDays: number): 'Overdue' | 'DueSoon' | 'Ok' {
   const expiry = new Date(expiryDateIso);
@@ -54,6 +55,9 @@ export default function FleetCompliancePage() {
 
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState<FleetComplianceItemDto | null>(null);
+
+  const [docsOpen, setDocsOpen] = React.useState(false);
+  const [docsItem, setDocsItem] = React.useState<FleetComplianceItemDto | null>(null);
 
   const [form, setForm] = React.useState<CreateFleetComplianceItemDto>({
     vehicleAssetId: '',
@@ -185,6 +189,11 @@ export default function FleetCompliancePage() {
     }
   };
 
+  const openDocs = (item: FleetComplianceItemDto) => {
+    setDocsItem(item);
+    setDocsOpen(true);
+  };
+
   return (
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
@@ -273,6 +282,9 @@ export default function FleetCompliancePage() {
                           <Button variant="ghost" size="sm" onClick={() => openEdit(i)}>
                             Edit
                           </Button>
+                          <Button variant="ghost" size="sm" onClick={() => openDocs(i)}>
+                            Documents
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -309,6 +321,41 @@ export default function FleetCompliancePage() {
           await remove(deleting.id);
         }}
       />
+
+      <Dialog
+        open={docsOpen}
+        onOpenChange={(o) => {
+          setDocsOpen(o);
+          if (!o) setDocsItem(null);
+        }}
+      >
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Compliance Documents</DialogTitle>
+            <DialogDescription>
+              {docsItem ? `${docsItem.complianceType} — Expires ${formatFleetDate(docsItem.expiryDate)}` : 'Upload and view documents.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {docsItem ? (
+            <MaintenanceAttachmentsPanel
+              entityType="FleetCompliance"
+              entityId={docsItem.id}
+              category="ComplianceDocs"
+              title="Documents"
+              description="Upload roadworthy, insurance, registration, permits, and related documents."
+            />
+          ) : (
+            <div className="py-6 text-sm text-muted-foreground">Select a compliance record to view documents.</div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDocsOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-3xl">

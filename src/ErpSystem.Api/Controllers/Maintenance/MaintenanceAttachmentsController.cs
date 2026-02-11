@@ -35,7 +35,7 @@ public class MaintenanceAttachmentsController : ControllerBase
     }
 
     /// <summary>
-    /// Uploads files for work orders, assets, or inspections
+    /// Uploads files for supported maintenance entities (work orders, assets, inspections, and fleet records)
     /// </summary>
     [HttpPost("upload/{entityType}/{entityId:guid}")]
     [RequestSizeLimit(52428800)] // 50MB
@@ -54,7 +54,7 @@ public class MaintenanceAttachmentsController : ControllerBase
                 return BadRequest("No files provided");
             }
 
-            var allowedTypes = new[] { "WorkOrder", "Asset", "Inspection" };
+            var allowedTypes = new[] { "WorkOrder", "Asset", "Inspection", "FleetCompliance", "FleetIncident" };
             if (!allowedTypes.Contains(entityType, StringComparer.OrdinalIgnoreCase))
             {
                 return BadRequest($"Entity type must be one of: {string.Join(", ", allowedTypes)}");
@@ -407,6 +407,8 @@ public class MaintenanceAttachmentsController : ControllerBase
             "workorder" => "maintenance-workorders",
             "asset" => "maintenance-assets",
             "inspection" => "maintenance-inspections",
+            "fleetcompliance" => "maintenance-fleet",
+            "fleetincident" => "maintenance-fleet",
             _ => "maintenance-general"
         };
     }

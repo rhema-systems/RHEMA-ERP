@@ -323,6 +323,7 @@ public class FleetCostEntry : TenantEntity
     public Guid? FleetFuelTransactionId { get; set; }
     public Guid? FleetTyreEventId { get; set; }
     public Guid? FleetBatteryEventId { get; set; }
+    public Guid? FleetIncidentId { get; set; }
 
     public DateTime CostDateUtc { get; set; } = DateTime.UtcNow;
 
@@ -366,5 +367,8 @@ public class FleetCostEntry : TenantEntity
 
     [ForeignKey(nameof(FleetBatteryEventId))]
     public virtual FleetBatteryEvent? FleetBatteryEvent { get; set; }
+
+    [ForeignKey(nameof(FleetIncidentId))]
+    public virtual FleetIncident? FleetIncident { get; set; }
 }
 

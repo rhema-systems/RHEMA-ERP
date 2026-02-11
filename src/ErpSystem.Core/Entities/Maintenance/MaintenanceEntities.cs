@@ -31,6 +31,10 @@ public class MaintenanceAsset : TenantEntity
     [MaxLength(100)]
     public string? Model { get; set; }
 
+    public int? Year { get; set; }
+
+    public AssetOwnershipType OwnershipType { get; set; } = AssetOwnershipType.Owned;
+
     public Guid? EmployeeId { get; set; }
 
     [MaxLength(50)]

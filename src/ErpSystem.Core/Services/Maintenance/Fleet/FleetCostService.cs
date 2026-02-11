@@ -53,7 +53,8 @@ public sealed class FleetCostService : IFleetCostService
                 FleetTripId = c.FleetTripId,
                 WorkOrderId = c.WorkOrderId,
                 FleetExternalRepairId = c.FleetExternalRepairId,
-                FleetFuelTransactionId = c.FleetFuelTransactionId
+                FleetFuelTransactionId = c.FleetFuelTransactionId,
+                FleetIncidentId = c.FleetIncidentId
             })
             .ToListAsync();
 

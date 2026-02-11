@@ -667,6 +667,7 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetAssignmentService, ErpSystem.Core.Services.Maintenance.Fleet.FleetAssignmentService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetInspectionService, ErpSystem.Core.Services.Maintenance.Fleet.FleetInspectionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetDefectService, ErpSystem.Core.Services.Maintenance.Fleet.FleetDefectService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetIncidentService, ErpSystem.Core.Services.Maintenance.Fleet.FleetIncidentService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetTyreService, ErpSystem.Core.Services.Maintenance.Fleet.FleetTyreService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetBatteryService, ErpSystem.Core.Services.Maintenance.Fleet.FleetBatteryService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetExternalRepairService, ErpSystem.Core.Services.Maintenance.Fleet.FleetExternalRepairService>();

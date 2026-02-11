@@ -106,3 +106,13 @@ public enum AssetTypeClassification
     Safety = 7,
     Other = 99
 }
+
+/// <summary>
+/// Ownership classification for assets (primarily vehicles).
+/// </summary>
+public enum AssetOwnershipType
+{
+    Owned = 0,
+    Leased = 1,
+    Rented = 2
+}

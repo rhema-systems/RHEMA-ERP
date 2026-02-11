@@ -137,6 +137,7 @@ const navigationItems: NavItem[] = [
           { title: 'Compliance', href: '/maintenance/fleet/compliance', icon: ShieldCheck },
           { title: 'Fuel', href: '/maintenance/fleet/fuel', icon: Droplet },
           { title: 'Defects', href: '/maintenance/fleet/defects', icon: AlertTriangle },
+          { title: 'Incidents', href: '/maintenance/fleet/incidents', icon: AlertTriangle },
           { title: 'Tyres', href: '/maintenance/fleet/tyres', icon: Package },
           { title: 'Batteries', href: '/maintenance/fleet/batteries', icon: Package },
           { title: 'External Repairs', href: '/maintenance/fleet/external-repairs', icon: Wrench },

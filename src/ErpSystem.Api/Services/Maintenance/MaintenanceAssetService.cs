@@ -307,6 +307,8 @@ public class MaintenanceAssetService : IMaintenanceAssetService
                 AssetType = a.AssetCategory.AssetType,
                 Manufacturer = a.Manufacturer,
                 Model = a.Model,
+                Year = a.Year,
+                OwnershipType = a.OwnershipType,
                 Status = a.Status.ToString(),
                 Criticality = a.Criticality.ToString(),
                 Location = a.Location,

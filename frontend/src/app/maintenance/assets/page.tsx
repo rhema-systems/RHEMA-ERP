@@ -31,6 +31,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
+import MaintenanceAttachmentsPanel from '@/components/maintenance/MaintenanceAttachmentsPanel';
 
 import { format } from 'date-fns';
 
@@ -44,6 +45,8 @@ interface Asset {
   location: string;
   manufacturer: string;
   model: string;
+  year?: number | null;
+  ownershipType?: string | null;
   serialNumber: string;
   licensePlate?: string;
   vin?: string;
@@ -88,6 +91,7 @@ function AssetsPageContent() {
   const [assetTypes, setAssetTypes] = useState<Array<{ id: string; name: string; description?: string; assetType?: string | null; isActive?: boolean }>>([]);
   const initialCreateHandledRef = useRef(false);
   const initialEditHandledRef = useRef(false);
+  const [vehiclePicturesOpen, setVehiclePicturesOpen] = useState(false);
 
   const [newAsset, setNewAsset] = useState({
     name: '',
@@ -97,6 +101,8 @@ function AssetsPageContent() {
     location: '',
     manufacturer: '',
     model: '',
+    year: '',
+    ownershipType: 'Owned',
     serialNumber: '',
     licensePlate: '',
     vin: '',
@@ -167,6 +173,8 @@ function AssetsPageContent() {
         // Map other potential field name variations
         manufacturer: asset.manufacturer || asset.Manufacturer || '',
         model: asset.model || asset.Model || '',
+        year: asset.year ?? asset.Year ?? null,
+        ownershipType: asset.ownershipType || asset.OwnershipType || 'Owned',
         serialNumber: asset.serialNumber || asset.SerialNumber || '',
         location: asset.location || asset.Location || '',
         description: asset.description || asset.Description || '',
@@ -351,6 +359,7 @@ function AssetsPageContent() {
       const selectedType = assetTypes.find(type => type.name === newAsset.category);
       const typeId = selectedType?.id || assetTypes[0]?.id;
       const isVehicleCategory = (selectedType?.assetType || '').toLowerCase() === 'vehicle';
+      const yearNumber = newAsset.year ? parseInt(newAsset.year, 10) : null;
 
       // Log debugging info
       console.log('Creating asset with data:', {
@@ -426,6 +435,8 @@ function AssetsPageContent() {
         assetCategoryId: typeId,
         manufacturer: newAsset.manufacturer?.trim() || null,
         model: newAsset.model?.trim() || null,
+        year: isVehicleCategory ? yearNumber : null,
+        ownershipType: isVehicleCategory ? newAsset.ownershipType : 'Owned',
         serialNumber: newAsset.serialNumber?.trim() || null,
         licensePlate: isVehicleCategory ? (newAsset.licensePlate?.trim() || null) : null,
         vin: isVehicleCategory ? (newAsset.vin?.trim() || null) : null,
@@ -518,6 +529,8 @@ function AssetsPageContent() {
         location: '',
         manufacturer: '',
         model: '',
+        year: '',
+        ownershipType: 'Owned',
         serialNumber: '',
         licensePlate: '',
         vin: '',
@@ -541,6 +554,8 @@ function AssetsPageContent() {
       location: asset.location || '',
       manufacturer: asset.manufacturer || '',
       model: asset.model || '',
+      year: asset.year != null ? String(asset.year) : '',
+      ownershipType: asset.ownershipType || 'Owned',
       serialNumber: asset.serialNumber || '',
       licensePlate: asset.licensePlate || '',
       vin: asset.vin || '',
@@ -587,6 +602,7 @@ function AssetsPageContent() {
       const selectedType = assetTypes.find(type => type.name === newAsset.category);
       const assetCategoryId = selectedType?.id || assetTypes[0]?.id || '';
       const isVehicleCategory = (selectedType?.assetType || '').toLowerCase() === 'vehicle';
+      const yearNumber = newAsset.year ? parseInt(newAsset.year, 10) : null;
 
       const response = await fetch(`${API_URL}/maintenance/assets/${selectedAsset.id}`, {
         method: 'PUT',
@@ -600,6 +616,8 @@ function AssetsPageContent() {
           assetCategoryId,
           manufacturer: newAsset.manufacturer,
           model: newAsset.model,
+          year: isVehicleCategory ? yearNumber : null,
+          ownershipType: isVehicleCategory ? newAsset.ownershipType : 'Owned',
           serialNumber: newAsset.serialNumber,
           licensePlate: isVehicleCategory ? (newAsset.licensePlate?.trim() || null) : null,
           vin: isVehicleCategory ? (newAsset.vin?.trim() || null) : null,
@@ -640,6 +658,8 @@ function AssetsPageContent() {
         location: '',
         manufacturer: '',
         model: '',
+        year: '',
+        ownershipType: 'Owned',
         serialNumber: '',
         licensePlate: '',
         vin: '',
@@ -902,7 +922,7 @@ function AssetsPageContent() {
                 </div>
               </div>
               {showVehicleFields && (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="licensePlate">Plate Number</Label>
                     <Input
@@ -920,6 +940,31 @@ function AssetsPageContent() {
                       onChange={(e) => setNewAsset(prev => ({ ...prev, vin: e.target.value }))}
                       placeholder="Vehicle identification number"
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="year">Year</Label>
+                    <Input
+                      id="year"
+                      type="number"
+                      min="1900"
+                      max={String(new Date().getFullYear() + 1)}
+                      value={newAsset.year}
+                      onChange={(e) => setNewAsset((prev) => ({ ...prev, year: e.target.value }))}
+                      placeholder="e.g. 2021"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Ownership</Label>
+                    <Select value={newAsset.ownershipType} onValueChange={(value) => setNewAsset((prev) => ({ ...prev, ownershipType: value }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select ownership" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Owned">Owned</SelectItem>
+                        <SelectItem value="Leased">Leased</SelectItem>
+                        <SelectItem value="Rented">Rented</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               )}
@@ -1074,7 +1119,7 @@ function AssetsPageContent() {
                 </div>
               </div>
               {showVehicleFields && (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="edit-licensePlate">Plate Number</Label>
                     <Input
@@ -1093,8 +1138,44 @@ function AssetsPageContent() {
                       placeholder="Vehicle identification number"
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-year">Year</Label>
+                    <Input
+                      id="edit-year"
+                      type="number"
+                      min="1900"
+                      max={String(new Date().getFullYear() + 1)}
+                      value={newAsset.year}
+                      onChange={(e) => setNewAsset((prev) => ({ ...prev, year: e.target.value }))}
+                      placeholder="e.g. 2021"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Ownership</Label>
+                    <Select value={newAsset.ownershipType} onValueChange={(value) => setNewAsset((prev) => ({ ...prev, ownershipType: value }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select ownership" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Owned">Owned</SelectItem>
+                        <SelectItem value="Leased">Leased</SelectItem>
+                        <SelectItem value="Rented">Rented</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               )}
+              {showVehicleFields && selectedAsset?.id ? (
+                <div className="flex items-center justify-between rounded-md border bg-muted/10 p-3">
+                  <div>
+                    <div className="text-sm font-medium">Vehicle Pictures</div>
+                    <div className="text-xs text-muted-foreground">Upload and view photos for this vehicle asset.</div>
+                  </div>
+                  <Button variant="outline" onClick={() => setVehiclePicturesOpen(true)}>
+                    Manage Pictures
+                  </Button>
+                </div>
+              ) : null}
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="edit-purchaseDate">Purchase Date</Label>
@@ -1134,6 +1215,33 @@ function AssetsPageContent() {
               </Button>
               <Button onClick={handleUpdateAsset}>
                 Update Asset
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={vehiclePicturesOpen} onOpenChange={setVehiclePicturesOpen}>
+          <DialogContent className="max-w-5xl">
+            <DialogHeader>
+              <DialogTitle>Vehicle Pictures</DialogTitle>
+              <DialogDescription>Upload and view pictures for this vehicle. Stored securely as Asset attachments.</DialogDescription>
+            </DialogHeader>
+
+            {selectedAsset?.id ? (
+              <MaintenanceAttachmentsPanel
+                entityType="Asset"
+                entityId={selectedAsset.id}
+                category="VehiclePictures"
+                title="Pictures"
+                description="Upload photos and related documents for this vehicle."
+              />
+            ) : (
+              <div className="py-6 text-sm text-muted-foreground">Select a vehicle to manage pictures.</div>
+            )}
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setVehiclePicturesOpen(false)}>
+                Close
               </Button>
             </DialogFooter>
           </DialogContent>
