@@ -32,6 +32,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import MaintenanceAttachmentsPanel from '@/components/maintenance/MaintenanceAttachmentsPanel';
+import AssetVehicleFleetTabs from '@/components/maintenance/AssetVehicleFleetTabs';
 
 import { format } from 'date-fns';
 
@@ -92,6 +93,7 @@ function AssetsPageContent() {
   const initialCreateHandledRef = useRef(false);
   const initialEditHandledRef = useRef(false);
   const [vehiclePicturesOpen, setVehiclePicturesOpen] = useState(false);
+  const [assetViewTab, setAssetViewTab] = useState<string>('details');
 
   const [newAsset, setNewAsset] = useState({
     name: '',
@@ -190,11 +192,19 @@ function AssetsPageContent() {
 
   const isVehicleCategoryName = (categoryName: string | null | undefined) => {
     if (!categoryName) return false;
-    return (assetTypes.find((t) => t.name === categoryName)?.assetType || '').toLowerCase() === 'vehicle';
+    const normalized = categoryName.trim().toLowerCase();
+    const match = assetTypes.find((t) => (t.name || '').trim().toLowerCase() === normalized);
+    if (match) return (match.assetType || '').toLowerCase() === 'vehicle';
+    return normalized.includes('vehicle');
   };
 
   const showVehicleFields = isVehicleCategoryName(newAsset.category);
   const selectedAssetIsVehicle = selectedAsset ? isVehicleCategoryName(selectedAsset.category) : false;
+
+  useEffect(() => {
+    if (!isViewDialogOpen) return;
+    setAssetViewTab('details');
+  }, [isViewDialogOpen, selectedAsset?.id]);
 
   // Load assets and maintenance history from API
   useEffect(() => {
@@ -809,7 +819,7 @@ function AssetsPageContent() {
               Add Asset
             </Button>
           </DialogTrigger>
-          <DialogContent className="w-[95vw] max-w-5xl max-h-[85vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] max-w-6xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Add New Asset</DialogTitle>
               <DialogDescription>
@@ -1014,7 +1024,7 @@ function AssetsPageContent() {
 
         {/* Edit Asset Dialog */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="w-[95vw] max-w-5xl max-h-[85vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] max-w-6xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit Asset</DialogTitle>
               <DialogDescription>
@@ -1463,7 +1473,7 @@ function AssetsPageContent() {
 
       {/* View Asset Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] max-w-6xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Asset Details</DialogTitle>
             <DialogDescription>
@@ -1471,12 +1481,15 @@ function AssetsPageContent() {
             </DialogDescription>
           </DialogHeader>
           {selectedAsset && (
-            <Tabs defaultValue="details" className="space-y-4">
+            <Tabs value={assetViewTab} onValueChange={setAssetViewTab} className="space-y-4">
               <div className="h-[60vh] flex flex-col">
-                <TabsList>
+                <TabsList className="flex flex-wrap justify-start gap-1 h-auto">
                   <TabsTrigger value="details">Asset Details</TabsTrigger>
                   <TabsTrigger value="schedule">Maintenance Schedule</TabsTrigger>
                   <TabsTrigger value="history">Maintenance History</TabsTrigger>
+                  {selectedAssetIsVehicle && (
+                    <TabsTrigger value="fleet">Fleet</TabsTrigger>
+                  )}
                 </TabsList>
 
                 <div className="flex-1 overflow-y-auto mt-2">
@@ -1649,6 +1662,12 @@ function AssetsPageContent() {
                   </div>
                 </div>
               </TabsContent>
+
+              {selectedAssetIsVehicle && (
+                <TabsContent value="fleet" className="space-y-4">
+                  <AssetVehicleFleetTabs vehicleAssetId={selectedAsset.id} />
+                </TabsContent>
+              )}
               </div>
             </div>
             </Tabs>
