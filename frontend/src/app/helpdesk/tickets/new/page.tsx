@@ -35,11 +35,18 @@ const relatedEntityTypeOptions = [
   { label: 'Purchase Requisition', value: 'PurchaseRequisition' },
   { label: 'Tender', value: 'Tender' },
   { label: 'RFQ', value: 'RFQ' },
-  { label: 'Order', value: 'Order' },
-  { label: 'Invoice', value: 'Invoice' },
-  { label: 'Patient', value: 'Patient' },
   { label: 'Other', value: 'Other' },
 ];
+
+const relatedLookupSupportedTypes = new Set([
+  'Asset',
+  'Vehicle',
+  'WorkOrder',
+  'PurchaseOrder',
+  'PurchaseRequisition',
+  'Tender',
+  'RFQ',
+]);
 
 type CategoryNode = EhcAdminCategory & { children: CategoryNode[] };
 
@@ -386,13 +393,13 @@ export default function NewInternalHelpdeskTicketPage() {
                         setRelatedLookupError(null);
                         setRelatedLookupOpen(true);
                       }}
-                      disabled={!form.relatedEntityType}
+                      disabled={!form.relatedEntityType || !relatedLookupSupportedTypes.has(form.relatedEntityType)}
                     >
                       Lookup
                     </Button>
                   </div>
                   <div className="text-xs text-slate-500">
-                    Lookup supports Asset/Vehicle, Work Order, Purchase Order.
+                    Lookup supports Asset/Vehicle, Work Order, Purchase Order/Requisition, Tender, and RFQ.
                   </div>
                 </div>
               </div>
@@ -441,7 +448,16 @@ export default function NewInternalHelpdeskTicketPage() {
                 <Label className="text-xs text-slate-600">Search</Label>
                 <div className="flex gap-2">
                   <Input value={relatedLookupQ} onChange={(e) => setRelatedLookupQ(e.target.value)} placeholder="Type name/number..." />
-                  <Button type="button" onClick={doRelatedLookup} disabled={!relatedLookupQ.trim() || !form.relatedEntityType || relatedLookupLoading}>
+                  <Button
+                    type="button"
+                    onClick={doRelatedLookup}
+                    disabled={
+                      !relatedLookupQ.trim() ||
+                      !form.relatedEntityType ||
+                      !relatedLookupSupportedTypes.has(form.relatedEntityType) ||
+                      relatedLookupLoading
+                    }
+                  >
                     {relatedLookupLoading ? 'Searching...' : 'Search'}
                   </Button>
                 </div>

@@ -26,6 +26,16 @@ const toDisplayUrl = (attachment: EhcTicketAttachment) => {
   return raw;
 };
 
+const relatedResolveSupportedTypes = new Set([
+  'Asset',
+  'Vehicle',
+  'WorkOrder',
+  'PurchaseOrder',
+  'PurchaseRequisition',
+  'Tender',
+  'RFQ',
+]);
+
 export default function HelpdeskTicketDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -358,6 +368,7 @@ export default function HelpdeskTicketDetailPage() {
       const type = (ticket?.relatedEntityType || '').trim();
       const reference = (ticket?.relatedEntityReference || '').trim();
       if (!type || !reference) throw new Error('No related entity to open');
+      if (!relatedResolveSupportedTypes.has(type)) throw new Error(`Related entity type '${type}' is not supported yet.`);
       return ehcInternalTicketService.resolveRelatedEntity(type, reference);
     },
     onSuccess: (res) => {
@@ -371,6 +382,11 @@ export default function HelpdeskTicketDetailPage() {
       toast({ title: 'Error', description: getErrorMessage(err), variant: 'destructive' });
     },
   });
+
+  const canOpenRelated =
+    Boolean(ticket?.relatedEntityType) &&
+    Boolean(ticket?.relatedEntityReference) &&
+    relatedResolveSupportedTypes.has((ticket?.relatedEntityType || '').trim());
 
   if (isLoading) {
     return (
@@ -453,7 +469,7 @@ export default function HelpdeskTicketDetailPage() {
               <div className="text-slate-500">Reference</div>
               <div className="font-medium text-slate-900 flex items-center gap-2 flex-wrap">
                 <span>{ticket.relatedEntityReference || '—'}</span>
-                {ticket.relatedEntityType && ticket.relatedEntityReference ? (
+                {canOpenRelated ? (
                   <Button
                     type="button"
                     variant="outline"

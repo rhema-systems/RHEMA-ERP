@@ -114,7 +114,8 @@ public sealed class EhcInternalRelatedEntitiesController : ControllerBase
                     EntityType = "WorkOrder",
                     Reference = w.WorkOrderNumber,
                     Label = w.Title,
-                    OpenUrl = $"/maintenance/work-orders?search={w.WorkOrderNumber}"
+                    // Work Orders page supports deep-linking by workOrderNumber (auto-opens details dialog)
+                    OpenUrl = $"/maintenance/work-orders?workOrderNumber={w.WorkOrderNumber}"
                 }).ToList();
 
                 return Ok(new { success = true, data });
@@ -308,7 +309,8 @@ public sealed class EhcInternalRelatedEntitiesController : ControllerBase
                         EntityType = "WorkOrder",
                         Reference = w.WorkOrderNumber,
                         Label = w.Title,
-                        OpenUrl = $"/maintenance/work-orders?search={w.WorkOrderNumber}"
+                        // Work Orders page supports deep-linking by workOrderNumber (auto-opens details dialog)
+                        OpenUrl = $"/maintenance/work-orders?workOrderNumber={w.WorkOrderNumber}"
                     }
                 });
             }

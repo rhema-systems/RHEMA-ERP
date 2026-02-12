@@ -267,11 +267,8 @@ export default function NewExternalPortalSupportTicketPage() {
                     onChange={(e) => setForm((f) => ({ ...f, relatedEntityType: e.target.value || undefined }))}
                   >
                     <option value="">None</option>
-                    <option value="Order">Order</option>
-                    <option value="Invoice">Invoice</option>
                     <option value="Asset">Asset</option>
                     <option value="Vehicle">Vehicle</option>
-                    <option value="Patient">Patient</option>
                     <option value="Other">Other</option>
                   </select>
                 </div>
@@ -280,7 +277,7 @@ export default function NewExternalPortalSupportTicketPage() {
                   <Input
                     value={form.relatedEntityReference || ''}
                     onChange={(e) => setForm((f) => ({ ...f, relatedEntityReference: e.target.value || undefined }))}
-                    placeholder="e.g. INV-000123"
+                    placeholder={form.relatedEntityType === 'Vehicle' ? 'e.g. GR-123-24' : 'Enter reference'}
                   />
                 </div>
               </div>
