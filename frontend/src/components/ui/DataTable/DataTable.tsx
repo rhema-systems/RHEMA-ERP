@@ -148,6 +148,7 @@ export interface DataTableProps<TData> {
   
   // Advanced features
   enableColumnVisibility?: boolean;
+  initialColumnVisibility?: VisibilityState;
   enableSearch?: boolean;
   searchPlaceholder?: string;
   emptyStateMessage?: string;
@@ -215,6 +216,7 @@ export function DataTable<TData>({
   
   // Advanced
   enableColumnVisibility = true,
+  initialColumnVisibility,
   enableSearch = true,
   searchPlaceholder = 'Search all columns...',
   emptyStateMessage = 'No data available',
@@ -230,10 +232,11 @@ export function DataTable<TData>({
   enableHorizontalScroll = true,
 }: DataTableProps<TData>) {
   const { isMobile, isTablet, needsMoreSpacing } = useDeviceType();
+  const isCompact = compact;
   
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(initialColumnVisibility ?? {});
   const [rowSelection, setRowSelection] = useState<RowSelectionState>(rowSelectionState || {});
   const [globalFilter, setGlobalFilter] = useState('');
   const [pagination, setPagination] = useState<PaginationState>({
@@ -477,7 +480,7 @@ export function DataTable<TData>({
   return (
     <Card className={`${className} ${showBorder ? 'border' : 'border-0'}`}>
       {(title || description) && (
-        <CardHeader>
+        <CardHeader className={compact ? 'py-4' : ''}>
           {title && <CardTitle>{title}</CardTitle>}
           {description && <p className="text-sm text-muted-foreground">{description}</p>}
         </CardHeader>
@@ -487,6 +490,7 @@ export function DataTable<TData>({
         {/* Toolbar */}
         <DataTableToolbar
           table={table}
+          compact={compact}
           enableGlobalFilter={enableGlobalFilter}
           enableColumnFilters={enableColumnFilters}
           enableColumnVisibility={enableColumnVisibility}

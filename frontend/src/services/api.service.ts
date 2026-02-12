@@ -12,6 +12,7 @@ export interface LoginRequest {
   tenantCode?: string;
   rememberMe?: boolean;
   twoFactorCode?: string;
+  recaptchaToken?: string;
 }
 
 export interface LoginResponse {

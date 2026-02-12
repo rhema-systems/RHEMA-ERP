@@ -279,6 +279,7 @@ const navigationItems: NavItem[] = [
     href: '/helpdesk',
     icon: HelpCircle,
     children: [
+      { title: 'Dashboard', href: '/helpdesk/dashboard', icon: BarChart3 },
       { title: 'Tickets', href: '/helpdesk/tickets', icon: FileText },
       { title: 'Knowledge Base', href: '/helpdesk/knowledge-base', icon: FileText },
       { title: 'Customer Support', href: '/helpdesk/support', icon: Users },
@@ -456,6 +457,7 @@ const navigationItems: NavItem[] = [
           { title: 'Ticket Categories', href: '/administration/helpdesk/categories', icon: FileText },
           { title: 'Priority Levels', href: '/administration/helpdesk/priorities', icon: BarChart3 },
           { title: 'SLA Templates', href: '/administration/helpdesk/sla', icon: FileText },
+          { title: 'Workflow Routing', href: '/administration/helpdesk/workflows', icon: Workflow },
           { title: 'Support Channels', href: '/administration/helpdesk/channels', icon: HelpCircle },
         ],
       },

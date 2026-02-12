@@ -1,14 +1,78 @@
 'use client';
 
+import { useMemo, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { User, Mail, Phone, Building2, Save } from 'lucide-react';
+import { Mail, Phone, Save } from 'lucide-react';
 import { authService } from '@/services/auth';
+import { useToast } from '@/hooks/use-toast';
+import { userProfileService } from '@/services/userProfileService';
 
 export default function ProfilePage() {
+  const { toast } = useToast();
   const user = authService.getStoredUser();
+  const initial = useMemo(
+    () => ({
+      firstName: user?.firstName ?? '',
+      lastName: user?.lastName ?? '',
+      email: user?.email ?? '',
+      phoneNumber: user?.phoneNumber ?? '',
+    }),
+    [user?.firstName, user?.lastName, user?.email, user?.phoneNumber],
+  );
+
+  const [firstName, setFirstName] = useState(initial.firstName);
+  const [lastName, setLastName] = useState(initial.lastName);
+  const [email, setEmail] = useState(initial.email);
+  const [phoneNumber, setPhoneNumber] = useState(initial.phoneNumber);
+
+  const canSave =
+    Boolean(email.trim()) &&
+    (firstName.trim() !== initial.firstName.trim() ||
+      lastName.trim() !== initial.lastName.trim() ||
+      email.trim() !== initial.email.trim() ||
+      phoneNumber.trim() !== initial.phoneNumber.trim());
+
+  const updateMutation = useMutation({
+    mutationFn: async () => {
+      const updated = await userProfileService.updateProfile({
+        firstName: firstName.trim() || null,
+        lastName: lastName.trim() || null,
+        email: email.trim() || null,
+        phoneNumber: phoneNumber.trim() || null,
+      });
+
+      const stored = authService.getStoredUser();
+      if (stored) {
+        localStorage.setItem(
+          'user',
+          JSON.stringify({
+            ...stored,
+            firstName: updated.firstName ?? stored.firstName,
+            lastName: updated.lastName ?? stored.lastName,
+            email: updated.email ?? stored.email,
+            phoneNumber: updated.phoneNumber ?? stored.phoneNumber,
+          }),
+        );
+      }
+
+      return updated;
+    },
+    onSuccess: () => {
+      toast({ title: 'Saved', description: 'Profile updated successfully.', variant: 'success' });
+    },
+    onError: (err) => {
+      toast({
+        title: 'Error',
+        description: err instanceof Error ? err.message : 'Failed to update profile.',
+        variant: 'destructive',
+      });
+    },
+  });
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -33,7 +97,8 @@ export default function ProfilePage() {
               <Label htmlFor="firstName">First Name</Label>
               <Input
                 id="firstName"
-                defaultValue={user?.firstName}
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
                 placeholder="Enter first name"
               />
             </div>
@@ -41,7 +106,8 @@ export default function ProfilePage() {
               <Label htmlFor="lastName">Last Name</Label>
               <Input
                 id="lastName"
-                defaultValue={user?.lastName}
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
                 placeholder="Enter last name"
               />
             </div>
@@ -54,7 +120,8 @@ export default function ProfilePage() {
               <Input
                 id="email"
                 type="email"
-                defaultValue={user?.email}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 placeholder="Enter email"
                 className="pl-10"
               />
@@ -68,6 +135,8 @@ export default function ProfilePage() {
               <Input
                 id="phone"
                 type="tel"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
                 placeholder="Enter phone number"
                 className="pl-10"
               />
@@ -75,10 +144,21 @@ export default function ProfilePage() {
           </div>
 
           <div className="flex justify-end space-x-3 pt-4">
-            <Button variant="outline">Cancel</Button>
-            <Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setFirstName(initial.firstName);
+                setLastName(initial.lastName);
+                setEmail(initial.email);
+                setPhoneNumber(initial.phoneNumber);
+              }}
+              disabled={updateMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button onClick={() => updateMutation.mutate()} disabled={!canSave || updateMutation.isPending}>
               <Save className="mr-2 h-4 w-4" />
-              Save Changes
+              {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
             </Button>
           </div>
         </CardContent>

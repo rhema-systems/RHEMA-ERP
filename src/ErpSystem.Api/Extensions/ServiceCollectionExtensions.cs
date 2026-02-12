@@ -128,6 +128,9 @@ namespace ErpSystem.Api.Extensions
             // Specific repositories
             services.AddScoped<ITenantRepository, TenantRepository>();
 
+            // Enquiry, Helpdesk & Complaints (EHC) repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IEhcTicketRepository, ErpSystem.Data.Repositories.Ehc.EhcTicketRepository>();
+
             // Report repositories
             services.AddScoped<IReportRepository, ReportRepository>();
             services.AddScoped<IReportScheduleRepository, ReportScheduleRepository>();
@@ -410,6 +413,15 @@ namespace ErpSystem.Api.Extensions
                 client.Timeout = TimeSpan.FromSeconds(5);
                 client.DefaultRequestHeaders.Add("User-Agent", "ERP-System/1.0");
             });
+
+            // CAPTCHA verification (reCAPTCHA / hCaptcha)
+            services.AddHttpClient("captcha", client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(5);
+                client.DefaultRequestHeaders.Add("User-Agent", "ERP-System/1.0");
+            });
+            services.AddScoped<ErpSystem.Api.Services.ICaptchaVerificationService, ErpSystem.Api.Services.CaptchaVerificationService>();
+
             services.AddScoped<ISecurityService, SecurityService>();
             // User context services
             services.AddHttpContextAccessor();
@@ -447,6 +459,9 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowConditionEvaluator, ErpSystem.Core.Services.Workflow.WorkflowConditionEvaluator>();
             services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowEntityDisplayService, ErpSystem.Core.Services.Workflow.WorkflowEntityDisplayService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowNotificationService, ErpSystem.Core.Services.Workflow.WorkflowNotificationService>();
+
+            // Enquiry, Helpdesk & Complaints (EHC) services
+            services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IEhcTicketService, ErpSystem.Core.Services.Ehc.EhcTicketService>();
 
             // Enhanced maintenance workflow integration - NOW ENABLED
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IEnhancedMaintenanceWorkflowService, ErpSystem.Core.Services.Maintenance.EnhancedMaintenanceWorkflowService>();
@@ -708,6 +723,9 @@ namespace ErpSystem.Api.Extensions
             // Exception log maintenance (retention purge)
             services.AddHostedService<ErpSystem.Api.Services.ExceptionLogMaintenanceBackgroundService>();
 
+            // EHC SLA monitoring / escalation (tickets)
+            services.AddHostedService<ErpSystem.Api.Services.Ehc.EhcSlaMonitoringBackgroundService>();
+
             // Notification template and escalation services
             services.AddScoped<ErpSystem.Core.Services.Maintenance.IMaintenanceNotificationTemplateService,
                 ErpSystem.Core.Services.Maintenance.MaintenanceNotificationTemplateService>();
@@ -733,6 +751,14 @@ namespace ErpSystem.Api.Extensions
                     policy.RequireRole("Manager", "TenantAdmin", "SuperAdmin"))
                 .AddPolicy("Employee", policy =>
                     policy.RequireRole("Employee", "Manager", "TenantAdmin", "SuperAdmin"))
+                .AddPolicy("ExternalOnly", policy =>
+                    policy.RequireAssertion(ctx =>
+                        ctx.User?.Identity?.IsAuthenticated == true &&
+                        string.Equals(ctx.User.FindFirst("auth_provider")?.Value, "Local", StringComparison.OrdinalIgnoreCase)))
+                .AddPolicy("InternalOnly", policy =>
+                    policy.RequireAssertion(ctx =>
+                        ctx.User?.Identity?.IsAuthenticated == true &&
+                        !string.Equals(ctx.User.FindFirst("auth_provider")?.Value, "Local", StringComparison.OrdinalIgnoreCase)))
                 .AddPolicy("Finance", policy =>
                     policy.RequireClaim("module", "Finance"))
                 .AddPolicy("HR", policy =>
@@ -760,6 +786,9 @@ namespace ErpSystem.Api.Extensions
 
         public static IServiceCollection AddErpSystemApi(this IServiceCollection services)
         {
+            // Custom middleware registered as IMiddleware
+            services.AddTransient<ErpSystem.Api.Middleware.ExternalUserAccessMiddleware>();
+
             services.AddControllers()
                 .AddJsonOptions(options =>
                 {
@@ -1203,6 +1232,62 @@ namespace ErpSystem.Api.Extensions
         {
             services.AddRateLimiter(rateLimiterOptions =>
             {
+                // Global limiter applies to every request (external portal included)
+                rateLimiterOptions.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(context =>
+                {
+                    var path = context.Request.Path.Value ?? string.Empty;
+                    var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                    var user = context.User;
+
+                    var isAuthenticated = user?.Identity?.IsAuthenticated == true;
+                    var authProvider = isAuthenticated ? user.FindFirst("auth_provider")?.Value : null;
+                    var isExternal = isAuthenticated && string.Equals(authProvider, "Local", StringComparison.OrdinalIgnoreCase);
+
+                    // Anonymous traffic (public portal endpoints)
+                    if (!isAuthenticated)
+                    {
+                        var isAuth = path.StartsWith("/api/auth", StringComparison.OrdinalIgnoreCase);
+                        var key = isAuth ? $"anon-auth:{ip}" : $"anon:{ip}";
+
+                        return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                            partitionKey: key,
+                            factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                            {
+                                PermitLimit = isAuth ? 30 : 120,
+                                Window = TimeSpan.FromMinutes(1),
+                                QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
+                                QueueLimit = 0
+                            });
+                    }
+
+                    // External portal (Local auth) traffic
+                    if (isExternal)
+                    {
+                        var userId = user?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? ip;
+                        return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                            partitionKey: $"external:{userId}",
+                            factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                            {
+                                PermitLimit = 90,
+                                Window = TimeSpan.FromMinutes(1),
+                                QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
+                                QueueLimit = 10
+                            });
+                    }
+
+                    // Internal ERP traffic (LDAP)
+                    var internalUserId = user?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? ip;
+                    return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: $"internal:{internalUserId}",
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 300,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
+                            QueueLimit = 50
+                        });
+                });
+
                 // General API rate limiting
                 rateLimiterOptions.AddFixedWindowLimiter(policyName: "ApiPolicy", options =>
                 {

@@ -60,7 +60,7 @@ export function ExternalNavbar() {
       {/* Right Section */}
       <div className="flex items-center space-x-4">
         {/* Help */}
-        <Button variant="ghost" size="icon" title="Help & Support">
+        <Button variant="ghost" size="icon" title="Help & Support" onClick={() => router.push('/support')}>
           <HelpCircle className="h-5 w-5 text-gray-600" />
         </Button>
 

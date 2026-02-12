@@ -20,6 +20,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
 
   const notificationContext = useNotificationContext();
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const connectAttemptedRef = useRef(false);
 
   // Handle real-time notifications from SignalR
   const handleRealtimeNotification = useCallback((notification: any) => {
@@ -63,6 +64,15 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
 
     // Subscribe to SignalR notifications
     unsubscribeRef.current = signalRService.onNotification(handleRealtimeNotification);
+
+    // Ensure SignalR is connected (safe no-op if already connected)
+    // If no token is available (logged-out pages), connect() will throw; ignore.
+    if (!connectAttemptedRef.current && typeof window !== 'undefined') {
+      connectAttemptedRef.current = true;
+      signalRService.connect().catch(() => {
+        // swallow - connection will succeed once a token exists (e.g., after login)
+      });
+    }
 
     // Cleanup
     return () => {

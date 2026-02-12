@@ -45,16 +45,22 @@ export class TenantService {
     try {
       const request: SelectTenantRequest = { tenantCode, setAsDefault };
       const response = await apiService.selectTenant(request);
+
+      // Persist updated user context (token is already updated by apiService.selectTenant)
+      if (typeof window !== 'undefined' && response?.user) {
+        try {
+          localStorage.setItem('user', JSON.stringify(response.user));
+        } catch {
+          // ignore storage errors
+        }
+      }
       
       // The API service already updates the token, but we can also dispatch events
       if (typeof window !== 'undefined') {
-        // Dispatch a custom event to notify other components about tenant change
-        window.dispatchEvent(new CustomEvent('tenant-selected', {
-          detail: {
-            tenantCode,
-            user: response.user
-          }
-        }));
+        const detail = { tenantCode, user: response.user };
+        // Dispatch both legacy and canonical events (different parts of the app listen to different names)
+        window.dispatchEvent(new CustomEvent('tenant-selected', { detail }));
+        window.dispatchEvent(new CustomEvent('tenant-changed', { detail }));
       }
     } catch (error) {
       console.error('Error selecting tenant:', error);

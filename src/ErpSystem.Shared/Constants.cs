@@ -9,6 +9,14 @@ public static class Constants
         public const string Manager = "Manager";
         public const string Employee = "Employee";
         public const string ReadOnly = "ReadOnly";
+
+        // External users (customer/vendor/partner/citizen portal accounts)
+        public const string ExternalUser = "ExternalUser";
+
+        // Helpdesk / Enquiry / Complaints roles
+        public const string HelpdeskAgent = "HelpdeskAgent";
+        public const string HelpdeskSupervisor = "HelpdeskSupervisor";
+        public const string HelpdeskManager = "HelpdeskManager";
     }
 
     public static class Modules

@@ -7,6 +7,8 @@ export interface UploadedFile {
   mimeType: string;
   size: number;
   url: string;
+  filePath?: string;
+  publicUrl?: string;
   thumbnailUrl?: string;
   uploadedAt: string;
   uploadedBy: string;
@@ -63,6 +65,8 @@ class FileUploadService {
           mimeType: response.contentType,
           size: response.fileSize,
           url: fullUrl,
+          filePath: response.filePath,
+          publicUrl: response.publicUrl,
           thumbnailUrl: response.contentType?.startsWith('image/') ? fullUrl : undefined,
           uploadedAt: response.uploadedAt,
           uploadedBy: 'Current User'
