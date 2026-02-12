@@ -19,6 +19,11 @@ namespace ErpSystem.Core.DTOs.Auth
         /// </summary>
         [StringLength(50)]
         public string? TenantCode { get; set; }
+
+        /// <summary>
+        /// CAPTCHA token (required when tenant security settings enable CAPTCHA)
+        /// </summary>
+        public string? CaptchaToken { get; set; }
     }
 
     /// <summary>
@@ -68,6 +73,11 @@ namespace ErpSystem.Core.DTOs.Auth
         [Required(ErrorMessage = "Password confirmation is required")]
         [Compare("NewPassword", ErrorMessage = "Passwords do not match")]
         public string ConfirmPassword { get; set; } = string.Empty;
+
+        /// <summary>
+        /// CAPTCHA token (required when tenant security settings enable CAPTCHA)
+        /// </summary>
+        public string? CaptchaToken { get; set; }
     }
 
     /// <summary>
@@ -103,6 +113,11 @@ namespace ErpSystem.Core.DTOs.Auth
         [Required]
         [EmailAddress]
         public string Email { get; set; } = string.Empty;
+
+        /// <summary>
+        /// CAPTCHA token (required when tenant security settings enable CAPTCHA)
+        /// </summary>
+        public string? CaptchaToken { get; set; }
     }
 
     /// <summary>

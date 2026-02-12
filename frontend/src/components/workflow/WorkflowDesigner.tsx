@@ -203,6 +203,7 @@ const moduleIntegrations = [
   { id: 'hr', name: 'Human Resources', icon: Users },
   { id: 'finance', name: 'Finance & Accounting', icon: Building },
   { id: 'procurement', name: 'Procurement', icon: FileText },
+  { id: 'helpdesk', name: 'Helpdesk (EHC)', icon: MessageSquare },
   { id: 'projects', name: 'Project Management', icon: CheckCircle },
   { id: 'sales', name: 'Sales & CRM', icon: User },
   { id: 'quality', name: 'Quality Management', icon: CheckCircle },

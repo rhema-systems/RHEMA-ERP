@@ -28,6 +28,15 @@ export default function TenantSelectPage() {
     queryFn: () => apiService.getCurrentUser(),
   });
 
+  const { data: publicSettingsRaw } = useQuery({
+    queryKey: ['publicSecuritySettingsRaw'],
+    queryFn: () =>
+      apiService.publicRequest<{ tenantCode?: string | null; tenantName?: string | null }>('/auth/security-settings', {
+        method: 'GET',
+      }),
+    staleTime: 10 * 60 * 1000,
+  });
+
   // Extract accessible tenants from user info
   const tenants = userInfo?.accessibleTenants || [];
 
@@ -35,7 +44,12 @@ export default function TenantSelectPage() {
     mutationFn: (tenant: UserTenantInfo) => tenantService.selectTenant(tenant.tenantCode, false),
     onSuccess: (response, tenant) => {
       setCurrentTenantCode(tenant.tenantCode);
-      router.push('/dashboard');
+
+      const authProvider = userInfo?.authenticationProvider || authService.getStoredUser()?.authenticationProvider || null;
+      const isSupportHost = typeof window !== 'undefined' && window.location.hostname.toLowerCase().startsWith('support.');
+
+      // Local-auth users are external-portal users; internal users go to the ERP dashboard.
+      router.push(authProvider === 'Local' ? (isSupportHost ? '/' : '/external-portal') : '/dashboard');
     },
     onError: (error) => {
       console.error('Error selecting tenant:', error);
@@ -87,6 +101,31 @@ export default function TenantSelectPage() {
       return () => clearTimeout(timer);
     }
   }, [tenants]);
+
+  // Support portal: if host resolves a specific tenant, auto-select that tenant even when the user has multiple mappings.
+  useEffect(() => {
+    if (!tenants?.length) return;
+    if (tenants.length === 1) return; // handled by the single-tenant auto-select effect
+    if (isAutoSelecting || isManuallySelecting || selectTenantMutation.isPending) return;
+
+    const isSupportHost = typeof window !== 'undefined' && window.location.hostname.toLowerCase().startsWith('support.');
+    if (!isSupportHost) return;
+
+    const resolvedTenantCode = publicSettingsRaw?.tenantCode as string | null | undefined;
+    if (!resolvedTenantCode) return;
+
+    const match = tenants.find((t) => t.tenantCode === resolvedTenantCode);
+    if (!match) return;
+
+    setIsAutoSelecting(true);
+    setSelectedTenantName(match.tenantName);
+
+    const timer = setTimeout(() => {
+      handleTenantSelect(match);
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [tenants, publicSettingsRaw?.tenantCode, isAutoSelecting, isManuallySelecting, selectTenantMutation.isPending]);
 
   if (isLoading) {
     return (

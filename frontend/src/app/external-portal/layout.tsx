@@ -7,6 +7,9 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { authService } from '@/services/auth';
 
+// External portal is auth-dependent and uses browser-only storage; disable static generation.
+export const dynamic = 'force-dynamic';
+
 export default function ExternalPortalLayout({
   children,
 }: {

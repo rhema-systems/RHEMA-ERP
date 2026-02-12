@@ -72,13 +72,34 @@ export function TenantProvider({ children }: TenantProviderProps) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const handleTenantChange = (event: CustomEvent) => {
-      console.log('TenantContext: Received tenant-changed event:', event.detail);
-      setCurrentTenantCodeState(event.detail);
+    const resolveCode = (detail: any): string | null => {
+      if (!detail) return null;
+      if (typeof detail === 'string') return detail;
+      if (typeof detail === 'object') {
+        const code = detail.code || detail.tenantCode || detail.currentTenantCode || null;
+        return typeof code === 'string' ? code : null;
+      }
+      return null;
     };
 
-    window.addEventListener('tenant-changed', handleTenantChange as EventListener);
-    return () => window.removeEventListener('tenant-changed', handleTenantChange as EventListener);
+    const handleTenantChanged = (event: CustomEvent) => {
+      const code = resolveCode(event.detail);
+      console.log('TenantContext: Received tenant-changed event:', event.detail, '=>', code);
+      if (code !== null) setCurrentTenantCode(code);
+    };
+
+    const handleTenantSelected = (event: CustomEvent) => {
+      const code = resolveCode(event.detail);
+      console.log('TenantContext: Received tenant-selected event:', event.detail, '=>', code);
+      if (code !== null) setCurrentTenantCode(code);
+    };
+
+    window.addEventListener('tenant-changed', handleTenantChanged as EventListener);
+    window.addEventListener('tenant-selected', handleTenantSelected as EventListener);
+    return () => {
+      window.removeEventListener('tenant-changed', handleTenantChanged as EventListener);
+      window.removeEventListener('tenant-selected', handleTenantSelected as EventListener);
+    };
   }, []);
 
   // Update localStorage when tenant code changes

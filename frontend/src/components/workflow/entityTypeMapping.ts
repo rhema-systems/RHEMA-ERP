@@ -17,6 +17,7 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
   procurement: ['PurchaseOrder', 'PurchaseRequisition', 'Vendor'],
   inventory: ['Inventory', 'Asset'],
   hr: ['Employee'],
+  helpdesk: ['EhcTicket'],
   projects: ['Project'],
   sales: ['Customer'],
   quality: ['Quality']

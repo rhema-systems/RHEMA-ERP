@@ -5,38 +5,45 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useMutation } from '@tanstack/react-query';
 import { Building2, Loader2, Shield, ArrowLeft } from 'lucide-react';
+import ReCAPTCHA from 'react-google-recaptcha';
 
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
+import { apiService } from '../../services/api.service';
+import { settingsService } from '../../services/settings';
 
 function VerifyOtpContent() {
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [error, setError] = useState('');
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaEnabled, setCaptchaEnabled] = useState(false);
+  const [captchaProvider, setCaptchaProvider] = useState<'recaptcha' | 'hcaptcha'>('recaptcha');
+  const [recaptchaSiteKey, setRecaptchaSiteKey] = useState<string | null>(null);
+  const [hCaptchaSiteKey, setHCaptchaSiteKey] = useState<string | null>(null);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const router = useRouter();
   const searchParams = useSearchParams();
   const phoneNumber = searchParams.get('phone') || '';
 
+  useEffect(() => {
+    settingsService.getPublicSecuritySettings().then((s) => {
+      setCaptchaEnabled(!!s.captchaEnabled);
+      setCaptchaProvider((s.captchaProvider || 'recaptcha') as any);
+      setRecaptchaSiteKey(s.recaptchaSiteKey || null);
+      setHCaptchaSiteKey(s.hCaptchaSiteKey || null);
+    }).catch(() => {
+      // ignore
+    });
+  }, []);
+
   const verifyOtpMutation = useMutation({
     mutationFn: async (otpCode: string) => {
-      const response = await fetch('http://localhost:5000/api/auth/verify-otp', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          phoneNumber,
-          otpCode,
-        }),
+      return apiService.post('/auth/verify-otp', {
+        phoneNumber,
+        otpCode,
+        recaptchaToken: captchaToken,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'OTP verification failed');
-      }
-
-      return await response.json();
     },
     onSuccess: () => {
       // Redirect to login page with success message
@@ -83,6 +90,11 @@ function VerifyOtpContent() {
     const otpCode = otp.join('');
     if (otpCode.length !== 6) {
       setError('Please enter a complete 6-digit verification code');
+      return;
+    }
+
+    if (captchaEnabled && !captchaToken) {
+      setError('Please complete the CAPTCHA verification.');
       return;
     }
     
@@ -174,11 +186,24 @@ function VerifyOtpContent() {
               </div>
             )}
 
+            {captchaEnabled ? (
+              <div className="flex justify-center">
+                {captchaProvider === 'recaptcha' && recaptchaSiteKey ? (
+                  <ReCAPTCHA sitekey={recaptchaSiteKey} onChange={(t) => setCaptchaToken(t)} />
+                ) : (
+                  <p className="text-sm text-slate-600 dark:text-slate-400 text-center">
+                    CAPTCHA is enabled but not configured for this portal. Please contact support.
+                    {captchaProvider === 'hcaptcha' && hCaptchaSiteKey ? null : null}
+                  </p>
+                )}
+              </div>
+            ) : null}
+
             {/* Verify Button */}
             <Button
               onClick={handleSubmit}
               className="w-full"
-              disabled={verifyOtpMutation.isPending || otp.join('').length !== 6}
+              disabled={verifyOtpMutation.isPending || otp.join('').length !== 6 || (captchaEnabled && !captchaToken)}
             >
               {verifyOtpMutation.isPending ? (
                 <>

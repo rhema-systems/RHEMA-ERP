@@ -22,6 +22,18 @@ public interface IWorkflowEngine
         object? stepData = null);
 
     /// <summary>
+    /// Executes a specific transition from the current step (supports branching workflows).
+    /// </summary>
+    Task<WorkflowExecutionResult> ExecuteTransitionAsync(Guid workflowInstanceId, Guid userId, Guid transitionId,
+        object? stepData = null);
+
+    /// <summary>
+    /// Executes a specific transition from the current step by name (supports branching workflows).
+    /// </summary>
+    Task<WorkflowExecutionResult> ExecuteTransitionAsync(Guid workflowInstanceId, Guid userId, string transitionName,
+        object? stepData = null);
+
+    /// <summary>
     /// Processes a specific step in a workflow instance
     /// </summary>
     Task<WorkflowExecutionResult> ProcessStepAsync(Guid workflowStepInstanceId, Guid userId,

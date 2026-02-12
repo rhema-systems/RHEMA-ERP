@@ -46,6 +46,11 @@ namespace ErpSystem.Api.Models
         /// </summary>
         [StringLength(6)]
         public string? TwoFactorCode { get; set; }
+
+        /// <summary>
+        /// CAPTCHA token (required when tenant security settings enable CAPTCHA)
+        /// </summary>
+        public string? RecaptchaToken { get; set; }
     }
 
     public class RefreshTokenRequest
@@ -156,6 +161,11 @@ namespace ErpSystem.Api.Models
         [Required]
         [StringLength(6, MinimumLength = 6)]
         public required string OtpCode { get; set; }
+
+        /// <summary>
+        /// CAPTCHA token (required when tenant security settings enable CAPTCHA)
+        /// </summary>
+        public string? RecaptchaToken { get; set; }
     }
 
     public class VerifyOtpResponse

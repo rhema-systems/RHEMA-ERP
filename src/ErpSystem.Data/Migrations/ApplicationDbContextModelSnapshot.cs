@@ -72,7 +72,11 @@ namespace ErpSystem.Data.Migrations
                         new
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000001"),
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(6988),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(4765),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             IsSystemRole = true,
                             Name = "SuperAdmin",
                             NormalizedName = "SUPERADMIN"
@@ -80,7 +84,11 @@ namespace ErpSystem.Data.Migrations
                         new
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000002"),
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7055),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(4841),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             IsSystemRole = true,
                             Name = "TenantAdmin",
                             NormalizedName = "TENANTADMIN"
@@ -88,7 +96,11 @@ namespace ErpSystem.Data.Migrations
                         new
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000003"),
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7059),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(4844),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             IsSystemRole = true,
                             Name = "Manager",
                             NormalizedName = "MANAGER"
@@ -96,7 +108,11 @@ namespace ErpSystem.Data.Migrations
                         new
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000004"),
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7062),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(4847),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             IsSystemRole = true,
                             Name = "Employee",
                             NormalizedName = "EMPLOYEE"
@@ -589,6 +605,874 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("ReportDataSourceUsageLogs", (string)null);
                 });
 
+<<<<<<< HEAD
+=======
+            modelBuilder.Entity("ErpSystem.Core.Entities.DistributedLock", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("AcquiredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("AcquiredBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("LastHeartbeatUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("LeaseUntilUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LockName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LockName")
+                        .IsUnique();
+
+                    b.ToTable("DistributedLocks", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcSlaTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CalendarConfigurationJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CategoryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("FirstResponseMinutes")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<int?>("Priority")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ResolutionMinutes")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("TicketType")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("TenantId", "IsActive");
+
+                    b.HasIndex("TenantId", "TicketType", "Priority");
+
+                    b.ToTable("EhcSlaTemplates");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicket", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AssignedDepartmentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AssignedToUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CategoryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ClosedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("FirstRespondedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("FirstResponseDueAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RelatedEntityReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("RelatedEntityType")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("RequesterUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ResolutionDueAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("SubcategoryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TicketNumber")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("TicketType")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("WorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssignedDepartmentId");
+
+                    b.HasIndex("AssignedToUserId");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("RequesterUserId");
+
+                    b.HasIndex("SubcategoryId");
+
+                    b.HasIndex("TenantId", "AssignedDepartmentId");
+
+                    b.HasIndex("TenantId", "AssignedToUserId");
+
+                    b.HasIndex("TenantId", "RequesterUserId");
+
+                    b.HasIndex("TenantId", "Status");
+
+                    b.HasIndex("TenantId", "TicketNumber")
+                        .IsUnique();
+
+                    b.ToTable("EhcTickets");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicketAttachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsInternal")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("MessageId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TicketId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId");
+
+                    b.HasIndex("TicketId");
+
+                    b.HasIndex("TenantId", "MessageId");
+
+                    b.HasIndex("TenantId", "TicketId");
+
+                    b.ToTable("EhcTicketAttachments");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicketAuditEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Body")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DataJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsInternal")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TicketId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("TicketId");
+
+                    b.HasIndex("TenantId", "EventType");
+
+                    b.HasIndex("TenantId", "IsInternal");
+
+                    b.HasIndex("TenantId", "TicketId");
+
+                    b.ToTable("EhcTicketAuditEvents");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicketCategory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("AppliesToType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<Guid?>("ParentCategoryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ParentCategoryId");
+
+                    b.HasIndex("TenantId", "Code")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "Name");
+
+                    b.ToTable("EhcTicketCategories");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicketMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AuthorUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsInternal")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TicketId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorUserId");
+
+                    b.HasIndex("TicketId");
+
+                    b.HasIndex("TenantId", "TicketId", "IsInternal");
+
+                    b.ToTable("EhcTicketMessages");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicketStatusHistory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ChangedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("FromStatus")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TicketId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ToStatus")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChangedByUserId");
+
+                    b.HasIndex("TicketId");
+
+                    b.HasIndex("TenantId", "TicketId");
+
+                    b.ToTable("EhcTicketStatusHistory");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcWorkflowRoutingRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AssignedDepartmentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CategoryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("SubcategoryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("TicketPriority")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TicketType")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("WorkflowName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssignedDepartmentId");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("SubcategoryId");
+
+                    b.HasIndex("TenantId", "IsActive");
+
+                    b.HasIndex("TenantId", "Priority");
+
+                    b.HasIndex("TenantId", "WorkflowName");
+
+                    b.ToTable("EhcWorkflowRoutingRules");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.EmailCampaign", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("FromEmail")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("FromName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("HtmlContent")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsTemplate")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ReplyTo")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("ScheduledFor")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("SentAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("TagsJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("TemplateData")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TextContent")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Name")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "Status");
+
+                    b.ToTable("EmailCampaigns", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.EmailCampaignRecipient", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid>("EmailCampaignId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("NotificationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("SentAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("SourceRole")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmailCampaignId");
+
+                    b.HasIndex("TenantId", "EmailCampaignId", "Email")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "EmailCampaignId", "Status");
+
+                    b.ToTable("EmailCampaignRecipients", (string)null);
+                });
+
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
             modelBuilder.Entity("ErpSystem.Core.Entities.EmailSettings", b =>
                 {
                     b.Property<Guid>("Id")
@@ -10985,10 +11869,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Code")
-                        .IsUnique();
+                    b.HasIndex("Code");
 
                     b.HasIndex("IsActive");
+
+                    b.HasIndex("TenantId", "Code")
+                        .IsUnique();
 
                     b.HasIndex("TenantId", "Name")
                         .IsUnique();
@@ -12969,6 +13855,71 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("MaintenanceAttachments");
                 });
 
+<<<<<<< HEAD
+=======
+            modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceAttachmentAccess", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("AccessType")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("AccessedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("AccessedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("AttachmentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(45)
+                        .HasColumnType("nvarchar(45)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccessedByUserId");
+
+                    b.HasIndex("AttachmentId");
+
+                    b.ToTable("MaintenanceAttachmentAccessLogs", (string)null);
+                });
+
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.MaintenanceAttachmentTag", b =>
                 {
                     b.Property<Guid>("Id")
@@ -18523,7 +19474,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000001"),
                             Category = "User Management",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7439),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5231),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "View user accounts and details",
                             DisplayName = "View Users",
                             IsDeleted = false,
@@ -18534,7 +19489,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000002"),
                             Category = "User Management",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7457),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5243),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "Create new user accounts",
                             DisplayName = "Create Users",
                             IsDeleted = false,
@@ -18545,7 +19504,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000003"),
                             Category = "User Management",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7467),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5252),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "Edit existing user accounts",
                             DisplayName = "Update Users",
                             IsDeleted = false,
@@ -18556,7 +19519,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000004"),
                             Category = "User Management",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7476),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5261),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "Delete user accounts",
                             DisplayName = "Delete Users",
                             IsDeleted = false,
@@ -18567,7 +19534,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000005"),
                             Category = "Role Management",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7492),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5282),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "View role definitions",
                             DisplayName = "View Roles",
                             IsDeleted = false,
@@ -18578,7 +19549,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000006"),
                             Category = "Role Management",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7504),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5293),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "Create new roles",
                             DisplayName = "Create Roles",
                             IsDeleted = false,
@@ -18589,7 +19564,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000007"),
                             Category = "Role Management",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7513),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5301),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "Edit existing roles",
                             DisplayName = "Update Roles",
                             IsDeleted = false,
@@ -18600,7 +19579,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000008"),
                             Category = "Role Management",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7522),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5308),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "Delete roles",
                             DisplayName = "Delete Roles",
                             IsDeleted = false,
@@ -18611,7 +19594,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000009"),
                             Category = "Dashboard & Reports",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7536),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5340),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "Access main dashboard",
                             DisplayName = "View Dashboard",
                             IsDeleted = false,
@@ -18622,7 +19609,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000010"),
                             Category = "Dashboard & Reports",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7550),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5353),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "Access reporting features",
                             DisplayName = "View Reports",
                             IsDeleted = false,
@@ -18633,7 +19624,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000011"),
                             Category = "Dashboard & Reports",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7574),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5368),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "Generate custom reports",
                             DisplayName = "Create Reports",
                             IsDeleted = false,
@@ -18644,7 +19639,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000012"),
                             Category = "Dashboard & Reports",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7593),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5376),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "Access analytics data",
                             DisplayName = "View Analytics",
                             IsDeleted = false,
@@ -18655,7 +19654,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000013"),
                             Category = "System Administration",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7610),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5390),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "Access admin interface",
                             DisplayName = "View Admin",
                             IsDeleted = false,
@@ -18666,7 +19669,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000014"),
                             Category = "System Administration",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7620),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5406),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "View system settings",
                             DisplayName = "View Settings",
                             IsDeleted = false,
@@ -18677,7 +19684,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000015"),
                             Category = "System Administration",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7628),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5414),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "Modify system settings",
                             DisplayName = "Update Settings",
                             IsDeleted = false,
@@ -18688,7 +19699,11 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000016"),
                             Category = "System Administration",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7635),
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5423),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             Description = "Access audit trail",
                             DisplayName = "View Audit Logs",
                             IsDeleted = false,
@@ -21471,308 +22486,484 @@ namespace ErpSystem.Data.Migrations
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000001"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7704),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5502),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000002"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7707),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5504),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000003"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7709),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5505),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000004"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7711),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5506),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000005"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7712),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5507),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000006"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7714),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5509),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000007"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7715),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5510),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000008"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7717),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5511),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000009"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7718),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5511),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000010"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7720),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5513),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000011"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7734),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5514),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000012"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7735),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5515),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000013"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7737),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5516),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000014"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7738),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5516),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000015"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7739),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5517),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000016"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7740),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5518),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000001"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7802),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5600),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000002"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7804),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5603),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000003"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7806),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5604),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000004"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7807),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5604),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000005"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7808),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5606),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000006"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7809),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5606),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000007"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7810),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5607),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000008"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7811),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5608),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000009"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7812),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5609),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000010"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7813),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5610),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000011"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7814),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5611),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000012"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7815),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5611),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000014"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7817),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5612),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000015"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7818),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5613),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000016"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7819),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5614),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000001"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7902),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5681),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000003"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7904),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5683),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000005"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7906),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5685),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000009"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7908),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5686),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000010"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7909),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5687),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000011"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7910),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5687),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000012"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7911),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5688),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000013"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7912),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5689),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000014"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7914),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5690),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000016"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7915),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5691),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000004"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000001"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7934),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5705),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000004"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000009"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7936),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5706),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000004"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000010"),
+<<<<<<< HEAD
                             GrantedAt = new DateTime(2026, 2, 12, 15, 8, 51, 289, DateTimeKind.Utc).AddTicks(7937),
+=======
+                            GrantedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(5715),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             GrantedBy = "System"
                         });
                 });
@@ -22830,8 +24021,12 @@ namespace ErpSystem.Data.Migrations
                             AllowSelfRegistration = false,
                             BaseCurrency = "GHS",
                             Code = "DEFAULT",
+<<<<<<< HEAD
                             CreatedAt = new DateTime(2025, 11, 27, 0, 0, 0, 0, DateTimeKind.Utc),
                             CurrencyDecimalPlaces = 2,
+=======
+                            CreatedAt = new DateTime(2026, 2, 12, 13, 13, 21, 190, DateTimeKind.Utc).AddTicks(4447),
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                             DefaultPriority = 10,
                             Description = "Default system tenant",
                             EnableAutoSelection = false,
@@ -24275,6 +25470,252 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("DataSource");
                 });
 
+<<<<<<< HEAD
+=======
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcSlaTemplate", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Ehc.EhcTicketCategory", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Category");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicket", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Department", "AssignedDepartment")
+                        .WithMany()
+                        .HasForeignKey("AssignedDepartmentId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("ErpSystem.Core.Entities.ApplicationUser", "AssignedToUser")
+                        .WithMany()
+                        .HasForeignKey("AssignedToUserId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Ehc.EhcTicketCategory", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("ErpSystem.Core.Entities.ApplicationUser", "RequesterUser")
+                        .WithMany()
+                        .HasForeignKey("RequesterUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Ehc.EhcTicketCategory", "Subcategory")
+                        .WithMany()
+                        .HasForeignKey("SubcategoryId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AssignedDepartment");
+
+                    b.Navigation("AssignedToUser");
+
+                    b.Navigation("Category");
+
+                    b.Navigation("RequesterUser");
+
+                    b.Navigation("Subcategory");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicketAttachment", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Ehc.EhcTicketMessage", "Message")
+                        .WithMany("Attachments")
+                        .HasForeignKey("MessageId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Ehc.EhcTicket", "Ticket")
+                        .WithMany("Attachments")
+                        .HasForeignKey("TicketId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("Ticket");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicketAuditEvent", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.ApplicationUser", "ActorUser")
+                        .WithMany()
+                        .HasForeignKey("ActorUserId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Ehc.EhcTicket", "Ticket")
+                        .WithMany("AuditEvents")
+                        .HasForeignKey("TicketId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ActorUser");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("Ticket");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicketCategory", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Ehc.EhcTicketCategory", "ParentCategory")
+                        .WithMany("Subcategories")
+                        .HasForeignKey("ParentCategoryId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ParentCategory");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicketMessage", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.ApplicationUser", "AuthorUser")
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Ehc.EhcTicket", "Ticket")
+                        .WithMany("Messages")
+                        .HasForeignKey("TicketId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AuthorUser");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("Ticket");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicketStatusHistory", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.ApplicationUser", "ChangedByUser")
+                        .WithMany()
+                        .HasForeignKey("ChangedByUserId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Ehc.EhcTicket", "Ticket")
+                        .WithMany("StatusHistory")
+                        .HasForeignKey("TicketId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ChangedByUser");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("Ticket");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcWorkflowRoutingRule", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Department", "AssignedDepartment")
+                        .WithMany()
+                        .HasForeignKey("AssignedDepartmentId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("ErpSystem.Core.Entities.Ehc.EhcTicketCategory", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("ErpSystem.Core.Entities.Ehc.EhcTicketCategory", "Subcategory")
+                        .WithMany()
+                        .HasForeignKey("SubcategoryId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AssignedDepartment");
+
+                    b.Navigation("Category");
+
+                    b.Navigation("Subcategory");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.EmailCampaign", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.EmailCampaignRecipient", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.EmailCampaign", "EmailCampaign")
+                        .WithMany("Recipients")
+                        .HasForeignKey("EmailCampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("EmailCampaign");
+
+                    b.Navigation("Tenant");
+                });
+
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
             modelBuilder.Entity("ErpSystem.Core.Entities.EmailSettings", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
@@ -29752,7 +31193,32 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("UsageLogs");
                 });
 
+<<<<<<< HEAD
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.Account", b =>
+=======
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicket", b =>
+                {
+                    b.Navigation("Attachments");
+
+                    b.Navigation("AuditEvents");
+
+                    b.Navigation("Messages");
+
+                    b.Navigation("StatusHistory");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicketCategory", b =>
+                {
+                    b.Navigation("Subcategories");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcTicketMessage", b =>
+                {
+                    b.Navigation("Attachments");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.EmailCampaign", b =>
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
                 {
                     b.Navigation("ChildAccounts");
 

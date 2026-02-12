@@ -250,8 +250,18 @@ public class MaintenanceConfigurationSeeder
 
         foreach (var at in assetTypes)
         {
-            var exists = await _context.AssetTypes.AnyAsync(a => a.TenantId == tenantId && a.Code == at.Code);
-            if (!exists)
+            var existing = await _context.AssetTypes
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Code == at.Code);
+
+            if (existing == null)
+            {
+                existing = await _context.AssetTypes
+                    .IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Name == at.Name);
+            }
+
+            if (existing == null)
             {
                 var assetType = new AssetType
                 {
@@ -266,6 +276,31 @@ public class MaintenanceConfigurationSeeder
 
                 _context.AssetTypes.Add(assetType);
                 _logger.LogInformation("Seeded asset type: {Name}", at.Name);
+            }
+            else if (existing.IsDeleted)
+            {
+                existing.IsDeleted = false;
+                existing.DeletedAt = null;
+                existing.DeletedBy = null;
+                existing.Code = at.Code;
+                existing.Name = at.Name;
+                existing.Description = at.Description;
+                existing.IsActive = true;
+                existing.UpdatedAt = DateTime.UtcNow;
+                existing.UpdatedBy = "System";
+                _logger.LogInformation("Revived soft-deleted asset type: {Name}", at.Name);
+            }
+            else if (!string.Equals(existing.Code, at.Code, StringComparison.OrdinalIgnoreCase) ||
+                     !string.Equals(existing.Name, at.Name, StringComparison.OrdinalIgnoreCase) ||
+                     !string.Equals(existing.Description, at.Description, StringComparison.OrdinalIgnoreCase))
+            {
+                existing.Code = at.Code;
+                existing.Name = at.Name;
+                existing.Description = at.Description;
+                existing.IsActive = true;
+                existing.UpdatedAt = DateTime.UtcNow;
+                existing.UpdatedBy = "System";
+                _logger.LogInformation("Updated existing asset type: {Name}", at.Name);
             }
         }
 

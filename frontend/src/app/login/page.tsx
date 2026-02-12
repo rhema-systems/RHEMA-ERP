@@ -17,6 +17,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { authService } from '../../services/auth';
 import { settingsService } from '../../services/settings';
 import { apiService } from '../../services/api.service';
+import { tenantService } from '../../services/tenant';
 import type { LoginRequest } from '../../types';
 
 const makeLoginSchema = (requireRecaptcha: boolean) => z.object({
@@ -145,7 +146,7 @@ function LoginFormWithSearchParams() {
 
   const loginMutation = useMutation({
     mutationFn: (data: LoginRequest) => authService.login(data),
-    onSuccess: (response) => {
+    onSuccess: async (response) => {
       // Check if 2FA is required
       if (response.requiresTwoFactor) {
         setTwoFactorToken(response.twoFactorToken || '');
@@ -159,26 +160,44 @@ function LoginFormWithSearchParams() {
 
       // After successful login, check authentication provider
       if (response.token) {
-        // If user is an external user (Local authentication) AND not admin/SuperAdmin/Administrator, redirect to external portal
-        const isSuperAdmin = response.user?.roles?.includes('SuperAdmin');
-        const isAdministrator = response.user?.roles?.includes('Administrator');
-        const username = response.user?.username?.toLowerCase() || '';
-        const isAdminUser = username === 'admin';
+        // If user is an external user (Local authentication), redirect to external portal
+        if (response.user?.authenticationProvider === 'Local') {
+          // Try to auto-select the best tenant (host-driven or single-tenant) to avoid an extra tenant-select step.
+          try {
+            const tenants = response.user?.accessibleTenants || [];
 
-        console.log('Login Redirect Check:', {
-          user: response.user,
-          authProvider: response.user?.authenticationProvider,
-          isSuperAdmin,
-          isAdministrator,
-          isAdminUser,
-          username,
-          roles: response.user?.roles
-        });
+            let preferredTenantCode: string | null = null;
 
-        // Only redirect to external portal if user is Local auth AND doesn't have admin privileges
-        if (response.user?.authenticationProvider === 'Local' && !isSuperAdmin && !isAdministrator && !isAdminUser) {
-          console.log('Redirecting to External Portal');
-          router.push('/external-portal');
+            if (tenants.length === 1) {
+              preferredTenantCode = tenants[0].tenantCode;
+            }
+
+            if (!preferredTenantCode) {
+              const publicSettings = await settingsService.getPublicSecuritySettings();
+              const hostTenantCode = (publicSettings as any)?.tenantCode as string | null | undefined;
+              const match = hostTenantCode ? tenants.find((t) => t.tenantCode === hostTenantCode) : null;
+              preferredTenantCode = match?.tenantCode ?? null;
+            }
+
+            if (!preferredTenantCode) {
+              const def = tenants.find((t) => t.isDefault) ?? null;
+              preferredTenantCode = def?.tenantCode ?? null;
+            }
+
+            if (preferredTenantCode) {
+              await tenantService.selectTenant(preferredTenantCode, false);
+
+              const host = typeof window !== 'undefined' ? window.location.hostname : '';
+              const isSupportHost = host.toLowerCase().startsWith('support.');
+              router.push(isSupportHost ? '/' : '/external-portal');
+              return;
+            }
+          } catch {
+            // ignore and fall back to tenant-select
+          }
+
+          // Fallback: tenant selection page auto-selects when possible.
+          router.push('/tenant-select');
         } else {
           // Internal users (LDAP or other) or Admins go to tenant selection
           console.log('Redirecting to Tenant Select');
@@ -242,6 +261,7 @@ function LoginFormWithSearchParams() {
       tenantCode: undefined, // will be set during tenant selection
       rememberMe: effectiveRemember,
       twoFactorCode: cleaned2fa,
+      recaptchaToken: (data as any).recaptchaToken || undefined,
     };
 
     console.log('🚀 Submitting login request:', {

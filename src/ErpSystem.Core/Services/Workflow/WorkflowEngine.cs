@@ -140,6 +140,140 @@ public class WorkflowEngine : IWorkflowEngine
         return nextResult;
     }
 
+    public async Task<WorkflowExecutionResult> ExecuteTransitionAsync(Guid workflowInstanceId, Guid userId, Guid transitionId, object? stepData = null)
+    {
+        var instance = await _workflowInstanceRepository.GetWithDetailsAsync(workflowInstanceId)
+            ?? throw new InvalidOperationException($"Workflow instance {workflowInstanceId} not found");
+
+        var currentStepInstance = await _workflowStepInstanceRepository.GetCurrentStepAsync(workflowInstanceId);
+        if (currentStepInstance == null)
+        {
+            return await CompleteWorkflowIfPossibleAsync(instance, userId);
+        }
+
+        var stepDefinition = currentStepInstance.WorkflowStep
+            ?? await _workflowStepRepository.GetByIdAsync(currentStepInstance.WorkflowStepId);
+
+        var transitions = await _workflowTransitionRepository.GetFromStepAsync(currentStepInstance.WorkflowStepId);
+        var context = MergeDataContext(instance, stepData);
+
+        var validTransitions = new List<WorkflowTransition>();
+        foreach (var transition in transitions)
+        {
+            if (transition.Condition == null)
+            {
+                validTransitions.Add(transition);
+                continue;
+            }
+
+            if (await EvaluateConditionAsync(transition.Condition, context))
+            {
+                validTransitions.Add(transition);
+            }
+        }
+
+        var selectedTransition = validTransitions.FirstOrDefault(t => t.Id == transitionId);
+        if (selectedTransition == null)
+        {
+            var fromStepName = stepDefinition?.Name ?? currentStepInstance.WorkflowStepId.ToString();
+            throw new InvalidOperationException($"Transition '{transitionId}' is not available from step '{fromStepName}'.");
+        }
+
+        currentStepInstance.ResultData = stepData != null ? JsonSerializer.Serialize(stepData) : currentStepInstance.ResultData;
+        currentStepInstance.Status = WorkflowStepInstanceStatus.Completed;
+        currentStepInstance.CompletedDate = DateTime.UtcNow;
+        await _workflowStepInstanceRepository.UpdateAsync(currentStepInstance);
+        await _workflowStepInstanceRepository.SaveChangesAsync();
+
+        await _activityService.LogActivityAsync(
+            instance.Id,
+            WorkflowActivityType.StepCompleted,
+            "Step completed",
+            $"Step '{currentStepInstance.WorkflowStep?.Name ?? "Step"}' completed",
+            userId,
+            currentStepInstance.Id,
+            stepData);
+
+        var nextStep = selectedTransition.ToStep ?? await _workflowStepRepository.GetByIdAsync(selectedTransition.ToStepId)
+            ?? throw new InvalidOperationException("Next step not found");
+
+        var nextStepInstance = await CreateStepInstanceAsync(instance, nextStep, userId, context);
+        instance.CurrentStepId = nextStep.Id;
+        await _workflowInstanceRepository.UpdateAsync(instance);
+        await _workflowInstanceRepository.SaveChangesAsync();
+
+        await _activityService.LogActivityAsync(
+            instance.Id,
+            WorkflowActivityType.TransitionTaken,
+            "Transition taken",
+            selectedTransition.Name,
+            userId,
+            nextStepInstance.Id,
+            stepData);
+
+        await HandleStepEntryAsync(instance, nextStepInstance, context, userId);
+
+        return new WorkflowExecutionResult
+        {
+            Success = true,
+            Status = instance.Status,
+            WorkflowInstanceId = instance.Id,
+            CurrentStepId = nextStep.Id,
+            Message = "Workflow advanced"
+        };
+    }
+
+    public async Task<WorkflowExecutionResult> ExecuteTransitionAsync(Guid workflowInstanceId, Guid userId, string transitionName, object? stepData = null)
+    {
+        if (string.IsNullOrWhiteSpace(transitionName))
+        {
+            throw new ArgumentException("Transition name is required.", nameof(transitionName));
+        }
+
+        var instance = await _workflowInstanceRepository.GetWithDetailsAsync(workflowInstanceId)
+            ?? throw new InvalidOperationException($"Workflow instance {workflowInstanceId} not found");
+
+        var currentStepInstance = await _workflowStepInstanceRepository.GetCurrentStepAsync(workflowInstanceId);
+        if (currentStepInstance == null)
+        {
+            return await CompleteWorkflowIfPossibleAsync(instance, userId);
+        }
+
+        var transitions = await _workflowTransitionRepository.GetFromStepAsync(currentStepInstance.WorkflowStepId);
+        var context = MergeDataContext(instance, stepData);
+
+        var validTransitions = new List<WorkflowTransition>();
+        foreach (var transition in transitions)
+        {
+            if (transition.Condition == null)
+            {
+                validTransitions.Add(transition);
+                continue;
+            }
+
+            if (await EvaluateConditionAsync(transition.Condition, context))
+            {
+                validTransitions.Add(transition);
+            }
+        }
+
+        var matches = validTransitions
+            .Where(t => t.Name != null && t.Name.Equals(transitionName.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (matches.Count == 0)
+        {
+            throw new InvalidOperationException($"Transition '{transitionName}' is not available from the current step.");
+        }
+
+        if (matches.Count > 1)
+        {
+            throw new InvalidOperationException($"Multiple transitions named '{transitionName}' are available. Use transitionId instead.");
+        }
+
+        return await ExecuteTransitionAsync(workflowInstanceId, userId, matches[0].Id, stepData);
+    }
+
     public async Task<WorkflowExecutionResult> ProcessStepAsync(Guid workflowStepInstanceId, Guid userId, WorkflowStepAction action, object? resultData = null, string? comments = null)
     {
         var stepInstance = await _workflowStepInstanceRepository.GetByIdAsync(workflowStepInstanceId)

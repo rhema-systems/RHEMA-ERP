@@ -2,16 +2,21 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.HR;
-using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Entities.Pricing;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data.Configuration;
-using ErpSystem.Core.Entities.Finance.FixedAssets;
+using ErpSystem.Data.Configuration.Maintenance;
+using ErpSystem.Data.Configuration.Pricing;
+using ErpSystem.Data.Configuration.Procurement;
 
 namespace ErpSystem.Data;
 
@@ -315,6 +320,96 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<BusinessPartnerRegistrationStatusHistory> BusinessPartnerRegistrationStatusHistories { get; set; }
     public DbSet<PurchaseRequisitionItem> PurchaseRequisitionItems { get; set; }
 
+    // RFQ Management (separate from formal tenders)
+    public DbSet<RequestForQuotation> RequestForQuotations { get; set; }
+    public DbSet<RequestForQuotationItem> RequestForQuotationItems { get; set; }
+    public DbSet<RequestForQuotationInvitation> RequestForQuotationInvitations { get; set; }
+    public DbSet<RequestForQuotationQuote> RequestForQuotationQuotes { get; set; }
+    public DbSet<RequestForQuotationQuoteItem> RequestForQuotationQuoteItems { get; set; }
+    public DbSet<RequestForQuotationAwardLine> RequestForQuotationAwardLines { get; set; }
+
+    // Business Partner User Management
+    public DbSet<BusinessPartnerUser> BusinessPartnerUsers { get; set; }
+    public DbSet<TenderAssignment> TenderAssignments { get; set; }
+
+    // Award Verification
+    public DbSet<AwardVerificationChecklistTemplate> AwardVerificationChecklistTemplates { get; set; }
+    public DbSet<AwardVerificationChecklistItem> AwardVerificationChecklistItems { get; set; }
+    public DbSet<TenderAwardVerification> TenderAwardVerifications { get; set; }
+    public DbSet<TenderAwardVerificationBidder> TenderAwardVerificationBidders { get; set; }
+    public DbSet<TenderAwardVerificationItemResult> TenderAwardVerificationItemResults { get; set; }
+    public DbSet<TenderAwardVerificationItemDocument> TenderAwardVerificationItemDocuments { get; set; }
+
+    // Performance Bonds
+    public DbSet<PerformanceBondRequest> PerformanceBondRequests { get; set; }
+
+    // Tender Negotiations
+    public DbSet<TenderNegotiation> TenderNegotiations { get; set; }
+    public DbSet<TenderNegotiationItem> TenderNegotiationItems { get; set; }
+
+    // Contract Management
+    public DbSet<Contract> Contracts { get; set; }
+    public DbSet<ContractMilestone> ContractMilestones { get; set; }
+    public DbSet<ContractAmendment> ContractAmendments { get; set; }
+    public DbSet<ContractDocument> ContractDocuments { get; set; }
+
+    // Procurement Planning
+    public DbSet<ProcurementPlan> ProcurementPlans { get; set; }
+    public DbSet<ProcurementPlanItem> ProcurementPlanItems { get; set; }
+    public DbSet<ProcurementPlanItemSupplier> ProcurementPlanItemSuppliers { get; set; }
+    public DbSet<ProcurementBudget> ProcurementBudgets { get; set; }
+    public DbSet<ProcurementBudgetAllocation> ProcurementBudgetAllocations { get; set; }
+    public DbSet<ProcurementBudgetRevision> ProcurementBudgetRevisions { get; set; }
+    public DbSet<ProcurementSchedule> ProcurementSchedules { get; set; }
+    public DbSet<MarketAnalysis> MarketAnalyses { get; set; }
+    public DbSet<PriceHistory> PriceHistories { get; set; }
+    public DbSet<SupplierConsolidation> SupplierConsolidations { get; set; }
+    public DbSet<EmergencyProcurementPlan> EmergencyProcurementPlans { get; set; }
+    public DbSet<EmergencyProcurementItem> EmergencyProcurementItems { get; set; }
+    public DbSet<EmergencySupplier> EmergencySuppliers { get; set; }
+
+    // Procurement Settings
+    public DbSet<ProcurementSettings> ProcurementSettings { get; set; }
+
+    // Maintenance Settings
+    public DbSet<MaintenanceSettings> MaintenanceSettings { get; set; }
+
+    // Distributed locks (global, non-tenant scoped)
+    public DbSet<DistributedLock> DistributedLocks { get; set; }
+
+    // Fleet Management (Maintenance)
+    public DbSet<FleetTrip> FleetTrips { get; set; }
+    public DbSet<FleetComplianceItem> FleetComplianceItems { get; set; }
+    public DbSet<FleetFuelTransaction> FleetFuelTransactions { get; set; }
+    public DbSet<FleetVehicleAssignment> FleetVehicleAssignments { get; set; }
+    public DbSet<FleetTripInspection> FleetTripInspections { get; set; }
+    public DbSet<FleetDefect> FleetDefects { get; set; }
+    public DbSet<FleetIncident> FleetIncidents { get; set; }
+    public DbSet<FleetTyre> FleetTyres { get; set; }
+    public DbSet<FleetTyreEvent> FleetTyreEvents { get; set; }
+    public DbSet<FleetBattery> FleetBatteries { get; set; }
+    public DbSet<FleetBatteryEvent> FleetBatteryEvents { get; set; }
+    public DbSet<FleetExternalRepair> FleetExternalRepairs { get; set; }
+    public DbSet<FleetCostEntry> FleetCostEntries { get; set; }
+
+    // Performance Tracking
+    public DbSet<SupplierPerformanceMetric> SupplierPerformanceMetrics { get; set; }
+    public DbSet<QualityIncident> QualityIncidents { get; set; }
+    public DbSet<PerformanceReview> PerformanceReviews { get; set; }
+
+    // Blacklist Appeals
+    public DbSet<BlacklistAppeal> BlacklistAppeals { get; set; }
+    public DbSet<BlacklistHistory> BlacklistHistories { get; set; }
+
+    // Enquiry, Helpdesk & Complaints (EHC)
+    public DbSet<EhcTicket> EhcTickets { get; set; }
+    public DbSet<EhcTicketCategory> EhcTicketCategories { get; set; }
+    public DbSet<EhcTicketMessage> EhcTicketMessages { get; set; }
+    public DbSet<EhcTicketAttachment> EhcTicketAttachments { get; set; }
+    public DbSet<EhcTicketStatusHistory> EhcTicketStatusHistories { get; set; }
+    public DbSet<EhcSlaTemplate> EhcSlaTemplates { get; set; }
+    public DbSet<EhcWorkflowRoutingRule> EhcWorkflowRoutingRules { get; set; }
+    public DbSet<EhcTicketAuditEvent> EhcTicketAuditEvents { get; set; }
     // Workflow Engine entities
     public DbSet<WorkflowDefinition> WorkflowDefinitions { get; set; }
     public DbSet<WorkflowStep> WorkflowSteps { get; set; }
@@ -797,6 +892,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
         // Configure Workflow Engine entities
         ConfigureWorkflowEntities(builder);
+
+        // Configure Enquiry, Helpdesk & Complaints (EHC) entities
+        ConfigureEhcEntities(builder);
 
         // Configure Business Partner entities
         ConfigureBusinessPartnerEntities(builder);
@@ -1380,7 +1478,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // Configure AssetType entity
         builder.Entity<AssetType>(entity =>
         {
-            entity.HasIndex(at => at.Code).IsUnique();
+            entity.HasIndex(at => new { at.TenantId, at.Code }).IsUnique();
             entity.HasIndex(at => at.IsActive);
         });
 
@@ -2408,6 +2506,115 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 method.Invoke(this, new object[] { builder, entityType });
             }
         }
+    }
+
+    private static void ConfigureEhcEntities(ModelBuilder builder)
+    {
+        builder.Entity<EhcTicketCategory>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.Name });
+
+            entity.HasOne(x => x.ParentCategory)
+                .WithMany(x => x.Subcategories)
+                .HasForeignKey(x => x.ParentCategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<EhcSlaTemplate>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.IsActive });
+            entity.HasIndex(x => new { x.TenantId, x.TicketType, x.Priority });
+        });
+
+        builder.Entity<EhcWorkflowRoutingRule>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.IsActive });
+            entity.HasIndex(x => new { x.TenantId, x.Priority });
+            entity.HasIndex(x => new { x.TenantId, x.WorkflowName });
+
+            entity.HasOne(x => x.Category)
+                .WithMany()
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.Subcategory)
+                .WithMany()
+                .HasForeignKey(x => x.SubcategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.AssignedDepartment)
+                .WithMany()
+                .HasForeignKey(x => x.AssignedDepartmentId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<EhcTicket>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.TicketNumber }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.Status });
+            entity.HasIndex(x => new { x.TenantId, x.RequesterUserId });
+            entity.HasIndex(x => new { x.TenantId, x.AssignedToUserId });
+            entity.HasIndex(x => new { x.TenantId, x.AssignedDepartmentId });
+
+            entity.HasOne(x => x.Category)
+                .WithMany()
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.Subcategory)
+                .WithMany()
+                .HasForeignKey(x => x.SubcategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.AssignedDepartment)
+                .WithMany()
+                .HasForeignKey(x => x.AssignedDepartmentId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasMany(x => x.Messages)
+                .WithOne(m => m.Ticket)
+                .HasForeignKey(m => m.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(x => x.Attachments)
+                .WithOne(a => a.Ticket)
+                .HasForeignKey(a => a.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(x => x.StatusHistory)
+                .WithOne(h => h.Ticket)
+                .HasForeignKey(h => h.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(x => x.AuditEvents)
+                .WithOne(a => a.Ticket)
+                .HasForeignKey(a => a.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<EhcTicketMessage>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.TicketId, x.IsInternal });
+        });
+
+        builder.Entity<EhcTicketAttachment>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.TicketId });
+            entity.HasIndex(x => new { x.TenantId, x.MessageId });
+        });
+
+        builder.Entity<EhcTicketStatusHistory>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.TicketId });
+        });
+
+        builder.Entity<EhcTicketAuditEvent>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.TicketId });
+            entity.HasIndex(x => new { x.TenantId, x.EventType });
+            entity.HasIndex(x => new { x.TenantId, x.IsInternal });
+        });
     }
 
     private static void SetSoftDeleteFilter<TEntity>(ModelBuilder builder, Microsoft.EntityFrameworkCore.Metadata.IMutableEntityType entityType)

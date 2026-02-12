@@ -1081,6 +1081,8 @@ public class UnifiedNotificationService : INotificationService
                 Timestamp = notification.Timestamp,
                 IsRead = notification.IsRead,
                 ActionUrl = notification.ActionUrl,
+                EntityType = string.IsNullOrWhiteSpace(notification.EntityType) ? null : notification.EntityType,
+                EntityId = notification.EntityId.HasValue ? notification.EntityId.Value.ToString() : null,
                 Metadata = notification.Metadata
             };
             await _hubNotificationService.BroadcastNotificationAsync(userId.ToString(), dashboardNotification);
@@ -1338,6 +1340,8 @@ public class UnifiedNotificationService : INotificationService
                             Timestamp = notification.CreatedAt,
                             IsRead = notification.IsRead,
                             ActionUrl = notification.ActionUrl,
+                            EntityType = string.IsNullOrWhiteSpace(notification.EntityType) ? null : notification.EntityType,
+                            EntityId = notification.EntityId != Guid.Empty ? notification.EntityId.ToString() : null,
                             Metadata = notification.AdditionalData != null
                                 ? JsonSerializer.Deserialize<Dictionary<string, object>>(notification.AdditionalData)
                                 : null
@@ -1826,6 +1830,8 @@ WHERE [Id] = {notificationId}
             Timestamp = notification.CreatedAt,
             IsRead = notification.IsRead,
             ActionUrl = notification.ActionUrl,
+            EntityType = string.IsNullOrWhiteSpace(notification.EntityType) ? null : notification.EntityType,
+            EntityId = notification.EntityId != Guid.Empty ? notification.EntityId.ToString() : null,
             Metadata = notification.AdditionalData != null
                 ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(notification.AdditionalData)
                 : null

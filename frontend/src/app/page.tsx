@@ -19,7 +19,9 @@ export default function Home() {
     if (authService.isAuthenticated()) {
       // Route based on authentication provider and roles
       const user = authService.getStoredUser();
+      const isSupportHost = typeof window !== 'undefined' && window.location.hostname.toLowerCase().startsWith('support.');
 
+<<<<<<< HEAD
       // Check if user has admin privileges
       const isSuperAdmin = user?.roles?.includes('SuperAdmin');
       const isAdministrator = user?.roles?.includes('Administrator');
@@ -31,6 +33,11 @@ export default function Home() {
       if (user?.authenticationProvider === 'Local' && !hasAdminPrivileges) {
         // External users go to external portal
         router.push('/external-portal');
+=======
+      if (user?.authenticationProvider === 'Local') {
+        // External users go to External Portal. On support.* host, middleware rewrites / to the support area.
+        router.push(isSupportHost ? '/' : '/external-portal');
+>>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
       } else {
         // Internal users (LDAP) or admins go to dashboard
         router.push('/dashboard');

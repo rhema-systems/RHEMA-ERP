@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Plus, Search, Download, Upload, Settings, Play, Pause, BarChart3, Eye, Edit3, Trash2, RefreshCw, Info } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -24,15 +25,19 @@ import type {
 } from '@/types/workflow';
 import { toast } from '@/hooks/use-toast';
 
-export default function WorkflowAdministrationPage() {
+function WorkflowAdministrationPageInner() {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState('definitions');
   const [selectedWorkflow, setSelectedWorkflow] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [entityTypeFilter, setEntityTypeFilter] = useState<string>('all');
   const [definitionStatusFilter, setDefinitionStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [isDesignerOpen, setIsDesignerOpen] = useState(false);
   const [isInstanceMonitorOpen, setIsInstanceMonitorOpen] = useState(false);
   const [isCreationWizardOpen, setIsCreationWizardOpen] = useState(false);
   const [isSeedingEntityTypes, setIsSeedingEntityTypes] = useState(false);
+  const [entityTypes, setEntityTypes] = useState<Array<{ code: string; name: string }>>([]);
+  const [initializedFromQuery, setInitializedFromQuery] = useState(false);
 
   // Workflow statistics
   const [stats, setStats] = useState({
@@ -62,7 +67,22 @@ export default function WorkflowAdministrationPage() {
     // Load workflow statistics and definitions on mount
     fetchWorkflowStats();
     fetchDefinitions();
+    fetchEntityTypes();
   }, []);
+
+  useEffect(() => {
+    if (initializedFromQuery) return;
+
+    const q = searchParams.get('q');
+    const et = searchParams.get('entityType');
+    const designId = searchParams.get('designWorkflowId');
+
+    if (q) setSearchQuery(q);
+    if (et) setEntityTypeFilter(et);
+    if (designId) handleDesignWorkflow(designId);
+
+    setInitializedFromQuery(true);
+  }, [initializedFromQuery, searchParams]);
 
   // Refetch definitions when search query changes
   useEffect(() => {
@@ -70,7 +90,7 @@ export default function WorkflowAdministrationPage() {
       fetchDefinitions();
     }, 300);
     return () => clearTimeout(debounceTimer);
-  }, [searchQuery, definitionStatusFilter]);
+  }, [searchQuery, definitionStatusFilter, entityTypeFilter]);
 
   const fetchWorkflowStats = async () => {
     try {
@@ -188,7 +208,7 @@ export default function WorkflowAdministrationPage() {
         page: 1,
         pageSize: 10,
         searchTerm: searchQuery || undefined,
-        entityType: undefined,
+        entityType: entityTypeFilter && entityTypeFilter !== 'all' ? entityTypeFilter : undefined,
         isActive:
           definitionStatusFilter === 'all'
             ? undefined
@@ -204,6 +224,19 @@ export default function WorkflowAdministrationPage() {
       toast({ title: 'Failed to load definitions', variant: 'destructive' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchEntityTypes = async () => {
+    try {
+      const types = await workflowApiService.getWorkflowEntityTypes();
+      const data = (types || [])
+        .filter((t) => t && t.code && t.name)
+        .map((t) => ({ code: String(t.code), name: String(t.name) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setEntityTypes(data);
+    } catch (error) {
+      console.error('Failed to fetch workflow entity types:', error);
     }
   };
 
@@ -454,6 +487,19 @@ export default function WorkflowAdministrationPage() {
                   className="pl-10 w-64"
                 />
               </div>
+              <Select value={entityTypeFilter} onValueChange={(value) => setEntityTypeFilter(value as any)}>
+                <SelectTrigger className="w-56">
+                  <SelectValue placeholder="Entity type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All entities</SelectItem>
+                  {entityTypes.map((t) => (
+                    <SelectItem key={t.code} value={t.code}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Select
                 value={definitionStatusFilter}
                 onValueChange={(value) => setDefinitionStatusFilter(value as any)}
@@ -846,5 +892,13 @@ export default function WorkflowAdministrationPage() {
         isLoading={deleteSaving}
       />
     </div>
+  );
+}
+
+export default function WorkflowAdministrationPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading workflow administration…</div>}>
+      <WorkflowAdministrationPageInner />
+    </Suspense>
   );
 }

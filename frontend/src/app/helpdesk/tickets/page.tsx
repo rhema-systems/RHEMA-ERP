@@ -1,0 +1,407 @@
+'use client';
+
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Ticket, Eye } from 'lucide-react';
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
+import { DataTable, type DataTableColumn, type DataTableAction } from '@/components/ui/DataTable';
+import { useSignalR } from '@/hooks/useSignalR';
+import { useToast } from '@/hooks/use-toast';
+import { ehcInternalTicketService } from '@/services/ehcInternalTicketService';
+import type { EhcTicketListItem, EhcTicketPriority, EhcTicketSource, EhcTicketStatus, EhcTicketType } from '@/services/ehcTicketService';
+
+const statuses: Array<{ label: string; value: EhcTicketStatus | '' }> = [
+  { label: 'All', value: '' },
+  { label: 'New', value: 'New' },
+  { label: 'Acknowledged', value: 'Acknowledged' },
+  { label: 'In Progress', value: 'InProgress' },
+  { label: 'Pending (User)', value: 'PendingUser' },
+  { label: 'Pending (3rd Party)', value: 'PendingThirdParty' },
+  { label: 'Resolved', value: 'Resolved' },
+  { label: 'Closed', value: 'Closed' },
+  { label: 'Reopened', value: 'Reopened' },
+];
+
+const statusBadgeClassName = (s: EhcTicketStatus) => {
+  switch (s) {
+    case 'Resolved':
+      return 'bg-green-600 text-white hover:bg-green-600/90 dark:bg-green-500 dark:hover:bg-green-500/90';
+    case 'Closed':
+      return 'bg-slate-600 text-white hover:bg-slate-600/90 dark:bg-slate-500 dark:hover:bg-slate-500/90';
+    default:
+      return 'bg-blue-600 text-white hover:bg-blue-600/90 dark:bg-blue-500 dark:hover:bg-blue-500/90';
+  }
+};
+
+const priorityBadgeClassName = (p: EhcTicketPriority) => {
+  switch (p) {
+    case 'Critical':
+      return 'bg-red-600 text-white hover:bg-red-600/90 dark:bg-red-500 dark:hover:bg-red-500/90';
+    case 'High':
+      return 'bg-orange-600 text-white hover:bg-orange-600/90 dark:bg-orange-500 dark:hover:bg-orange-500/90';
+    case 'Medium':
+      return 'bg-yellow-400 text-slate-900 hover:bg-yellow-400/90 dark:bg-yellow-500 dark:text-slate-900 dark:hover:bg-yellow-500/90';
+    case 'Low':
+      return 'bg-green-600 text-white hover:bg-green-600/90 dark:bg-green-500 dark:hover:bg-green-500/90';
+    default:
+      return 'bg-slate-600 text-white hover:bg-slate-600/90 dark:bg-slate-500 dark:hover:bg-slate-500/90';
+  }
+};
+
+export default function HelpdeskTicketsPage() {
+  const router = useRouter();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const seenNotificationIdsRef = useRef<Set<string>>(new Set());
+  const [status, setStatus] = useState<EhcTicketStatus | ''>('');
+  const [ticketType, setTicketType] = useState<EhcTicketType | ''>('');
+  const [priority, setPriority] = useState<EhcTicketPriority | ''>('');
+  const [source, setSource] = useState<EhcTicketSource | ''>('');
+  const [categoryId, setCategoryId] = useState<string>('');
+  const [assignedDepartmentId, setAssignedDepartmentId] = useState<string>('');
+  const [createdFrom, setCreatedFrom] = useState<string>('');
+  const [createdTo, setCreatedTo] = useState<string>('');
+
+  const createdAtFormatter = useMemo(() => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }), []);
+  const formatCreatedAt = useCallback((iso: string | null | undefined) => {
+    if (!iso) return '—';
+    const dt = new Date(iso);
+    if (Number.isNaN(dt.getTime())) return String(iso);
+    return createdAtFormatter.format(dt);
+  }, [createdAtFormatter]);
+
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['ehc', 'internal', 'tickets', { status, ticketType, priority, source, categoryId, assignedDepartmentId, createdFrom, createdTo }],
+    queryFn: () =>
+      ehcInternalTicketService.listTickets(1, 500, {
+        status: status || null,
+        ticketType: ticketType || null,
+        priority: priority || null,
+        source: source || null,
+        categoryId: categoryId || null,
+        assignedDepartmentId: assignedDepartmentId || null,
+        createdFrom: createdFrom || null,
+        createdTo: createdTo || null,
+      }),
+  });
+
+  const handleRealtimeNotification = useCallback(
+    (n: any) => {
+      const meta = n?.metadata ?? n?.Metadata ?? null;
+      const entityType = meta?.EntityType ?? meta?.entityType ?? null;
+
+      const actionUrl = (n?.actionUrl ?? n?.ActionUrl ?? '') as string;
+      const looksLikeTicketUrl = typeof actionUrl === 'string' && actionUrl.toLowerCase().includes('/tickets/');
+
+      const isTicket =
+        typeof entityType === 'string' &&
+        entityType.toLowerCase() === 'ehcticket';
+
+      if (!isTicket && !looksLikeTicketUrl) return;
+
+      const id = (n?.id ?? n?.Id ?? null) as string | null;
+      if (id) {
+        if (seenNotificationIdsRef.current.has(id)) {
+          qc.invalidateQueries({ queryKey: ['ehc', 'internal', 'tickets'] });
+          return;
+        }
+        seenNotificationIdsRef.current.add(id);
+        if (seenNotificationIdsRef.current.size > 200) {
+          seenNotificationIdsRef.current.clear();
+          seenNotificationIdsRef.current.add(id);
+        }
+      }
+
+      toast({ title: 'Ticket update', description: n?.title || n?.Title || 'A ticket was updated.', variant: 'success' });
+      qc.invalidateQueries({ queryKey: ['ehc', 'internal', 'tickets'] });
+    },
+    [qc, toast]
+  );
+
+  useSignalR({
+    autoConnect: true,
+    onNotification: handleRealtimeNotification,
+  });
+
+  const { data: departments } = useQuery({
+    queryKey: ['ehc', 'internal', 'departments'],
+    queryFn: () => ehcInternalTicketService.listDepartments(),
+  });
+
+  const { data: categories } = useQuery({
+    queryKey: ['ehc', 'admin', 'categories'],
+    queryFn: () => ehcInternalTicketService.listCategories(),
+  });
+
+  const categoryLabelById = useMemo(() => {
+    const items = categories || [];
+    const byId = new Map(items.map((c) => [c.id, c]));
+    const cache = new Map<string, string>();
+
+    const buildLabel = (id: string): string => {
+      const cached = cache.get(id);
+      if (cached) return cached;
+      const c = byId.get(id);
+      if (!c) return id;
+      if (!c.parentCategoryId) {
+        cache.set(id, c.name);
+        return c.name;
+      }
+      const parent = buildLabel(c.parentCategoryId);
+      const label = `${parent} / ${c.name}`;
+      cache.set(id, label);
+      return label;
+    };
+
+    for (const c of items) buildLabel(c.id);
+    return cache;
+  }, [categories]);
+
+  const selectedTypeForCategories = ticketType || null;
+  const categoryOptions = useMemo(() => {
+    const items = categories || [];
+    return items
+      .filter((c) => !selectedTypeForCategories || !c.appliesToType || c.appliesToType === selectedTypeForCategories)
+      .map((c) => ({ id: c.id, label: categoryLabelById.get(c.id) || c.name }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [categories, selectedTypeForCategories, categoryLabelById]);
+
+  const columns = useMemo<Array<DataTableColumn<EhcTicketListItem>>>(() => {
+    return [
+      {
+        id: 'ticketNumber',
+        header: 'Ticket',
+        accessorKey: 'ticketNumber',
+        cell: ({ row }) => (
+          <div className="font-medium text-slate-900">
+            {row.original.ticketNumber}
+            {row.original.subject ? <div className="text-xs text-slate-500 truncate max-w-[260px]">{row.original.subject}</div> : null}
+          </div>
+        ),
+      },
+      {
+        id: 'createdAt',
+        header: 'Created',
+        accessorKey: 'createdAt',
+        cell: ({ row }) => <div className="whitespace-nowrap">{formatCreatedAt(row.original.createdAt)}</div>,
+      },
+      {
+        id: 'requester',
+        header: 'Submitted By',
+        accessorFn: (r) => r.requesterName || '—',
+        cell: ({ row }) => {
+          const name = row.original.requesterName || '—';
+          const provider = row.original.requesterAuthenticationProvider || null;
+          const submittedVia = provider === 'Local' ? 'External Portal' : provider ? 'Internal ERP' : null;
+          return (
+            <div className="min-w-[160px]">
+              <div className="font-medium text-slate-900">{name}</div>
+              {submittedVia ? <div className="text-xs text-slate-500">{submittedVia}</div> : null}
+            </div>
+          );
+        },
+      },
+      {
+        id: 'source',
+        header: 'Channel',
+        accessorFn: (r) => (r.source === 'Web' ? 'Website' : r.source),
+      },
+      {
+        id: 'ticketType',
+        header: 'Type',
+        accessorKey: 'ticketType',
+      },
+      {
+        id: 'priority',
+        header: 'Priority',
+        accessorFn: (r) => r.priority,
+        cell: ({ row }) => <Badge className={priorityBadgeClassName(row.original.priority)}>{row.original.priority}</Badge>,
+      },
+      {
+        id: 'status',
+        header: 'Status',
+        accessorFn: (r) => r.status,
+        cell: ({ row }) => <Badge className={statusBadgeClassName(row.original.status)}>{row.original.status}</Badge>,
+      },
+      {
+        id: 'categoryName',
+        header: 'Category',
+        accessorFn: (r) => r.categoryName || '—',
+      },
+      {
+        id: 'assignedDepartmentName',
+        header: 'Department',
+        accessorFn: (r) => r.assignedDepartmentName || '—',
+      },
+      {
+        id: 'assignedToName',
+        header: 'Assignee',
+        accessorFn: (r) => r.assignedToName || '—',
+      },
+    ];
+  }, [formatCreatedAt]);
+
+  const rowActions = useMemo<Array<DataTableAction<EhcTicketListItem>>>(() => {
+    return [
+      {
+        id: 'view',
+        label: 'View',
+        icon: Eye,
+        onClick: (row) => router.push(`/helpdesk/tickets/${row.original.id}`),
+        variant: 'outline',
+        size: 'sm',
+      },
+    ];
+  }, [router]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-2">
+            <Ticket className="h-7 w-7" />
+            Helpdesk Tickets
+          </h1>
+          <p className="text-slate-600 mt-1">Assign, transition, and communicate with requesters.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => router.push('/helpdesk/tickets/new')}>Create Ticket</Button>
+          <Button variant="outline" onClick={() => refetch()}>
+            Refresh
+          </Button>
+        </div>
+      </div>
+
+      <Card>
+        <CardHeader className="p-4 pb-2">
+          <CardTitle>Filters</CardTitle>
+          <CardDescription className="text-xs">Filter tickets by type, priority, status, category, department, and date.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-3 p-4 pt-0">
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-600">Status</Label>
+            <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={status} onChange={(e) => setStatus(e.target.value as any)}>
+              {statuses.map((s) => (
+                <option key={s.label} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-600">Type</Label>
+            <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={ticketType} onChange={(e) => setTicketType(e.target.value as any)}>
+              <option value="">All</option>
+              <option value="Enquiry">Enquiry</option>
+              <option value="Complaint">Complaint</option>
+              <option value="Helpdesk">Helpdesk</option>
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-600">Priority</Label>
+            <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={priority} onChange={(e) => setPriority(e.target.value as any)}>
+              <option value="">All</option>
+              <option value="Low">Low</option>
+              <option value="Medium">Medium</option>
+              <option value="High">High</option>
+              <option value="Critical">Critical</option>
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-600">Category</Label>
+            <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+              <option value="">All</option>
+              {categoryOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-600">Department</Label>
+            <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={assignedDepartmentId} onChange={(e) => setAssignedDepartmentId(e.target.value)}>
+              <option value="">All</option>
+              {(departments || []).map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-600">Channel</Label>
+            <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={source} onChange={(e) => setSource(e.target.value as any)}>
+              <option value="">All</option>
+              <option value="Internal">Internal</option>
+              <option value="Web">Website</option>
+              <option value="Mobile">Mobile App</option>
+              <option value="Email">Email</option>
+              <option value="PhoneCall">Phone Call</option>
+              <option value="Sms">SMS</option>
+              <option value="WhatsApp">WhatsApp</option>
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-600">From</Label>
+            <input className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} />
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-600">To</Label>
+            <input className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} />
+          </div>
+
+          <div className="flex items-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setStatus('');
+                setTicketType('');
+                setPriority('');
+                setSource('');
+                setCategoryId('');
+                setAssignedDepartmentId('');
+                setCreatedFrom('');
+                setCreatedTo('');
+              }}
+            >
+              Clear
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <DataTable
+        compact
+        data={data || []}
+        columns={columns}
+        loading={isLoading}
+        error={error ? 'Failed to load tickets.' : null}
+        enableColumnFilters={false}
+        enableExport={true}
+        exportFileName={`helpdesk-tickets-${new Date().toISOString().slice(0, 10)}`}
+        exportFormats={['csv', 'excel']}
+        rowActions={rowActions}
+        initialColumnVisibility={{ categoryName: false, assignedDepartmentName: false, assignedToName: false }}
+        onRowDoubleClick={(row) => router.push(`/helpdesk/tickets/${row.original.id}`)}
+        emptyStateMessage="No tickets match the current filter."
+        toolbarActions={{
+          refresh: () => refetch(),
+          create: () => router.push('/helpdesk/tickets/new'),
+        }}
+      />
+    </div>
+  );
+}
