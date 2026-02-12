@@ -105,9 +105,20 @@ export default function HelpdeskTicketDetailPage() {
         label: t.transitionName ? `${t.transitionName} → ${t.targetStatus}` : String(t.targetStatus),
         transitionId: t.transitionId || null,
         transitionName: t.transitionName || null,
+        transitionDescription: t.transitionDescription || null,
         targetStatus: t.targetStatus,
       }));
   }, [allowedTransitions]);
+
+  const selectedTransitionMeta = useMemo(() => {
+    if (!allowedTransitionOptions.length) return null;
+
+    if (workflowTransitionId) {
+      return allowedTransitionOptions.find((o) => o.transitionId && String(o.transitionId) === String(workflowTransitionId)) || null;
+    }
+
+    return allowedTransitionOptions.find((o) => o.transitionId == null && o.targetStatus === targetStatus) || null;
+  }, [allowedTransitionOptions, targetStatus, workflowTransitionId]);
 
   useEffect(() => {
     if (!allowedTransitionOptions.length) return;
@@ -667,7 +678,7 @@ export default function HelpdeskTicketDetailPage() {
             <TabsContent value="transition" className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Target status</Label>
+                  <Label>Next action</Label>
                   <select
                     className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
                     value={workflowTransitionId ? workflowTransitionId : `status:${targetStatus}`}
@@ -699,10 +710,15 @@ export default function HelpdeskTicketDetailPage() {
                     )}
                   </select>
                   {allowedTransitionOptions.length ? (
-                    <div className="text-xs text-slate-500">
-                      {workflowTransitionName
-                        ? `Action: ${workflowTransitionName}`
-                        : 'Next status is driven by the workflow definition.'}
+                    <div className="space-y-1 text-xs text-slate-500">
+                      <div>
+                        {selectedTransitionMeta?.transitionName
+                          ? `Action: ${selectedTransitionMeta.transitionName}`
+                          : workflowTransitionName
+                            ? `Action: ${workflowTransitionName}`
+                            : 'Next status is driven by the workflow definition.'}
+                      </div>
+                      {selectedTransitionMeta?.transitionDescription ? <div className="text-slate-600">{selectedTransitionMeta.transitionDescription}</div> : null}
                     </div>
                   ) : (
                     <div className="text-xs text-slate-500">This ticket has no workflow transitions available right now.</div>

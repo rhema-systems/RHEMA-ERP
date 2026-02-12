@@ -74,6 +74,7 @@ export interface EhcRelatedEntityResolve {
 export interface EhcAllowedTicketTransition {
   transitionId?: string | null;
   transitionName?: string | null;
+  transitionDescription?: string | null;
   targetStatus: EhcTicketStatus;
 }
 

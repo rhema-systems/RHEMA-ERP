@@ -1619,6 +1619,7 @@ public sealed class EhcTicketService : IEhcTicketService
                 {
                     TransitionId = t.Id,
                     TransitionName = t.Name,
+                    TransitionDescription = t.Description,
                     TargetStatus = status
                 });
             }
@@ -1627,20 +1628,40 @@ public sealed class EhcTicketService : IEhcTicketService
         // Phase 1: allow requesting info from active tickets.
         if (ticket.Status is not (EhcTicketStatus.Resolved or EhcTicketStatus.Closed))
         {
-            result.Add(new EhcTicketAllowedTransitionDto { TransitionName = "Request info (user)", TargetStatus = EhcTicketStatus.PendingUser });
-            result.Add(new EhcTicketAllowedTransitionDto { TransitionName = "Request info (3rd party)", TargetStatus = EhcTicketStatus.PendingThirdParty });
+            result.Add(new EhcTicketAllowedTransitionDto
+            {
+                TransitionName = "Request info (user)",
+                TransitionDescription = "Pause the ticket and request more details from the requester.",
+                TargetStatus = EhcTicketStatus.PendingUser
+            });
+            result.Add(new EhcTicketAllowedTransitionDto
+            {
+                TransitionName = "Request info (3rd party)",
+                TransitionDescription = "Pause the ticket while awaiting information from an external party/vendor.",
+                TargetStatus = EhcTicketStatus.PendingThirdParty
+            });
         }
 
         // Phase 1: allow resume from pending.
         if (ticket.Status is EhcTicketStatus.PendingUser or EhcTicketStatus.PendingThirdParty)
         {
-            result.Add(new EhcTicketAllowedTransitionDto { TransitionName = "Resume", TargetStatus = EhcTicketStatus.InProgress });
+            result.Add(new EhcTicketAllowedTransitionDto
+            {
+                TransitionName = "Resume",
+                TransitionDescription = "Resume work on the ticket after pending information is received.",
+                TargetStatus = EhcTicketStatus.InProgress
+            });
         }
 
         // Phase 1: allow reopen from resolved/closed.
         if (ticket.Status is EhcTicketStatus.Resolved or EhcTicketStatus.Closed)
         {
-            result.Add(new EhcTicketAllowedTransitionDto { TransitionName = "Reopen", TargetStatus = EhcTicketStatus.Reopened });
+            result.Add(new EhcTicketAllowedTransitionDto
+            {
+                TransitionName = "Reopen",
+                TransitionDescription = "Reopen the ticket and restart the workflow lifecycle.",
+                TargetStatus = EhcTicketStatus.Reopened
+            });
         }
 
         return result
