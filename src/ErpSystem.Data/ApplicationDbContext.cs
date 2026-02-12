@@ -262,6 +262,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<InventoryLocation> InventoryLocations { get; set; }
     public DbSet<WarehouseQuantity> WarehouseQuantities { get; set; }
     public DbSet<InventoryAllocation> InventoryAllocations { get; set; }
+    public DbSet<InventoryBalance> InventoryBalances { get; set; }
+    public DbSet<InventoryLayer> InventoryLayers { get; set; }
+    public DbSet<InventoryMovement> InventoryMovements { get; set; }
+
 
     // Procurement entities
     public DbSet<Supplier> Suppliers { get; set; }
@@ -272,6 +276,28 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<PurchaseOrderReceipt> PurchaseOrderReceipts { get; set; }
     public DbSet<PurchaseOrderReceiptItem> PurchaseOrderReceiptItems { get; set; }
     public DbSet<PurchaseRequisition> PurchaseRequisitions { get; set; }
+    public DbSet<RequestForQuotation> RequestForQuotations { get; set; }
+        
+    // Tender entities
+    public DbSet<Tender> Tenders { get; set; }
+    public DbSet<TenderItem> TenderItems { get; set; }
+    public DbSet<TenderLot> TenderLots { get; set; }
+    public DbSet<TenderBid> TenderBids { get; set; }
+    public DbSet<TenderAward> TenderAwards { get; set; }
+    public DbSet<TenderViewLog> TenderViewLogs { get; set; }
+    public DbSet<TenderFee> TenderFees { get; set; }
+    public DbSet<TenderPayment> TenderPayments { get; set; }
+
+    // Email Campaign entities
+    public DbSet<EmailCampaign> EmailCampaigns { get; set; }
+    public DbSet<EmailCampaignRecipient> EmailCampaignRecipients { get; set; }
+
+    // System Logs
+    public DbSet<SystemExceptionLog> SystemExceptionLogs { get; set; }
+
+    // Inventory Transfer
+    public DbSet<InventoryTransfer> InventoryTransfers { get; set; }
+
 
     // Business Partner Management (Unified Supplier/Contractor)
     public DbSet<BusinessPartner> BusinessPartners { get; set; }
@@ -2822,6 +2848,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     private void ConfigureInventoryEntities(ModelBuilder builder)
     {
+        // UnitOfMeasure and Conversions
+        builder.Entity<UnitOfMeasureConversion>(entity =>
+        {
+            entity.HasOne(c => c.FromUnit)
+                .WithMany(u => u.ConversionsFrom)
+                .HasForeignKey(c => c.FromUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.ToUnit)
+                .WithMany(u => u.ConversionsTo)
+                .HasForeignKey(c => c.ToUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         // InventoryItem entity
         builder.Entity<InventoryItem>(entity =>
         {
