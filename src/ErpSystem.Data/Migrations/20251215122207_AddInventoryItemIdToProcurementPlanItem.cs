@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -13,41 +13,6 @@ namespace ErpSystem.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DeleteData(
-                table: "TenantModules",
-                keyColumn: "Id",
-                keyValue: new Guid("0f44e254-55e2-4b10-be39-c5f03a8256ec"));
-
-            migrationBuilder.DeleteData(
-                table: "TenantModules",
-                keyColumn: "Id",
-                keyValue: new Guid("4890db27-8913-41d2-ad96-de2c5db90d5d"));
-
-            migrationBuilder.DeleteData(
-                table: "TenantModules",
-                keyColumn: "Id",
-                keyValue: new Guid("8a7ad8aa-ec67-4f16-ba1b-5a8069af5d61"));
-
-            migrationBuilder.DeleteData(
-                table: "TenantModules",
-                keyColumn: "Id",
-                keyValue: new Guid("8f9b8277-9ae2-464c-ad12-ab0d413d9882"));
-
-            migrationBuilder.DeleteData(
-                table: "TenantModules",
-                keyColumn: "Id",
-                keyValue: new Guid("be90d0c9-7f17-453d-8d26-8361e72a950a"));
-
-            migrationBuilder.DeleteData(
-                table: "TenantModules",
-                keyColumn: "Id",
-                keyValue: new Guid("c592e0fa-b382-4613-b2c8-cdcd2923053e"));
-
-            migrationBuilder.DeleteData(
-                table: "TenantModules",
-                keyColumn: "Id",
-                keyValue: new Guid("d4eba907-f21c-48b5-889c-9ec0b52dea5c"));
-
             migrationBuilder.AddColumn<Guid>(
                 name: "InventoryItemId",
                 table: "ProcurementPlanItems",
@@ -501,21 +466,6 @@ namespace ErpSystem.Data.Migrations
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000010"), new Guid("00000000-0000-0000-0000-000000000004") },
                 column: "GrantedAt",
                 value: new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1906));
-
-            migrationBuilder.InsertData(
-                table: "TenantModules",
-                columns: new[] { "Id", "Configuration", "CreatedAt", "CreatedBy", "CreatedById", "DeletedAt", "DeletedBy", "Description", "DisabledDate", "EnabledDate", "IsDeleted", "LastModifiedById", "ModuleName", "Status", "TenantId", "UpdatedAt", "UpdatedBy" },
-                values: new object[,]
-                {
-                    { new Guid("0e415529-ac64-4e80-aed1-9c7bd767520c"), null, new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1376), null, null, null, null, null, null, new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1375), false, null, "HR", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("1ce6bdd1-c993-4487-bc84-d6399c81bf85"), null, new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1429), null, null, null, null, null, null, new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1429), false, null, "Marketing", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("31070f3b-f1d5-46f2-946b-e317278f7551"), null, new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1360), null, null, null, null, null, null, new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1356), false, null, "Finance", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("3ee1ee01-c2ba-47fd-9445-0f0a93478e2a"), null, new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1416), null, null, null, null, null, null, new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1416), false, null, "Inventory", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("3eee4fbc-4a34-4ed5-91f2-40a822153453"), null, new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1403), null, null, null, null, null, null, new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1403), false, null, "Procurement", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("837adb26-5093-4813-a6df-e975388f37b3"), null, new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1441), null, null, null, null, null, null, new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1441), false, null, "WorkflowEngine", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("b220e6a8-1fda-4739-a8b2-d1ef4c4856cc"), null, new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1390), null, null, null, null, null, null, new DateTime(2025, 12, 15, 12, 22, 4, 347, DateTimeKind.Utc).AddTicks(1390), false, null, "Sales", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null }
-                });
-
             migrationBuilder.UpdateData(
                 table: "Tenants",
                 keyColumn: "Id",
@@ -546,42 +496,6 @@ namespace ErpSystem.Data.Migrations
             migrationBuilder.DropIndex(
                 name: "IX_ProcurementPlanItems_InventoryItemId",
                 table: "ProcurementPlanItems");
-
-            migrationBuilder.DeleteData(
-                table: "TenantModules",
-                keyColumn: "Id",
-                keyValue: new Guid("0e415529-ac64-4e80-aed1-9c7bd767520c"));
-
-            migrationBuilder.DeleteData(
-                table: "TenantModules",
-                keyColumn: "Id",
-                keyValue: new Guid("1ce6bdd1-c993-4487-bc84-d6399c81bf85"));
-
-            migrationBuilder.DeleteData(
-                table: "TenantModules",
-                keyColumn: "Id",
-                keyValue: new Guid("31070f3b-f1d5-46f2-946b-e317278f7551"));
-
-            migrationBuilder.DeleteData(
-                table: "TenantModules",
-                keyColumn: "Id",
-                keyValue: new Guid("3ee1ee01-c2ba-47fd-9445-0f0a93478e2a"));
-
-            migrationBuilder.DeleteData(
-                table: "TenantModules",
-                keyColumn: "Id",
-                keyValue: new Guid("3eee4fbc-4a34-4ed5-91f2-40a822153453"));
-
-            migrationBuilder.DeleteData(
-                table: "TenantModules",
-                keyColumn: "Id",
-                keyValue: new Guid("837adb26-5093-4813-a6df-e975388f37b3"));
-
-            migrationBuilder.DeleteData(
-                table: "TenantModules",
-                keyColumn: "Id",
-                keyValue: new Guid("b220e6a8-1fda-4739-a8b2-d1ef4c4856cc"));
-
             migrationBuilder.DropColumn(
                 name: "InventoryItemId",
                 table: "ProcurementPlanItems");
@@ -1033,21 +947,6 @@ namespace ErpSystem.Data.Migrations
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000010"), new Guid("00000000-0000-0000-0000-000000000004") },
                 column: "GrantedAt",
                 value: new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(9508));
-
-            migrationBuilder.InsertData(
-                table: "TenantModules",
-                columns: new[] { "Id", "Configuration", "CreatedAt", "CreatedBy", "CreatedById", "DeletedAt", "DeletedBy", "Description", "DisabledDate", "EnabledDate", "IsDeleted", "LastModifiedById", "ModuleName", "Status", "TenantId", "UpdatedAt", "UpdatedBy" },
-                values: new object[,]
-                {
-                    { new Guid("0f44e254-55e2-4b10-be39-c5f03a8256ec"), null, new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(8051), null, null, null, null, null, null, new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(8050), false, null, "Sales", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("4890db27-8913-41d2-ad96-de2c5db90d5d"), null, new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(8003), null, null, null, null, null, null, new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(7996), false, null, "Finance", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("8a7ad8aa-ec67-4f16-ba1b-5a8069af5d61"), null, new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(8067), null, null, null, null, null, null, new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(8066), false, null, "Procurement", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("8f9b8277-9ae2-464c-ad12-ab0d413d9882"), null, new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(8141), null, null, null, null, null, null, new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(8140), false, null, "WorkflowEngine", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("be90d0c9-7f17-453d-8d26-8361e72a950a"), null, new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(8031), null, null, null, null, null, null, new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(8030), false, null, "HR", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("c592e0fa-b382-4613-b2c8-cdcd2923053e"), null, new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(8100), null, null, null, null, null, null, new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(8099), false, null, "Inventory", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("d4eba907-f21c-48b5-889c-9ec0b52dea5c"), null, new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(8122), null, null, null, null, null, null, new DateTime(2025, 12, 15, 9, 0, 50, 838, DateTimeKind.Utc).AddTicks(8121), false, null, "Marketing", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null }
-                });
-
             migrationBuilder.UpdateData(
                 table: "Tenants",
                 keyColumn: "Id",
