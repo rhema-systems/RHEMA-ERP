@@ -1,8 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Save, Trash2 } from 'lucide-react';
+import { Save, Settings, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -164,6 +165,14 @@ export default function HelpdeskWorkflowRoutingAdminPage() {
       <div>
         <h1 className="text-3xl font-bold">Workflow Routing</h1>
         <p className="text-slate-600 mt-1">Select which workflow definition to start per ticket type, category, priority, and department.</p>
+        <div className="mt-3">
+          <Button asChild variant="outline" size="sm">
+            <Link href="/administration/workflow?entityType=EHC_TICKET&q=EHC">
+              <Settings className="h-4 w-4 mr-2" />
+              Open Workflow Designer (EHC)
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <Card>
