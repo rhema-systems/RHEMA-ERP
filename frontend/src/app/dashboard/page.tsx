@@ -44,7 +44,23 @@ export default function Dashboard() {
     if (typeof window === 'undefined') return;
 
     const storedUser = authService.getStoredUser();
-    if (storedUser?.authenticationProvider === 'Local') {
+    const isSuperAdmin = storedUser?.roles?.includes('SuperAdmin');
+    const isAdministrator = storedUser?.roles?.includes('Administrator');
+    const username = storedUser?.username?.toLowerCase() || '';
+    const isAdminUser = username === 'admin';
+    const hasAdminPrivileges = isSuperAdmin || isAdministrator || isAdminUser;
+
+    console.log('Dashboard Redirect Check:', {
+      storedUser,
+      isSuperAdmin,
+      isAdministrator,
+      isAdminUser,
+      username,
+      hasAdminPrivileges
+    });
+
+    // Only redirect to external portal if user is Local auth AND doesn't have admin privileges
+    if (storedUser?.authenticationProvider === 'Local' && !hasAdminPrivileges) {
       console.log('External user detected on internal dashboard, redirecting to external portal');
       router.push('/external-portal');
     }
@@ -122,7 +138,7 @@ export default function Dashboard() {
             </Button>
           </div>
         </div>
-        
+
         {/* KPI Cards - Enhanced or Classic */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 animate-in slide-in-from-bottom-4 duration-700">
           {viewMode === 'enhanced' ? (

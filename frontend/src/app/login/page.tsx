@@ -50,7 +50,7 @@ function LoginFormWithSearchParams() {
       // Message will stay until user submits the form - no auto-clear
     }
   }, [searchParams]);
-  
+
 
   // Fetch public security settings to determine if reCAPTCHA should be shown
   const { data: securitySettings } = useQuery({
@@ -71,28 +71,28 @@ function LoginFormWithSearchParams() {
   });
 
   // Debug: Log tenant data
-  console.log('🏢 Tenants query state:', { 
-    tenants, 
-    tenantsLoading, 
+  console.log('🏢 Tenants query state:', {
+    tenants,
+    tenantsLoading,
     tenantsError: tenantsError?.message,
     hasData: !!tenants,
     tenantCount: tenants?.length || 0
   });
-  
+
   if (tenants) {
-    console.log('🔍 Tenant self-registration status:', 
-      tenants.map(t => ({ 
-        name: t.name, 
-        code: t.code, 
-        allowSelfRegistration: t.allowSelfRegistration, 
-        isActive: t.isActive 
+    console.log('🔍 Tenant self-registration status:',
+      tenants.map(t => ({
+        name: t.name,
+        code: t.code,
+        allowSelfRegistration: t.allowSelfRegistration,
+        isActive: t.isActive
       }))
     );
   }
 
   // Check if any tenant allows self-registration
   const allowSelfRegistration = tenants?.some(tenant => tenant.allowSelfRegistration && tenant.isActive) ?? false;
-  
+
   console.log('✨ Create Account button will be shown:', allowSelfRegistration);
   console.log('📋 Button visibility logic:', {
     hasTenants: !!tenants,
@@ -105,22 +105,22 @@ function LoginFormWithSearchParams() {
   // Determine if reCAPTCHA should be shown based on settings and failed attempts
   const shouldShowRecaptcha = () => {
     if (!securitySettings) return false;
-    
+
     // Only show CAPTCHA after failed attempts or suspicious activity, not always
     // Show after 2 or more failed attempts if configured (and we have a valid site key)
     if (securitySettings.captchaEnabled &&
-        failedAttempts >= 2 &&
-        (securitySettings.recaptchaSiteKey || securitySettings.hCaptchaSiteKey)) {
+      failedAttempts >= 2 &&
+      (securitySettings.recaptchaSiteKey || securitySettings.hCaptchaSiteKey)) {
       return true;
     }
-    
+
     // Show after X failed attempts based on maxFailedLoginAttempts setting
-    if (securitySettings.maxFailedLoginAttempts && 
-        failedAttempts >= Math.max(1, Math.floor(securitySettings.maxFailedLoginAttempts / 2)) &&
-        (securitySettings.recaptchaSiteKey || securitySettings.hCaptchaSiteKey)) {
+    if (securitySettings.maxFailedLoginAttempts &&
+      failedAttempts >= Math.max(1, Math.floor(securitySettings.maxFailedLoginAttempts / 2)) &&
+      (securitySettings.recaptchaSiteKey || securitySettings.hCaptchaSiteKey)) {
       return true;
     }
-    
+
     return false;
   };
 
@@ -159,11 +159,29 @@ function LoginFormWithSearchParams() {
 
       // After successful login, check authentication provider
       if (response.token) {
-        // If user is an external user (Local authentication), redirect to external portal
-        if (response.user?.authenticationProvider === 'Local') {
+        // If user is an external user (Local authentication) AND not admin/SuperAdmin/Administrator, redirect to external portal
+        const isSuperAdmin = response.user?.roles?.includes('SuperAdmin');
+        const isAdministrator = response.user?.roles?.includes('Administrator');
+        const username = response.user?.username?.toLowerCase() || '';
+        const isAdminUser = username === 'admin';
+
+        console.log('Login Redirect Check:', {
+          user: response.user,
+          authProvider: response.user?.authenticationProvider,
+          isSuperAdmin,
+          isAdministrator,
+          isAdminUser,
+          username,
+          roles: response.user?.roles
+        });
+
+        // Only redirect to external portal if user is Local auth AND doesn't have admin privileges
+        if (response.user?.authenticationProvider === 'Local' && !isSuperAdmin && !isAdministrator && !isAdminUser) {
+          console.log('Redirecting to External Portal');
           router.push('/external-portal');
         } else {
-          // Internal users (LDAP or other) go to tenant selection
+          // Internal users (LDAP or other) or Admins go to tenant selection
+          console.log('Redirecting to Tenant Select');
           router.push('/tenant-select');
         }
       }
@@ -175,11 +193,11 @@ function LoginFormWithSearchParams() {
         statusText: error.statusText,
         response: error.response
       });
-      
+
       const message = error.message || 'Login failed. Please try again.';
       setError('root', { message });
       setFailedAttempts(prev => prev + 1);
-      
+
       // If this was a 2FA error, clear the code for retry
       if (showTwoFactor) {
         setTwoFactorCode('');
@@ -245,7 +263,7 @@ function LoginFormWithSearchParams() {
     const cleanedValue = value.replace(/\D/g, '').slice(0, 6);
     setTwoFactorCode(cleanedValue);
   };
-  
+
   // Handle keyboard events for 2FA input
   const handleTwoFactorKeyDown = (e: React.KeyboardEvent) => {
     // Allow manual submission with Enter key when code is complete
@@ -258,11 +276,11 @@ function LoginFormWithSearchParams() {
   return (
     <div className="min-h-screen flex items-start justify-center p-4 pt-16 relative overflow-hidden">
       {/* Background Image */}
-      <div 
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat" 
-        style={{backgroundImage: 'url(/login.svg)'}}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: 'url(/login.svg)' }}
       ></div>
-      
+
       <div className="relative w-full max-w-md space-y-8">
         {/* Logo and Header */}
         <div className="text-center">
@@ -289,12 +307,12 @@ function LoginFormWithSearchParams() {
               {showTwoFactor ? '2FA Verification' : 'Sign In'}
             </CardTitle>
             <CardDescription className="text-center">
-              {showTwoFactor 
+              {showTwoFactor
                 ? 'Please enter your authentication code to complete login'
                 : 'Enter your credentials to access your account'
               }
             </CardDescription>
-            
+
             {/* Step Indicator */}
             {showTwoFactor && (
               <div className="flex items-center justify-center space-x-2 mt-4">
@@ -320,61 +338,61 @@ function LoginFormWithSearchParams() {
               {/* Username Field - Hidden during 2FA step */}
               {!showTwoFactor && (
                 <div className="space-y-2">
-                <Label htmlFor="username" className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  USER NAME OR EMAIL ADDRESS
-                </Label>
-                <div className="relative">
-                  <Input
-                    id="username"
-                    type="text"
-                    placeholder="admin"
-                    className={errors.username ? 'border-red-500' : ''}
-                    {...register('username')}
-                  />
-                </div>
-                {errors.username && (
-                  <p className="text-sm text-red-500 flex items-center gap-1">
-                    <Shield className="h-3 w-3" />
-                    {errors.username.message}
-                  </p>
-                )}
+                  <Label htmlFor="username" className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                    USER NAME OR EMAIL ADDRESS
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="username"
+                      type="text"
+                      placeholder="admin"
+                      className={errors.username ? 'border-red-500' : ''}
+                      {...register('username')}
+                    />
+                  </div>
+                  {errors.username && (
+                    <p className="text-sm text-red-500 flex items-center gap-1">
+                      <Shield className="h-3 w-3" />
+                      {errors.username.message}
+                    </p>
+                  )}
                 </div>
               )}
 
               {/* Password Field - Hidden during 2FA step */}
               {!showTwoFactor && (
                 <div className="space-y-2">
-                <Label htmlFor="password" className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  PASSWORD
-                </Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="Admin123!"
-                    className={`pr-12 ${errors.password ? 'border-red-500' : ''}`}
-                    {...register('password')}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 hover:bg-transparent"
-                    onClick={() => setShowPassword(!showPassword)}
-                  >
-                    {showPassword ? (
-                      <EyeOff className="h-4 w-4 text-slate-500" />
-                    ) : (
-                      <Eye className="h-4 w-4 text-slate-500" />
-                    )}
-                  </Button>
-                </div>
-                {errors.password && (
-                  <p className="text-sm text-red-500 flex items-center gap-1">
-                    <Shield className="h-3 w-3" />
-                    {errors.password.message}
-                  </p>
-                )}
+                  <Label htmlFor="password" className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                    PASSWORD
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Admin123!"
+                      className={`pr-12 ${errors.password ? 'border-red-500' : ''}`}
+                      {...register('password')}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 hover:bg-transparent"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4 text-slate-500" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-slate-500" />
+                      )}
+                    </Button>
+                  </div>
+                  {errors.password && (
+                    <p className="text-sm text-red-500 flex items-center gap-1">
+                      <Shield className="h-3 w-3" />
+                      {errors.password.message}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -435,23 +453,23 @@ function LoginFormWithSearchParams() {
               {/* Remember Me & Forgot Password - Hidden during 2FA step */}
               {!showTwoFactor && (
                 <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <input
-                    id="rememberMe"
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                    {...register('rememberMe')}
-                  />
-                  <Label htmlFor="rememberMe" className="text-sm font-normal">
-                    Remember me for 30 days
-                  </Label>
-                </div>
-                <a
-                  href="/forgot-password"
-                  className="text-sm font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
-                >
-                  Forgot password?
-                </a>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      id="rememberMe"
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      {...register('rememberMe')}
+                    />
+                    <Label htmlFor="rememberMe" className="text-sm font-normal">
+                      Remember me for 30 days
+                    </Label>
+                  </div>
+                  <a
+                    href="/forgot-password"
+                    className="text-sm font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                  >
+                    Forgot password?
+                  </a>
                 </div>
               )}
 
@@ -480,8 +498,8 @@ function LoginFormWithSearchParams() {
                 <div className="space-y-4">
                   <div className="flex justify-center">
                     <ReCAPTCHA
-                      sitekey={securitySettings.captchaProvider === 'recaptcha' 
-                        ? securitySettings.recaptchaSiteKey || '' 
+                      sitekey={securitySettings.captchaProvider === 'recaptcha'
+                        ? securitySettings.recaptchaSiteKey || ''
                         : securitySettings.hCaptchaSiteKey || ''}
                       onChange={(token) => setValue('recaptchaToken', token || '')}
                     />
@@ -564,11 +582,11 @@ function LoginPageLoading() {
   return (
     <div className="min-h-screen flex items-start justify-center p-4 pt-16 relative overflow-hidden">
       {/* Background Image */}
-      <div 
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat" 
-        style={{backgroundImage: 'url(/login.svg)'}}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: 'url(/login.svg)' }}
       ></div>
-      
+
       <div className="relative flex items-center space-x-3 backdrop-blur-sm bg-white/95 dark:bg-slate-900/95 p-8 rounded-2xl shadow-2xl border border-white/30">
         <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
         <span className="text-slate-900 dark:text-slate-100 font-medium text-lg">Loading login page...</span>

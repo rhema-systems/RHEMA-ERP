@@ -66,6 +66,12 @@ export interface DashboardStats {
   totalTenants: number;
   activeUsers: number;
   systemHealth: 'healthy' | 'warning' | 'error';
+  totalRevenue?: number;
+  revenueGrowth?: number;
+  revenueTarget?: number;
+  totalOrders?: number;
+  ordersGrowth?: number;
+  ordersTarget?: number;
 }
 
 // Form Types

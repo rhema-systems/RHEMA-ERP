@@ -4,14 +4,15 @@ import type { LoginRequest, LoginResponse, User, Tenant } from '../types';
 export class AuthService {
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     const response = await apiService.login(credentials);
-    
+
     // Store tokens and user info
     if (response.token) {
+      console.log('AuthService: Saving user to localStorage', response.user);
       localStorage.setItem('authToken', response.token);
       localStorage.setItem('refreshToken', response.refreshToken);
       localStorage.setItem('user', JSON.stringify(response.user));
     }
-    
+
     return response;
   }
 
@@ -19,7 +20,7 @@ export class AuthService {
     try {
       // Get refresh token before clearing
       const refreshToken = localStorage.getItem('refreshToken');
-      
+
       // Call logout endpoint with refresh token if available
       await apiService.logout(refreshToken || undefined);
     } catch (error) {
@@ -50,7 +51,7 @@ export class AuthService {
 
   async refreshToken(): Promise<LoginResponse> {
     const response = await apiService.refreshToken();
-    
+
     if (response.token) {
       localStorage.setItem('authToken', response.token);
       localStorage.setItem('refreshToken', response.refreshToken);
@@ -69,10 +70,10 @@ export class AuthService {
 
   getStoredUser(): User | null {
     if (typeof window === 'undefined') return null;
-    
+
     const userStr = localStorage.getItem('user');
     if (!userStr) return null;
-    
+
     try {
       return JSON.parse(userStr);
     } catch {
@@ -92,7 +93,7 @@ export class AuthService {
 
   clearTokens(): void {
     if (typeof window === 'undefined') return;
-    
+
     localStorage.removeItem('authToken');
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('user');
@@ -101,17 +102,17 @@ export class AuthService {
 
   setCurrentTenant(tenant: Tenant): void {
     if (typeof window === 'undefined') return;
-    
+
     localStorage.setItem('currentTenant', JSON.stringify(tenant));
     window.dispatchEvent(new CustomEvent('tenant-changed', { detail: tenant }));
   }
 
   getCurrentTenant(): Tenant | null {
     if (typeof window === 'undefined') return null;
-    
+
     const tenantStr = localStorage.getItem('currentTenant');
     if (!tenantStr) return null;
-    
+
     try {
       return JSON.parse(tenantStr);
     } catch {
@@ -131,14 +132,14 @@ export class AuthService {
   hasAnyRole(roles: string[]): boolean {
     const user = this.getStoredUser();
     if (!user?.roles) return false;
-    
+
     return roles.some(role => user.roles.includes(role));
   }
 
   hasAllRoles(roles: string[]): boolean {
     const user = this.getStoredUser();
     if (!user?.roles) return false;
-    
+
     return roles.every(role => user.roles.includes(role));
   }
 }

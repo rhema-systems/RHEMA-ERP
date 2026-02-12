@@ -17,14 +17,22 @@ export default function Home() {
 
     // Check if user is authenticated (only on client side)
     if (authService.isAuthenticated()) {
-      // Route based on authentication provider
+      // Route based on authentication provider and roles
       const user = authService.getStoredUser();
 
-      if (user?.authenticationProvider === 'Local') {
+      // Check if user has admin privileges
+      const isSuperAdmin = user?.roles?.includes('SuperAdmin');
+      const isAdministrator = user?.roles?.includes('Administrator');
+      const username = user?.username?.toLowerCase() || '';
+      const isAdminUser = username === 'admin';
+      const hasAdminPrivileges = isSuperAdmin || isAdministrator || isAdminUser;
+
+      // Only redirect to external portal if user is Local auth AND doesn't have admin privileges
+      if (user?.authenticationProvider === 'Local' && !hasAdminPrivileges) {
         // External users go to external portal
         router.push('/external-portal');
       } else {
-        // Internal users (LDAP) go to dashboard
+        // Internal users (LDAP) or admins go to dashboard
         router.push('/dashboard');
       }
     } else {

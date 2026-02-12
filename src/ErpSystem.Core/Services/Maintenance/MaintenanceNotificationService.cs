@@ -5,6 +5,13 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.Maintenance;
+<<<<<<< HEAD
+=======
+
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Entities.HR;
+>>>>>>> b148baa (feat(finance): Add comprehensive finance module improvements)
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Maintenance;

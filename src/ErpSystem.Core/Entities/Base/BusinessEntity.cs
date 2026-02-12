@@ -6,7 +6,7 @@ namespace ErpSystem.Core.Entities.Base;
 /// Base class for all business entities across ERP modules
 /// Provides common properties and audit trails
 /// </summary>
-public abstract class BusinessEntity : BaseEntity
+public abstract class BusinessEntity : TenantEntity
 {
     /// <summary>
     /// Business reference number (auto-generated, human-readable)
