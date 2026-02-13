@@ -116,6 +116,14 @@ export interface EhcTicketDetail {
   assignedToName?: string | null;
   relatedEntityType?: string | null;
   relatedEntityReference?: string | null;
+
+  // Complaint/RCA (internal-only; not populated for external portal)
+  rootCauseId?: string | null;
+  rootCauseCode?: string | null;
+  rootCauseName?: string | null;
+  rootCauseDetails?: string | null;
+  resolutionSummary?: string | null;
+
   messages: EhcTicketMessage[];
   attachments?: EhcTicketAttachment[];
   statusHistory?: EhcTicketStatusHistory[];

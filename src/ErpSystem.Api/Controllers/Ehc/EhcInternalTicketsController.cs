@@ -184,6 +184,33 @@ public sealed class EhcInternalTicketsController : ControllerBase
         }
     }
 
+    [HttpPut("{id:guid}/rca")]
+    public async Task<ActionResult> UpdateRca(Guid id, [FromBody] UpdateEhcTicketRcaRequestDto request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _ticketService.UpdateTicketRcaAsync(id, request, cancellationToken);
+            return Ok(new { success = true, data = result });
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { success = false, message = "Ticket not found" });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating RCA details for EHC ticket {TicketId}", id);
+            return StatusCode(500, new { success = false, message = "Failed to update RCA" });
+        }
+    }
+
     [HttpPost("{id:guid}/internal-comments")]
     public async Task<ActionResult> AddInternalComment(Guid id, [FromBody] AddEhcTicketMessageRequestDto request, CancellationToken cancellationToken)
     {

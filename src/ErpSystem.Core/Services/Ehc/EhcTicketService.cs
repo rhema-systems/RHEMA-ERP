@@ -1670,6 +1670,105 @@ public sealed class EhcTicketService : IEhcTicketService
             .ToList();
     }
 
+    public async Task<EhcTicketDetailDto> UpdateTicketRcaAsync(Guid ticketId, UpdateEhcTicketRcaRequestDto request, CancellationToken cancellationToken = default)
+    {
+        request ??= new UpdateEhcTicketRcaRequestDto();
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            throw new InvalidOperationException("Tenant context is required.");
+        }
+
+        if (!Guid.TryParse(_currentUserService.UserId, out var actorUserId) || actorUserId == Guid.Empty)
+        {
+            throw new InvalidOperationException("Authenticated user context is required.");
+        }
+
+        var ticketRepo = _unitOfWork.Repository<EhcTicket>();
+        var ticket = await ticketRepo.FirstOrDefaultAsync(
+            t => t.Id == ticketId && t.TenantId == tenantId && !t.IsDeleted,
+            t => t.RootCause,
+            t => t.Category,
+            t => t.Subcategory,
+            t => t.AssignedDepartment,
+            t => t.AssignedToUser,
+            t => t.RequesterUser,
+            t => t.Messages!,
+            t => t.Attachments!,
+            t => t.StatusHistory!,
+            t => t.AuditEvents!);
+
+        if (ticket == null)
+        {
+            throw new KeyNotFoundException("Ticket not found.");
+        }
+
+        if (ticket.TicketType != EhcTicketType.Complaint)
+        {
+            throw new InvalidOperationException("RCA fields are only applicable to Complaint tickets.");
+        }
+
+        Guid? rootCauseId = request.RootCauseId.HasValue && request.RootCauseId.Value == Guid.Empty
+            ? (Guid?)null
+            : request.RootCauseId;
+
+        EhcRootCauseCode? rootCause = null;
+        if (rootCauseId.HasValue)
+        {
+            rootCause = await _unitOfWork.Repository<EhcRootCauseCode>().FirstOrDefaultAsync(
+                r => r.Id == rootCauseId.Value && r.TenantId == tenantId && !r.IsDeleted && r.IsActive);
+
+            if (rootCause == null)
+            {
+                throw new ArgumentException("Selected root cause does not exist.");
+            }
+        }
+
+        ticket.RootCauseId = rootCauseId;
+        ticket.RootCause = rootCause;
+        ticket.RootCauseDetails = string.IsNullOrWhiteSpace(request.RootCauseDetails) ? null : request.RootCauseDetails.Trim();
+        ticket.ResolutionSummary = string.IsNullOrWhiteSpace(request.ResolutionSummary) ? null : request.ResolutionSummary.Trim();
+        ticket.UpdatedAt = DateTime.UtcNow;
+        ticket.UpdatedBy = _currentUserService.UserName;
+        ticket.LastModifiedById = actorUserId;
+
+        await ticketRepo.UpdateAsync(ticket);
+
+        await AddAuditEventAsync(
+            ticket,
+            eventType: "RcaUpdated",
+            title: "RCA updated",
+            body: $"Root cause: {(rootCause == null ? "—" : $"{rootCause.Code} - {rootCause.Name}")}",
+            isInternal: true,
+            actorUserId: actorUserId,
+            data: new
+            {
+                rootCauseId = rootCauseId,
+                rootCauseCode = rootCause?.Code,
+                rootCauseName = rootCause?.Name
+            });
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        await PublishTicketTopicAsync(
+            tenantId,
+            activity: "Updated",
+            audience: "Internal",
+            ticketId: ticket.Id,
+            triggeredByUserId: actorUserId,
+            data: new Dictionary<string, object>
+            {
+                ["ticketId"] = ticket.Id,
+                ["ticketNumber"] = ticket.TicketNumber,
+                ["ActionUrl"] = $"/helpdesk/tickets/{ticket.Id}"
+            },
+            cancellationToken);
+
+        // Return full internal view.
+        return await MapToDetailDtoAsync(ticket, includeInternal: true, cancellationToken);
+    }
+
     private async Task<HashSet<EhcTicketStatus>> GetAllowedTransitionsInternalAsync(EhcTicket ticket, CancellationToken cancellationToken)
     {
         var statuses = new HashSet<EhcTicketStatus>();
@@ -2033,6 +2132,11 @@ public sealed class EhcTicketService : IEhcTicketService
                 : null,
             RequesterEmail = includeInternal ? ticket.RequesterUser?.Email : null,
             RequesterAuthenticationProvider = includeInternal ? ticket.RequesterUser?.AuthenticationProvider.ToString() : null,
+            RootCauseId = includeInternal ? ticket.RootCauseId : null,
+            RootCauseCode = includeInternal ? ticket.RootCause?.Code : null,
+            RootCauseName = includeInternal ? ticket.RootCause?.Name : null,
+            RootCauseDetails = includeInternal ? ticket.RootCauseDetails : null,
+            ResolutionSummary = includeInternal ? ticket.ResolutionSummary : null,
             Messages = messages,
             Attachments = attachments,
             StatusHistory = history,

@@ -15,9 +15,11 @@ public class NotificationTopicDto
 
     public bool EnableInApp { get; set; }
     public bool EnableEmail { get; set; }
+    public bool EnableSms { get; set; }
 
     public string? InAppTitleTemplate { get; set; }
     public string? InAppBodyTemplate { get; set; }
+    public string? SmsBodyTemplate { get; set; }
 
     public Guid? EmailTemplateId { get; set; }
     public string? ActionUrlTemplate { get; set; }
@@ -33,6 +35,7 @@ public class NotificationTopicRecipientDto
     public bool IsSystem { get; set; }
     public bool SendInApp { get; set; }
     public bool SendEmail { get; set; }
+    public bool SendSms { get; set; }
 }
 
 public class CreateNotificationTopicDto
@@ -48,9 +51,11 @@ public class CreateNotificationTopicDto
 
     public bool EnableInApp { get; set; } = true;
     public bool EnableEmail { get; set; } = false;
+    public bool EnableSms { get; set; } = false;
 
     public string? InAppTitleTemplate { get; set; }
     public string? InAppBodyTemplate { get; set; }
+    public string? SmsBodyTemplate { get; set; }
 
     public Guid? EmailTemplateId { get; set; }
     public string? ActionUrlTemplate { get; set; }
@@ -64,6 +69,7 @@ public class CreateNotificationTopicRecipientDto
     public string RecipientValue { get; set; } = string.Empty;
     public bool SendInApp { get; set; } = true;
     public bool SendEmail { get; set; } = false;
+    public bool SendSms { get; set; } = false;
 }
 
 public class UpdateNotificationTopicDto : CreateNotificationTopicDto

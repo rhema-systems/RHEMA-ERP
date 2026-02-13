@@ -1169,17 +1169,8 @@ namespace ErpSystem.Web.Services
                 return;
             }
 
-            // Check if any modules already exist for this tenant
-            var existingModuleCount = await _context.TenantModules
-                .Where(tm => tm.TenantId == defaultTenant.Id)
-                .CountAsync();
-
-            if (existingModuleCount > 0)
-            {
-                _logger.LogInformation("Tenant modules already exist for {TenantName}. Skipping module seeding.", defaultTenant.Name);
-                return;
-            }
-
+            // IMPORTANT: TenantModules has a unique index on (TenantId, ModuleName) and uses soft-delete.
+            // Seeding must be idempotent and must not insert duplicates when a record already exists (even if soft-deleted).
             var modules = new[]
             {
                 new { ModuleName = "Finance", Description = "Financial reports and analytics" },
@@ -1191,24 +1182,93 @@ namespace ErpSystem.Web.Services
                 new { ModuleName = "WorkflowEngine", Description = "Workflow automation and BPM" }
             };
 
+            var now = DateTime.UtcNow;
+
+            var existing = await _context.TenantModules
+                .IgnoreQueryFilters()
+                .Where(tm => tm.TenantId == defaultTenant.Id)
+                .ToListAsync();
+
+            var existingByName = existing
+                .Where(m => !string.IsNullOrWhiteSpace(m.ModuleName))
+                .ToDictionary(m => m.ModuleName.Trim(), m => m, StringComparer.OrdinalIgnoreCase);
+
+            var created = 0;
+            var updated = 0;
+
             foreach (var moduleInfo in modules)
             {
-                var module = new TenantModule
+                if (existingByName.TryGetValue(moduleInfo.ModuleName, out var module))
                 {
+                    var changed = false;
+
+                    if (module.IsDeleted)
+                    {
+                        module.IsDeleted = false;
+                        module.DeletedAt = null;
+                        module.DeletedBy = null;
+                        changed = true;
+                    }
+
+                    if (module.Status != ModuleStatus.Enabled)
+                    {
+                        module.Status = ModuleStatus.Enabled;
+                        changed = true;
+                    }
+
+                    // Keep existing descriptions unless empty; some tenants may customize descriptions.
+                    if (string.IsNullOrWhiteSpace(module.Description))
+                    {
+                        module.Description = moduleInfo.Description;
+                        changed = true;
+                    }
+
+                    if (module.EnabledDate == null)
+                    {
+                        module.EnabledDate = now;
+                        changed = true;
+                    }
+
+                    if (changed)
+                    {
+                        module.UpdatedAt = now;
+                        module.UpdatedBy = "System";
+                        updated++;
+                        _logger.LogDebug("Updated tenant module: {ModuleName} for tenant {TenantName}", moduleInfo.ModuleName, defaultTenant.Name);
+                    }
+
+                    continue;
+                }
+
+                _context.TenantModules.Add(new TenantModule
+                {
+                    Id = Guid.NewGuid(),
                     TenantId = defaultTenant.Id,
                     ModuleName = moduleInfo.ModuleName,
                     Description = moduleInfo.Description,
                     Status = ModuleStatus.Enabled,
-                    EnabledDate = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow,
+                    EnabledDate = now,
+                    CreatedAt = now,
                     CreatedBy = "System"
-                };
+                });
 
-                _context.TenantModules.Add(module);
+                created++;
                 _logger.LogDebug("Created tenant module: {ModuleName} for tenant {TenantName}", moduleInfo.ModuleName, defaultTenant.Name);
             }
 
-            await _context.SaveChangesAsync();
+            if (created > 0 || updated > 0)
+            {
+                await _context.SaveChangesAsync();
+                _logger.LogInformation(
+                    "Ensured default tenant modules for {TenantName}: created={Created}, updated={Updated}.",
+                    defaultTenant.Name,
+                    created,
+                    updated);
+            }
+            else
+            {
+                _logger.LogInformation("Default tenant modules already up to date for {TenantName}.", defaultTenant.Name);
+            }
         }
 
         private async Task CreateTestUserAsync(

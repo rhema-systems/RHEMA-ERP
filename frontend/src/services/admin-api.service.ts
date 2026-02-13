@@ -226,6 +226,22 @@ export interface EmailSettings {
   fromName: string;
 }
 
+export interface SmsSettings {
+  defaultProvider: string;
+  fallbackProvidersCsv: string;
+
+  twilioEnabled: boolean;
+  twilioAccountSid: string;
+  twilioAuthToken: string;
+  twilioFromNumber: string;
+
+  ghanaGatewayEnabled: boolean;
+  ghanaGatewayUrlTemplate: string;
+  ghanaGatewayApiKey: string;
+  ghanaGatewaySenderId: string;
+  ghanaGatewayTimeoutSeconds: number;
+}
+
 export interface PasswordPolicy {
   minLength: number;
   requireUppercase: boolean;
@@ -673,6 +689,10 @@ class AdminApiService {
     return apiService.request<EmailSettings>('/settings/email');
   }
 
+  async getSmsSettings(): Promise<SmsSettings> {
+    return apiService.request<SmsSettings>('/settings/sms');
+  }
+
   async saveEmailSettings(settings: EmailSettings): Promise<EmailSettings> {
     console.log('Saving email settings:', settings.smtpHost, settings.fromAddress);
     try {
@@ -708,6 +728,39 @@ class AdminApiService {
         return result;
       } catch (createError) {
         console.error('Failed to save email settings:', createError);
+        throw createError;
+      }
+    }
+  }
+
+  async saveSmsSettings(settings: SmsSettings): Promise<SmsSettings> {
+    console.log('Saving SMS settings:', settings.defaultProvider);
+    try {
+      const existing = await this.getSmsSettings();
+      let result: SmsSettings;
+      if (existing && (existing.twilioAccountSid || existing.ghanaGatewayUrlTemplate))
+      {
+        result = await apiService.request<SmsSettings>('/settings/sms', {
+          method: 'PUT',
+          body: JSON.stringify(settings),
+        });
+      }
+      else
+      {
+        result = await apiService.request<SmsSettings>('/settings/sms', {
+          method: 'POST',
+          body: JSON.stringify(settings),
+        });
+      }
+      return result;
+    } catch (error: unknown) {
+      try {
+        return await apiService.request<SmsSettings>('/settings/sms', {
+          method: 'POST',
+          body: JSON.stringify(settings),
+        });
+      } catch (createError) {
+        console.error('Failed to save SMS settings:', createError);
         throw createError;
       }
     }

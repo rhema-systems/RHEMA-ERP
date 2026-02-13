@@ -174,6 +174,68 @@ namespace ErpSystem.Api.Models
         public required string Message { get; set; }
     }
 
+    public class RequestLoginOtpRequest
+    {
+        /// <summary>
+        /// Email address or phone number (E.164 recommended for SMS, e.g. +233XXXXXXXXX)
+        /// </summary>
+        [Required]
+        [StringLength(150, MinimumLength = 3)]
+        public required string Identifier { get; set; }
+
+        /// <summary>
+        /// Delivery channel: "Email" or "Sms"
+        /// </summary>
+        [Required]
+        [StringLength(10)]
+        public required string Channel { get; set; }
+
+        [StringLength(50)]
+        public string? TenantCode { get; set; }
+
+        /// <summary>
+        /// CAPTCHA token (required when tenant security settings enable CAPTCHA)
+        /// </summary>
+        public string? RecaptchaToken { get; set; }
+    }
+
+    public class RequestLoginOtpResponse
+    {
+        public bool Success { get; set; }
+        public required string Message { get; set; }
+    }
+
+    public class VerifyLoginOtpRequest
+    {
+        [Required]
+        [StringLength(150, MinimumLength = 3)]
+        public required string Identifier { get; set; }
+
+        [Required]
+        [StringLength(10)]
+        public required string Channel { get; set; }
+
+        [Required]
+        [StringLength(6, MinimumLength = 6)]
+        public required string OtpCode { get; set; }
+
+        [StringLength(50)]
+        public string? TenantCode { get; set; }
+
+        public bool RememberMe { get; set; } = false;
+
+        /// <summary>
+        /// Optional Two-factor authentication code (6 digits) when user has TOTP enabled.
+        /// </summary>
+        [StringLength(6)]
+        public string? TwoFactorCode { get; set; }
+
+        /// <summary>
+        /// CAPTCHA token (required when tenant security settings enable CAPTCHA)
+        /// </summary>
+        public string? RecaptchaToken { get; set; }
+    }
+
     public class ChangePasswordRequest
     {
         [Required]

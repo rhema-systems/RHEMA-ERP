@@ -212,6 +212,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<MaintenanceNotification> MaintenanceNotifications { get; set; }
     public DbSet<MaintenanceNotificationTemplate> MaintenanceNotificationTemplates { get; set; }
     public DbSet<MaintenanceEscalationRule> MaintenanceEscalationRules { get; set; }
+    public DbSet<SmsSettings> SmsSettings { get; set; }
+    public DbSet<DataRetentionPolicy> DataRetentionPolicies { get; set; }
+    public DbSet<DataRetentionJobRun> DataRetentionJobRuns { get; set; }
 
     // HR entities
     public DbSet<Employee> Employees { get; set; }
@@ -421,12 +424,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // Enquiry, Helpdesk & Complaints (EHC)
     public DbSet<EhcTicket> EhcTickets { get; set; }
     public DbSet<EhcTicketCategory> EhcTicketCategories { get; set; }
+    public DbSet<EhcRootCauseCode> EhcRootCauseCodes { get; set; }
     public DbSet<EhcTicketMessage> EhcTicketMessages { get; set; }
     public DbSet<EhcTicketAttachment> EhcTicketAttachments { get; set; }
     public DbSet<EhcTicketStatusHistory> EhcTicketStatusHistories { get; set; }
     public DbSet<EhcSlaTemplate> EhcSlaTemplates { get; set; }
     public DbSet<EhcWorkflowRoutingRule> EhcWorkflowRoutingRules { get; set; }
     public DbSet<EhcTicketAuditEvent> EhcTicketAuditEvents { get; set; }
+    public DbSet<EhcEscalationPolicy> EhcEscalationPolicies { get; set; }
+    public DbSet<EhcEscalationPolicyLevel> EhcEscalationPolicyLevels { get; set; }
+    public DbSet<EhcEscalationExecution> EhcEscalationExecutions { get; set; }
 
     // Workflow Engine entities
     public DbSet<WorkflowDefinition> WorkflowDefinitions { get; set; }
@@ -938,6 +945,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
         // Configure Finance Common entities
         ConfigureFinanceCommonEntities(builder);
+
+        // Configure Compliance/Settings entities
+        ConfigureComplianceAndSettingsEntities(builder);
 
         // Apply global query filters for soft delete and multitenancy
         ApplyGlobalFilters(builder);
@@ -2693,6 +2703,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.NoAction);
         });
 
+        builder.Entity<EhcRootCauseCode>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.Name });
+            entity.HasIndex(x => new { x.TenantId, x.IsActive });
+        });
+
         builder.Entity<EhcSlaTemplate>(entity =>
         {
             entity.HasIndex(x => new { x.TenantId, x.IsActive });
@@ -2728,6 +2745,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(x => new { x.TenantId, x.RequesterUserId });
             entity.HasIndex(x => new { x.TenantId, x.AssignedToUserId });
             entity.HasIndex(x => new { x.TenantId, x.AssignedDepartmentId });
+            entity.HasIndex(x => new { x.TenantId, x.RootCauseId });
 
             entity.HasOne(x => x.Category)
                 .WithMany()
@@ -2737,6 +2755,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasOne(x => x.Subcategory)
                 .WithMany()
                 .HasForeignKey(x => x.SubcategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.RootCause)
+                .WithMany()
+                .HasForeignKey(x => x.RootCauseId)
                 .OnDelete(DeleteBehavior.NoAction);
 
             entity.HasOne(x => x.AssignedDepartment)
@@ -2787,6 +2810,62 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(x => new { x.TenantId, x.EventType });
             entity.HasIndex(x => new { x.TenantId, x.IsInternal });
         });
+
+        builder.Entity<EhcEscalationPolicy>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.IsActive });
+            entity.HasIndex(x => new { x.TenantId, x.Priority });
+            entity.HasIndex(x => new { x.TenantId, x.Trigger });
+
+            entity.HasOne(x => x.Category)
+                .WithMany()
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.Subcategory)
+                .WithMany()
+                .HasForeignKey(x => x.SubcategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.Department)
+                .WithMany()
+                .HasForeignKey(x => x.DepartmentId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasMany(x => x.Levels)
+                .WithOne(l => l.Policy)
+                .HasForeignKey(l => l.PolicyId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<EhcEscalationPolicyLevel>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.PolicyId, x.Level }).IsUnique();
+        });
+
+        builder.Entity<EhcEscalationExecution>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.TicketId, x.PolicyId, x.Level }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.ExecutedAtUtc });
+        });
+    }
+
+    private static void ConfigureComplianceAndSettingsEntities(ModelBuilder builder)
+    {
+        builder.Entity<SmsSettings>(entity =>
+        {
+            entity.HasIndex(x => x.TenantId).IsUnique();
+        });
+
+        builder.Entity<DataRetentionPolicy>(entity =>
+        {
+            entity.HasIndex(x => x.TenantId).IsUnique();
+        });
+
+        builder.Entity<DataRetentionJobRun>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.JobName, x.StartedAtUtc });
+        });
     }
 
     private static void SetSoftDeleteFilter<TEntity>(ModelBuilder builder, Microsoft.EntityFrameworkCore.Metadata.IMutableEntityType entityType)
@@ -2803,6 +2882,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     private void SeedData(ModelBuilder builder)
     {
+        // IMPORTANT: EF Core captures HasData values into migrations. Avoid DateTime.UtcNow here to prevent constant
+        // migration churn across environments/branches.
+        var seedDateUtc = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
         // Seed default tenant
         var defaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         builder.Entity<Tenant>().HasData(
@@ -2813,7 +2896,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 Code = "DEFAULT",
                 Description = "Default system tenant",
                 Status = Shared.TenantStatus.Active,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = seedDateUtc,
+                CreatedBy = "System"
             }
         );
 
@@ -2824,13 +2908,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         var employeeRoleId = Guid.Parse("00000000-0000-0000-0000-000000000004");
 
         builder.Entity<ApplicationRole>().HasData(
-            new ApplicationRole { Id = superAdminRoleId, Name = Shared.Constants.Roles.SuperAdmin, NormalizedName = Shared.Constants.Roles.SuperAdmin.ToUpper(), IsSystemRole = true },
-            new ApplicationRole { Id = tenantAdminRoleId, Name = Shared.Constants.Roles.TenantAdmin, NormalizedName = Shared.Constants.Roles.TenantAdmin.ToUpper(), IsSystemRole = true },
-            new ApplicationRole { Id = managerRoleId, Name = Shared.Constants.Roles.Manager, NormalizedName = Shared.Constants.Roles.Manager.ToUpper(), IsSystemRole = true },
-            new ApplicationRole { Id = employeeRoleId, Name = Shared.Constants.Roles.Employee, NormalizedName = Shared.Constants.Roles.Employee.ToUpper(), IsSystemRole = true }
+            new ApplicationRole { Id = superAdminRoleId, Name = Shared.Constants.Roles.SuperAdmin, NormalizedName = Shared.Constants.Roles.SuperAdmin.ToUpper(), IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
+            new ApplicationRole { Id = tenantAdminRoleId, Name = Shared.Constants.Roles.TenantAdmin, NormalizedName = Shared.Constants.Roles.TenantAdmin.ToUpper(), IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
+            new ApplicationRole { Id = managerRoleId, Name = Shared.Constants.Roles.Manager, NormalizedName = Shared.Constants.Roles.Manager.ToUpper(), IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
+            new ApplicationRole { Id = employeeRoleId, Name = Shared.Constants.Roles.Employee, NormalizedName = Shared.Constants.Roles.Employee.ToUpper(), IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" }
         );
-
-        var seedDateUtc = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
         // Seed default modules for default tenant (use stable IDs to avoid migration churn)
         var moduleIds = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase)
@@ -2871,10 +2953,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         }
 
         // Seed permissions
-        SeedPermissions(builder);
+        SeedPermissions(builder, seedDateUtc);
     }
 
-    private void SeedPermissions(ModelBuilder builder)
+    private static void SeedPermissions(ModelBuilder builder, DateTime seedDateUtc)
     {
         var permissions = new List<Permission>();
         var permissionId = 1;
@@ -2898,7 +2980,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 Description = description,
                 Category = "User Management",
                 IsSystemPermission = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = seedDateUtc,
+                CreatedBy = "System"
             });
             permissionId++;
         }
@@ -2922,7 +3005,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 Description = description,
                 Category = "Role Management",
                 IsSystemPermission = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = seedDateUtc,
+                CreatedBy = "System"
             });
             permissionId++;
         }
@@ -2946,7 +3030,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 Description = description,
                 Category = "Dashboard & Reports",
                 IsSystemPermission = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = seedDateUtc,
+                CreatedBy = "System"
             });
             permissionId++;
         }
@@ -2970,7 +3055,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 Description = description,
                 Category = "System Administration",
                 IsSystemPermission = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = seedDateUtc,
+                CreatedBy = "System"
             });
             permissionId++;
         }
@@ -2978,10 +3064,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<Permission>().HasData(permissions.ToArray());
 
         // Seed role-permission relationships
-        SeedRolePermissions(builder, permissions);
+        SeedRolePermissions(builder, permissions, seedDateUtc);
     }
 
-    private static void SeedRolePermissions(ModelBuilder builder, List<Permission> permissions)
+    private static void SeedRolePermissions(ModelBuilder builder, List<Permission> permissions, DateTime seedDateUtc)
     {
         var rolePermissions = new List<RolePermission>();
 
@@ -2993,7 +3079,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             {
                 RoleId = superAdminRoleId,
                 PermissionId = permission.Id,
-                GrantedAt = DateTime.UtcNow,
+                GrantedAt = seedDateUtc,
                 GrantedBy = "System"
             });
         }
@@ -3010,7 +3096,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             {
                 RoleId = tenantAdminRoleId,
                 PermissionId = permission.Id,
-                GrantedAt = DateTime.UtcNow,
+                GrantedAt = seedDateUtc,
                 GrantedBy = "System"
             });
         }
@@ -3028,7 +3114,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             {
                 RoleId = managerRoleId,
                 PermissionId = permission.Id,
-                GrantedAt = DateTime.UtcNow,
+                GrantedAt = seedDateUtc,
                 GrantedBy = "System"
             });
         }
@@ -3046,7 +3132,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             {
                 RoleId = employeeRoleId,
                 PermissionId = permission.Id,
-                GrantedAt = DateTime.UtcNow,
+                GrantedAt = seedDateUtc,
                 GrantedBy = "System"
             });
         }

@@ -51,6 +51,7 @@ import {
   Truck,
   ShieldCheck,
   Droplet,
+  MessageSquare,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -455,8 +456,10 @@ const navigationItems: NavItem[] = [
         icon: HelpCircle,
         children: [
           { title: 'Ticket Categories', href: '/administration/helpdesk/categories', icon: FileText },
+          { title: 'Root Causes', href: '/administration/helpdesk/root-causes', icon: Target },
           { title: 'Priority Levels', href: '/administration/helpdesk/priorities', icon: BarChart3 },
           { title: 'SLA Templates', href: '/administration/helpdesk/sla', icon: FileText },
+          { title: 'Escalations', href: '/administration/helpdesk/escalations', icon: AlertTriangle },
           { title: 'Workflow Routing', href: '/administration/helpdesk/workflows', icon: Workflow },
           { title: 'Support Channels', href: '/administration/helpdesk/channels', icon: HelpCircle },
         ],
@@ -486,10 +489,12 @@ const navigationItems: NavItem[] = [
           { title: 'User-Employee Links', href: '/administration/user-employee-links', icon: UserCheck },
           { title: 'Tenant Management', href: '/administration/tenant-management', icon: Building },
           { title: 'Email Settings', href: '/administration/settings/email', icon: Mail },
+          { title: 'SMS Settings', href: '/administration/settings/sms', icon: MessageSquare },
           { title: 'Field Labels', href: '/administration/settings/field-labels', icon: Tag },
           { title: 'User-Tenant Mapping', href: '/administration/user-tenant-mapping', icon: Users },
           { title: 'Security Logs', href: '/administration/identity-management/security-logs', icon: FileText },
           { title: 'Audit Logs', href: '/administration/audit-logs', icon: FileText },
+          { title: 'Data Retention', href: '/administration/security/retention', icon: Clock },
           { title: 'Data Sources', href: '/data-sources', icon: Database },
         ],
       },

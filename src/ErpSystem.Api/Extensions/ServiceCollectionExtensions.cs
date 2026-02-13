@@ -344,8 +344,24 @@ namespace ErpSystem.Api.Extensions
         {
             // Core services
             services.AddScoped<ErpSystem.Core.Interfaces.IFileUploadService, ErpSystem.Api.Services.SimpleFileUploadService>();
+
+            // SMS (Twilio + Ghana gateway) - used by notifications + OTP flows
+            services.AddOptions<ErpSystem.Api.Services.Sms.SmsOptions>()
+                .BindConfiguration("Sms");
+            services.AddScoped<ErpSystem.Api.Services.Sms.TwilioSmsSender>();
+            services.AddHttpClient<ErpSystem.Api.Services.Sms.GhanaGatewaySmsSender>((sp, client) =>
+            {
+                var opts = sp.GetRequiredService<IOptions<ErpSystem.Api.Services.Sms.SmsOptions>>().Value;
+                var seconds = Math.Clamp(opts.GhanaGateway.TimeoutSeconds, 1, 60);
+                client.Timeout = TimeSpan.FromSeconds(seconds);
+            });
+            services.AddScoped<ErpSystem.Api.Services.Sms.CompositeSmsSender>();
+            services.AddScoped<ErpSystem.Api.Services.Sms.ISmsSender>(sp => sp.GetRequiredService<ErpSystem.Api.Services.Sms.CompositeSmsSender>());
+            services.AddScoped<ErpSystem.Api.Services.Sms.ITenantSmsSender, ErpSystem.Api.Services.Sms.TenantSmsSender>();
+
             // Unified notification service - comprehensive notification handling for all ERP modules
             services.AddScoped<ErpSystem.Core.Interfaces.INotificationService, ErpSystem.Api.Services.UnifiedNotificationService>();
+            services.AddScoped<ErpSystem.Api.Services.Otp.IOtpService, ErpSystem.Api.Services.Otp.OtpService>();
             services.AddScoped<ErpSystem.Core.Interfaces.INotificationTopicPublisher, ErpSystem.Core.Services.Notifications.NotificationTopicPublisher>();
             services.AddScoped<ErpSystem.Core.Interfaces.Events.IAppEventBus, ErpSystem.Core.Services.Events.AppEventBus>();
             services.AddScoped<ErpSystem.Core.Interfaces.Events.IAppEventHandler<ErpSystem.Core.Interfaces.Events.EntityActivityEvent>, ErpSystem.Core.Services.Notifications.EntityActivityNotificationTopicHandler>();
@@ -722,6 +738,9 @@ namespace ErpSystem.Api.Extensions
 
             // Exception log maintenance (retention purge)
             services.AddHostedService<ErpSystem.Api.Services.ExceptionLogMaintenanceBackgroundService>();
+
+            // Tenant data retention (audit/security logs, notifications, EHC audit events)
+            services.AddHostedService<ErpSystem.Api.Services.DataRetentionBackgroundService>();
 
             // EHC SLA monitoring / escalation (tickets)
             services.AddHostedService<ErpSystem.Api.Services.Ehc.EhcSlaMonitoringBackgroundService>();

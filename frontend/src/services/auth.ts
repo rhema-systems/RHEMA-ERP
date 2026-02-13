@@ -1,5 +1,5 @@
 import { apiService } from './api.service';
-import type { LoginRequest, LoginResponse, User, Tenant } from '../types';
+import type { LoginRequest, LoginResponse, RequestLoginOtpRequest, RequestLoginOtpResponse, VerifyLoginOtpRequest, User, Tenant } from '../types';
 
 export class AuthService {
   async login(credentials: LoginRequest): Promise<LoginResponse> {
@@ -12,6 +12,22 @@ export class AuthService {
       localStorage.setItem('user', JSON.stringify(response.user));
     }
     
+    return response;
+  }
+
+  async requestLoginOtp(request: RequestLoginOtpRequest): Promise<RequestLoginOtpResponse> {
+    return apiService.requestLoginOtp(request);
+  }
+
+  async loginWithOtp(request: VerifyLoginOtpRequest): Promise<LoginResponse> {
+    const response = await apiService.verifyLoginOtp(request);
+
+    if (response.token) {
+      localStorage.setItem('authToken', response.token);
+      localStorage.setItem('refreshToken', response.refreshToken);
+      localStorage.setItem('user', JSON.stringify(response.user));
+    }
+
     return response;
   }
 

@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
@@ -54,6 +55,9 @@ export default function HelpdeskTicketDetailPage() {
   const [externalReply, setExternalReply] = useState('');
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [attachmentInternalOnly, setAttachmentInternalOnly] = useState(false);
+  const [rcaRootCauseId, setRcaRootCauseId] = useState<string>('');
+  const [rcaRootCauseDetails, setRcaRootCauseDetails] = useState('');
+  const [rcaResolutionSummary, setRcaResolutionSummary] = useState('');
 
   const getErrorMessage = (err: unknown) => (err instanceof Error ? err.message : 'Something went wrong');
 
@@ -84,6 +88,14 @@ export default function HelpdeskTicketDetailPage() {
     queryFn: () => ehcInternalTicketService.listAgents(),
   });
 
+  const isComplaint = ticket?.ticketType === 'Complaint';
+
+  const { data: rootCauses } = useQuery({
+    queryKey: ['ehc', 'internal', 'lookups', 'root-causes'],
+    queryFn: () => ehcInternalTicketService.listRootCauses(),
+    enabled: Boolean(isComplaint),
+  });
+
   useEffect(() => {
     const id = setInterval(() => setNowTs(Date.now()), 30_000);
     return () => clearInterval(id);
@@ -95,6 +107,13 @@ export default function HelpdeskTicketDetailPage() {
     setAssignedDepartmentId((prev) => prev || ticket.assignedDepartmentId || myDepartment?.id || '');
     setAssignedToUserId((prev) => prev || ticket.assignedToUserId || '');
   }, [ticket, myDepartment?.id]);
+
+  useEffect(() => {
+    if (!ticket || ticket.ticketType !== 'Complaint') return;
+    setRcaRootCauseId(ticket.rootCauseId || '');
+    setRcaRootCauseDetails(ticket.rootCauseDetails || '');
+    setRcaResolutionSummary(ticket.resolutionSummary || '');
+  }, [ticket?.id, ticket?.ticketType, ticket?.rootCauseId, ticket?.rootCauseDetails, ticket?.resolutionSummary]);
 
   const allowedTransitionOptions = useMemo(() => {
     const items = (allowedTransitions || []) as EhcAllowedTicketTransition[];
@@ -181,6 +200,26 @@ export default function HelpdeskTicketDetailPage() {
       await qc.invalidateQueries({ queryKey: ['ehc', 'internal', 'ticket', ticketId] });
       await qc.invalidateQueries({ queryKey: ['ehc', 'internal', 'ticket', ticketId, 'allowed-transitions'] });
       toast({ title: 'Saved', description: 'Status updated.', variant: 'success' });
+    },
+    onError: (err) => {
+      toast({ title: 'Error', description: getErrorMessage(err), variant: 'destructive' });
+    },
+  });
+
+  const saveRca = useMutation({
+    mutationFn: async () => {
+      if (!ticketId) throw new Error('Ticket id is required');
+      if (!isComplaint) throw new Error('RCA is only available for complaint tickets');
+
+      return ehcInternalTicketService.updateRca(ticketId, {
+        rootCauseId: rcaRootCauseId ? rcaRootCauseId : null,
+        rootCauseDetails: (rcaRootCauseDetails || '').trim() || null,
+        resolutionSummary: (rcaResolutionSummary || '').trim() || null,
+      });
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['ehc', 'internal', 'ticket', ticketId] });
+      toast({ title: 'Saved', description: 'RCA updated.', variant: 'success' });
     },
     onError: (err) => {
       toast({ title: 'Error', description: getErrorMessage(err), variant: 'destructive' });
@@ -551,6 +590,7 @@ export default function HelpdeskTicketDetailPage() {
           <Tabs defaultValue="sla">
             <TabsList>
               <TabsTrigger value="sla">SLA</TabsTrigger>
+              {isComplaint ? <TabsTrigger value="rca">RCA</TabsTrigger> : null}
               <TabsTrigger value="audit">Audit trail</TabsTrigger>
             </TabsList>
 
@@ -594,6 +634,59 @@ export default function HelpdeskTicketDetailPage() {
                 </div>
               </div>
             </TabsContent>
+
+            {isComplaint ? (
+              <TabsContent value="rca" className="space-y-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Root cause</Label>
+                    <Select value={rcaRootCauseId || '__none'} onValueChange={(v) => setRcaRootCauseId(v === '__none' ? '' : v)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select root cause..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none">None</SelectItem>
+                        {(rootCauses ?? [])
+                          .filter((x) => x?.isActive)
+                          .sort((a, b) => String(a.code || '').localeCompare(String(b.code || '')))
+                          .map((x) => (
+                            <SelectItem key={x.id} value={x.id}>
+                              {x.code} • {x.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    <div className="text-xs text-slate-500">Configure options in Admin → Helpdesk → Root Causes.</div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Resolution summary</Label>
+                    <Textarea
+                      value={rcaResolutionSummary}
+                      onChange={(e) => setRcaResolutionSummary(e.target.value)}
+                      placeholder="What was done to resolve the complaint?"
+                      rows={4}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Root cause details</Label>
+                  <Textarea
+                    value={rcaRootCauseDetails}
+                    onChange={(e) => setRcaRootCauseDetails(e.target.value)}
+                    placeholder="Additional analysis, contributing factors, corrective/preventive actions..."
+                    rows={5}
+                  />
+                </div>
+
+                <div className="flex justify-end">
+                  <Button onClick={() => saveRca.mutate()} disabled={saveRca.isPending}>
+                    {saveRca.isPending ? 'Saving…' : 'Save RCA'}
+                  </Button>
+                </div>
+              </TabsContent>
+            ) : null}
 
             <TabsContent value="audit" className="space-y-2">
               {auditEvents.length ? (

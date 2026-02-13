@@ -52,6 +52,38 @@ export interface EhcHelpdeskSummary {
   byType: Array<{ ticketType: EhcTicketType; count: number }>;
   byDepartment: Array<{ departmentId?: string | null; departmentName: string; count: number }>;
   byCategory: Array<{ categoryId?: string | null; categoryName: string; count: number }>;
+  byRootCause?: Array<{ rootCauseId?: string | null; rootCauseName: string; count: number }>;
+}
+
+export interface EhcSlaCompliancePoint {
+  date: string; // yyyy-mm-dd
+  totalTickets: number;
+  firstResponseMet: number;
+  firstResponseBreached: number;
+  resolutionMet: number;
+  resolutionBreached: number;
+  firstResponseCompliancePercent?: number | null;
+  resolutionCompliancePercent?: number | null;
+}
+
+export interface EhcAgentPerformanceRow {
+  agentUserId?: string | null;
+  agentName: string;
+  totalAssigned: number;
+  openAssigned: number;
+  resolvedAssigned: number;
+  firstResponseBreaches: number;
+  resolutionBreaches: number;
+  avgFirstResponseMinutes?: number | null;
+  avgResolutionMinutes?: number | null;
+}
+
+export interface EhcEscalationReportRow {
+  policyId: string;
+  policyName: string;
+  trigger: string;
+  level: number;
+  count: number;
 }
 
 export interface EhcRelatedEntityLookupItem {
@@ -76,6 +108,20 @@ export interface EhcAllowedTicketTransition {
   transitionName?: string | null;
   transitionDescription?: string | null;
   targetStatus: EhcTicketStatus;
+}
+
+export interface EhcRootCauseCode {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  isActive: boolean;
+}
+
+export interface UpdateEhcTicketRcaRequest {
+  rootCauseId?: string | null;
+  rootCauseDetails?: string | null;
+  resolutionSummary?: string | null;
 }
 
 export const ehcInternalTicketService = {
@@ -194,6 +240,24 @@ export const ehcInternalTicketService = {
     return res.data as any;
   },
 
+  async getSlaCompliance(days = 30): Promise<EhcSlaCompliancePoint[]> {
+    const qs = new URLSearchParams({ days: String(days) });
+    const res = await apiService.request<ApiEnvelope<EhcSlaCompliancePoint[]>>(`/ehc/internal/reports/sla-compliance?${qs.toString()}`, { method: 'GET' });
+    return (res.data ?? []) as any;
+  },
+
+  async getAgentPerformance(days = 30): Promise<EhcAgentPerformanceRow[]> {
+    const qs = new URLSearchParams({ days: String(days) });
+    const res = await apiService.request<ApiEnvelope<EhcAgentPerformanceRow[]>>(`/ehc/internal/reports/agent-performance?${qs.toString()}`, { method: 'GET' });
+    return (res.data ?? []) as any;
+  },
+
+  async getEscalations(days = 30): Promise<EhcEscalationReportRow[]> {
+    const qs = new URLSearchParams({ days: String(days) });
+    const res = await apiService.request<ApiEnvelope<EhcEscalationReportRow[]>>(`/ehc/internal/reports/escalations?${qs.toString()}`, { method: 'GET' });
+    return (res.data ?? []) as any;
+  },
+
   async searchRelatedEntities(entityType: string, q: string, limit = 20): Promise<EhcRelatedEntityLookupItem[]> {
     const qs = new URLSearchParams({ entityType, q, limit: String(limit) });
     const res = await apiService.request<ApiEnvelope<EhcRelatedEntityLookupItem[]>>(`/ehc/internal/related-entities/search?${qs.toString()}`, { method: 'GET' });
@@ -204,6 +268,19 @@ export const ehcInternalTicketService = {
     const qs = new URLSearchParams({ entityType, reference });
     const res = await apiService.request<ApiEnvelope<EhcRelatedEntityResolve>>(`/ehc/internal/related-entities/resolve?${qs.toString()}`, { method: 'GET' });
     return res.data as any;
+  },
+
+  async listRootCauses(): Promise<EhcRootCauseCode[]> {
+    const res = await apiService.request<ApiEnvelope<EhcRootCauseCode[]>>('/ehc/internal/lookups/root-causes', { method: 'GET' });
+    return (res.data ?? []) as any;
+  },
+
+  async updateRca(ticketId: string, payload: UpdateEhcTicketRcaRequest): Promise<EhcTicketDetail> {
+    const res = await apiService.request<ApiEnvelope<EhcTicketDetail>>(`/ehc/internal/tickets/${ticketId}/rca`, {
+      method: 'PUT',
+      body: JSON.stringify(payload ?? {}),
+    });
+    return res.data;
   },
 };
 

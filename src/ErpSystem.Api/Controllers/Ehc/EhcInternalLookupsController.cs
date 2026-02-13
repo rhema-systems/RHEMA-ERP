@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Shared;
@@ -112,5 +113,31 @@ public sealed class EhcInternalLookupsController : ControllerBase
         }
 
         return Ok(new { success = true, data = new EhcLookupItemDto { Id = department.Id, Name = department.Name } });
+    }
+
+    [HttpGet("root-causes")]
+    public async Task<ActionResult> GetRootCauses(CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            return Ok(new { success = true, data = Array.Empty<EhcRootCauseCodeDto>() });
+        }
+
+        var items = await _db.Set<EhcRootCauseCode>()
+            .AsNoTracking()
+            .Where(r => r.TenantId == tenantId && !r.IsDeleted && r.IsActive)
+            .OrderBy(r => r.Name)
+            .Select(r => new EhcRootCauseCodeDto
+            {
+                Id = r.Id,
+                Code = r.Code,
+                Name = r.Name,
+                Description = r.Description,
+                IsActive = r.IsActive
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(new { success = true, data = items });
     }
 }

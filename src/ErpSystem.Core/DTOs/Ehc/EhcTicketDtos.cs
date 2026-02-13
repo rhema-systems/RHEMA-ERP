@@ -88,10 +88,24 @@ public sealed class EhcTicketDetailDto
     public string? RequesterEmail { get; set; }
     public string? RequesterAuthenticationProvider { get; set; }
 
+    // Complaint/RCA (internal-only)
+    public Guid? RootCauseId { get; set; }
+    public string? RootCauseCode { get; set; }
+    public string? RootCauseName { get; set; }
+    public string? RootCauseDetails { get; set; }
+    public string? ResolutionSummary { get; set; }
+
     public List<EhcTicketMessageDto> Messages { get; set; } = new();
     public List<EhcTicketAttachmentDto> Attachments { get; set; } = new();
     public List<EhcTicketStatusHistoryDto> StatusHistory { get; set; } = new();
     public List<EhcTicketAuditEventDto> AuditTrail { get; set; } = new();
+}
+
+public sealed class UpdateEhcTicketRcaRequestDto
+{
+    public Guid? RootCauseId { get; set; }
+    public string? RootCauseDetails { get; set; }
+    public string? ResolutionSummary { get; set; }
 }
 
 public sealed class EhcTicketMessageDto

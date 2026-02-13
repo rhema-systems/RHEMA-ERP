@@ -30,6 +30,23 @@ public class EhcTicketCategory : TenantEntity
     public virtual ICollection<EhcTicketCategory> Subcategories { get; set; } = new List<EhcTicketCategory>();
 }
 
+[Table("EhcRootCauseCodes")]
+public class EhcRootCauseCode : TenantEntity
+{
+    [Required]
+    [StringLength(50)]
+    public string Code { get; set; } = string.Empty;
+
+    [Required]
+    [StringLength(150)]
+    public string Name { get; set; } = string.Empty;
+
+    [StringLength(500)]
+    public string? Description { get; set; }
+
+    public bool IsActive { get; set; } = true;
+}
+
 [Table("EhcSlaTemplates")]
 public class EhcSlaTemplate : TenantEntity
 {
@@ -171,6 +188,18 @@ public class EhcTicket : TenantEntity
 
     [StringLength(100)]
     public string? RelatedEntityReference { get; set; }
+
+    // Complaint / RCA fields (internal-only UI, but stored for reporting)
+    public Guid? RootCauseId { get; set; }
+
+    [ForeignKey(nameof(RootCauseId))]
+    public virtual EhcRootCauseCode? RootCause { get; set; }
+
+    [StringLength(2000)]
+    public string? RootCauseDetails { get; set; }
+
+    [StringLength(2000)]
+    public string? ResolutionSummary { get; set; }
 
     public virtual ICollection<EhcTicketMessage> Messages { get; set; } = new List<EhcTicketMessage>();
     public virtual ICollection<EhcTicketAttachment> Attachments { get; set; } = new List<EhcTicketAttachment>();

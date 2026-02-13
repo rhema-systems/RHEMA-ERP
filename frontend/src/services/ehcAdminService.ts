@@ -70,6 +70,52 @@ export interface CreateEhcWorkflowRoutingRuleAdmin {
   assignedDepartmentId?: string | null;
 }
 
+export type EhcEscalationTrigger =
+  | 'FirstResponseDueSoon'
+  | 'FirstResponseBreached'
+  | 'ResolutionDueSoon'
+  | 'ResolutionBreached';
+
+export interface EhcEscalationPolicyLevelAdmin {
+  level: number;
+  delayMinutes: number;
+  notifyRoles: string[];
+  notifyAssignedAgent: boolean;
+  notifyUserId?: string | null;
+  addInternalComment: boolean;
+  reassignToRole?: string | null;
+  reassignToUserId?: string | null;
+}
+
+export interface EhcEscalationPolicyAdmin {
+  id: string;
+  name: string;
+  isActive: boolean;
+  priority: number;
+  trigger: EhcEscalationTrigger;
+  dueSoonMinutes: number;
+  ticketType?: EhcTicketType | null;
+  ticketPriority?: EhcTicketPriority | null;
+  categoryId?: string | null;
+  subcategoryId?: string | null;
+  departmentId?: string | null;
+  levels: EhcEscalationPolicyLevelAdmin[];
+}
+
+export interface CreateEhcEscalationPolicyAdmin {
+  name: string;
+  isActive: boolean;
+  priority: number;
+  trigger: EhcEscalationTrigger;
+  dueSoonMinutes: number;
+  ticketType?: EhcTicketType | null;
+  ticketPriority?: EhcTicketPriority | null;
+  categoryId?: string | null;
+  subcategoryId?: string | null;
+  departmentId?: string | null;
+  levels: EhcEscalationPolicyLevelAdmin[];
+}
+
 export const ehcAdminService = {
   async listCategories(): Promise<EhcTicketCategoryAdmin[]> {
     const res = await apiService.request<ApiEnvelope<EhcTicketCategoryAdmin[]>>('/ehc/admin/categories', { method: 'GET' });
@@ -142,6 +188,30 @@ export const ehcAdminService = {
 
   async deleteWorkflowRoutingRule(id: string): Promise<void> {
     await apiService.request<ApiEnvelope<any>>(`/ehc/admin/workflow-routing-rules/${id}`, { method: 'DELETE' });
+  },
+
+  async listEscalationPolicies(): Promise<EhcEscalationPolicyAdmin[]> {
+    const res = await apiService.request<ApiEnvelope<EhcEscalationPolicyAdmin[]>>('/ehc/admin/escalation-policies', { method: 'GET' });
+    return res.data ?? [];
+  },
+
+  async createEscalationPolicy(payload: CreateEhcEscalationPolicyAdmin): Promise<EhcEscalationPolicyAdmin> {
+    const res = await apiService.request<ApiEnvelope<EhcEscalationPolicyAdmin>>('/ehc/admin/escalation-policies', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return res.data;
+  },
+
+  async updateEscalationPolicy(id: string, payload: CreateEhcEscalationPolicyAdmin): Promise<void> {
+    await apiService.request<ApiEnvelope<any>>(`/ehc/admin/escalation-policies/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteEscalationPolicy(id: string): Promise<void> {
+    await apiService.request<ApiEnvelope<any>>(`/ehc/admin/escalation-policies/${id}`, { method: 'DELETE' });
   },
 };
 
