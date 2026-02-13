@@ -12,36 +12,30 @@ namespace ErpSystem.Core.Interfaces.Finance
     /// </summary>
     public interface ICurrencyService
     {
-        /// <summary>
-        /// Retrieves all currencies for the current tenant.
-        /// </summary>
+        // Retrieval
+        Task<IReadOnlyList<CurrencyDto>> GetAllAsync(CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<CurrencyDto>> GetActiveAsync(CancellationToken cancellationToken = default);
+        Task<CurrencyDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+        Task<CurrencyDto?> GetByCodeAsync(string code, CancellationToken cancellationToken = default);
+        Task<CurrencyDto?> GetBaseCurrencyAsync(CancellationToken cancellationToken = default);
+
+        // CRUD
+        Task<CurrencyDto> CreateAsync(CreateCurrencyDto dto, CancellationToken cancellationToken = default);
+        Task<CurrencyDto> UpdateAsync(Guid id, UpdateCurrencyDto dto, CancellationToken cancellationToken = default);
+        Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+        
+        // Operations
+        Task<bool> SetBaseCurrencyAsync(Guid id, CancellationToken cancellationToken = default);
+        Task<bool> UpdateExchangeRateAsync(Guid id, decimal rate, CancellationToken cancellationToken = default);
+        Task<decimal> ConvertAsync(decimal amount, string fromCurrencyCode, string toCurrencyCode, CancellationToken cancellationToken = default);
+        Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null, CancellationToken cancellationToken = default);
+
+        // Legacy/Alias (kept for compatibility or remove if unused)
         Task<IReadOnlyList<CurrencyDto>> GetCurrenciesAsync(CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// Retrieves a single currency by its ISO currency code.
-        /// </summary>
-        /// <param name="currencyCode">ISO 4217 three-letter code (e.g., "USD", "GHS")</param>
         Task<CurrencyDto?> GetCurrencyByCodeAsync(string currencyCode, CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// Creates a new currency.
-        /// </summary>
         Task<CurrencyDto> CreateCurrencyAsync(CreateCurrencyDto dto, CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// Updates an existing currency.
-        /// </summary>
         Task<CurrencyDto> UpdateCurrencyAsync(string currencyCode, UpdateCurrencyDto dto, CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// Deletes a currency (soft delete).
-        /// Cannot delete if currency has transaction history or is base currency.
-        /// </summary>
         Task DeleteCurrencyAsync(string currencyCode, CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// Activates or deactivates a currency.
-        /// </summary>
         Task<CurrencyDto> ToggleCurrencyStatusAsync(string currencyCode, bool isActive, CancellationToken cancellationToken = default);
     }
 }

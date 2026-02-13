@@ -49,6 +49,19 @@ public class Currency : BusinessEntity
     public string CurrencyCode { get; set; } = string.Empty;
 
     /// <summary>
+    /// Alias for CurrencyCode to satisfy interface requirements or legacy code
+    /// </summary>
+    [NotMapped]
+    public string Code 
+    { 
+        get => CurrencyCode; 
+        set => CurrencyCode = value; 
+    }
+
+    public int DisplayOrder { get; set; } = 0;
+
+
+    /// <summary>
     /// ISO 4217 numeric currency code (3 digits).
     /// Provides alternative unique identifier for systems that prefer numeric codes.
     /// 

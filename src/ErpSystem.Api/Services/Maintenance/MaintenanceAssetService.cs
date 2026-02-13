@@ -308,7 +308,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
                 Manufacturer = a.Manufacturer,
                 Model = a.Model,
                 Year = a.Year,
-                OwnershipType = a.OwnershipType,
+                OwnershipType = a.OwnershipType.ToString(),
                 LicensePlate = a.LicensePlate,
                 VIN = a.VIN,
                 Status = a.Status.ToString(),

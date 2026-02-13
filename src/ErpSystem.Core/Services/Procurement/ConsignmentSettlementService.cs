@@ -33,7 +33,7 @@ public class ConsignmentSettlementService : IConsignmentSettlementService
             return;
         }
 
-        if (!movement.WarehouseId.HasValue || movement.WarehouseId.Value == Guid.Empty)
+        if (movement.WarehouseId == Guid.Empty)
         {
             return;
         }
@@ -50,7 +50,7 @@ public class ConsignmentSettlementService : IConsignmentSettlementService
             return;
         }
 
-        var warehouse = await _warehouseRepository.GetByIdAsync(movement.WarehouseId.Value);
+        var warehouse = await _warehouseRepository.GetByIdAsync(movement.WarehouseId);
         if (warehouse?.IsConsignmentWarehouse != true)
         {
             return;
@@ -72,7 +72,7 @@ public class ConsignmentSettlementService : IConsignmentSettlementService
             TenantId = tenantId,
             StockMovementId = movement.Id,
             InventoryItemId = movement.InventoryItemId,
-            WarehouseId = movement.WarehouseId.Value,
+            WarehouseId = movement.WarehouseId,
             LocationId = movement.LocationId,
             MovementType = movement.MovementType,
             Quantity = qty,
@@ -87,6 +87,6 @@ public class ConsignmentSettlementService : IConsignmentSettlementService
 
         _logger.LogInformation(
             "Created consignment settlement for movement {MovementId} (Warehouse {WarehouseId}, Item {ItemId}, Qty {Qty})",
-            movement.Id, movement.WarehouseId.Value, movement.InventoryItemId, qty);
+            movement.Id, movement.WarehouseId, movement.InventoryItemId, qty);
     }
 }

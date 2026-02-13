@@ -99,7 +99,7 @@ public class CurrencyRepository : GenericRepository<Currency>, ICurrencyReposito
         return await _dbSet
             .Where(c => c.IsActive && c.TenantId == TenantId && !c.IsDeleted)
             .OrderBy(c => c.DisplayOrder)
-            .ThenBy(c => c.Name)
+            .ThenBy(c => c.CurrencyName)
             .ToListAsync();
     }
 

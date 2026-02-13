@@ -1046,7 +1046,8 @@ public class CreateStockAdjustmentDto
     /// <summary>
     /// The warehouse where the adjustment is being made
     /// </summary>
-    public Guid? WarehouseId { get; set; }
+    [Required]
+    public Guid WarehouseId { get; set; }
 
     [Required]
     [MaxLength(50)]

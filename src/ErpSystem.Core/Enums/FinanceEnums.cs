@@ -127,3 +127,23 @@ public enum PeriodStatus
     Locked = 4
 }
 
+/// <summary>
+/// Journal entry posting status.
+/// </summary>
+public enum JournalStatus
+{
+    Draft = 1,
+    Posted = 2,
+    Reversed = 3
+}
+
+/// <summary>
+/// Account transaction direction (debit or credit).
+/// </summary>
+public enum TransactionType
+{
+    Debit = 1,
+    Credit = 2
+}
+
+

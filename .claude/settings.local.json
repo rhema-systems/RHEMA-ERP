@@ -5,7 +5,11 @@
       "Bash(dotnet ef migrations add:*)",
       "Bash(grep:*)",
       "Bash(powershell:*)",
-      "Bash(dotnet build:*)"
+      "Bash(dotnet build:*)",
+      "Bash(findstr:*)",
+      "Bash(git stash:*)",
+      "Bash(git checkout:*)",
+      "Bash(timeout 15 dotnet run:*)"
     ]
   }
 }

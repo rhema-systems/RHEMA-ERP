@@ -2006,6 +2006,10 @@ public class MaintenanceAssetListDto
     public string? AssetType { get; set; }
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
+    public int? Year { get; set; }
+    public string? OwnershipType { get; set; }
+    public string? LicensePlate { get; set; }
+    public string? VIN { get; set; }
     public string Status { get; set; } = string.Empty;
     public string Criticality { get; set; } = string.Empty;
     public string? Location { get; set; }
@@ -2042,6 +2046,12 @@ public class CreateMaintenanceAssetDto
 
     [StringLength(50)]
     public string? SerialNumber { get; set; }
+
+    [StringLength(20)]
+    public string? LicensePlate { get; set; }
+
+    [StringLength(50)]
+    public string? VIN { get; set; }
 
     public DateTime? PurchaseDate { get; set; }
     public decimal? PurchasePrice { get; set; }
@@ -2092,6 +2102,12 @@ public class UpdateMaintenanceAssetDto
 
     [StringLength(50)]
     public string? SerialNumber { get; set; }
+
+    [StringLength(20)]
+    public string? LicensePlate { get; set; }
+
+    [StringLength(50)]
+    public string? VIN { get; set; }
 
     public DateTime? PurchaseDate { get; set; }
     public decimal? PurchasePrice { get; set; }
@@ -2336,6 +2352,8 @@ public class WorkOrderDto
     public DateTime? RequestedStartDate { get; set; }
     public DateTime? RequestedCompletionDate { get; set; }
     public DateTime? ScheduledStartDate { get; set; }
+    public string BillingType { get; set; } = string.Empty;
+    public decimal FixedAmount { get; set; }
     public DateTime? ScheduledEndDate { get; set; }
     public DateTime? ActualStartDate { get; set; }
     public DateTime? ActualEndDate { get; set; }
@@ -2441,6 +2459,11 @@ public class CreateWorkOrderDto
 
     [StringLength(2000)]
     public string? Description { get; set; }
+
+    [StringLength(20)]
+    public string BillingType { get; set; } = "Repairs";
+
+    public decimal FixedAmount { get; set; }
 
     [Required]
     public Guid AssetId { get; set; }
@@ -2683,6 +2706,7 @@ public class WorkOrderTaskDto
     public DateTime? CompletedAt { get; set; }
     public string? CompletionNotes { get; set; }
     public bool IsRequired { get; set; }
+    public string? PhotoPath { get; set; }
 
     public EmployeeDto? AssignedTechnician { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -3331,6 +3355,12 @@ public class ComplianceChecklistItemDto
     public string? Notes { get; set; }
     public DateTime? CompletedDate { get; set; }
     public string? CompletedBy { get; set; }
+}
+
+public class EndLaborDto
+{
+    public DateTime? EndTime { get; set; }
+    public string? Notes { get; set; }
 }
 
 public class ComplianceViolationDto

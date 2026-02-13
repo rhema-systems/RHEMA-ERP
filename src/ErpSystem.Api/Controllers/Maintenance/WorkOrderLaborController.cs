@@ -74,7 +74,7 @@ public class WorkOrderLaborController : ControllerBase
     {
         try
         {
-            var labor = await _laborService.EndLaborAsync(id, endDto.EndTime, endDto.Notes);
+            var labor = await _laborService.EndLaborAsync(id, endDto.EndTime ?? DateTime.UtcNow, endDto.Notes);
             return Ok(labor);
         }
         catch (ArgumentException ex)

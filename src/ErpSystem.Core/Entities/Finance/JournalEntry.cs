@@ -91,15 +91,6 @@ public class JournalEntry : BusinessEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal TotalDebitAmount { get; set; } = 0;
 
-<<<<<<< HEAD
-    public enum JournalStatus
-    {
-        Draft = 1,
-        Posted = 2,
-        Reversed = 3
-    }
-}
-=======
     /// <summary>
     /// Total credit amount for all transaction lines (base currency).
     /// Must equal TotalDebitAmount for balanced entry.
@@ -407,4 +398,3 @@ public class JournalEntry : BusinessEntity
     [ForeignKey(nameof(OriginalJournalEntryId))]
     public virtual JournalEntry? OriginalJournalEntry { get; set; }
 }
->>>>>>> b148baa (feat(finance): Add comprehensive finance module improvements)

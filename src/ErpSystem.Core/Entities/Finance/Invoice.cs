@@ -16,12 +16,8 @@ namespace ErpSystem.Core.Entities.Finance
 
         [Required]
         public Guid CustomerId { get; set; }
-<<<<<<< HEAD
-
-=======
         public virtual Customer? Customer { get; set; }
-        
->>>>>>> b148baa (feat(finance): Add comprehensive finance module improvements)
+
         [Required]
         [MaxLength(200)]
         public string CustomerName { get; set; } = string.Empty;

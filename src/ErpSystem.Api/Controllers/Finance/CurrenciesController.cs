@@ -187,7 +187,7 @@ public class CurrenciesController : ControllerBase
 
         try
         {
-            var result = await _currencyService.UpdateExchangeRateAsync(id, dto.ExchangeRate);
+            var result = await _currencyService.UpdateExchangeRateAsync(id, dto.Rate);
             if (!result)
             {
                 return NotFound($"Currency with ID {id} not found.");

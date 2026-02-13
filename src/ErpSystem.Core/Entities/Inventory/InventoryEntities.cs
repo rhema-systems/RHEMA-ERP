@@ -40,6 +40,13 @@ public class InventoryItem : TenantEntity
     [MaxLength(20)]
     public string UnitOfMeasure { get; set; } = "EA"; // Each, KG, LB, FT, M, L, GAL, etc.
 
+    public Guid? UnitOfMeasureScheduleId { get; set; }
+    public virtual UnitOfMeasureSchedule? UnitOfMeasureSchedule { get; set; }
+
+    public ValuationMethod ValuationMethod { get; set; }
+    public bool IsValuationLocked { get; set; }
+    public decimal DailyRentalRate { get; set; }
+
     // Costing
     [Column(TypeName = "decimal(18,4)")]
     public decimal StandardCost { get; set; } = 0;
@@ -85,6 +92,7 @@ public class InventoryItem : TenantEntity
     public Guid? DefaultTaxGroupId { get; set; }
 
     // Physical Properties
+    public decimal ShippingWeight { get; set; }
     public decimal? Weight { get; set; }
     public decimal? Length { get; set; }
     public decimal? Width { get; set; }
@@ -186,6 +194,9 @@ public class StockMovement : TenantEntity
     public Guid InventoryItemId { get; set; }
 
     [Required]
+    public Guid WarehouseId { get; set; }
+
+    [Required]
     [MaxLength(50)]
     public string MovementType { get; set; } = string.Empty; 
     // Inbound: Receipt, Return, Adjustment+, Transfer-In, Production
@@ -235,6 +246,7 @@ public class StockMovement : TenantEntity
 
     // Navigation Properties
     public virtual InventoryItem InventoryItem { get; set; } = null!;
+    public virtual Warehouse? Warehouse { get; set; }
     public virtual WarehouseLocation? Location { get; set; }
     public virtual ApplicationUser? ProcessedBy { get; set; }
     public virtual ApplicationUser? ApprovedBy { get; set; }
@@ -248,6 +260,12 @@ public class StockAdjustment : TenantEntity
     [Required]
     [MaxLength(50)]
     public string AdjustmentNumber { get; set; } = string.Empty;
+
+    [Required]
+    public Guid WarehouseId { get; set; }
+
+    [MaxLength(50)]
+    public string Reference { get; set; } = string.Empty;
 
     public DateTime AdjustmentDate { get; set; } = DateTime.UtcNow;
 
@@ -268,6 +286,7 @@ public class StockAdjustment : TenantEntity
     public decimal TotalAdjustmentValue { get; set; } = 0;
 
     // Navigation Properties
+    public virtual Warehouse? Warehouse { get; set; }
     public virtual ApplicationUser? ApprovedBy { get; set; }
     public virtual ICollection<StockAdjustmentItem> Items { get; set; } = new List<StockAdjustmentItem>();
 }
@@ -303,6 +322,9 @@ public class StockAdjustmentItem : TenantEntity
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
+
+    [MaxLength(500)]
+    public string? Reason { get; set; }
 
     // Navigation Properties
     public virtual StockAdjustment Adjustment { get; set; } = null!;
@@ -346,6 +368,7 @@ public class Warehouse : TenantEntity
 
     public bool IsActive { get; set; } = true;
     public bool IsDefault { get; set; } = false;
+    public bool IsConsignmentWarehouse { get; set; } = false;
 
     [MaxLength(20)]
     public string WarehouseType { get; set; } = "Standard"; // Standard, Distribution, Manufacturing, Quarantine
@@ -537,6 +560,56 @@ public class InventoryAllocation : TenantEntity
     public virtual Warehouse Warehouse { get; set; } = null!;
     public virtual WarehouseLocation? Location { get; set; }
     public virtual ApplicationUser? AllocatedBy { get; set; }
+}
+
+#endregion
+
+#region Unit of Measure Schedules
+
+/// <summary>
+/// Unit of Measure Schedule - groups UOM conversions for inventory items
+/// </summary>
+public class UnitOfMeasureSchedule : TenantEntity
+{
+    [Required]
+    [MaxLength(50)]
+    public string ScheduleId { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(200)]
+    public string Description { get; set; } = string.Empty;
+
+    public Guid BaseUnitOfMeasureId { get; set; }
+
+    public int QuantityDecimals { get; set; } = 2;
+
+    public bool IsActive { get; set; } = true;
+
+    // Navigation Properties
+    public virtual UnitOfMeasure? BaseUnitOfMeasure { get; set; }
+    public virtual ICollection<UnitOfMeasureScheduleDetail> Details { get; set; } = new List<UnitOfMeasureScheduleDetail>();
+    public virtual ICollection<InventoryItem> Items { get; set; } = new List<InventoryItem>();
+}
+
+/// <summary>
+/// Detail line for UOM Schedule - defines conversion to base unit
+/// </summary>
+public class UnitOfMeasureScheduleDetail : TenantEntity
+{
+    [Required]
+    public Guid ScheduleId { get; set; }
+
+    [Required]
+    public Guid UnitOfMeasureId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal BaseQuantity { get; set; } = 1;
+
+    public int SortOrder { get; set; } = 0;
+
+    // Navigation Properties
+    public virtual UnitOfMeasureSchedule Schedule { get; set; } = null!;
+    public virtual UnitOfMeasure UnitOfMeasure { get; set; } = null!;
 }
 
 #endregion

@@ -953,20 +953,10 @@ namespace ErpSystem.Web.Services
             }
 
             // Only create test users if they don't exist - don't update existing users
-<<<<<<< HEAD
-            var adminExists = await _userManager.FindByNameAsync("admin") != null;
-            if (!adminExists)
-            {
-                // Create admin user
-                await CreateTestUserAsync("admin", "admin@default.com", "Admin123!", 
-                    "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin);
-            }
-=======
             // Ensure these accounts exist and remain usable on every Development seed run.
             // (CreateTestUserAsync is idempotent and will update existing users as needed.)
             await CreateTestUserAsync("admin", "admin@default.com", "Admin123!",
                 "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin, AuthenticationProvider.LDAP);
->>>>>>> 655b3d04879442177f902c3ce15be656a8a3698d
 
             await CreateTestUserAsync("manager", "manager@default.com", "Manager123!",
                 "John", "Manager", defaultTenant.Id, Constants.Roles.Manager, AuthenticationProvider.LDAP);

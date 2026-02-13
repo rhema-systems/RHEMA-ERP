@@ -234,6 +234,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<MaintenanceNotification> MaintenanceNotifications { get; set; }
     public DbSet<MaintenanceNotificationTemplate> MaintenanceNotificationTemplates { get; set; }
     public DbSet<MaintenanceEscalationRule> MaintenanceEscalationRules { get; set; }
+    public DbSet<NotificationTopic> NotificationTopics { get; set; }
+    public DbSet<NotificationTopicRecipient> NotificationTopicRecipients { get; set; }
 
     // HR entities
     public DbSet<Employee> Employees { get; set; }
@@ -281,8 +283,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<PurchaseOrderReceipt> PurchaseOrderReceipts { get; set; }
     public DbSet<PurchaseOrderReceiptItem> PurchaseOrderReceiptItems { get; set; }
     public DbSet<PurchaseRequisition> PurchaseRequisitions { get; set; }
-    public DbSet<RequestForQuotation> RequestForQuotations { get; set; }
-        
+
     // Tender entities
     public DbSet<Tender> Tenders { get; set; }
     public DbSet<TenderItem> TenderItems { get; set; }
