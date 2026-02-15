@@ -23,7 +23,26 @@ public class CoreEmailServiceAdapter : ErpSystem.Core.Interfaces.Common.IEmailSe
     {
         try
         {
-            // Convert Core EmailDto to simple email call
+            // Check if email has attachments
+            if (email.Attachments != null && email.Attachments.Count > 0)
+            {
+                // Convert Core EmailAttachmentDto to Web EmailAttachment
+                var webAttachments = email.Attachments.Select(a => new ErpSystem.Web.Services.EmailAttachment
+                {
+                    FileName = a.FileName,
+                    Content = a.Content,
+                    ContentType = a.ContentType
+                }).ToList();
+
+                return await _simpleEmailService.SendEmailWithAttachmentsAsync(
+                    to: email.To,
+                    subject: email.Subject,
+                    body: email.Body,
+                    attachments: webAttachments,
+                    isHtml: email.IsHtml);
+            }
+
+            // No attachments - use simple email call
             return await _simpleEmailService.SendEmailAsync(
                 to: email.To,
                 subject: email.Subject,

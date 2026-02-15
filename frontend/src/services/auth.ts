@@ -60,7 +60,7 @@ export class AuthService {
     return response;
   }
 
-  forgotPassword = async (request: { email: string }): Promise<{ success: boolean; message: string }> => {
+  forgotPassword = async (request: { email: string; tenantCode?: string; captchaToken?: string | null }): Promise<{ success: boolean; message: string }> => {
     return apiService.publicRequest('/auth/forgot-password', {
       method: 'POST',
       body: JSON.stringify(request),

@@ -5,6 +5,7 @@ export interface InspectionTemplateChecklistItem {
   item: string;
   type: 'checklist' | 'text' | 'number' | 'measurement';
   required: boolean;
+  order: number;
 }
 
 export interface InspectionTemplate {
@@ -34,6 +35,7 @@ export interface CreateInspectionTemplateDto {
   category: string;
   frequency: string;
   estimatedDuration: number;
+  isActive: boolean;
   requiresSignature: boolean;
   allowPhotos: boolean;
   version: string;
@@ -43,9 +45,7 @@ export interface CreateInspectionTemplateDto {
   checklistItems: Omit<InspectionTemplateChecklistItem, 'id'>[];
 }
 
-export interface UpdateInspectionTemplateDto extends CreateInspectionTemplateDto {
-  isActive: boolean;
-}
+export interface UpdateInspectionTemplateDto extends CreateInspectionTemplateDto {}
 
 // Mock data for fallback
 const mockTemplates: InspectionTemplate[] = [
@@ -64,11 +64,11 @@ const mockTemplates: InspectionTemplate[] = [
     createdBy: 'John Smith',
     lastUpdated: '2024-03-15',
     checklistItems: [
-      { id: '1', item: 'Check emergency stop buttons', type: 'checklist', required: true },
-      { id: '2', item: 'Inspect safety guards', type: 'checklist', required: true },
-      { id: '3', item: 'Test warning lights', type: 'checklist', required: true },
-      { id: '4', item: 'Verify lockout/tagout procedures', type: 'checklist', required: true },
-      { id: '5', item: 'Document any issues found', type: 'text', required: false }
+      { id: '1', item: 'Check emergency stop buttons', type: 'checklist', required: true, order: 1 },
+      { id: '2', item: 'Inspect safety guards', type: 'checklist', required: true, order: 2 },
+      { id: '3', item: 'Test warning lights', type: 'checklist', required: true, order: 3 },
+      { id: '4', item: 'Verify lockout/tagout procedures', type: 'checklist', required: true, order: 4 },
+      { id: '5', item: 'Document any issues found', type: 'text', required: false, order: 5 }
     ],
     assetTypes: ['Production Equipment', 'Conveyors'],
     inspectorRoles: ['Safety Inspector', 'Maintenance Supervisor'],
@@ -125,7 +125,6 @@ class InspectionTemplateService {
     const newTemplate: InspectionTemplate = {
       id: (mockTemplates.length + 1).toString(),
       ...data,
-      isActive: true,
       createdBy: 'Current User',
       lastUpdated: new Date().toISOString().split('T')[0],
       checklistItems: data.checklistItems.map((item, index) => ({
@@ -163,7 +162,7 @@ class InspectionTemplateService {
       lastUpdated: new Date().toISOString().split('T')[0],
       checklistItems: data.checklistItems.map((item, index) => ({
         ...item,
-        id: item.id || `${id}-${index + 1}`
+        id: `${id}-${index + 1}`
       }))
     };
 
@@ -203,6 +202,7 @@ class InspectionTemplateService {
       category: original.category,
       frequency: original.frequency,
       estimatedDuration: original.estimatedDuration,
+      isActive: original.isActive,
       requiresSignature: original.requiresSignature,
       allowPhotos: original.allowPhotos,
       version: '1.0',
@@ -212,7 +212,8 @@ class InspectionTemplateService {
       checklistItems: original.checklistItems.map(item => ({
         item: item.item,
         type: item.type,
-        required: item.required
+        required: item.required,
+        order: item.order ?? 0
       }))
     };
 

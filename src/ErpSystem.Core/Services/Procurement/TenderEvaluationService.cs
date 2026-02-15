@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.Extensions.Logging;
 
@@ -13,9 +14,11 @@ public class TenderEvaluationService : ITenderEvaluationService
     private readonly ITenderEvaluatorRepository _evaluatorRepository;
     private readonly ITenderRepository _tenderRepository;
     private readonly ITenderNotificationService _notificationService;
+    private readonly IEvaluationCriterionRepository _criterionRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<TenderEvaluationService> _logger;
+    private readonly IAppEventBus _appEventBus;
 
     public TenderEvaluationService(
         ITenderEvaluationRepository evaluationRepository,
@@ -23,8 +26,10 @@ public class TenderEvaluationService : ITenderEvaluationService
         ITenderEvaluatorRepository evaluatorRepository,
         ITenderRepository tenderRepository,
         ITenderNotificationService notificationService,
+        IEvaluationCriterionRepository criterionRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IAppEventBus appEventBus,
         ILogger<TenderEvaluationService> logger)
     {
         _evaluationRepository = evaluationRepository;
@@ -32,8 +37,10 @@ public class TenderEvaluationService : ITenderEvaluationService
         _evaluatorRepository = evaluatorRepository;
         _tenderRepository = tenderRepository;
         _notificationService = notificationService;
+        _criterionRepository = criterionRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _appEventBus = appEventBus;
         _logger = logger;
     }
 
@@ -160,6 +167,33 @@ public class TenderEvaluationService : ITenderEvaluationService
 
             _logger.LogInformation("Created evaluation {EvaluationId} for bid {BidId}", evaluation.Id, dto.TenderBidId);
 
+            // Publish event for admin-configurable notification topics (best-effort).
+            try
+            {
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = evaluation.TenantId,
+                    EntityType = "Evaluation",
+                    Activity = "Created",
+                    Audience = "Internal",
+                    EntityId = evaluation.Id,
+                    TriggeredByUserId = _currentUserProvider.UserId,
+                    Data = new Dictionary<string, object>
+                    {
+                        ["EvaluationId"] = evaluation.Id,
+                        ["TenderBidId"] = evaluation.TenderBidId,
+                        ["TenderId"] = bid.TenderId,
+                        ["EvaluatorId"] = evaluation.TenderEvaluatorId,
+                        ["Status"] = evaluation.Status ?? string.Empty,
+                        ["TotalScore"] = evaluation.TotalScore ?? 0m
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish Evaluation.Created entity activity event for evaluation {EvaluationId}", evaluation.Id);
+            }
+
             return MapToDto(evaluation);
         }
         catch (Exception ex)
@@ -254,6 +288,35 @@ public class TenderEvaluationService : ITenderEvaluationService
 
             _logger.LogInformation("Submitted evaluation {EvaluationId}", id);
 
+            // Publish event for admin-configurable notification topics (best-effort).
+            try
+            {
+                var bid = await _bidRepository.GetByIdAsync(evaluation.TenderBidId);
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = evaluation.TenantId,
+                    EntityType = "Evaluation",
+                    Activity = "Submitted",
+                    Audience = "Internal",
+                    EntityId = evaluation.Id,
+                    TriggeredByUserId = _currentUserProvider.UserId,
+                    Data = new Dictionary<string, object>
+                    {
+                        ["EvaluationId"] = evaluation.Id,
+                        ["TenderBidId"] = evaluation.TenderBidId,
+                        ["TenderId"] = bid?.TenderId ?? Guid.Empty,
+                        ["EvaluatorId"] = evaluation.TenderEvaluatorId,
+                        ["Status"] = evaluation.Status ?? string.Empty,
+                        ["SubmittedDate"] = evaluation.SubmittedDate?.ToString("o") ?? string.Empty,
+                        ["TotalScore"] = evaluation.TotalScore ?? 0m
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish Evaluation.Submitted entity activity event for evaluation {EvaluationId}", id);
+            }
+
             // Check if all evaluators have submitted their evaluations for this bid
             await CheckAndUpdateBidEvaluationStatusAsync(evaluation.TenderBidId);
 
@@ -317,6 +380,46 @@ public class TenderEvaluationService : ITenderEvaluationService
                 {
                     _logger.LogInformation("All evaluators have submitted for bid {BidId}. Bid status updated to 'Evaluated' with total score {TotalScore}", bidId, bid.TotalScore);
 
+                    // Publish events for admin-configurable notification topics (best-effort).
+                    try
+                    {
+                        var baseData = new Dictionary<string, object>
+                        {
+                            ["BidId"] = bid.Id,
+                            ["TenderId"] = bid.TenderId,
+                            ["BusinessPartnerId"] = bid.BusinessPartnerId,
+                            ["Status"] = bid.Status ?? string.Empty,
+                            ["TotalScore"] = bid.TotalScore ?? 0m,
+                            ["EvaluatedDate"] = bid.EvaluatedDate?.ToString("o") ?? string.Empty
+                        };
+
+                        await _appEventBus.PublishAsync(new EntityActivityEvent
+                        {
+                            TenantId = bid.TenantId,
+                            EntityType = "Bid",
+                            Activity = "Evaluated",
+                            Audience = "Internal",
+                            EntityId = bid.Id,
+                            TriggeredByUserId = _currentUserProvider.UserId,
+                            Data = new Dictionary<string, object>(baseData)
+                        });
+
+                        await _appEventBus.PublishAsync(new EntityActivityEvent
+                        {
+                            TenantId = bid.TenantId,
+                            EntityType = "Bid",
+                            Activity = "Evaluated",
+                            Audience = "Supplier",
+                            EntityId = bid.Id,
+                            TriggeredByUserId = _currentUserProvider.UserId,
+                            Data = new Dictionary<string, object>(baseData)
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to publish Bid.Evaluated entity activity event for bid {BidId}", bidId);
+                    }
+
                     // Check if all bids for this tender have been evaluated
                     await CheckAndUpdateTenderEvaluationStatusAsync(bid.TenderId);
                 }
@@ -361,6 +464,33 @@ public class TenderEvaluationService : ITenderEvaluationService
                 await _unitOfWork.SaveChangesAsync();
 
                 _logger.LogInformation("All bids for tender {TenderId} have been evaluated. Tender status updated to 'Evaluated'", tenderId);
+
+                // Publish event for admin-configurable notification topics (best-effort).
+                try
+                {
+                    var data = new Dictionary<string, object>
+                    {
+                        ["TenderId"] = tender.Id,
+                        ["TenderNumber"] = tender.TenderNumber ?? string.Empty,
+                        ["Title"] = tender.Title ?? string.Empty,
+                        ["Status"] = tender.Status ?? string.Empty
+                    };
+
+                    await _appEventBus.PublishAsync(new EntityActivityEvent
+                    {
+                        TenantId = tender.TenantId,
+                        EntityType = "Tender",
+                        Activity = "Evaluated",
+                        Audience = "Internal",
+                        EntityId = tender.Id,
+                        TriggeredByUserId = _currentUserProvider.UserId,
+                        Data = data
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to publish Tender.Evaluated entity activity event for tender {TenderId}", tenderId);
+                }
             }
         }
         catch (Exception ex)
@@ -639,6 +769,119 @@ public class TenderEvaluationService : ITenderEvaluationService
         public decimal WeightedScore { get; set; }
     }
 
+    /// <summary>
+    /// Extracts criterion IDs from the EvaluationCriteriaJson
+    /// </summary>
+    private static List<Guid> ExtractCriterionIdsFromJson(string? criteriaJson)
+    {
+        var ids = new List<Guid>();
+        if (string.IsNullOrEmpty(criteriaJson))
+            return ids;
+
+        try
+        {
+            var options = new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            };
+
+            var criteriaScores = System.Text.Json.JsonSerializer.Deserialize<List<CriteriaScoreEntry>>(criteriaJson, options);
+            if (criteriaScores == null)
+                return ids;
+
+            foreach (var entry in criteriaScores)
+            {
+                if (Guid.TryParse(entry.CriterionId, out var id))
+                {
+                    ids.Add(id);
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // If JSON parsing fails, return empty list
+        }
+
+        return ids;
+    }
+
+    /// <summary>
+    /// Calculates separate Technical and Financial scores from the EvaluationCriteriaJson.
+    /// Returns (technicalScore, financialScore, hasFinancialCriteria)
+    /// </summary>
+    private static (decimal technicalScore, decimal financialScore, bool hasFinancialCriteria) CalculateSeparateScoresFromCriteriaJson(
+        string? criteriaJson,
+        Dictionary<Guid, string> criteriaEvaluationTypes)
+    {
+        if (string.IsNullOrEmpty(criteriaJson))
+            return (0, 0, false);
+
+        try
+        {
+            var options = new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            };
+
+            var criteriaScores = System.Text.Json.JsonSerializer.Deserialize<List<CriteriaScoreEntry>>(criteriaJson, options);
+            if (criteriaScores == null || criteriaScores.Count == 0)
+                return (0, 0, false);
+
+            decimal technicalWeightedSum = 0;
+            decimal technicalTotalWeight = 0;
+            decimal financialWeightedSum = 0;
+            decimal financialTotalWeight = 0;
+
+            foreach (var entry in criteriaScores)
+            {
+                if (!Guid.TryParse(entry.CriterionId, out var criterionId))
+                    continue;
+
+                // Determine evaluation type - default to Technical if not found
+                var evaluationType = criteriaEvaluationTypes.TryGetValue(criterionId, out var type)
+                    ? type
+                    : "Technical";
+
+                if (evaluationType == "Financial")
+                {
+                    financialWeightedSum += entry.WeightedScore;
+                    financialTotalWeight += entry.Weight;
+                }
+                else // Technical (default)
+                {
+                    technicalWeightedSum += entry.WeightedScore;
+                    technicalTotalWeight += entry.Weight;
+                }
+            }
+
+            // Calculate normalized scores (0-100 scale)
+            // WeightedScore is already calculated as: (score/maxScore) * 100 * (weight/100)
+            // So the sum of WeightedScores gives us the total score out of 100
+            decimal technicalScore = technicalWeightedSum;
+            decimal financialScore = financialWeightedSum;
+
+            // If there are financial criteria, normalize the financial score
+            // to account for the fact that it's only a portion of the total weight
+            if (financialTotalWeight > 0)
+            {
+                // Normalize to 0-100 scale based on the weight proportion
+                financialScore = (financialWeightedSum / financialTotalWeight) * 100;
+            }
+
+            // Similarly normalize technical score if needed
+            if (technicalTotalWeight > 0)
+            {
+                technicalScore = (technicalWeightedSum / technicalTotalWeight) * 100;
+            }
+
+            return (technicalScore, financialScore, financialTotalWeight > 0);
+        }
+        catch (Exception)
+        {
+            return (0, 0, false);
+        }
+    }
+
     private static TenderEvaluationDto MapToDto(TenderEvaluation evaluation)
     {
         // Debug: Log what we're getting
@@ -684,7 +927,9 @@ public class TenderEvaluationService : ITenderEvaluationService
     /// <summary>
     /// Calculates QCBS (Quality and Cost Based Selection) scores for all bids in a tender.
     /// Formula: Combined Score = (Technical Weight × Technical Score) + (Financial Weight × Financial Score)
-    /// Financial Score = (Lowest Bid Amount / Bid Amount) × 100
+    /// Technical Score = Weighted average of Technical evaluation criteria scores
+    /// Financial Score = Combination of price-based score and Financial evaluation criteria scores
+    /// Price-based Score = (Lowest Bid Amount / Bid Amount) × 100
     /// </summary>
     public async Task<QCBSEvaluationResultDto> CalculateQCBSScoresAsync(Guid tenderId)
     {
@@ -711,17 +956,63 @@ public class TenderEvaluationService : ITenderEvaluationService
             var financialWeight = tender.FinancialWeight / 100m;
             var minimumTechnicalScore = tender.MinimumTechnicalScore;
 
-            // First pass: Calculate technical scores and identify qualified bids
+            // Collect all criterion IDs from all evaluations to fetch their EvaluationType
+            var allCriterionIds = new HashSet<Guid>();
+            var bidEvaluationsMap = new Dictionary<Guid, List<TenderEvaluation>>();
+
             foreach (var bid in evaluatedBids)
             {
                 var evaluations = await _evaluationRepository.GetByBidIdAsync(bid.Id);
                 var submittedEvaluations = evaluations.Where(e => e.Status == "Submitted").ToList();
+                bidEvaluationsMap[bid.Id] = submittedEvaluations;
 
-                // Calculate average technical score from evaluations
+                foreach (var eval in submittedEvaluations)
+                {
+                    if (!string.IsNullOrEmpty(eval.EvaluationCriteriaJson))
+                    {
+                        var criteriaIds = ExtractCriterionIdsFromJson(eval.EvaluationCriteriaJson);
+                        foreach (var id in criteriaIds)
+                        {
+                            allCriterionIds.Add(id);
+                        }
+                    }
+                }
+            }
+
+            // Fetch all criteria to get their EvaluationType
+            var criteria = await _criterionRepository.GetByIdsAsync(allCriterionIds);
+            var criteriaEvaluationTypes = criteria.ToDictionary(c => c.Id, c => c.EvaluationType);
+
+            // First pass: Calculate technical and financial criteria scores, identify qualified bids
+            foreach (var bid in evaluatedBids)
+            {
+                var submittedEvaluations = bidEvaluationsMap[bid.Id];
+
+                // Calculate scores from evaluations, separating Technical and Financial criteria
                 decimal technicalScore = 0;
+                decimal financialCriteriaScore = 0;
+                bool hasFinancialCriteria = false;
+
                 if (submittedEvaluations.Any())
                 {
-                    technicalScore = submittedEvaluations.Average(e => e.TotalScore ?? 0);
+                    var technicalScores = new List<decimal>();
+                    var financialScores = new List<decimal>();
+
+                    foreach (var eval in submittedEvaluations)
+                    {
+                        var (techScore, finScore, hasFinCriteria) = CalculateSeparateScoresFromCriteriaJson(
+                            eval.EvaluationCriteriaJson, criteriaEvaluationTypes);
+
+                        technicalScores.Add(techScore);
+                        if (hasFinCriteria)
+                        {
+                            financialScores.Add(finScore);
+                            hasFinancialCriteria = true;
+                        }
+                    }
+
+                    technicalScore = technicalScores.Any() ? technicalScores.Average() : 0;
+                    financialCriteriaScore = financialScores.Any() ? financialScores.Average() : 0;
                 }
 
                 var isQualified = technicalScore >= minimumTechnicalScore;
@@ -739,7 +1030,9 @@ public class TenderEvaluationService : ITenderEvaluationService
                     Currency = bid.Currency ?? tender.Currency ?? "USD",
                     TechnicalScore = technicalScore,
                     IsQualifiedTechnically = isQualified,
-                    DisqualificationReason = disqualificationReason
+                    DisqualificationReason = disqualificationReason,
+                    // Store financial criteria score temporarily for second pass
+                    FinancialScore = financialCriteriaScore
                 });
             }
 
@@ -749,13 +1042,28 @@ public class TenderEvaluationService : ITenderEvaluationService
                 ? qualifiedBids.Min(b => b.TotalBidAmount)
                 : null;
 
-            // Second pass: Calculate financial scores and combined scores for qualified bids
+            // Check if any bid has financial criteria scores
+            bool anyFinancialCriteria = bidScores.Any(b => b.FinancialScore > 0);
+
+            // Second pass: Calculate final financial scores and combined scores for qualified bids
             foreach (var bidScore in bidScores)
             {
                 if (bidScore.IsQualifiedTechnically && lowestBidAmount.HasValue && bidScore.TotalBidAmount > 0)
                 {
-                    // Financial Score = (Lowest Bid / Current Bid) × 100
-                    bidScore.FinancialScore = (lowestBidAmount.Value / bidScore.TotalBidAmount) * 100;
+                    // Price-based Score = (Lowest Bid / Current Bid) × 100
+                    decimal priceBasedScore = (lowestBidAmount.Value / bidScore.TotalBidAmount) * 100;
+
+                    // If there are financial criteria, combine price-based score with financial criteria score
+                    // Financial Score = (Price-based Score × 50%) + (Financial Criteria Score × 50%)
+                    // If no financial criteria, use only price-based score
+                    if (anyFinancialCriteria && bidScore.FinancialScore > 0)
+                    {
+                        bidScore.FinancialScore = (priceBasedScore * 0.5m) + (bidScore.FinancialScore * 0.5m);
+                    }
+                    else
+                    {
+                        bidScore.FinancialScore = priceBasedScore;
+                    }
 
                     // Combined Score = (Technical Weight × Technical Score) + (Financial Weight × Financial Score)
                     bidScore.CombinedScore = (technicalWeight * bidScore.TechnicalScore) +

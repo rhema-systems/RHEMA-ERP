@@ -24,6 +24,7 @@ import {
   Calendar,
   DollarSign,
   User,
+  Users,
   XCircle,
   Send,
   Ban,
@@ -45,6 +46,7 @@ import { type TenderAwardDto, type CancelAwardDto } from '@/services/tenderAward
 import * as performanceBondService from '@/services/performanceBondService';
 import { type PerformanceBondRequestDto } from '@/services/performanceBondService';
 import { format } from 'date-fns';
+import NegotiationInviteDialog from '@/components/procurement/awards/NegotiationInviteDialog';
 
 export default function AwardDetailPage() {
   const params = useParams();
@@ -74,6 +76,9 @@ export default function AwardDetailPage() {
   const [performanceBondRequest, setPerformanceBondRequest] = useState<PerformanceBondRequestDto | null>(null);
   const [reviewingBond, setReviewingBond] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
+
+  // Negotiation state
+  const [showNegotiationDialog, setShowNegotiationDialog] = useState(false);
 
   useEffect(() => {
     if (awardId) {
@@ -177,21 +182,36 @@ export default function AwardDetailPage() {
         return;
       }
 
-      // For PO - Simulate API call - PO API not ready
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // For PO - Call the new API endpoint
+      const poData = {
+        tenderAwardId: award.id,
+        autoApprove: false,
+        notes: `Purchase Order created from tender award ${award.tenderNumber}`,
+      };
+
+      const result = await tenderAwardService.createPurchaseOrderFromAward(poData);
 
       toast.success(
         <div className="flex flex-col gap-1">
           <span className="font-semibold">Purchase Order created successfully!</span>
           <span className="text-sm text-muted-foreground">
-            Reference: PO-{award.tenderNumber}-{Date.now().toString().slice(-6)}
+            PO Number: {result.orderNumber}
+          </span>
+          <span className="text-sm text-muted-foreground">
+            {result.itemCount} items • {result.currency} {result.totalAmount.toLocaleString()}
           </span>
         </div>
       );
       setShowCreatePODialog(false);
-    } catch (error) {
+      
+      // Reload award to show PO link
+      await loadAward();
+      
+      // Navigate to PO detail page
+      router.push(`/procurement/purchase-orders/${result.purchaseOrderId}`);
+    } catch (error: any) {
       console.error('Error creating PO:', error);
-      toast.error(`Failed to create ${poType}`);
+      toast.error(error.message || `Failed to create ${poType}`);
     } finally {
       setCreatingPO(false);
     }
@@ -422,10 +442,27 @@ export default function AwardDetailPage() {
                 <Label className="text-gray-500 flex items-center gap-2">
                   <DollarSign className="h-4 w-4" />
                   Awarded Amount
+                  {award.isNegotiated && (
+                    <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                      Negotiated
+                    </span>
+                  )}
                 </Label>
                 <p className="text-2xl font-bold text-green-600">
                   {award.currency} {award.awardedAmount.toLocaleString()}
                 </p>
+                {award.isNegotiated && award.originalBidAmount > 0 && (
+                  <div className="mt-1 text-sm">
+                    <span className="text-gray-400 line-through">
+                      {award.currency} {award.originalBidAmount.toLocaleString()}
+                    </span>
+                    {award.negotiationSavings > 0 && (
+                      <span className="ml-2 text-green-600 font-medium">
+                        (Saved {award.currency} {award.negotiationSavings.toLocaleString()})
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -494,6 +531,12 @@ export default function AwardDetailPage() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap items-center gap-4">
+              {/* Invite for Negotiation Button */}
+              <Button onClick={() => setShowNegotiationDialog(true)} variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50">
+                <Users className="h-4 w-4 mr-2" />
+                Invite for Negotiation
+              </Button>
+
               {/* Send Notification Button */}
               <Button onClick={() => setShowNotificationDialog(true)} className="bg-blue-600 hover:bg-blue-700">
                 <Send className="h-4 w-4 mr-2" />
@@ -750,7 +793,26 @@ export default function AwardDetailPage() {
                 </div>
                 <div>
                   <span className="text-blue-600">Award Amount:</span>
-                  <p className="font-medium">{award.currency} {award.awardedAmount?.toLocaleString()}</p>
+                  <div className="font-medium">
+                    <span className="text-green-700">{award.currency} {award.awardedAmount?.toLocaleString()}</span>
+                    {award.isNegotiated && (
+                      <span className="ml-2 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                        Negotiated
+                      </span>
+                    )}
+                  </div>
+                  {award.isNegotiated && award.originalBidAmount > 0 && (
+                    <div className="mt-1">
+                      <span className="text-gray-400 line-through text-xs">
+                        {award.currency} {award.originalBidAmount?.toLocaleString()}
+                      </span>
+                      {award.negotiationSavings > 0 && (
+                        <span className="ml-2 text-green-600 text-xs font-medium">
+                          (Saved {award.currency} {award.negotiationSavings?.toLocaleString()})
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="col-span-2">
                   <span className="text-blue-600">Tender:</span>
@@ -1103,6 +1165,21 @@ export default function AwardDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Negotiation Invite Dialog */}
+      {award && (
+        <NegotiationInviteDialog
+          open={showNegotiationDialog}
+          onOpenChange={setShowNegotiationDialog}
+          tenderId={award.tenderId}
+          tenderBidId={award.tenderBidId}
+          businessPartnerName={award.businessPartnerName}
+          onNegotiationComplete={(negotiatedAmount) => {
+            toast.success(`Negotiation completed. Negotiated amount: ${award.currency || 'ETB'} ${negotiatedAmount.toLocaleString()}`);
+            loadAward();
+          }}
+        />
+      )}
     </div>
   );
 }

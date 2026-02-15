@@ -22,6 +22,7 @@ public class AdmissionQueryParameters
     public string? AdmissionType { get; set; }
     public Guid? AssetId { get; set; }
     public Guid? WorkOrderId { get; set; }
+    public Guid? JobCardId { get; set; }
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
     public int PageNumber { get; set; } = 1;

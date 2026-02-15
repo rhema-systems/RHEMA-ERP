@@ -79,6 +79,33 @@ if (args.Length > 0 && args[0] == "seed-maintenance-e2e")
     return;
 }
 
+// Check for full database seeding command (roles, workflows, modules, etc.)
+if (args.Length > 0 && args[0] == "seed-db")
+{
+    var tempBuilder = WebApplication.CreateBuilder(args);
+
+    // Configure services for seeding
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        // Apply migrations first so seeding is safe in all environments.
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await db.Database.MigrateAsync();
+
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        await seedingService.SeedAsync();
+    }
+
+    Console.WriteLine("✅ Database seeding completed!");
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Configure host shutdown timeout
@@ -115,6 +142,18 @@ builder.Services.AddDevelopmentServices(builder.Environment);
 
 // Add Quality Certificate Service
 builder.Services.AddScoped<ErpSystem.Api.Services.QualityCertificateService>();
+
+// Add Transfer Document Service for Shipment Notes and GRNs
+builder.Services.AddScoped<ErpSystem.Api.Services.TransferDocumentService>();
+
+// Add Purchase Receipt (PO GRN) PDF service
+builder.Services.AddScoped<ErpSystem.Api.Services.PurchaseOrderReceiptDocumentService>();
+
+// Add Award Letter Service for PDF award letter generation
+builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardLetterService, ErpSystem.Api.Services.AwardLetterService>();
+
+// Add Price List Lookup Service for procurement pricing
+builder.Services.AddScoped<ErpSystem.Core.Services.Pricing.PriceListLookupService>();
 
 var app = builder.Build();
 
@@ -189,6 +228,7 @@ app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseMiddleware<JwtBlacklistMiddleware>();
+app.UseMiddleware<ExternalUserAccessMiddleware>();
 app.UseAuthorization();
 
 // Health check endpoints

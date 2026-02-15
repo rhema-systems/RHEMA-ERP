@@ -1,7 +1,13 @@
 using System.Net;
 using System.Text.Json;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ErpSystem.Api.Middleware;
 
@@ -114,6 +120,9 @@ public class GlobalExceptionHandlingMiddleware
         // Log the exception with different levels based on type
         LogException(exception, context);
 
+        // Persist exception details to SQL for admin troubleshooting (best-effort).
+        await TryPersistExceptionAsync(context, exception, response);
+
         // Only include detailed error information in development
         if (_environment.IsDevelopment())
         {
@@ -127,6 +136,169 @@ public class GlobalExceptionHandlingMiddleware
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = _environment.IsDevelopment()
         }));
+    }
+
+    private async Task TryPersistExceptionAsync(HttpContext context, Exception exception, ErrorResponse response)
+    {
+        try
+        {
+            using var scope = context.RequestServices.CreateScope();
+            var unitOfWork = scope.ServiceProvider.GetService<ErpSystem.Core.Interfaces.IUnitOfWork>();
+            var currentUser = scope.ServiceProvider.GetService<ICurrentUserService>();
+
+            if (unitOfWork == null || currentUser == null)
+            {
+                return;
+            }
+
+            var level = exception switch
+            {
+                ValidationException or UnauthorizedException or ForbiddenException or NotFoundException or ConflictException or ArgumentException => "Warning",
+                InvalidOperationException => "Error",
+                _ => "Critical"
+            };
+
+            var userId = (Guid?)null;
+            var userIdClaim = context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!string.IsNullOrWhiteSpace(userIdClaim) && Guid.TryParse(userIdClaim, out var uid))
+            {
+                userId = uid;
+            }
+
+            var loggerName = exception.TargetSite?.DeclaringType?.FullName;
+            var shortMessage = exception.Message ?? string.Empty;
+
+            var tenantId = currentUser.TenantId ?? Guid.Empty;
+            var now = DateTime.UtcNow;
+
+            var requestPath = context.Request.Path.Value;
+            var queryString = context.Request.QueryString.HasValue ? context.Request.QueryString.Value : null;
+            var referrer = context.Request.Headers.Referer.FirstOrDefault();
+            var userAgent = context.Request.Headers.UserAgent.FirstOrDefault();
+
+            // Redact sensitive tokens/secrets before persisting.
+            var redactedShort = SensitiveDataRedactor.Redact(shortMessage);
+            var redactedFull = SensitiveDataRedactor.Redact(Truncate(exception.ToString(), 20000));
+            var redactedStack = SensitiveDataRedactor.Redact(Truncate(exception.StackTrace, 20000));
+            var redactedQuery = SensitiveDataRedactor.Redact(Truncate(queryString, 2000));
+            var redactedReferrer = SensitiveDataRedactor.Redact(Truncate(referrer, 500));
+            var redactedUserAgent = SensitiveDataRedactor.Redact(Truncate(userAgent, 500));
+
+            var fingerprint = ExceptionFingerprint.Compute(
+                exceptionType: exception.GetType().FullName,
+                message: redactedShort,
+                requestPath: requestPath);
+
+            var repo = unitOfWork.Repository<SystemExceptionLog>();
+            var existing = await repo.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Fingerprint == fingerprint);
+
+            if (existing != null && !existing.IsDeleted)
+            {
+                existing.OccurrenceCount += 1;
+                existing.LastOccurredAt = now;
+                existing.Level = level;
+                existing.Logger = loggerName;
+                existing.ShortMessage = Truncate(redactedShort, 1000);
+                existing.FullMessage = redactedFull;
+                existing.ExceptionType = exception.GetType().FullName;
+                existing.StackTrace = redactedStack;
+                existing.TraceId = response.TraceId;
+                existing.RequestMethod = context.Request.Method;
+                existing.RequestPath = requestPath;
+                existing.QueryString = redactedQuery;
+                existing.ReferrerUrl = redactedReferrer;
+                existing.RemoteIpAddress = context.Connection.RemoteIpAddress?.ToString();
+                existing.UserAgent = redactedUserAgent;
+                existing.UserId = userId;
+                existing.Username = context.User?.FindFirst(ClaimTypes.Name)?.Value;
+                existing.UpdatedAt = now;
+                existing.LastModifiedById = userId;
+
+                await repo.UpdateAsync(existing);
+                await unitOfWork.SaveChangesAsync();
+                return;
+            }
+
+            var log = new SystemExceptionLog
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                Fingerprint = fingerprint,
+                OccurrenceCount = 1,
+                FirstOccurredAt = now,
+                LastOccurredAt = now,
+                Level = level,
+                Logger = loggerName,
+                ShortMessage = Truncate(redactedShort, 1000),
+                FullMessage = redactedFull,
+                ExceptionType = exception.GetType().FullName,
+                StackTrace = redactedStack,
+                TraceId = response.TraceId,
+                RequestMethod = context.Request.Method,
+                RequestPath = requestPath,
+                QueryString = redactedQuery,
+                ReferrerUrl = redactedReferrer,
+                RemoteIpAddress = context.Connection.RemoteIpAddress?.ToString(),
+                UserAgent = redactedUserAgent,
+                UserId = userId,
+                Username = context.User?.FindFirst(ClaimTypes.Name)?.Value,
+                CreatedAt = now,
+                CreatedById = userId
+            };
+
+            await repo.AddAsync(log);
+
+            try
+            {
+                await unitOfWork.SaveChangesAsync();
+            }
+            catch (Exception saveEx)
+            {
+                // If we hit the unique fingerprint constraint due to a race, retry by updating the existing row.
+                _logger.LogDebug(saveEx, "Exception log insert failed; attempting fingerprint dedup update");
+
+                var again = await repo.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Fingerprint == fingerprint);
+                if (again == null)
+                {
+                    throw;
+                }
+
+                again.OccurrenceCount += 1;
+                again.LastOccurredAt = now;
+                again.Level = level;
+                again.Logger = loggerName;
+                again.ShortMessage = Truncate(redactedShort, 1000);
+                again.FullMessage = redactedFull;
+                again.ExceptionType = exception.GetType().FullName;
+                again.StackTrace = redactedStack;
+                again.TraceId = response.TraceId;
+                again.RequestMethod = context.Request.Method;
+                again.RequestPath = requestPath;
+                again.QueryString = redactedQuery;
+                again.ReferrerUrl = redactedReferrer;
+                again.RemoteIpAddress = context.Connection.RemoteIpAddress?.ToString();
+                again.UserAgent = redactedUserAgent;
+                again.UserId = userId;
+                again.Username = context.User?.FindFirst(ClaimTypes.Name)?.Value;
+                again.UpdatedAt = now;
+                again.LastModifiedById = userId;
+
+                await repo.UpdateAsync(again);
+                await unitOfWork.SaveChangesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            // Never allow exception logging to break the API response pipeline.
+            _logger.LogError(ex, "Failed to persist exception log entry to SQL");
+        }
+    }
+
+    private static string Truncate(string? value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        if (value.Length <= maxLength) return value;
+        return value.Substring(0, maxLength) + "...[truncated]";
     }
 
     private void LogException(Exception exception, HttpContext context)
@@ -201,6 +373,58 @@ public class ValidationException : Exception
     public ValidationException(string message, Exception innerException) : base(message, innerException)
     {
         Errors = new Dictionary<string, string[]>();
+    }
+}
+
+internal static class ExceptionFingerprint
+{
+    private static readonly Regex GuidRegex = new(
+        @"\b[a-fA-F0-9]{8}\-[a-fA-F0-9]{4}\-[a-fA-F0-9]{4}\-[a-fA-F0-9]{4}\-[a-fA-F0-9]{12}\b",
+        RegexOptions.Compiled);
+
+    private static readonly Regex LongNumberRegex = new(@"\b\d{4,}\b", RegexOptions.Compiled);
+
+    public static string Compute(string? exceptionType, string message, string? requestPath)
+    {
+        var type = exceptionType ?? "UnknownException";
+        var normalized = Normalize(message);
+        var path = requestPath ?? string.Empty;
+
+        // Stable fingerprint input; keep small and deterministic.
+        var input = $"{type}|{path}|{normalized}";
+        using var sha = SHA256.Create();
+        var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(input));
+        return Convert.ToHexString(bytes).ToLowerInvariant(); // 64 chars
+    }
+
+    private static string Normalize(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return string.Empty;
+        var s = input.Trim();
+        s = GuidRegex.Replace(s, "{guid}");
+        s = LongNumberRegex.Replace(s, "{n}");
+        return s;
+    }
+}
+
+internal static class SensitiveDataRedactor
+{
+    // Conservative redaction: remove secrets/tokens but keep debugging value.
+    private static readonly Regex BearerRegex = new(@"Bearer\s+[A-Za-z0-9\-\._~\+\/]+=*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ApiKeyRegex = new(@"(?i)\b(api[-_ ]?key|x-api-key|token|access[-_ ]?token|refresh[-_ ]?token|secret)\b\s*[:=]\s*([^\s;,'\""]+)", RegexOptions.Compiled);
+    private static readonly Regex PasswordEqRegex = new(@"(?i)\b(password|pwd)\b\s*=\s*([^;]+)", RegexOptions.Compiled);
+    private static readonly Regex PasswordColonRegex = new(@"(?i)\b(password|pwd)\b\s*:\s*([^\s;,'\""]+)", RegexOptions.Compiled);
+
+    public static string Redact(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return input ?? string.Empty;
+
+        var s = input;
+        s = BearerRegex.Replace(s, "Bearer [REDACTED]");
+        s = ApiKeyRegex.Replace(s, m => $"{m.Groups[1].Value}=[REDACTED]");
+        s = PasswordEqRegex.Replace(s, m => $"{m.Groups[1].Value}=[REDACTED]");
+        s = PasswordColonRegex.Replace(s, m => $"{m.Groups[1].Value}:[REDACTED]");
+        return s;
     }
 }
 

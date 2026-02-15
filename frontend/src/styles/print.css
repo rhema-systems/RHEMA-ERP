@@ -1,0 +1,314 @@
+/* Print Styles for Purchase Orders and Goods Receipt Notes */
+
+@media print {
+  /* Hide non-printable elements */
+  .no-print,
+  nav,
+  header,
+  footer,
+  button,
+  .breadcrumb,
+  [role="navigation"],
+  [role="banner"],
+  [role="contentinfo"] {
+    display: none !important;
+  }
+
+  /* Reset page margins */
+  @page {
+    margin: 1cm;
+    size: A4;
+  }
+
+  /* General print styles */
+  body {
+    font-size: 12pt;
+    line-height: 1.5;
+    color: #000;
+    background: #fff;
+  }
+
+  /* Ensure content fits on page */
+  * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Prevent page breaks inside elements */
+  .print-keep-together {
+    page-break-inside: avoid;
+  }
+
+  /* Force page breaks */
+  .print-page-break {
+    page-break-after: always;
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-footer-group;
+  }
+
+  th,
+  td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+  }
+
+  th {
+    background-color: #f5f5f5 !important;
+    font-weight: bold;
+  }
+
+  /* Headers and titles */
+  h1 {
+    font-size: 24pt;
+    margin-bottom: 10pt;
+  }
+
+  h2 {
+    font-size: 18pt;
+    margin-top: 15pt;
+    margin-bottom: 10pt;
+  }
+
+  h3 {
+    font-size: 14pt;
+    margin-top: 12pt;
+    margin-bottom: 8pt;
+  }
+
+  /* Purchase Order specific styles */
+  .po-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 20pt;
+    border-bottom: 2px solid #000;
+    padding-bottom: 10pt;
+  }
+
+  .po-number {
+    font-size: 20pt;
+    font-weight: bold;
+  }
+
+  .po-date {
+    font-size: 12pt;
+  }
+
+  .po-section {
+    margin-bottom: 15pt;
+    page-break-inside: avoid;
+  }
+
+  .po-section-title {
+    font-size: 14pt;
+    font-weight: bold;
+    margin-bottom: 8pt;
+    border-bottom: 1px solid #000;
+    padding-bottom: 4pt;
+  }
+
+  .po-info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10pt;
+    margin-bottom: 15pt;
+  }
+
+  .po-info-item {
+    margin-bottom: 8pt;
+  }
+
+  .po-info-label {
+    font-weight: bold;
+    display: block;
+    margin-bottom: 2pt;
+  }
+
+  .po-info-value {
+    display: block;
+  }
+
+  /* Items table */
+  .po-items-table {
+    width: 100%;
+    margin-top: 15pt;
+    margin-bottom: 15pt;
+  }
+
+  .po-items-table th {
+    background-color: #e0e0e0 !important;
+    font-weight: bold;
+    text-align: left;
+  }
+
+  .po-items-table td {
+    vertical-align: top;
+  }
+
+  .po-items-table .text-right {
+    text-align: right;
+  }
+
+  /* Totals section */
+  .po-totals {
+    margin-top: 15pt;
+    float: right;
+    width: 40%;
+    border: 1px solid #000;
+    padding: 10pt;
+  }
+
+  .po-total-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 5pt;
+  }
+
+  .po-total-row.grand-total {
+    font-size: 14pt;
+    font-weight: bold;
+    border-top: 2px solid #000;
+    padding-top: 5pt;
+    margin-top: 5pt;
+  }
+
+  /* Terms and conditions */
+  .po-terms {
+    clear: both;
+    margin-top: 20pt;
+    page-break-inside: avoid;
+  }
+
+  .po-terms-title {
+    font-weight: bold;
+    margin-bottom: 5pt;
+  }
+
+  .po-terms-content {
+    font-size: 10pt;
+    line-height: 1.4;
+  }
+
+  /* Signatures */
+  .po-signatures {
+    margin-top: 30pt;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20pt;
+  }
+
+  .po-signature-box {
+    border-top: 1px solid #000;
+    padding-top: 5pt;
+    text-align: center;
+  }
+
+  /* GRN specific styles */
+  .grn-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 20pt;
+    border-bottom: 2px solid #000;
+    padding-bottom: 10pt;
+  }
+
+  .grn-number {
+    font-size: 20pt;
+    font-weight: bold;
+  }
+
+  .grn-status {
+    display: inline-block;
+    padding: 4pt 8pt;
+    border: 1px solid #000;
+    font-weight: bold;
+  }
+
+  /* Quality inspection section */
+  .grn-inspection {
+    margin-top: 15pt;
+    border: 2px solid #000;
+    padding: 10pt;
+    page-break-inside: avoid;
+  }
+
+  .grn-inspection-title {
+    font-weight: bold;
+    font-size: 14pt;
+    margin-bottom: 10pt;
+  }
+
+  /* Barcode/QR code placeholder */
+  .print-barcode {
+    text-align: center;
+    margin: 15pt 0;
+  }
+
+  /* Footer for each page */
+  .print-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 10pt;
+    border-top: 1px solid #000;
+    padding-top: 5pt;
+  }
+
+  /* Company logo */
+  .print-logo {
+    max-width: 150px;
+    max-height: 80px;
+  }
+
+  /* Ensure links are visible */
+  a[href]:after {
+    content: none !important;
+  }
+
+  /* Remove background colors except for table headers */
+  * {
+    background: transparent !important;
+  }
+
+  th {
+    background-color: #f5f5f5 !important;
+  }
+
+  /* Badge styles for print */
+  .badge {
+    border: 1px solid #000;
+    padding: 2pt 6pt;
+    display: inline-block;
+    font-size: 10pt;
+  }
+}
+
+/* Print button styling (visible on screen, hidden in print) */
+@media screen {
+  .print-button {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1000;
+  }
+}

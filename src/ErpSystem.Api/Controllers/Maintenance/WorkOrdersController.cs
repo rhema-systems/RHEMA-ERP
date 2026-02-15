@@ -262,8 +262,24 @@ public class WorkOrdersController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error updating status for work order with ID {id}");
-            return StatusCode(500, $"An error occurred while updating status for work order with ID {id}");
+            _logger.LogError(ex, "Error updating status for work order with ID {WorkOrderId}", id);
+
+            if (ex is ArgumentException)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+
+            if (ex is UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+
+            if (ex is InvalidOperationException)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+
+            return StatusCode(500, new { message = "An unexpected error occurred while updating the work order status." });
         }
     }
 
@@ -342,7 +358,8 @@ public class WorkOrdersController : ControllerBase
                 taskId,
                 request.Status,
                 request.ActualHours,
-                request.CompletionNotes);
+                request.CompletionNotes,
+                request.TechnicianId);
 
             if (updatedTask == null)
             {
@@ -619,4 +636,5 @@ public class UpdateTaskStatusRequest
     public string Status { get; set; } = string.Empty;
     public double? ActualHours { get; set; }
     public string? CompletionNotes { get; set; }
+    public Guid? TechnicianId { get; set; }
 }

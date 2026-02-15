@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -31,6 +31,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
+import MaintenanceAttachmentsPanel from '@/components/maintenance/MaintenanceAttachmentsPanel';
+import AssetVehicleFleetTabs from '@/components/maintenance/AssetVehicleFleetTabs';
 
 import { format } from 'date-fns';
 
@@ -44,7 +46,11 @@ interface Asset {
   location: string;
   manufacturer: string;
   model: string;
+  year?: number | null;
+  ownershipType?: string | null;
   serialNumber: string;
+  licensePlate?: string;
+  vin?: string;
   purchaseDate: string;
   warrantyExpiry: string;
   lastMaintenanceDate: string;
@@ -52,6 +58,7 @@ interface Asset {
   condition: 'Excellent' | 'Good' | 'Fair' | 'Poor';
   criticality: 'Low' | 'Medium' | 'High' | 'Critical';
   value: number;
+  currentValue?: number;
 }
 
 interface MaintenanceHistory {
@@ -67,7 +74,7 @@ interface MaintenanceHistory {
 }
 
 
-export default function AssetsPage() {
+function AssetsPageContent() {
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
   const { toast } = useToast();
   const searchParams = useSearchParams();
@@ -82,7 +89,11 @@ export default function AssetsPage() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  const [assetTypes, setAssetTypes] = useState<Array<{id: string, name: string, description?: string}>>([]);
+  const [assetTypes, setAssetTypes] = useState<Array<{ id: string; name: string; description?: string; assetType?: string | null; isActive?: boolean }>>([]);
+  const initialCreateHandledRef = useRef(false);
+  const initialEditHandledRef = useRef(false);
+  const [vehiclePicturesOpen, setVehiclePicturesOpen] = useState(false);
+  const [assetViewTab, setAssetViewTab] = useState<string>('details');
 
   const [newAsset, setNewAsset] = useState({
     name: '',
@@ -92,7 +103,11 @@ export default function AssetsPage() {
     location: '',
     manufacturer: '',
     model: '',
+    year: '',
+    ownershipType: 'Owned',
     serialNumber: '',
+    licensePlate: '',
+    vin: '',
     purchaseDate: '',
     warrantyExpiry: '',
     criticality: 'Medium' as const,
@@ -108,8 +123,6 @@ export default function AssetsPage() {
       return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD format
     } catch {
       return '';
-  const router = useRouter();
-
     }
   };
 
@@ -152,13 +165,18 @@ export default function AssetsPage() {
         ...asset,
         assetNumber: asset.assetNumber || asset.AssetNumber || 'N/A',
         value: asset.currentValue || asset.CurrentValue || 0,
+        currentValue: asset.currentValue || asset.CurrentValue || 0,
         category: asset.assetCategory?.name || asset.categoryName || asset.CategoryName || 'Unknown',
+        licensePlate: asset.licensePlate || asset.LicensePlate || '',
+        vin: asset.vin || asset.VIN || asset.Vin || '',
         // Map date fields with proper formatting
         purchaseDate: formatDateForInput(asset.purchaseDate || asset.PurchaseDate),
         warrantyExpiry: formatDateForInput(asset.warrantyEndDate || asset.WarrantyEndDate || asset.warrantyExpiry),
         // Map other potential field name variations
         manufacturer: asset.manufacturer || asset.Manufacturer || '',
         model: asset.model || asset.Model || '',
+        year: asset.year ?? asset.Year ?? null,
+        ownershipType: asset.ownershipType || asset.OwnershipType || 'Owned',
         serialNumber: asset.serialNumber || asset.SerialNumber || '',
         location: asset.location || asset.Location || '',
         description: asset.description || asset.Description || '',
@@ -171,6 +189,22 @@ export default function AssetsPage() {
       return mapped;
     });
   };
+
+  const isVehicleCategoryName = (categoryName: string | null | undefined) => {
+    if (!categoryName) return false;
+    const normalized = categoryName.trim().toLowerCase();
+    const match = assetTypes.find((t) => (t.name || '').trim().toLowerCase() === normalized);
+    if (match) return (match.assetType || '').toLowerCase() === 'vehicle';
+    return normalized.includes('vehicle');
+  };
+
+  const showVehicleFields = isVehicleCategoryName(newAsset.category);
+  const selectedAssetIsVehicle = selectedAsset ? isVehicleCategoryName(selectedAsset.category) : false;
+
+  useEffect(() => {
+    if (!isViewDialogOpen) return;
+    setAssetViewTab('details');
+  }, [isViewDialogOpen, selectedAsset?.id]);
 
   // Load assets and maintenance history from API
   useEffect(() => {
@@ -258,9 +292,11 @@ export default function AssetsPage() {
   useEffect(() => {
     const assetId = searchParams.get('id');
     const categoryParam = searchParams.get('category');
+    const editParam = (searchParams.get('edit') || '').trim().toLowerCase();
+    const shouldEdit = editParam === '1' || editParam === 'true';
 
     // If a specific asset ID is provided, open its details dialog once assets are loaded
-    if (assetId && assets.length > 0 && !isViewDialogOpen) {
+    if (assetId && assets.length > 0 && !isViewDialogOpen && !shouldEdit) {
       const asset = assets.find(a => a.id === assetId);
       if (asset) {
         console.log('Opening asset from URL:', asset);
@@ -282,6 +318,27 @@ export default function AssetsPage() {
       setCategoryFilter(categoryParam);
     }
   }, [assets, searchParams, isViewDialogOpen, toast, categoryFilter]);
+
+  // Optional: deep-link helper to open Create dialog pre-selected by asset type (e.g. /maintenance/assets?assetType=Vehicle&create=1)
+  useEffect(() => {
+    if (initialCreateHandledRef.current) return;
+
+    const createParam = (searchParams.get('create') || '').trim().toLowerCase();
+    if (createParam !== '1' && createParam !== 'true') return;
+    if (assetTypes.length === 0) return;
+
+    const assetTypeParam = (searchParams.get('assetType') || '').trim();
+    if (assetTypeParam) {
+      const match = assetTypes.find((t) => (t.assetType || '').toLowerCase() === assetTypeParam.toLowerCase());
+      if (match) {
+        setNewAsset((prev) => ({ ...prev, category: match.name }));
+        if (categoryFilter === 'all') setCategoryFilter(match.name);
+      }
+    }
+
+    initialCreateHandledRef.current = true;
+    setIsCreateDialogOpen(true);
+  }, [assetTypes, categoryFilter, searchParams]);
 
   // Filter assets
   useEffect(() => {
@@ -311,6 +368,8 @@ export default function AssetsPage() {
       // Find the selected asset type
       const selectedType = assetTypes.find(type => type.name === newAsset.category);
       const typeId = selectedType?.id || assetTypes[0]?.id;
+      const isVehicleCategory = (selectedType?.assetType || '').toLowerCase() === 'vehicle';
+      const yearNumber = newAsset.year ? parseInt(newAsset.year, 10) : null;
 
       // Log debugging info
       console.log('Creating asset with data:', {
@@ -386,7 +445,11 @@ export default function AssetsPage() {
         assetCategoryId: typeId,
         manufacturer: newAsset.manufacturer?.trim() || null,
         model: newAsset.model?.trim() || null,
+        year: isVehicleCategory ? yearNumber : null,
+        ownershipType: isVehicleCategory ? newAsset.ownershipType : 'Owned',
         serialNumber: newAsset.serialNumber?.trim() || null,
+        licensePlate: isVehicleCategory ? (newAsset.licensePlate?.trim() || null) : null,
+        vin: isVehicleCategory ? (newAsset.vin?.trim() || null) : null,
         location: newAsset.location?.trim() || null,
         status: 'Active',
         criticality: newAsset.criticality || 'Medium',
@@ -476,7 +539,11 @@ export default function AssetsPage() {
         location: '',
         manufacturer: '',
         model: '',
+        year: '',
+        ownershipType: 'Owned',
         serialNumber: '',
+        licensePlate: '',
+        vin: '',
         purchaseDate: '',
         warrantyExpiry: '',
         criticality: 'Medium',
@@ -497,7 +564,11 @@ export default function AssetsPage() {
       location: asset.location || '',
       manufacturer: asset.manufacturer || '',
       model: asset.model || '',
+      year: asset.year != null ? String(asset.year) : '',
+      ownershipType: asset.ownershipType || 'Owned',
       serialNumber: asset.serialNumber || '',
+      licensePlate: asset.licensePlate || '',
+      vin: asset.vin || '',
       purchaseDate: formatDateForInput(asset.purchaseDate),
       warrantyExpiry: formatDateForInput(asset.warrantyExpiry),
       criticality: asset.criticality || 'Medium',
@@ -506,11 +577,43 @@ export default function AssetsPage() {
     setIsEditDialogOpen(true);
   };
 
+  // Deep-link helper to open edit dialog for a specific asset (e.g. /maintenance/assets?id={id}&edit=1)
+  useEffect(() => {
+    if (initialEditHandledRef.current) return;
+
+    const assetId = (searchParams.get('id') || '').trim();
+    const editParam = (searchParams.get('edit') || '').trim().toLowerCase();
+    const shouldEdit = editParam === '1' || editParam === 'true';
+
+    if (!shouldEdit) return;
+    if (!assetId) return;
+    if (assets.length === 0) return;
+
+    const asset = assets.find((a) => a.id === assetId);
+    initialEditHandledRef.current = true;
+
+    if (!asset) {
+      toast({
+        title: 'Asset not found',
+        description: 'The requested asset could not be found.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    handleEditAsset(asset);
+  }, [assets, searchParams, toast]);
+
   const handleUpdateAsset = async () => {
     if (!selectedAsset?.id) return;
 
     try {
       const token = localStorage.getItem('authToken');
+      const selectedType = assetTypes.find(type => type.name === newAsset.category);
+      const assetCategoryId = selectedType?.id || assetTypes[0]?.id || '';
+      const isVehicleCategory = (selectedType?.assetType || '').toLowerCase() === 'vehicle';
+      const yearNumber = newAsset.year ? parseInt(newAsset.year, 10) : null;
+
       const response = await fetch(`${API_URL}/maintenance/assets/${selectedAsset.id}`, {
         method: 'PUT',
         headers: {
@@ -520,10 +623,14 @@ export default function AssetsPage() {
         body: JSON.stringify({
           name: newAsset.name,
           description: newAsset.description,
-          assetCategoryId: assetTypes.find(type => type.name === newAsset.category)?.id || assetTypes[0]?.id || '',
+          assetCategoryId,
           manufacturer: newAsset.manufacturer,
           model: newAsset.model,
+          year: isVehicleCategory ? yearNumber : null,
+          ownershipType: isVehicleCategory ? newAsset.ownershipType : 'Owned',
           serialNumber: newAsset.serialNumber,
+          licensePlate: isVehicleCategory ? (newAsset.licensePlate?.trim() || null) : null,
+          vin: isVehicleCategory ? (newAsset.vin?.trim() || null) : null,
           location: newAsset.location,
           status: 'Active',
           criticality: newAsset.criticality,
@@ -561,7 +668,11 @@ export default function AssetsPage() {
         location: '',
         manufacturer: '',
         model: '',
+        year: '',
+        ownershipType: 'Owned',
         serialNumber: '',
+        licensePlate: '',
+        vin: '',
         purchaseDate: '',
         warrantyExpiry: '',
         criticality: 'Medium',
@@ -708,7 +819,7 @@ export default function AssetsPage() {
               Add Asset
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="w-[95vw] max-w-6xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Add New Asset</DialogTitle>
               <DialogDescription>
@@ -766,7 +877,7 @@ export default function AssetsPage() {
                   rows={3}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="location">Location</Label>
                   <Input
@@ -791,7 +902,7 @@ export default function AssetsPage() {
                   </Select>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="manufacturer">Manufacturer</Label>
                   <Input
@@ -820,7 +931,54 @@ export default function AssetsPage() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              {showVehicleFields && (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="licensePlate">Plate Number</Label>
+                    <Input
+                      id="licensePlate"
+                      value={newAsset.licensePlate}
+                      onChange={(e) => setNewAsset(prev => ({ ...prev, licensePlate: e.target.value }))}
+                      placeholder="Plate number"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="vin">VIN</Label>
+                    <Input
+                      id="vin"
+                      value={newAsset.vin}
+                      onChange={(e) => setNewAsset(prev => ({ ...prev, vin: e.target.value }))}
+                      placeholder="Vehicle identification number"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="year">Year</Label>
+                    <Input
+                      id="year"
+                      type="number"
+                      min="1900"
+                      max={String(new Date().getFullYear() + 1)}
+                      value={newAsset.year}
+                      onChange={(e) => setNewAsset((prev) => ({ ...prev, year: e.target.value }))}
+                      placeholder="e.g. 2021"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Ownership</Label>
+                    <Select value={newAsset.ownershipType} onValueChange={(value) => setNewAsset((prev) => ({ ...prev, ownershipType: value }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select ownership" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Owned">Owned</SelectItem>
+                        <SelectItem value="Leased">Leased</SelectItem>
+                        <SelectItem value="Rented">Rented</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="purchaseDate">Purchase Date</Label>
                   <Input
@@ -866,7 +1024,7 @@ export default function AssetsPage() {
 
         {/* Edit Asset Dialog */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="w-[95vw] max-w-6xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit Asset</DialogTitle>
               <DialogDescription>
@@ -916,7 +1074,7 @@ export default function AssetsPage() {
                   rows={3}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="edit-location">Location</Label>
                   <Input
@@ -941,7 +1099,7 @@ export default function AssetsPage() {
                   </Select>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="edit-manufacturer">Manufacturer</Label>
                   <Input
@@ -970,7 +1128,65 @@ export default function AssetsPage() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              {showVehicleFields && (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-licensePlate">Plate Number</Label>
+                    <Input
+                      id="edit-licensePlate"
+                      value={newAsset.licensePlate}
+                      onChange={(e) => setNewAsset(prev => ({ ...prev, licensePlate: e.target.value }))}
+                      placeholder="Plate number"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-vin">VIN</Label>
+                    <Input
+                      id="edit-vin"
+                      value={newAsset.vin}
+                      onChange={(e) => setNewAsset(prev => ({ ...prev, vin: e.target.value }))}
+                      placeholder="Vehicle identification number"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-year">Year</Label>
+                    <Input
+                      id="edit-year"
+                      type="number"
+                      min="1900"
+                      max={String(new Date().getFullYear() + 1)}
+                      value={newAsset.year}
+                      onChange={(e) => setNewAsset((prev) => ({ ...prev, year: e.target.value }))}
+                      placeholder="e.g. 2021"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Ownership</Label>
+                    <Select value={newAsset.ownershipType} onValueChange={(value) => setNewAsset((prev) => ({ ...prev, ownershipType: value }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select ownership" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Owned">Owned</SelectItem>
+                        <SelectItem value="Leased">Leased</SelectItem>
+                        <SelectItem value="Rented">Rented</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+              {showVehicleFields && selectedAsset?.id ? (
+                <div className="flex items-center justify-between rounded-md border bg-muted/10 p-3">
+                  <div>
+                    <div className="text-sm font-medium">Vehicle Pictures</div>
+                    <div className="text-xs text-muted-foreground">Upload and view photos for this vehicle asset.</div>
+                  </div>
+                  <Button variant="outline" onClick={() => setVehiclePicturesOpen(true)}>
+                    Manage Pictures
+                  </Button>
+                </div>
+              ) : null}
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="edit-purchaseDate">Purchase Date</Label>
                   <Input
@@ -1009,6 +1225,33 @@ export default function AssetsPage() {
               </Button>
               <Button onClick={handleUpdateAsset}>
                 Update Asset
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={vehiclePicturesOpen} onOpenChange={setVehiclePicturesOpen}>
+          <DialogContent className="max-w-5xl">
+            <DialogHeader>
+              <DialogTitle>Vehicle Pictures</DialogTitle>
+              <DialogDescription>Upload and view pictures for this vehicle. Stored securely as Asset attachments.</DialogDescription>
+            </DialogHeader>
+
+            {selectedAsset?.id ? (
+              <MaintenanceAttachmentsPanel
+                entityType="Asset"
+                entityId={selectedAsset.id}
+                category="VehiclePictures"
+                title="Pictures"
+                description="Upload photos and related documents for this vehicle."
+              />
+            ) : (
+              <div className="py-6 text-sm text-muted-foreground">Select a vehicle to manage pictures.</div>
+            )}
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setVehiclePicturesOpen(false)}>
+                Close
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1230,7 +1473,7 @@ export default function AssetsPage() {
 
       {/* View Asset Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] max-w-6xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Asset Details</DialogTitle>
             <DialogDescription>
@@ -1238,12 +1481,15 @@ export default function AssetsPage() {
             </DialogDescription>
           </DialogHeader>
           {selectedAsset && (
-            <Tabs defaultValue="details" className="space-y-4">
+            <Tabs value={assetViewTab} onValueChange={setAssetViewTab} className="space-y-4">
               <div className="h-[60vh] flex flex-col">
-                <TabsList>
+                <TabsList className="flex flex-wrap justify-start gap-1 h-auto">
                   <TabsTrigger value="details">Asset Details</TabsTrigger>
                   <TabsTrigger value="schedule">Maintenance Schedule</TabsTrigger>
                   <TabsTrigger value="history">Maintenance History</TabsTrigger>
+                  {selectedAssetIsVehicle && (
+                    <TabsTrigger value="fleet">Fleet</TabsTrigger>
+                  )}
                 </TabsList>
 
                 <div className="flex-1 overflow-y-auto mt-2">
@@ -1312,6 +1558,18 @@ export default function AssetsPage() {
                       <p className="text-sm">{selectedAsset.serialNumber || 'Not specified'}</p>
                     </div>
                   </div>
+                  {selectedAssetIsVehicle && (
+                    <div className="mt-4 grid grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Plate Number</Label>
+                        <p className="text-sm">{selectedAsset.licensePlate || 'Not specified'}</p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">VIN</Label>
+                        <p className="text-sm">{selectedAsset.vin || 'Not specified'}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="border-t pt-4">
@@ -1404,6 +1662,12 @@ export default function AssetsPage() {
                   </div>
                 </div>
               </TabsContent>
+
+              {selectedAssetIsVehicle && (
+                <TabsContent value="fleet" className="space-y-4">
+                  <AssetVehicleFleetTabs vehicleAssetId={selectedAsset.id} />
+                </TabsContent>
+              )}
               </div>
             </div>
             </Tabs>
@@ -1416,5 +1680,13 @@ export default function AssetsPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export default function AssetsPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen">Loading...</div>}>
+      <AssetsPageContent />
+    </Suspense>
   );
 }

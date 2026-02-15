@@ -1,7 +1,9 @@
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Shared;
@@ -17,36 +19,48 @@ public class JobCardService : IJobCardService
     private readonly IJobCardRepository _jobCardRepository;
     private readonly IWorkOrderService _workOrderService;
     private readonly IMaintenanceAssetRepository _assetRepository;
+    private readonly IMaintenanceTypeRepository _maintenanceTypeRepository;
     private readonly ErpSystem.Core.Interfaces.HR.IEmployeeRepository _employeeRepository;
     private readonly ICurrentUserService _currentUserService;
     private readonly IFileUploadService _fileUploadService;
     private readonly IMaintenanceNotificationService _maintenanceNotificationService;
-    private readonly IWorkflowService _workflowService;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
+    private readonly IAssetConditionService _assetConditionService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobCardService> _logger;
+    private readonly IAppEventBus _appEventBus;
 
     public JobCardService(
         IJobCardRepository jobCardRepository,
         IWorkOrderService workOrderService,
         IMaintenanceAssetRepository assetRepository,
+        IMaintenanceTypeRepository maintenanceTypeRepository,
         ErpSystem.Core.Interfaces.HR.IEmployeeRepository employeeRepository,
         ICurrentUserService currentUserService,
         IFileUploadService fileUploadService,
         IMaintenanceNotificationService maintenanceNotificationService,
-        IWorkflowService workflowService,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
+        IAssetConditionService assetConditionService,
         IUnitOfWork unitOfWork,
-        ILogger<JobCardService> logger)
+        ILogger<JobCardService> logger,
+        IAppEventBus appEventBus)
     {
         _jobCardRepository = jobCardRepository;
         _workOrderService = workOrderService;
         _assetRepository = assetRepository;
+        _maintenanceTypeRepository = maintenanceTypeRepository;
         _employeeRepository = employeeRepository;
         _currentUserService = currentUserService;
         _fileUploadService = fileUploadService;
         _maintenanceNotificationService = maintenanceNotificationService;
-        _workflowService = workflowService;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
+        _assetConditionService = assetConditionService;
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _appEventBus = appEventBus;
     }
 
     public async Task<PagedResult<JobCardListDto>> GetJobCardsPagedAsync(JobCardFilterDto filter)
@@ -161,6 +175,34 @@ public class JobCardService : IJobCardService
 
             _logger.LogInformation("Created job card {JobCardNumber} with ID {JobCardId}",
                 jobCardNumber, jobCard.Id);
+
+            // Publish event for admin-configurable notification topics (best-effort).
+            try
+            {
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = tenantId,
+                    EntityType = "JobCard",
+                    Activity = "Created",
+                    Audience = "Internal",
+                    EntityId = jobCard.Id,
+                    TriggeredByUserId = currentUserId,
+                    Data = new Dictionary<string, object>
+                    {
+                        ["JobCardId"] = jobCard.Id,
+                        ["JobCardNumber"] = jobCard.JobCardNumber ?? string.Empty,
+                        ["Title"] = jobCard.Title ?? string.Empty,
+                        ["Status"] = jobCard.JobCardStatus ?? string.Empty,
+                        ["AssetId"] = jobCard.AssetId,
+                        ["RequestedById"] = jobCard.RequestedById,
+                        ["CreatedByUserId"] = currentUserId
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish JobCard.Created entity activity event for job card {JobCardId}", jobCard.Id);
+            }
 
             return await GetJobCardByIdAsync(jobCard.Id) ??
                 throw new InvalidOperationException("Failed to retrieve created job card");
@@ -306,9 +348,11 @@ public class JobCardService : IJobCardService
 
             var currentUserIdString = _currentUserService.UserId;
 
-            // Update status
-            jobCard.JobCardStatus = "Submitted";
-            jobCard.ApprovalStatus = "Pending";
+            // Start approval workflow
+            var workflowResult = await _workflowIntegrationService.SubmitAsync("JobCard", id);
+            var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("JobCard");
+            statusAdapter.ApplySubmitOutcome(jobCard, workflowResult.Outcome, currentEmployeeId.Value);
+
             jobCard.SubmittedDate = DateTime.UtcNow;
             jobCard.SubmittedById = currentEmployeeId.Value;
             jobCard.UpdatedAt = DateTime.UtcNow;
@@ -317,11 +361,37 @@ public class JobCardService : IJobCardService
             await _jobCardRepository.UpdateAsync(jobCard);
             await _unitOfWork.SaveChangesAsync();
 
-            // Start approval workflow
-            await _workflowService.StartApprovalWorkflowAsync("JobCard", id);
-
             // Send notification to approvers
             await _maintenanceNotificationService.NotifyJobCardSubmittedAsync(id);
+
+            // Publish event for admin-configurable notification topics (best-effort).
+            try
+            {
+                var triggeredBy = !string.IsNullOrWhiteSpace(currentUserIdString) && Guid.TryParse(currentUserIdString, out var uid) ? uid : (Guid?)null;
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = jobCard.TenantId,
+                    EntityType = "JobCard",
+                    Activity = "Submitted",
+                    Audience = "Internal",
+                    EntityId = jobCard.Id,
+                    TriggeredByUserId = triggeredBy,
+                    Data = new Dictionary<string, object>
+                    {
+                        ["JobCardId"] = jobCard.Id,
+                        ["JobCardNumber"] = jobCard.JobCardNumber ?? string.Empty,
+                        ["Title"] = jobCard.Title ?? string.Empty,
+                        ["Status"] = jobCard.JobCardStatus ?? string.Empty,
+                        ["ApprovalStatus"] = jobCard.ApprovalStatus ?? string.Empty,
+                        ["SubmittedById"] = jobCard.SubmittedById ?? Guid.Empty,
+                        ["SubmittedDate"] = jobCard.SubmittedDate?.ToString("o") ?? string.Empty
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish JobCard.Submitted entity activity event for job card {JobCardId}", jobCard.Id);
+            }
 
             // Add submission comment
             if (!string.IsNullOrEmpty(submitDto.SubmissionNotes))
@@ -368,24 +438,41 @@ public class JobCardService : IJobCardService
                 throw new UnauthorizedAccessException("Current user does not have an associated employee record");
             }
 
-            // For now, skip workflow validation - in production, implement proper approval workflow
-            // var canApprove = await _workflowService.CanUserApproveAsync("JobCard", id, currentEmployeeId.Value);
-            // if (!canApprove)
-            //     throw new UnauthorizedAccessException("User does not have permission to approve this job card");
+            var canApprove = await _workflowIntegrationService.CanUserApproveAsync("JobCard", id, currentEmployeeId.Value);
+            if (!canApprove && approvalDto.Action.ToLower() != "requestchanges")
+                throw new UnauthorizedAccessException("User does not have permission to approve this job card");
 
-            switch (approvalDto.Action.ToLower())
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                "JobCard",
+                id,
+                currentEmployeeId.Value,
+                approvalDto.Action,
+                approvalDto.Comments);
+
+            if (approvalDto.Action.Equals("requestchanges", StringComparison.OrdinalIgnoreCase))
             {
-                case "approve":
-                    await ApproveJobCardAsync(jobCard, approvalDto, currentEmployeeId.Value);
-                    break;
-                case "reject":
-                    await RejectJobCardAsync(jobCard, approvalDto, currentEmployeeId.Value);
-                    break;
-                case "requestchanges":
-                    await RequestChangesJobCardAsync(jobCard, approvalDto, currentEmployeeId.Value);
-                    break;
-                default:
-                    throw new ArgumentException($"Invalid approval action: {approvalDto.Action}");
+                await RequestChangesJobCardAsync(jobCard, approvalDto, currentEmployeeId.Value);
+                await _workflowIntegrationService.CancelWorkflowAsync("JobCard", id, "Changes requested");
+                return await GetJobCardByIdAsync(id) ??
+                    throw new InvalidOperationException("Failed to retrieve processed job card");
+            }
+
+            if (workflowResult.Outcome == WorkflowOutcome.Approved)
+            {
+                await ApproveJobCardAsync(jobCard, approvalDto, currentEmployeeId.Value);
+            }
+            else if (workflowResult.Outcome == WorkflowOutcome.Rejected)
+            {
+                await RejectJobCardAsync(jobCard, approvalDto, currentEmployeeId.Value);
+            }
+            else
+            {
+                var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("JobCard");
+                statusAdapter.ApplyApprovalOutcome(jobCard, workflowResult.Outcome, currentEmployeeId.Value);
+                jobCard.UpdatedAt = DateTime.UtcNow;
+                jobCard.UpdatedBy = _currentUserService.UserId ?? "System";
+                await _jobCardRepository.UpdateAsync(jobCard);
+                await _unitOfWork.SaveChangesAsync();
             }
 
             _logger.LogInformation("Processed approval action {Action} for job card {JobCardId}",
@@ -404,10 +491,8 @@ public class JobCardService : IJobCardService
     private async Task ApproveJobCardAsync(JobCard jobCard, JobCardApprovalActionDto approvalDto, Guid approverId)
     {
         // Update job card status
-        jobCard.JobCardStatus = "Approved";
-        jobCard.ApprovalStatus = "Approved";
-        jobCard.ApprovedDate = DateTime.UtcNow;
-        jobCard.ApprovedById = approverId;
+        var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("JobCard");
+        statusAdapter.ApplyApprovalOutcome(jobCard, WorkflowOutcome.Approved, approverId);
 
         // Update planning details if provided
         if (approvalDto.PlannedStartDate.HasValue)
@@ -441,7 +526,6 @@ public class JobCardService : IJobCardService
             jobCard.EstimatedCost = approvalDto.RevisedEstimatedCost.Value;
         }
 
-        jobCard.ApprovedDate = DateTime.UtcNow;
         jobCard.UpdatedAt = DateTime.UtcNow;
         jobCard.UpdatedBy = _currentUserService.UserId ?? "System";
 
@@ -459,17 +543,47 @@ public class JobCardService : IJobCardService
             });
         }
 
-        // Automatically generate work order from approved job card
-        await GenerateWorkOrderAsync(jobCard.Id);
+        // Automatically generate work order from approved job card with billing type
+        await GenerateWorkOrderAsync(jobCard.Id, approvalDto.BillingType ?? "Repairs");
 
         // Notify requestor
         await _maintenanceNotificationService.NotifyJobCardApprovedAsync(jobCard.Id);
+
+        // Publish event for admin-configurable notification topics (best-effort).
+        try
+        {
+            var triggeredBy = !string.IsNullOrWhiteSpace(_currentUserService.UserId) && Guid.TryParse(_currentUserService.UserId, out var uid) ? uid : (Guid?)null;
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = jobCard.TenantId,
+                EntityType = "JobCard",
+                Activity = "Approved",
+                Audience = "Internal",
+                EntityId = jobCard.Id,
+                TriggeredByUserId = triggeredBy,
+                Data = new Dictionary<string, object>
+                {
+                    ["JobCardId"] = jobCard.Id,
+                    ["JobCardNumber"] = jobCard.JobCardNumber ?? string.Empty,
+                    ["Title"] = jobCard.Title ?? string.Empty,
+                    ["Status"] = jobCard.JobCardStatus ?? string.Empty,
+                    ["ApprovalStatus"] = jobCard.ApprovalStatus ?? string.Empty,
+                    ["ApprovedById"] = approverId,
+                    ["AssignedTechnicianId"] = jobCard.AssignedTechnicianId ?? Guid.Empty,
+                    ["AssignedTeamId"] = jobCard.AssignedTeamId ?? Guid.Empty
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish JobCard.Approved entity activity event for job card {JobCardId}", jobCard.Id);
+        }
     }
 
     private async Task RejectJobCardAsync(JobCard jobCard, JobCardApprovalActionDto approvalDto, Guid approverId)
     {
-        jobCard.JobCardStatus = "Rejected";
-        jobCard.ApprovalStatus = "Rejected";
+        var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("JobCard");
+        statusAdapter.ApplyApprovalOutcome(jobCard, WorkflowOutcome.Rejected, approverId);
         jobCard.UpdatedAt = DateTime.UtcNow;
         jobCard.UpdatedBy = _currentUserService.UserId ?? "System";
 
@@ -486,6 +600,35 @@ public class JobCardService : IJobCardService
 
         // Notify requestor
         await _maintenanceNotificationService.NotifyJobCardRejectedAsync(jobCard.Id, approvalDto.Comments);
+
+        // Publish event for admin-configurable notification topics (best-effort).
+        try
+        {
+            var triggeredBy = !string.IsNullOrWhiteSpace(_currentUserService.UserId) && Guid.TryParse(_currentUserService.UserId, out var uid) ? uid : (Guid?)null;
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = jobCard.TenantId,
+                EntityType = "JobCard",
+                Activity = "Rejected",
+                Audience = "Internal",
+                EntityId = jobCard.Id,
+                TriggeredByUserId = triggeredBy,
+                Data = new Dictionary<string, object>
+                {
+                    ["JobCardId"] = jobCard.Id,
+                    ["JobCardNumber"] = jobCard.JobCardNumber ?? string.Empty,
+                    ["Title"] = jobCard.Title ?? string.Empty,
+                    ["Status"] = jobCard.JobCardStatus ?? string.Empty,
+                    ["ApprovalStatus"] = jobCard.ApprovalStatus ?? string.Empty,
+                    ["RejectedById"] = approverId,
+                    ["Comments"] = approvalDto.Comments ?? string.Empty
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish JobCard.Rejected entity activity event for job card {JobCardId}", jobCard.Id);
+        }
     }
 
     private async Task RequestChangesJobCardAsync(JobCard jobCard, JobCardApprovalActionDto approvalDto, Guid approverId)
@@ -510,7 +653,7 @@ public class JobCardService : IJobCardService
         await _maintenanceNotificationService.NotifyJobCardChangesRequestedAsync(jobCard.Id, approvalDto.Comments);
     }
 
-    public async Task<Guid> GenerateWorkOrderAsync(Guid jobCardId)
+    public async Task<Guid> GenerateWorkOrderAsync(Guid jobCardId, string billingType = "Repairs")
     {
         try
         {
@@ -530,8 +673,20 @@ public class JobCardService : IJobCardService
             var defaultWorkOrderTypeId = await GetDefaultWorkOrderTypeIdAsync(jobCard.MaintenanceTypeId);
             _logger.LogDebug("Using work order type {WorkOrderTypeId}", defaultWorkOrderTypeId);
 
+            // Get the maintenance type to retrieve fixed amount for Maintenance billing type
+            decimal fixedAmount = 0;
+            if (billingType == "Maintenance")
+            {
+                var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(jobCard.MaintenanceTypeId);
+                if (maintenanceType != null)
+                {
+                    fixedAmount = maintenanceType.FixedAmount;
+                    _logger.LogDebug("Using fixed amount {FixedAmount} from maintenance type {MaintenanceTypeId}", fixedAmount, jobCard.MaintenanceTypeId);
+                }
+            }
+
             // Create work order from job card
-            _logger.LogDebug("Creating work order DTO for job card {JobCardId}", jobCardId);
+            _logger.LogDebug("Creating work order DTO for job card {JobCardId} with billing type {BillingType}", jobCardId, billingType);
             var createWorkOrderDto = new CreateWorkOrderDto
             {
                 Title = jobCard.Title,
@@ -549,7 +704,9 @@ public class JobCardService : IJobCardService
                 SafetyRequirements = jobCard.SafetyRequirements,
                 RequiresPermit = jobCard.RequiresSafetyPermit,
                 RequiresLockout = jobCard.RequiresShutdown,
-                JobCardId = jobCardId // Link the work order to the job card
+                JobCardId = jobCardId, // Link the work order to the job card
+                BillingType = billingType,
+                FixedAmount = fixedAmount
             };
 
             _logger.LogDebug("Calling WorkOrderService.CreateWorkOrderAsync with DTO: {@CreateWorkOrderDto}", createWorkOrderDto);
@@ -574,6 +731,30 @@ public class JobCardService : IJobCardService
                     CommentType = "WorkOrderGenerated",
                     IsInternal = false
                 });
+
+                // Create work order tasks from admission checklist (repair/replace items)
+                try
+                {
+                    var tasksCreated = await _assetConditionService.CreateTasksFromAdmissionChecklistAsync(jobCardId, workOrder.Id);
+                    if (tasksCreated > 0)
+                    {
+                        _logger.LogInformation("Created {TaskCount} tasks from admission checklist for work order {WorkOrderId}",
+                            tasksCreated, workOrder.Id);
+
+                        await AddCommentAsync(jobCardId, new AddJobCardCommentDto
+                        {
+                            Comment = $"{tasksCreated} task(s) added to work order from admission checklist (repair/replace items)",
+                            CommentType = "TasksCreated",
+                            IsInternal = false
+                        });
+                    }
+                }
+                catch (Exception checklistEx)
+                {
+                    // Log but don't fail work order generation if checklist task creation fails
+                    _logger.LogWarning(checklistEx, "Failed to create tasks from admission checklist for job card {JobCardId}, work order {WorkOrderId}",
+                        jobCardId, workOrder.Id);
+                }
 
                 _logger.LogInformation("Generated work order {WorkOrderId} from job card {JobCardId}",
                     workOrder.Id, jobCardId);

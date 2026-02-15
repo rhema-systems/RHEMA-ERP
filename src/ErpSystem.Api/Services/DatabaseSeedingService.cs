@@ -1,4 +1,7 @@
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.Workflow;
+using ErpSystem.Core.Enums;
 using ErpSystem.Data;
 using ErpSystem.Data.Seeders;
 using ErpSystem.Shared;
@@ -47,6 +50,10 @@ namespace ErpSystem.Web.Services
                 // Ensure database is created and migrated
                 await _context.Database.MigrateAsync();
 
+                // Always ensure roles exist (safe/idempotent; required for new module roles on existing DBs)
+                _logger.LogInformation("Ensuring roles are seeded...");
+                await SeedRolesAsync();
+
                 // Check if we already have seed data
                 var hasData = await HasSeedDataAsync();
                 if (!hasData)
@@ -62,6 +69,23 @@ namespace ErpSystem.Web.Services
                     _logger.LogInformation("Ensuring tenant modules are seeded...");
                     await SeedDefaultTenantModulesAsync();
                 }
+
+                // Always ensure baseline EHC workflow exists (required for ticket lifecycle management)
+                _logger.LogInformation("Ensuring EHC workflow is seeded...");
+                await EnsureEhcWorkflowSeededAsync();
+
+                // Always ensure baseline EHC workflow routing rules exist (workflow selection by type/category/priority/department)
+                _logger.LogInformation("Ensuring EHC workflow routing rules are seeded...");
+                await EnsureEhcWorkflowRoutingRulesSeededAsync();
+
+                // Always ensure baseline EHC categories and SLA templates exist (external portal UI depends on them)
+                _logger.LogInformation("Ensuring EHC categories and SLA templates are seeded...");
+                await EnsureEhcCategoriesSeededAsync();
+                await EnsureEhcSlaTemplatesSeededAsync();
+
+                // Always ensure baseline EHC notification topics exist (templated in-app/email notifications)
+                _logger.LogInformation("Ensuring EHC notification topics are seeded...");
+                await EnsureEhcNotificationTopicsSeededAsync();
 
                 // Always seed/update test users in development to ensure correct passwords
                 if (_environment.IsDevelopment())
@@ -96,9 +120,6 @@ namespace ErpSystem.Web.Services
         {
             _logger.LogInformation("Seeding basic data...");
 
-            // Seed roles
-            await SeedRolesAsync();
-
             // Seed default tenant
             await SeedDefaultTenantAsync();
 
@@ -111,7 +132,804 @@ namespace ErpSystem.Web.Services
             // Seed maintenance configuration (work order types, priority levels, maintenance types)
             await SeedMaintenanceConfigurationAsync();
 
+            // Seed baseline EHC workflow definition
+            await EnsureEhcWorkflowSeededAsync();
+
             _logger.LogInformation("Basic data seeding completed");
+        }
+
+        private async Task EnsureEhcWorkflowSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    var entityType = await _context.WorkflowEntityTypes
+                        .FirstOrDefaultAsync(et => !et.IsDeleted && et.TenantId == tenant.Id && et.Code == "EHC_TICKET");
+
+                    if (entityType == null)
+                    {
+                        entityType = new WorkflowEntityType
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenant.Id,
+                            Code = "EHC_TICKET",
+                            Name = "EHC Ticket",
+                            Description = "Enquiry, Helpdesk & Complaints Ticket",
+                            EntityClassName = typeof(EhcTicket).FullName,
+                            IsActive = true,
+                            DisplayOrder = 50,
+                            Icon = "ticket",
+                            ColorCode = "#2563EB",
+                            CreatedAt = DateTime.UtcNow,
+                            CreatedBy = "System"
+                        };
+
+                        _context.WorkflowEntityTypes.Add(entityType);
+                        await _context.SaveChangesAsync();
+                    }
+
+                    var existingDefinition = await _context.WorkflowDefinitions
+                        .FirstOrDefaultAsync(d => !d.IsDeleted && d.TenantId == tenant.Id && d.Name == "EHC Ticket");
+
+                    if (existingDefinition != null)
+                    {
+                        continue;
+                    }
+
+                    var definitionId = Guid.NewGuid();
+                    var definition = new WorkflowDefinition
+                    {
+                        Id = definitionId,
+                        TenantId = tenant.Id,
+                        Name = "EHC Ticket",
+                        Description = "Baseline ticket lifecycle: New → Acknowledged → InProgress → Resolved → Closed",
+                        EntityTypeId = entityType.Id,
+                        Version = 1,
+                        IsActive = true,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = "System"
+                    };
+
+                    _context.WorkflowDefinitions.Add(definition);
+
+                    var stepNew = new WorkflowStep
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        WorkflowDefinitionId = definitionId,
+                        Name = EhcTicketStatus.New.ToString(),
+                        StepType = WorkflowStepType.Manual,
+                        Order = 1,
+                        IsStartStep = true,
+                        IsEndStep = false,
+                        IsRequired = true,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = "System"
+                    };
+
+                    var stepAck = new WorkflowStep
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        WorkflowDefinitionId = definitionId,
+                        Name = EhcTicketStatus.Acknowledged.ToString(),
+                        StepType = WorkflowStepType.Manual,
+                        Order = 2,
+                        IsStartStep = false,
+                        IsEndStep = false,
+                        IsRequired = true,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = "System"
+                    };
+
+                    var stepInProgress = new WorkflowStep
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        WorkflowDefinitionId = definitionId,
+                        Name = EhcTicketStatus.InProgress.ToString(),
+                        StepType = WorkflowStepType.Manual,
+                        Order = 3,
+                        IsStartStep = false,
+                        IsEndStep = false,
+                        IsRequired = true,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = "System"
+                    };
+
+                    var stepResolved = new WorkflowStep
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        WorkflowDefinitionId = definitionId,
+                        Name = EhcTicketStatus.Resolved.ToString(),
+                        StepType = WorkflowStepType.Manual,
+                        Order = 4,
+                        IsStartStep = false,
+                        IsEndStep = false,
+                        IsRequired = true,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = "System"
+                    };
+
+                    var stepClosed = new WorkflowStep
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        WorkflowDefinitionId = definitionId,
+                        Name = EhcTicketStatus.Closed.ToString(),
+                        StepType = WorkflowStepType.Manual,
+                        Order = 5,
+                        IsStartStep = false,
+                        IsEndStep = true,
+                        IsRequired = true,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = "System"
+                    };
+
+                    _context.WorkflowSteps.AddRange(stepNew, stepAck, stepInProgress, stepResolved, stepClosed);
+
+                    _context.WorkflowTransitions.AddRange(
+                        new WorkflowTransition
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenant.Id,
+                            WorkflowDefinitionId = definitionId,
+                            FromStepId = stepNew.Id,
+                            ToStepId = stepAck.Id,
+                            Name = "Acknowledge",
+                            IsDefault = true,
+                            Priority = 0,
+                            CreatedAt = DateTime.UtcNow,
+                            CreatedBy = "System"
+                        },
+                        new WorkflowTransition
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenant.Id,
+                            WorkflowDefinitionId = definitionId,
+                            FromStepId = stepAck.Id,
+                            ToStepId = stepInProgress.Id,
+                            Name = "Start Progress",
+                            IsDefault = true,
+                            Priority = 0,
+                            CreatedAt = DateTime.UtcNow,
+                            CreatedBy = "System"
+                        },
+                        new WorkflowTransition
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenant.Id,
+                            WorkflowDefinitionId = definitionId,
+                            FromStepId = stepInProgress.Id,
+                            ToStepId = stepResolved.Id,
+                            Name = "Resolve",
+                            IsDefault = true,
+                            Priority = 0,
+                            CreatedAt = DateTime.UtcNow,
+                            CreatedBy = "System"
+                        },
+                        new WorkflowTransition
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenant.Id,
+                            WorkflowDefinitionId = definitionId,
+                            FromStepId = stepResolved.Id,
+                            ToStepId = stepClosed.Id,
+                            Name = "Close",
+                            IsDefault = true,
+                            Priority = 0,
+                            CreatedAt = DateTime.UtcNow,
+                            CreatedBy = "System"
+                        });
+
+                    await _context.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed EHC workflow");
+            }
+        }
+
+        private async Task EnsureEhcNotificationTopicsSeededAsync()
+        {
+            var tenants = await _context.Tenants
+                .AsNoTracking()
+                .Where(t => !t.IsDeleted && t.Status == TenantStatus.Active)
+                .Select(t => t.Id)
+                .ToListAsync();
+
+            foreach (var tenantId in tenants)
+            {
+                // Requester-facing templates (email enabled).
+                var createdTemplateId = await EnsureEmailTemplateAsync(
+                    tenantId,
+                    name: "EHC Ticket Created (Requester)",
+                    subject: "Ticket created: {{ticketNumber}}",
+                    htmlBody:
+                    """
+                    <h2>Ticket created</h2>
+                    <p>Your ticket <strong>{{ticketNumber}}</strong> has been created.</p>
+                    <p><strong>Status:</strong> {{status}}</p>
+                    <p>You can view your ticket here: <a href="{{ActionUrl}}">{{ActionUrl}}</a></p>
+                    """);
+
+                var statusChangedTemplateId = await EnsureEmailTemplateAsync(
+                    tenantId,
+                    name: "EHC Ticket Status Changed (Requester)",
+                    subject: "Ticket updated: {{ticketNumber}}",
+                    htmlBody:
+                    """
+                    <h2>Ticket updated</h2>
+                    <p>Your ticket <strong>{{ticketNumber}}</strong> status changed.</p>
+                    <p><strong>From:</strong> {{fromStatus}}</p>
+                    <p><strong>To:</strong> {{toStatus}}</p>
+                    <p>Open ticket: <a href="{{ActionUrl}}">{{ActionUrl}}</a></p>
+                    """);
+
+                var messageTemplateId = await EnsureEmailTemplateAsync(
+                    tenantId,
+                    name: "EHC Ticket Message (Requester)",
+                    subject: "New message: {{ticketNumber}}",
+                    htmlBody:
+                    """
+                    <h2>New message</h2>
+                    <p>Support posted a new message on ticket <strong>{{ticketNumber}}</strong>.</p>
+                    <p>Open ticket: <a href="{{ActionUrl}}">{{ActionUrl}}</a></p>
+                    """);
+
+                var attachmentTemplateId = await EnsureEmailTemplateAsync(
+                    tenantId,
+                    name: "EHC Ticket Attachment (Requester)",
+                    subject: "New attachment: {{ticketNumber}}",
+                    htmlBody:
+                    """
+                    <h2>New attachment</h2>
+                    <p>Support uploaded an attachment on ticket <strong>{{ticketNumber}}</strong>.</p>
+                    <p><strong>File:</strong> {{fileName}}</p>
+                    <p>Open ticket: <a href="{{ActionUrl}}">{{ActionUrl}}</a></p>
+                    """);
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.Created.Requester",
+                    name: "EHC Ticket Created (Requester)",
+                    description: "Notify the requester when a ticket is created.",
+                    entityType: "EhcTicket",
+                    isRequired: true,
+                    enableInApp: true,
+                    enableEmail: true,
+                    inAppTitleTemplate: "Ticket created: {{ticketNumber}}",
+                    inAppBodyTemplate: "We received ticket {{ticketNumber}} ({{ticketType}}). Status: {{status}}.",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: createdTemplateId,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "requesterUserId", inApp: true, email: true)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.StatusChanged.Requester",
+                    name: "EHC Ticket Status Changed (Requester)",
+                    description: "Notify the requester when ticket status changes.",
+                    entityType: "EhcTicket",
+                    isRequired: true,
+                    enableInApp: true,
+                    enableEmail: true,
+                    inAppTitleTemplate: "Ticket updated: {{ticketNumber}}",
+                    inAppBodyTemplate: "Status: {{fromStatus}} → {{toStatus}}",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: statusChangedTemplateId,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "requesterUserId", inApp: true, email: true)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.Message.Requester",
+                    name: "EHC Ticket Message (Requester)",
+                    description: "Notify the requester when an agent posts a message.",
+                    entityType: "EhcTicket",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: true,
+                    inAppTitleTemplate: "New message: {{ticketNumber}}",
+                    inAppBodyTemplate: "Support sent a new message.",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: messageTemplateId,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "requesterUserId", inApp: true, email: true)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.Attachment.Requester",
+                    name: "EHC Ticket Attachment (Requester)",
+                    description: "Notify the requester when an agent uploads an attachment.",
+                    entityType: "EhcTicket",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: true,
+                    inAppTitleTemplate: "New attachment: {{ticketNumber}}",
+                    inAppBodyTemplate: "Support uploaded {{fileName}}.",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: attachmentTemplateId,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "requesterUserId", inApp: true, email: true)
+                    });
+
+                // Internal topics (in-app only by default).
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.Created.Internal",
+                    name: "EHC Ticket Created (Internal)",
+                    description: "Notify internal helpdesk users when a new ticket is created.",
+                    entityType: "EhcTicket",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: false,
+                    inAppTitleTemplate: "New ticket: {{ticketNumber}}",
+                    inAppBodyTemplate: "A new ticket was created ({{ticketType}} • {{priority}}).",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: null,
+                    recipients: new[]
+                    {
+                        (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskAgent, inApp: true, email: false)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.Assigned.Internal",
+                    name: "EHC Ticket Assigned (Internal)",
+                    description: "Notify the assigned agent when a ticket is assigned.",
+                    entityType: "EhcTicket",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: false,
+                    inAppTitleTemplate: "Ticket assigned: {{ticketNumber}}",
+                    inAppBodyTemplate: "A ticket was assigned to you.",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: null,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.Message.Internal",
+                    name: "EHC Ticket Message (Internal)",
+                    description: "Notify internal users when a requester posts a message.",
+                    entityType: "EhcTicket",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: false,
+                    inAppTitleTemplate: "Requester replied: {{ticketNumber}}",
+                    inAppBodyTemplate: "The requester posted a new message.",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: null,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.Attachment.Internal",
+                    name: "EHC Ticket Attachment (Internal)",
+                    description: "Notify internal users when a requester uploads an attachment.",
+                    entityType: "EhcTicket",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: false,
+                    inAppTitleTemplate: "Requester attachment: {{ticketNumber}}",
+                    inAppBodyTemplate: "Requester uploaded {{fileName}}.",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: null,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.StatusChanged.Internal",
+                    name: "EHC Ticket Status Changed (Internal)",
+                    description: "Notify internal users when ticket status changes.",
+                    entityType: "EhcTicket",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: false,
+                    inAppTitleTemplate: "Ticket updated: {{ticketNumber}}",
+                    inAppBodyTemplate: "Status: {{fromStatus}} → {{toStatus}}",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: null,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.SlaWarning.Internal",
+                    name: "EHC SLA Warning (Internal)",
+                    description: "Notify internal users for near-breach SLA warnings.",
+                    entityType: "EhcTicket",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: false,
+                    inAppTitleTemplate: "SLA warning: {{ticketNumber}}",
+                    inAppBodyTemplate: "SLA due soon. Minutes left: {{minutesLeft}}",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: null,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.SlaBreach.Internal",
+                    name: "EHC SLA Breach (Internal)",
+                    description: "Notify internal users for SLA breaches.",
+                    entityType: "EhcTicket",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: false,
+                    inAppTitleTemplate: "SLA breach: {{ticketNumber}}",
+                    inAppBodyTemplate: "A ticket breached the SLA ({{breachKind}}).",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: null,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskManager, inApp: true, email: false)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.SlaEscalation.Internal",
+                    name: "EHC SLA Escalation (Internal)",
+                    description: "Notify internal users when SLA escalation auto-assigns a ticket.",
+                    entityType: "EhcTicket",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: false,
+                    inAppTitleTemplate: "Ticket escalated: {{ticketNumber}}",
+                    inAppBodyTemplate: "Ticket auto-assigned due to SLA: {{reason}}",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: null,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskManager, inApp: true, email: false)
+                    });
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task<Guid?> EnsureEmailTemplateAsync(Guid tenantId, string name, string subject, string htmlBody)
+        {
+            var existing = await _context.EmailTemplates
+                .FirstOrDefaultAsync(t => !t.IsDeleted && t.TenantId == tenantId && t.Module == "Notifications" && t.Name == name);
+
+            if (existing != null)
+            {
+                return existing.Id;
+            }
+
+            var template = new EmailTemplate
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                Module = "Notifications",
+                Name = name,
+                Subject = subject,
+                HtmlBody = htmlBody,
+                IsActive = true,
+                Category = "EHC",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "System"
+            };
+
+            _context.EmailTemplates.Add(template);
+            await _context.SaveChangesAsync();
+            return template.Id;
+        }
+
+        private async Task EnsureNotificationTopicAsync(
+            Guid tenantId,
+            string key,
+            string name,
+            string description,
+            string entityType,
+            bool isRequired,
+            bool enableInApp,
+            bool enableEmail,
+            string? inAppTitleTemplate,
+            string? inAppBodyTemplate,
+            string? actionUrlTemplate,
+            Guid? emailTemplateId,
+            (string kind, string value, bool inApp, bool email)[] recipients)
+        {
+            var topic = await _context.NotificationTopics
+                .Include(t => t.Recipients)
+                .FirstOrDefaultAsync(t => !t.IsDeleted && t.TenantId == tenantId && t.Key == key);
+
+            if (topic == null)
+            {
+                topic = new NotificationTopic
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Key = key,
+                    Name = name,
+                    Description = description,
+                    EntityType = entityType,
+                    IsSystem = true,
+                    IsRequired = isRequired,
+                    IsActive = true,
+                    EnableInApp = enableInApp,
+                    EnableEmail = enableEmail,
+                    InAppTitleTemplate = inAppTitleTemplate,
+                    InAppBodyTemplate = inAppBodyTemplate,
+                    ActionUrlTemplate = actionUrlTemplate,
+                    EmailTemplateId = emailTemplateId,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "System"
+                };
+
+                _context.NotificationTopics.Add(topic);
+                await _context.SaveChangesAsync();
+            }
+
+            var existingRules = (topic.Recipients ?? new List<NotificationTopicRecipient>())
+                .Where(r => !r.IsDeleted)
+                .Select(r => $"{r.RecipientKind}:{r.RecipientValue}")
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (kind, value, inApp, email) in recipients)
+            {
+                var k = $"{kind}:{value}";
+                if (existingRules.Contains(k)) continue;
+
+                _context.NotificationTopicRecipients.Add(new NotificationTopicRecipient
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    TopicId = topic.Id,
+                    RecipientKind = kind,
+                    RecipientValue = value,
+                    IsSystem = true,
+                    SendInApp = inApp,
+                    SendEmail = email,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "System"
+                });
+            }
+        }
+
+        private async Task EnsureEhcWorkflowRoutingRulesSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    var hasAny = await _context.EhcWorkflowRoutingRules.AnyAsync(r => r.TenantId == tenant.Id && !r.IsDeleted);
+                    if (hasAny)
+                    {
+                        continue;
+                    }
+
+                    _context.EhcWorkflowRoutingRules.Add(new EhcWorkflowRoutingRule
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        Name = "Default EHC Ticket Workflow",
+                        IsActive = true,
+                        Priority = 0,
+                        WorkflowName = "EHC Ticket",
+                        TicketType = null,
+                        TicketPriority = null,
+                        CategoryId = null,
+                        SubcategoryId = null,
+                        AssignedDepartmentId = null,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = "System"
+                    });
+
+                    await _context.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed EHC workflow routing rules");
+            }
+        }
+
+        private async Task EnsureEhcCategoriesSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    var hasAny = await _context.EhcTicketCategories.AnyAsync(c => c.TenantId == tenant.Id && !c.IsDeleted);
+                    if (hasAny)
+                    {
+                        continue;
+                    }
+
+                    var now = DateTime.UtcNow;
+
+                    var general = new ErpSystem.Core.Entities.Ehc.EhcTicketCategory
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        Code = "GENERAL",
+                        Name = "General",
+                        Description = "General enquiries and requests",
+                        CreatedAt = now,
+                        CreatedBy = "System"
+                    };
+                    var technical = new ErpSystem.Core.Entities.Ehc.EhcTicketCategory
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        Code = "TECH",
+                        Name = "Technical Support",
+                        Description = "Technical issues and helpdesk requests",
+                        AppliesToType = ErpSystem.Core.Enums.EhcTicketType.Helpdesk,
+                        CreatedAt = now,
+                        CreatedBy = "System"
+                    };
+                    var complaints = new ErpSystem.Core.Entities.Ehc.EhcTicketCategory
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        Code = "COMPLAINTS",
+                        Name = "Complaints",
+                        Description = "Service/product complaints",
+                        AppliesToType = ErpSystem.Core.Enums.EhcTicketType.Complaint,
+                        CreatedAt = now,
+                        CreatedBy = "System"
+                    };
+
+                    _context.EhcTicketCategories.AddRange(general, technical, complaints);
+
+                    // A few starter subcategories
+                    _context.EhcTicketCategories.AddRange(
+                        new ErpSystem.Core.Entities.Ehc.EhcTicketCategory
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenant.Id,
+                            ParentCategoryId = technical.Id,
+                            Code = "LOGIN",
+                            Name = "Login / Access",
+                            AppliesToType = ErpSystem.Core.Enums.EhcTicketType.Helpdesk,
+                            CreatedAt = now,
+                            CreatedBy = "System"
+                        },
+                        new ErpSystem.Core.Entities.Ehc.EhcTicketCategory
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenant.Id,
+                            ParentCategoryId = technical.Id,
+                            Code = "BUG",
+                            Name = "System Bug",
+                            AppliesToType = ErpSystem.Core.Enums.EhcTicketType.Helpdesk,
+                            CreatedAt = now,
+                            CreatedBy = "System"
+                        },
+                        new ErpSystem.Core.Entities.Ehc.EhcTicketCategory
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenant.Id,
+                            ParentCategoryId = complaints.Id,
+                            Code = "SERVICE",
+                            Name = "Service Quality",
+                            AppliesToType = ErpSystem.Core.Enums.EhcTicketType.Complaint,
+                            CreatedAt = now,
+                            CreatedBy = "System"
+                        });
+
+                    await _context.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed EHC categories");
+            }
+        }
+
+        private async Task EnsureEhcSlaTemplatesSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    var hasAny = await _context.EhcSlaTemplates.AnyAsync(s => s.TenantId == tenant.Id && !s.IsDeleted);
+                    if (hasAny)
+                    {
+                        continue;
+                    }
+
+                    var now = DateTime.UtcNow;
+                    _context.EhcSlaTemplates.AddRange(
+                        new ErpSystem.Core.Entities.Ehc.EhcSlaTemplate
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenant.Id,
+                            Name = "Default - Low",
+                            IsActive = true,
+                            Priority = ErpSystem.Core.Enums.EhcTicketPriority.Low,
+                            FirstResponseMinutes = 240,
+                            ResolutionMinutes = 4320,
+                            CreatedAt = now,
+                            CreatedBy = "System"
+                        },
+                        new ErpSystem.Core.Entities.Ehc.EhcSlaTemplate
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenant.Id,
+                            Name = "Default - Medium",
+                            IsActive = true,
+                            Priority = ErpSystem.Core.Enums.EhcTicketPriority.Medium,
+                            FirstResponseMinutes = 120,
+                            ResolutionMinutes = 2880,
+                            CreatedAt = now,
+                            CreatedBy = "System"
+                        },
+                        new ErpSystem.Core.Entities.Ehc.EhcSlaTemplate
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenant.Id,
+                            Name = "Default - High",
+                            IsActive = true,
+                            Priority = ErpSystem.Core.Enums.EhcTicketPriority.High,
+                            FirstResponseMinutes = 60,
+                            ResolutionMinutes = 1440,
+                            CreatedAt = now,
+                            CreatedBy = "System"
+                        },
+                        new ErpSystem.Core.Entities.Ehc.EhcSlaTemplate
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenant.Id,
+                            Name = "Default - Critical",
+                            IsActive = true,
+                            Priority = ErpSystem.Core.Enums.EhcTicketPriority.Critical,
+                            FirstResponseMinutes = 30,
+                            ResolutionMinutes = 480,
+                            CreatedAt = now,
+                            CreatedBy = "System"
+                        });
+
+                    await _context.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed EHC SLA templates");
+            }
         }
 
         public async Task SeedTestUsersAsync()
@@ -126,29 +944,29 @@ namespace ErpSystem.Web.Services
             }
 
             // Only create test users if they don't exist - don't update existing users
-            var adminExists = await _userManager.FindByNameAsync("admin") != null;
-            if (!adminExists)
-            {
-                // Create admin user
-                await CreateTestUserAsync("admin", "admin@default.com", "Admin123!",
-                    "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin);
-            }
+            // Ensure these accounts exist and remain usable on every Development seed run.
+            // (CreateTestUserAsync is idempotent and will update existing users as needed.)
+            await CreateTestUserAsync("admin", "admin@default.com", "Admin123!",
+                "System", "Administrator", defaultTenant.Id, Constants.Roles.SuperAdmin, AuthenticationProvider.LDAP);
 
-            var managerExists = await _userManager.FindByNameAsync("manager") != null;
-            if (!managerExists)
-            {
-                // Create manager user
-                await CreateTestUserAsync("manager", "manager@default.com", "Manager123!",
-                    "John", "Manager", defaultTenant.Id, Constants.Roles.Manager);
-            }
+            await CreateTestUserAsync("manager", "manager@default.com", "Manager123!",
+                "John", "Manager", defaultTenant.Id, Constants.Roles.Manager, AuthenticationProvider.LDAP);
 
-            var employeeExists = await _userManager.FindByNameAsync("employee") != null;
-            if (!employeeExists)
-            {
-                // Create employee user
-                await CreateTestUserAsync("employee", "employee@default.com", "Employee123!",
-                    "Jane", "Employee", defaultTenant.Id, Constants.Roles.Employee);
-            }
+            await CreateTestUserAsync("employee", "employee@default.com", "Employee123!",
+                "Jane", "Employee", defaultTenant.Id, Constants.Roles.Employee, AuthenticationProvider.LDAP);
+
+            await CreateTestUserAsync("helpdesk.agent", "helpdesk.agent@default.com", "Helpdesk123!",
+                "Helpdesk", "Agent", defaultTenant.Id, Constants.Roles.HelpdeskAgent, AuthenticationProvider.LDAP);
+
+            await CreateTestUserAsync("helpdesk.supervisor", "helpdesk.supervisor@default.com", "Helpdesk123!",
+                "Helpdesk", "Supervisor", defaultTenant.Id, Constants.Roles.HelpdeskSupervisor, AuthenticationProvider.LDAP);
+
+            await CreateTestUserAsync("helpdesk.manager", "helpdesk.manager@default.com", "Helpdesk123!",
+                "Helpdesk", "Manager", defaultTenant.Id, Constants.Roles.HelpdeskManager, AuthenticationProvider.LDAP);
+
+            // External portal user (Local auth) for testing support portal flows
+            await CreateTestUserAsync("external", "external@default.com", "External123!",
+                "External", "User", defaultTenant.Id, Constants.Roles.ExternalUser, AuthenticationProvider.Local);
 
             _logger.LogInformation("Test users seeding completed");
         }
@@ -276,6 +1094,10 @@ namespace ErpSystem.Web.Services
                 new { Name = Constants.Roles.TenantAdmin, Description = "Tenant Administrator with tenant-wide access" },
                 new { Name = Constants.Roles.Manager, Description = "Manager with departmental access" },
                 new { Name = Constants.Roles.Employee, Description = "Standard employee with limited access" },
+                new { Name = Constants.Roles.ExternalUser, Description = "External portal user (customers/vendors/partners/citizens)" },
+                new { Name = Constants.Roles.HelpdeskAgent, Description = "Helpdesk agent for managing tickets" },
+                new { Name = Constants.Roles.HelpdeskSupervisor, Description = "Helpdesk supervisor for assignment and escalation" },
+                new { Name = Constants.Roles.HelpdeskManager, Description = "Helpdesk manager for dashboards and configuration" },
                 new { Name = "Finance User", Description = "User with access to finance module" },
                 new { Name = "HR User", Description = "User with access to HR module" },
                 new { Name = "Sales User", Description = "User with access to sales module" },
@@ -389,8 +1211,15 @@ namespace ErpSystem.Web.Services
             await _context.SaveChangesAsync();
         }
 
-        private async Task CreateTestUserAsync(string username, string email, string password,
-            string firstName, string lastName, Guid tenantId, string roleName)
+        private async Task CreateTestUserAsync(
+            string username,
+            string email,
+            string password,
+            string firstName,
+            string lastName,
+            Guid tenantId,
+            string roleName,
+            AuthenticationProvider authenticationProvider = AuthenticationProvider.Local)
         {
             var existingUser = await _userManager.FindByNameAsync(username);
             if (existingUser != null)
@@ -403,6 +1232,7 @@ namespace ErpSystem.Web.Services
                 if (existingUser.LastName != lastName) { existingUser.LastName = lastName; needsUpdate = true; }
                 if (!existingUser.EmailConfirmed) { existingUser.EmailConfirmed = true; needsUpdate = true; }
                 if (!existingUser.IsActive) { existingUser.IsActive = true; needsUpdate = true; }
+                if (existingUser.AuthenticationProvider != authenticationProvider) { existingUser.AuthenticationProvider = authenticationProvider; needsUpdate = true; }
 
                 if (needsUpdate)
                 {
@@ -448,7 +1278,7 @@ namespace ErpSystem.Web.Services
                 FirstName = firstName,
                 LastName = lastName,
                 TenantId = tenantId,
-                AuthenticationProvider = AuthenticationProvider.Local,
+                AuthenticationProvider = authenticationProvider,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = "System",

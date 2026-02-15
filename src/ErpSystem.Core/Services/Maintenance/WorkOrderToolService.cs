@@ -232,6 +232,43 @@ public class WorkOrderToolService : IWorkOrderToolService
         });
     }
 
+    public async Task<WorkOrderToolDto> ExcludeToolFromBillingAsync(Guid workOrderId, Guid toolId, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ArgumentException("A reason is required to exclude a tool from billing.");
+        }
+
+        try
+        {
+            var workOrderTool = await _workOrderToolRepository.GetByWorkOrderAndToolIdAsync(workOrderId, toolId)
+                ?? throw new ArgumentException("Tool allocation not found");
+
+            workOrderTool.IsExcludedFromBilling = true;
+            workOrderTool.BillingExclusionReason = reason.Trim();
+            workOrderTool.BillingExcludedAt = DateTime.UtcNow;
+            workOrderTool.BillingExcludedBy = _currentUserService.UserId?.ToString();
+            workOrderTool.UpdatedAt = DateTime.UtcNow;
+            workOrderTool.UpdatedBy = _currentUserService.UserId?.ToString();
+
+            await _workOrderToolRepository.UpdateAsync(workOrderTool);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Tool {ToolId} for work order {WorkOrderId} was excluded from billing by {UserId}",
+                toolId,
+                workOrderId,
+                _currentUserService.UserId);
+
+            return await MapToDto(workOrderTool);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error excluding tool {ToolId} from billing for work order {WorkOrderId}", toolId, workOrderId);
+            throw;
+        }
+    }
+
     public async Task<WorkOrderToolDto> CheckoutToolAsync(CheckoutWorkOrderToolDto checkoutDto)
     {
         try
@@ -708,6 +745,10 @@ public class WorkOrderToolService : IWorkOrderToolService
             RequiresTraining = false,
             SafetyNotes = null,
             Notes = workOrderTool.Notes,
+            IsExcludedFromBilling = workOrderTool.IsExcludedFromBilling,
+            BillingExclusionReason = workOrderTool.BillingExclusionReason,
+            BillingExcludedAt = workOrderTool.BillingExcludedAt,
+            BillingExcludedBy = workOrderTool.BillingExcludedBy,
             CreatedAt = workOrderTool.CreatedAt,
             UpdatedAt = workOrderTool.UpdatedAt
         };

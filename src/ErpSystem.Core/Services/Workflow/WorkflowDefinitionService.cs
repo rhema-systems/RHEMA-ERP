@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Repositories;
@@ -241,6 +244,34 @@ public class WorkflowDefinitionService : IWorkflowDefinitionService
             {
                 errors.Add("Step orders must be sequential starting from 1");
                 break;
+            }
+        }
+
+        // Approval steps must declare approvers. Without approver rules, the engine cannot generate approval rows
+        // and some fallback behaviors (AssignedTo) can unintentionally allow the wrong user to approve.
+        var serializerOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        serializerOptions.Converters.Add(new JsonStringEnumConverter());
+
+        foreach (var step in steps.Where(s => s.StepType == WorkflowStepType.Approval))
+        {
+            if (string.IsNullOrWhiteSpace(step.Configuration))
+            {
+                errors.Add($"Approval step '{step.Name}' must have at least one approver user or role configured");
+                continue;
+            }
+
+            try
+            {
+                var config = JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(step.Configuration, serializerOptions);
+                var rules = config?.ApprovalConfig?.ApproverRules;
+                if (rules == null || rules.Count == 0)
+                {
+                    errors.Add($"Approval step '{step.Name}' must have at least one approver user or role configured");
+                }
+            }
+            catch
+            {
+                errors.Add($"Approval step '{step.Name}' has an invalid configuration payload");
             }
         }
 

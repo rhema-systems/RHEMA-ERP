@@ -1,30 +1,43 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Plus, Search, Filter, Download, Upload, Settings, Play, Pause, BarChart3, Eye, Edit3, Trash2 } from 'lucide-react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Plus, Search, Download, Upload, Settings, Play, Pause, BarChart3, Eye, Edit3, Trash2, RefreshCw, Info } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { WorkflowDesigner } from '@/components/workflow/WorkflowDesigner';
 import { WorkflowInstanceMonitor } from '@/components/workflow/WorkflowInstanceMonitor';
 import { WorkflowCreationWizard } from '@/components/workflow/WorkflowCreationWizard';
 import { workflowApiService } from '@/services/workflow-api.service';
 import type { 
   WorkflowDefinitionAdminDto, 
-  WorkflowDefinitionFilterDto,
-  WorkflowSummaryDto 
+  WorkflowDefinitionDto,
+  WorkflowDefinitionFilterDto
 } from '@/types/workflow';
 import { toast } from '@/hooks/use-toast';
 
-export default function WorkflowAdministrationPage() {
+function WorkflowAdministrationPageInner() {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState('definitions');
   const [selectedWorkflow, setSelectedWorkflow] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [entityTypeFilter, setEntityTypeFilter] = useState<string>('all');
+  const [definitionStatusFilter, setDefinitionStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [isDesignerOpen, setIsDesignerOpen] = useState(false);
   const [isInstanceMonitorOpen, setIsInstanceMonitorOpen] = useState(false);
   const [isCreationWizardOpen, setIsCreationWizardOpen] = useState(false);
+  const [isSeedingEntityTypes, setIsSeedingEntityTypes] = useState(false);
+  const [entityTypes, setEntityTypes] = useState<Array<{ code: string; name: string }>>([]);
+  const [initializedFromQuery, setInitializedFromQuery] = useState(false);
 
   // Workflow statistics
   const [stats, setStats] = useState({
@@ -37,11 +50,39 @@ export default function WorkflowAdministrationPage() {
   const [definitions, setDefinitions] = useState<WorkflowDefinitionAdminDto[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // Edit / Delete actions
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editDefinition, setEditDefinition] = useState<WorkflowDefinitionDto | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editIsActive, setEditIsActive] = useState(false);
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<WorkflowDefinitionAdminDto | null>(null);
+  const [deleteSaving, setDeleteSaving] = useState(false);
+
   useEffect(() => {
     // Load workflow statistics and definitions on mount
     fetchWorkflowStats();
     fetchDefinitions();
+    fetchEntityTypes();
   }, []);
+
+  useEffect(() => {
+    if (initializedFromQuery) return;
+
+    const q = searchParams.get('q');
+    const et = searchParams.get('entityType');
+    const designId = searchParams.get('designWorkflowId');
+
+    if (q) setSearchQuery(q);
+    if (et) setEntityTypeFilter(et);
+    if (designId) handleDesignWorkflow(designId);
+
+    setInitializedFromQuery(true);
+  }, [initializedFromQuery, searchParams]);
 
   // Refetch definitions when search query changes
   useEffect(() => {
@@ -49,16 +90,110 @@ export default function WorkflowAdministrationPage() {
       fetchDefinitions();
     }, 300);
     return () => clearTimeout(debounceTimer);
-  }, [searchQuery]);
+  }, [searchQuery, definitionStatusFilter, entityTypeFilter]);
 
   const fetchWorkflowStats = async () => {
     try {
-      const summary = await workflowApiService.getWorkflowSummary();
-      setStats({
-        totalDefinitions: summary.totalWorkflowDefinitions,
-        activeInstances: summary.activeWorkflowInstances,
-        completedToday: summary.completedWorkflowInstances, // adjust if a dedicated metric exists
-        pendingApprovals: 0, // could be derived via getPendingApprovals length if needed
+      const now = new Date();
+      const startOfTodayUtc = new Date(Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate()
+      ));
+      const endOfTodayUtc = new Date(startOfTodayUtc);
+      endOfTodayUtc.setUTCDate(endOfTodayUtc.getUTCDate() + 1);
+
+      const statusRequests = [
+        workflowApiService.getWorkflowInstances({
+          page: 1,
+          pageSize: 1,
+          status: 'Created',
+          sortBy: 'StartedDate',
+          sortDescending: true,
+        }),
+        workflowApiService.getWorkflowInstances({
+          page: 1,
+          pageSize: 1,
+          status: 'InProgress',
+          sortBy: 'StartedDate',
+          sortDescending: true,
+        }),
+        workflowApiService.getWorkflowInstances({
+          page: 1,
+          pageSize: 1,
+          status: 'Waiting',
+          sortBy: 'StartedDate',
+          sortDescending: true,
+        }),
+        workflowApiService.getWorkflowInstances({
+          page: 1,
+          pageSize: 1,
+          status: 'Suspended',
+          sortBy: 'StartedDate',
+          sortDescending: true,
+        }),
+      ];
+
+      const [
+        definitionsResult,
+        approvalsResult,
+        completedTodayResult,
+        ...activeResults
+      ] = await Promise.allSettled([
+        workflowApiService.getWorkflowDefinitions({
+          page: 1,
+          pageSize: 1,
+          sortBy: 'Name',
+          sortDescending: false,
+        } as unknown as WorkflowDefinitionFilterDto),
+        workflowApiService.getPendingApprovals(),
+        workflowApiService.getWorkflowInstances({
+          page: 1,
+          pageSize: 1,
+          status: 'Completed',
+          sortBy: 'CompletedDate',
+          sortDescending: true,
+          completedAfter: startOfTodayUtc,
+          completedBefore: endOfTodayUtc,
+        }),
+        ...statusRequests,
+      ]);
+
+      const totalDefinitions =
+        definitionsResult.status === 'fulfilled' ? definitionsResult.value.totalCount : undefined;
+      const pendingApprovals =
+        approvalsResult.status === 'fulfilled' ? approvalsResult.value.length : undefined;
+      const completedToday =
+        completedTodayResult.status === 'fulfilled' ? completedTodayResult.value.totalCount : undefined;
+
+      const activeInstances = activeResults.reduce((sum, result) => {
+        if (result.status === 'fulfilled') {
+          return sum + result.value.totalCount;
+        }
+        return sum;
+      }, 0);
+      const hasActiveCounts = activeResults.some((result) => result.status === 'fulfilled');
+
+      setStats((prev) => ({
+        totalDefinitions: totalDefinitions ?? prev.totalDefinitions,
+        activeInstances: hasActiveCounts ? activeInstances : prev.activeInstances,
+        completedToday: completedToday ?? prev.completedToday,
+        pendingApprovals: pendingApprovals ?? prev.pendingApprovals,
+      }));
+
+      if (definitionsResult.status === 'rejected') {
+        console.error('Failed to fetch workflow definitions count:', definitionsResult.reason);
+      }
+      if (approvalsResult.status === 'rejected') {
+        console.error('Failed to fetch pending approvals:', approvalsResult.reason);
+      }
+      if (completedTodayResult.status === 'rejected') {
+        console.error('Failed to fetch completed instances count:', completedTodayResult.reason);
+      }
+      activeResults.forEach((result) => {
+        if (result.status === 'rejected') {
+          console.error('Failed to fetch active workflow instances:', result.reason);
+        }
       });
     } catch (error) {
       console.error('Failed to fetch workflow stats:', error);
@@ -73,8 +208,11 @@ export default function WorkflowAdministrationPage() {
         page: 1,
         pageSize: 10,
         searchTerm: searchQuery || undefined,
-        entityType: undefined,
-        isActive: undefined,
+        entityType: entityTypeFilter && entityTypeFilter !== 'all' ? entityTypeFilter : undefined,
+        isActive:
+          definitionStatusFilter === 'all'
+            ? undefined
+            : definitionStatusFilter === 'active',
         createdAfter: undefined,
         createdBefore: undefined,
         sortBy: 'Name',
@@ -89,6 +227,19 @@ export default function WorkflowAdministrationPage() {
     }
   };
 
+  const fetchEntityTypes = async () => {
+    try {
+      const types = await workflowApiService.getWorkflowEntityTypes();
+      const data = (types || [])
+        .filter((t) => t && t.code && t.name)
+        .map((t) => ({ code: String(t.code), name: String(t.name) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setEntityTypes(data);
+    } catch (error) {
+      console.error('Failed to fetch workflow entity types:', error);
+    }
+  };
+
   const handleCreateWorkflow = () => {
     setIsCreationWizardOpen(true);
   };
@@ -100,6 +251,122 @@ export default function WorkflowAdministrationPage() {
   const handleDesignWorkflow = (workflowId: string) => {
     setSelectedWorkflow(workflowId);
     setIsDesignerOpen(true);
+  };
+
+  const handleEditWorkflow = async (workflowId: string) => {
+    setEditDialogOpen(true);
+    setEditLoading(true);
+    try {
+      const def = await workflowApiService.getWorkflowDefinition(workflowId);
+      setEditDefinition(def);
+      setEditName(def.name ?? '');
+      setEditDescription(def.description ?? '');
+      setEditIsActive(!!def.isActive);
+    } catch (error: any) {
+      console.error('Failed to load workflow definition for edit:', error);
+      const status = (error as any)?.status;
+      toast({
+        title: status === 403 ? 'Not authorized' : 'Failed to load workflow',
+        description: status === 403 ? 'You do not have permission to edit workflow definitions.' : undefined,
+        variant: 'destructive'
+      });
+      setEditDialogOpen(false);
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleSaveWorkflowEdit = async () => {
+    if (!editDefinition) return;
+
+    const trimmedName = editName.trim();
+    if (!trimmedName) {
+      toast({ title: 'Name is required', variant: 'destructive' });
+      return;
+    }
+
+    setEditSaving(true);
+    try {
+      await workflowApiService.updateWorkflowDefinition(editDefinition.id, {
+        name: trimmedName,
+        description: editDescription?.trim() || undefined,
+        isActive: editIsActive,
+        // IMPORTANT: backend overwrites configuration when null/omitted.
+        // Keep existing configuration unless the designer is used.
+        configuration: editDefinition.configuration ?? undefined,
+      });
+
+      toast({ title: 'Workflow updated', variant: 'success' });
+      setEditDialogOpen(false);
+      setEditDefinition(null);
+      await Promise.all([fetchDefinitions(), fetchWorkflowStats()]);
+    } catch (error: any) {
+      console.error('Failed to update workflow definition:', error);
+      const status = (error as any)?.status;
+      toast({
+        title: status === 403 ? 'Not authorized' : 'Update failed',
+        description:
+          status === 403
+            ? 'You do not have permission to update workflow definitions.'
+            : (error as any)?.message?.toString()?.replace(/^Error:\s*/i, ''),
+        variant: 'destructive'
+      });
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleDeleteWorkflow = (definition: WorkflowDefinitionAdminDto) => {
+    setDeleteTarget(definition);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDeleteWorkflow = async () => {
+    if (!deleteTarget) return;
+    setDeleteSaving(true);
+    try {
+      await workflowApiService.deleteWorkflowDefinition(deleteTarget.id);
+      toast({
+        title: 'Workflow deleted',
+        description: 'The workflow definition has been archived (hidden from lists).',
+        variant: 'success'
+      });
+      await Promise.all([fetchDefinitions(), fetchWorkflowStats()]);
+    } catch (error: any) {
+      console.error('Failed to delete workflow definition:', error);
+      const status = (error as any)?.status;
+      toast({
+        title: status === 403 ? 'Not authorized' : 'Delete failed',
+        description:
+          status === 403
+            ? 'You do not have permission to delete workflow definitions.'
+            : (error as any)?.message?.toString()?.replace(/^Error:\s*/i, ''),
+        variant: 'destructive'
+      });
+    } finally {
+      setDeleteSaving(false);
+      setDeleteDialogOpen(false);
+      setDeleteTarget(null);
+    }
+  };
+
+  const handleSeedEntityTypes = async () => {
+    try {
+      setIsSeedingEntityTypes(true);
+      const seeded = await workflowApiService.seedWorkflowEntityTypes();
+      toast({
+        title: 'Entity types seeded',
+        description: `${seeded.length} entity types are now available.`
+      });
+    } catch (error) {
+      console.error('Failed to seed workflow entity types:', error);
+      toast({
+        title: 'Failed to seed entity types',
+        variant: 'destructive'
+      });
+    } finally {
+      setIsSeedingEntityTypes(false);
+    }
   };
 
   return (
@@ -121,12 +388,31 @@ export default function WorkflowAdministrationPage() {
             <Download className="h-4 w-4 mr-2" />
             Export
           </Button>
+          <Button variant="outline" size="sm" onClick={handleSeedEntityTypes} disabled={isSeedingEntityTypes}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            {isSeedingEntityTypes ? 'Seeding...' : 'Seed Entity Types'}
+          </Button>
           <Button onClick={handleCreateWorkflow}>
             <Plus className="h-4 w-4 mr-2" />
-            Create Workflow
+            New Workflow (Wizard)
           </Button>
         </div>
       </div>
+
+      {/* UX Helper: Wizard vs Designer */}
+      <Card className="border-blue-200 bg-blue-50">
+        <CardContent className="pt-6">
+          <div className="flex items-start gap-3">
+            <Info className="h-5 w-5 text-blue-600 mt-0.5" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-blue-900">Wizard vs Designer</p>
+              <p className="text-sm text-blue-700">
+                Use the <strong>Wizard</strong> to create the workflow definition (module + entity type + basic setup). Then use the <strong>Designer</strong> to configure steps, approvers/roles, and conditions before activating it.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Statistics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -201,10 +487,32 @@ export default function WorkflowAdministrationPage() {
                   className="pl-10 w-64"
                 />
               </div>
-              <Button variant="outline" size="sm">
-                <Filter className="h-4 w-4 mr-2" />
-                Filter
-              </Button>
+              <Select value={entityTypeFilter} onValueChange={(value) => setEntityTypeFilter(value as any)}>
+                <SelectTrigger className="w-56">
+                  <SelectValue placeholder="Entity type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All entities</SelectItem>
+                  {entityTypes.map((t) => (
+                    <SelectItem key={t.code} value={t.code}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={definitionStatusFilter}
+                onValueChange={(value) => setDefinitionStatusFilter(value as any)}
+              >
+                <SelectTrigger className="w-44">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex space-x-2">
               <Badge variant="secondary">All Modules Connected</Badge>
@@ -244,11 +552,11 @@ export default function WorkflowAdministrationPage() {
                         <Settings className="h-4 w-4 mr-1" />
                         Design
                       </Button>
-                      <Button variant="outline" size="sm">
+                      <Button variant="outline" size="sm" onClick={() => handleEditWorkflow(def.id)}>
                         <Edit3 className="h-4 w-4 mr-1" />
                         Edit
                       </Button>
-                      <Button variant="outline" size="sm">
+                      <Button variant="outline" size="sm" onClick={() => handleDeleteWorkflow(def)}>
                         <Trash2 className="h-4 w-4 mr-1" />
                         Delete
                       </Button>
@@ -463,6 +771,134 @@ export default function WorkflowAdministrationPage() {
           setIsDesignerOpen(true);
         }}
       />
+
+      {/* Edit Workflow Definition */}
+      <Dialog
+        open={editDialogOpen}
+        onOpenChange={(open) => {
+          setEditDialogOpen(open);
+          if (!open) {
+            setEditDefinition(null);
+            setEditName('');
+            setEditDescription('');
+            setEditIsActive(false);
+            setEditLoading(false);
+            setEditSaving(false);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[640px]" style={{ maxWidth: 640 }}>
+          <DialogHeader>
+            <DialogTitle>Edit Workflow Definition</DialogTitle>
+            <DialogDescription>
+              Update basic metadata here. Use the Designer for steps, approvers, and conditions.
+            </DialogDescription>
+          </DialogHeader>
+
+          {editLoading && (
+            <div className="text-sm text-muted-foreground">Loading workflow...</div>
+          )}
+
+          {!editLoading && editDefinition && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="wf-edit-name">Name</Label>
+                  <Input
+                    id="wf-edit-name"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    disabled={editSaving}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Entity Type</Label>
+                  <Input value={editDefinition.entityType} disabled />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="wf-edit-desc">Description</Label>
+                <Textarea
+                  id="wf-edit-desc"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  placeholder="Optional description..."
+                  disabled={editSaving}
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="space-y-0.5">
+                  <div className="text-sm font-medium">Active</div>
+                  <div className="text-xs text-muted-foreground">
+                    Activating will validate the definition before it can be used by submissions.
+                  </div>
+                </div>
+                <Switch checked={editIsActive} onCheckedChange={setEditIsActive} disabled={editSaving} />
+              </div>
+
+              <div className="text-xs text-muted-foreground">
+                Version {editDefinition.version} • {editDefinition.steps?.length ?? 0} steps • {editDefinition.transitions?.length ?? 0} transitions
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditDialogOpen(false)}
+              disabled={editSaving}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveWorkflowEdit} disabled={editSaving || editLoading || !editDefinition}>
+              {editSaving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Workflow Definition */}
+      <ConfirmationDialog
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          setDeleteDialogOpen(open);
+          if (!open) {
+            setDeleteTarget(null);
+            setDeleteSaving(false);
+          }
+        }}
+        title="Delete Workflow Definition?"
+        description={
+          deleteTarget ? (
+            <div className="space-y-2">
+              <div>
+                You are about to delete <strong>{deleteTarget.name}</strong> ({deleteTarget.entityType}).
+              </div>
+              <div>
+                This is a <strong>soft delete</strong> (archive): it will be hidden from the workflow list.
+                If the workflow has ever been used (has instances), deletion is blocked to preserve history.
+                {deleteTarget.activeInstancesCount > 0 ? (
+                  <span> It also has <strong>{deleteTarget.activeInstancesCount}</strong> active instance(s).</span>
+                ) : null}
+              </div>
+            </div>
+          ) : undefined
+        }
+        confirmText={deleteSaving ? 'Deleting...' : 'Delete'}
+        variant="destructive"
+        onConfirm={handleConfirmDeleteWorkflow}
+        isLoading={deleteSaving}
+      />
     </div>
+  );
+}
+
+export default function WorkflowAdministrationPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading workflow administration…</div>}>
+      <WorkflowAdministrationPageInner />
+    </Suspense>
   );
 }

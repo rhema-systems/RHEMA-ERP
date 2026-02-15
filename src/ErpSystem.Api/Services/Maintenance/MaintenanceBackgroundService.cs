@@ -61,6 +61,18 @@ public class MaintenanceBackgroundService : BackgroundService
     {
         using var scope = _scopeFactory.CreateScope();
 
+        var lockService = scope.ServiceProvider.GetRequiredService<IDistributedLockService>();
+        await using var leader = await lockService.TryAcquireAsync(
+            lockName: "bg:maintenance-processing",
+            leaseDuration: TimeSpan.FromMinutes(25),
+            cancellationToken: cancellationToken);
+
+        if (leader == null)
+        {
+            _logger.LogDebug("Skipping maintenance processing run (lock not acquired)");
+            return;
+        }
+
         var workOrderService = scope.ServiceProvider.GetRequiredService<IWorkOrderService>();
         var scheduleService = scope.ServiceProvider.GetRequiredService<IMaintenanceScheduleService>();
         var emailService = scope.ServiceProvider.GetRequiredService<IEmailService>();

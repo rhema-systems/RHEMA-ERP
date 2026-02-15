@@ -5,7 +5,12 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
+using ErpSystem.Data;
 using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using System.Text.Json;
+using EmailAttachmentInfo = ErpSystem.Core.Interfaces.EmailAttachmentInfo;
 using CreateEmailCampaignDto = ErpSystem.Core.DTOs.Notifications.CreateEmailCampaignDto;
 using CreateNotificationDto = ErpSystem.Core.DTOs.Notifications.CreateNotificationDto;
 using CreateNotificationTemplateDto = ErpSystem.Core.DTOs.Notifications.CreateNotificationTemplateDto;
@@ -33,6 +38,8 @@ public class UnifiedNotificationService : INotificationService
     private readonly IEmailService _emailService;
     private readonly ICurrentUserService _currentUserService;
     private readonly IHubNotificationService _hubNotificationService;
+    private readonly ApplicationDbContext _dbContext;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<UnifiedNotificationService> _logger;
 
     public UnifiedNotificationService(
@@ -40,12 +47,16 @@ public class UnifiedNotificationService : INotificationService
         IEmailService emailService,
         ICurrentUserService currentUserService,
         IHubNotificationService hubNotificationService,
+        ApplicationDbContext dbContext,
+        IConfiguration configuration,
         ILogger<UnifiedNotificationService> logger)
     {
         _unitOfWork = unitOfWork;
         _emailService = emailService;
         _currentUserService = currentUserService;
         _hubNotificationService = hubNotificationService;
+        _dbContext = dbContext;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -53,9 +64,14 @@ public class UnifiedNotificationService : INotificationService
 
     public async Task SendEmailAsync(string to, string subject, string body, bool isHtml = true)
     {
+        Notification? logEntity = null;
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+
         try
         {
             _logger.LogInformation("Sending email to {EmailAddress} with subject: {Subject}", to, subject);
+
+            logEntity = await TryCreateEmailLogAsync(tenantId, to, subject, body, isHtml, attachments: null);
 
             await _emailService.SendEmailAsync(new EmailDto
             {
@@ -65,11 +81,52 @@ public class UnifiedNotificationService : INotificationService
                 IsHtml = isHtml
             });
 
+            await TryMarkEmailLogSentAsync(logEntity);
             _logger.LogInformation("Email sent successfully to {EmailAddress}", to);
         }
         catch (Exception ex)
         {
+            await TryMarkEmailLogFailedAsync(logEntity, ex);
             _logger.LogError(ex, "Error sending email to {EmailAddress}", to);
+            throw;
+        }
+    }
+
+    public async Task SendEmailWithAttachmentsAsync(string to, string subject, string body, List<EmailAttachmentInfo> attachments, bool isHtml = true)
+    {
+        Notification? logEntity = null;
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+
+        try
+        {
+            _logger.LogInformation("Sending email with {AttachmentCount} attachments to {EmailAddress} with subject: {Subject}", 
+                attachments.Count, to, subject);
+
+            logEntity = await TryCreateEmailLogAsync(tenantId, to, subject, body, isHtml, attachments);
+
+            var emailDto = new EmailDto
+            {
+                To = to,
+                Subject = subject,
+                Body = body,
+                IsHtml = isHtml,
+                Attachments = attachments.Select(a => new EmailAttachmentDto
+                {
+                    FileName = a.FileName,
+                    Content = a.Content,
+                    ContentType = a.ContentType
+                }).ToList()
+            };
+
+            await _emailService.SendEmailAsync(emailDto);
+
+            await TryMarkEmailLogSentAsync(logEntity);
+            _logger.LogInformation("Email with attachments sent successfully to {EmailAddress}", to);
+        }
+        catch (Exception ex)
+        {
+            await TryMarkEmailLogFailedAsync(logEntity, ex);
+            _logger.LogError(ex, "Error sending email with attachments to {EmailAddress}", to);
             throw;
         }
     }
@@ -157,6 +214,7 @@ public class UnifiedNotificationService : INotificationService
             // Extract EntityType and EntityId from data dictionary if present
             string? entityType = null;
             Guid? entityId = null;
+            string? actionUrl = null;
 
             if (data != null)
             {
@@ -176,6 +234,16 @@ public class UnifiedNotificationService : INotificationService
                         entityId = eidDirect;
                     }
                 }
+
+                // Optional: allow services to provide an explicit navigation URL
+                if (data.TryGetValue("ActionUrl", out var au) && au != null)
+                {
+                    actionUrl = au.ToString();
+                }
+                else if (data.TryGetValue("actionUrl", out var aul) && aul != null)
+                {
+                    actionUrl = aul.ToString();
+                }
             }
 
             var notification = new Notification
@@ -190,6 +258,7 @@ public class UnifiedNotificationService : INotificationService
                 SentAt = DateTime.UtcNow,
                 EntityType = entityType,
                 EntityId = entityId ?? Guid.Empty,
+                ActionUrl = string.IsNullOrWhiteSpace(actionUrl) ? null : actionUrl,
                 AdditionalData = data != null ? System.Text.Json.JsonSerializer.Serialize(data) : null,
                 DeliveryMethods = "InApp",
                 TenantId = tenantId,
@@ -222,6 +291,119 @@ public class UnifiedNotificationService : INotificationService
         }
 
         return string.Concat("***", phoneNumber.AsSpan(phoneNumber.Length - 4));
+    }
+
+    #endregion
+
+    #region Email Logging (Message Queue)
+
+    private async Task<Notification?> TryCreateEmailLogAsync(
+        Guid tenantId,
+        string to,
+        string subject,
+        string body,
+        bool isHtml,
+        List<EmailAttachmentInfo>? attachments)
+    {
+        // If we don't know the tenant (e.g. background context), we still send the email but we can't safely persist.
+        if (tenantId == Guid.Empty)
+        {
+            return null;
+        }
+
+        try
+        {
+            const int maxTotalAttachmentBytesToPersist = 2 * 1024 * 1024; // 2MB safety cap
+            var totalBytes = attachments?.Sum(a => a.Content?.Length ?? 0) ?? 0;
+            var persistAttachmentBytes = attachments != null && totalBytes > 0 && totalBytes <= maxTotalAttachmentBytesToPersist;
+
+            object payload = new
+            {
+                email = new
+                {
+                    isHtml,
+                    attachmentsOmitted = attachments != null && !persistAttachmentBytes,
+                    attachments = attachments?.Select(a => new
+                    {
+                        fileName = a.FileName,
+                        contentType = a.ContentType,
+                        size = a.Content?.Length ?? 0,
+                        contentBase64 = persistAttachmentBytes ? Convert.ToBase64String(a.Content) : null
+                    }).ToList()
+                }
+            };
+
+            var entity = new Notification
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                NotificationType = "Email",
+                Title = subject ?? string.Empty,
+                Message = body ?? string.Empty,
+                Priority = "Normal",
+                Status = "Pending",
+                IsRead = false,
+                ScheduledFor = DateTime.UtcNow,
+                SentAt = null,
+                AttemptCount = 0,
+                LastError = null,
+                DeliveryMethods = "Email",
+                EmailAddress = to,
+                PhoneNumber = null,
+                RecipientId = Guid.Empty,
+                AdditionalData = JsonSerializer.Serialize(payload)
+            };
+
+            await _unitOfWork.Repository<Notification>().AddAsync(entity);
+            await _unitOfWork.SaveChangesAsync();
+            return entity;
+        }
+        catch (Exception ex)
+        {
+            // Best-effort: never block sending on logging failures.
+            _logger.LogWarning(ex, "Failed to persist email log entry for recipient {EmailAddress}", to);
+            return null;
+        }
+    }
+
+    private async Task TryMarkEmailLogSentAsync(Notification? logEntity)
+    {
+        if (logEntity == null) return;
+
+        try
+        {
+            logEntity.Status = "Sent";
+            logEntity.SentAt = DateTime.UtcNow;
+            logEntity.AttemptCount += 1;
+            logEntity.LastError = null;
+
+            await _unitOfWork.Repository<Notification>().UpdateAsync(logEntity);
+            await _unitOfWork.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to update email log {NotificationId} to Sent", logEntity.Id);
+        }
+    }
+
+    private async Task TryMarkEmailLogFailedAsync(Notification? logEntity, Exception exception)
+    {
+        if (logEntity == null) return;
+
+        try
+        {
+            logEntity.Status = "Failed";
+            logEntity.SentAt = null;
+            logEntity.AttemptCount += 1;
+            logEntity.LastError = exception.Message;
+
+            await _unitOfWork.Repository<Notification>().UpdateAsync(logEntity);
+            await _unitOfWork.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to update email log {NotificationId} to Failed", logEntity.Id);
+        }
     }
 
     #endregion
@@ -484,7 +666,8 @@ public class UnifiedNotificationService : INotificationService
                 PushNotificationsSent = notificationsList.Count(n => n.DeliveryMethods?.Contains("Push") == true),
                 EmailNotificationsSent = notificationsList.Count(n => n.DeliveryMethods?.Contains("Email") == true),
                 DeliveryRate = notificationsList.Count > 0 ? (double)notificationsList.Count(n => n.Status == "Sent") / notificationsList.Count : 0,
-                OpenRate = notificationsList.Count > 0 ? (double)notificationsList.Count(n => n.IsRead) / notificationsList.Count : 0
+                OpenRate = notificationsList.Count > 0 ? (double)notificationsList.Count(n => n.IsRead) / notificationsList.Count : 0,
+                AverageDeliveryTimeSeconds = CalculateAverageDeliveryTime(notificationsList)
             };
         }
         catch (Exception ex)
@@ -500,18 +683,138 @@ public class UnifiedNotificationService : INotificationService
 
     public async Task<List<NotificationTemplateDto>> GetNotificationTemplatesAsync(Guid tenantId, string? type = null)
     {
-        return await Task.FromResult(new List<NotificationTemplateDto>());
+        try
+        {
+            var query = _dbContext.EmailTemplates
+                .AsNoTracking()
+                .Where(t =>
+                    t.TenantId == tenantId &&
+                    !t.IsDeleted &&
+                    t.Module == "Notifications");
+
+            if (!string.IsNullOrWhiteSpace(type))
+            {
+                query = query.Where(t => t.Category == type);
+            }
+
+            var templates = await query
+                .OrderByDescending(t => t.CreatedAt)
+                .ToListAsync();
+
+            return templates.Select(t => new NotificationTemplateDto
+            {
+                Id = t.Id,
+                Name = t.Name,
+                Type = t.Category ?? string.Empty,
+                Subject = t.Subject,
+                HtmlTemplate = t.HtmlBody,
+                TextTemplate = t.PlainTextBody,
+                Variables = TryParseTemplateVariables(t.TemplateVariables),
+                IsActive = t.IsActive,
+                CreatedBy = t.CreatedBy ?? string.Empty,
+                CreatedAt = t.CreatedAt,
+                LastUsed = null,
+                UsageCount = 0
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving notification templates for tenant {TenantId}", tenantId);
+            return new List<NotificationTemplateDto>();
+        }
     }
 
     public async Task<NotificationTemplateDto> CreateNotificationTemplateAsync(
         CreateNotificationTemplateDto templateDto, Guid createdBy, Guid tenantId)
     {
-        return await Task.FromResult(new NotificationTemplateDto());
+        try
+        {
+            var name = templateDto.Name?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new InvalidOperationException("Template name is required");
+            }
+
+            var exists = await _dbContext.EmailTemplates
+                .AsNoTracking()
+                .AnyAsync(t =>
+                    t.TenantId == tenantId &&
+                    !t.IsDeleted &&
+                    t.Module == "Notifications" &&
+                    t.Name == name);
+
+            if (exists)
+            {
+                throw new InvalidOperationException($"A template with name '{name}' already exists");
+            }
+
+            var user = await _dbContext.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Id == createdBy);
+
+            var entity = new EmailTemplate
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                Name = name,
+                Module = "Notifications",
+                Category = templateDto.Type?.Trim(),
+                Subject = templateDto.Subject?.Trim() ?? string.Empty,
+                HtmlBody = templateDto.HtmlTemplate ?? string.Empty,
+                PlainTextBody = templateDto.TextTemplate,
+                TemplateVariables = templateDto.Variables != null ? JsonSerializer.Serialize(templateDto.Variables) : null,
+                IsActive = templateDto.IsActive,
+                CreatedById = createdBy,
+                CreatedBy = user?.UserName ?? user?.Email ?? string.Empty
+            };
+
+            await _dbContext.EmailTemplates.AddAsync(entity);
+            await _dbContext.SaveChangesAsync();
+
+            return new NotificationTemplateDto
+            {
+                Id = entity.Id,
+                Name = entity.Name,
+                Type = entity.Category ?? string.Empty,
+                Subject = entity.Subject,
+                HtmlTemplate = entity.HtmlBody,
+                TextTemplate = entity.PlainTextBody,
+                Variables = templateDto.Variables,
+                IsActive = entity.IsActive,
+                CreatedBy = entity.CreatedBy ?? string.Empty,
+                CreatedAt = entity.CreatedAt,
+                LastUsed = null,
+                UsageCount = 0
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating notification template for tenant {TenantId}", tenantId);
+            throw;
+        }
     }
 
     public async Task<bool> DeleteNotificationTemplateAsync(Guid templateId, Guid tenantId)
     {
-        return await Task.FromResult(true);
+        try
+        {
+            var template = await _dbContext.EmailTemplates
+                .FirstOrDefaultAsync(t => t.Id == templateId && t.TenantId == tenantId && !t.IsDeleted && t.Module == "Notifications");
+
+            if (template == null) return false;
+
+            template.IsActive = false;
+            template.IsDeleted = true;
+            template.DeletedAt = DateTime.UtcNow;
+
+            await _dbContext.SaveChangesAsync();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting notification template {TemplateId} for tenant {TenantId}", templateId, tenantId);
+            return false;
+        }
     }
 
     #endregion
@@ -520,27 +823,240 @@ public class UnifiedNotificationService : INotificationService
 
     public async Task<EmailCampaignDto> CreateEmailCampaignAsync(CreateEmailCampaignDto campaignDto, Guid createdBy, Guid tenantId)
     {
-        return await Task.FromResult(new EmailCampaignDto());
+        try
+        {
+            var name = campaignDto.Name?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new InvalidOperationException("Campaign name is required");
+            }
+
+            if (string.IsNullOrWhiteSpace(campaignDto.Subject))
+            {
+                throw new InvalidOperationException("Campaign subject is required");
+            }
+
+            if (string.IsNullOrWhiteSpace(campaignDto.HtmlContent) && string.IsNullOrWhiteSpace(campaignDto.TextContent))
+            {
+                throw new InvalidOperationException("Campaign content is required");
+            }
+
+            var exists = await _dbContext.EmailCampaigns
+                .AsNoTracking()
+                .AnyAsync(c => c.TenantId == tenantId && !c.IsDeleted && c.Name == name);
+
+            if (exists)
+            {
+                throw new InvalidOperationException($"A campaign with name '{name}' already exists");
+            }
+
+            var user = await _dbContext.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == createdBy);
+
+            var campaign = new EmailCampaign
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                Name = name,
+                Subject = campaignDto.Subject?.Trim() ?? string.Empty,
+                HtmlContent = campaignDto.HtmlContent ?? string.Empty,
+                TextContent = campaignDto.TextContent,
+                FromName = campaignDto.FromName,
+                FromEmail = campaignDto.FromEmail,
+                ReplyTo = campaignDto.ReplyTo,
+                ScheduledFor = campaignDto.ScheduledFor,
+                Status = "draft",
+                IsTemplate = campaignDto.IsTemplate,
+                TemplateData = campaignDto.TemplateData,
+                TagsJson = campaignDto.Tags != null ? JsonSerializer.Serialize(campaignDto.Tags) : null,
+                CreatedById = createdBy,
+                CreatedBy = user?.UserName ?? user?.Email ?? string.Empty
+            };
+
+            await _dbContext.EmailCampaigns.AddAsync(campaign);
+
+            // Pre-create recipients (best effort)
+            var recipientRows = await ResolveCampaignRecipientsAsync(campaignDto, tenantId);
+            foreach (var r in recipientRows)
+            {
+                r.EmailCampaignId = campaign.Id;
+                r.TenantId = tenantId;
+            }
+            if (recipientRows.Count > 0)
+            {
+                await _dbContext.EmailCampaignRecipients.AddRangeAsync(recipientRows);
+            }
+
+            await _dbContext.SaveChangesAsync();
+
+            return await MapCampaignToDtoAsync(campaign, tenantId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating email campaign for tenant {TenantId}", tenantId);
+            throw;
+        }
     }
 
     public async Task<EmailCampaignDto?> GetEmailCampaignAsync(Guid campaignId, Guid tenantId)
     {
-        return await Task.FromResult<EmailCampaignDto?>(null);
+        try
+        {
+            var campaign = await _dbContext.EmailCampaigns
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Id == campaignId && c.TenantId == tenantId && !c.IsDeleted);
+
+            if (campaign == null) return null;
+
+            return await MapCampaignToDtoAsync(campaign, tenantId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving email campaign {CampaignId} for tenant {TenantId}", campaignId, tenantId);
+            return null;
+        }
     }
 
     public async Task<List<EmailCampaignDto>> GetEmailCampaignsAsync(Guid tenantId, string? status = null)
     {
-        return await Task.FromResult(new List<EmailCampaignDto>());
+        try
+        {
+            var query = _dbContext.EmailCampaigns
+                .AsNoTracking()
+                .Where(c => c.TenantId == tenantId && !c.IsDeleted);
+
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                query = query.Where(c => c.Status == status);
+            }
+
+            var campaigns = await query
+                .OrderByDescending(c => c.CreatedAt)
+                .ToListAsync();
+
+            var result = new List<EmailCampaignDto>(campaigns.Count);
+            foreach (var c in campaigns)
+            {
+                var dto = await MapCampaignToDtoAsync(c, tenantId);
+                result.Add(dto);
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving email campaigns for tenant {TenantId}", tenantId);
+            return new List<EmailCampaignDto>();
+        }
     }
 
     public async Task<bool> DeleteEmailCampaignAsync(Guid campaignId, Guid tenantId)
     {
-        return await Task.FromResult(true);
+        try
+        {
+            var campaign = await _dbContext.EmailCampaigns
+                .FirstOrDefaultAsync(c => c.Id == campaignId && c.TenantId == tenantId && !c.IsDeleted);
+
+            if (campaign == null) return false;
+
+            campaign.IsDeleted = true;
+            campaign.DeletedAt = DateTime.UtcNow;
+            campaign.Status = "cancelled";
+
+            await _dbContext.SaveChangesAsync();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting email campaign {CampaignId} for tenant {TenantId}", campaignId, tenantId);
+            return false;
+        }
     }
 
     public async Task<EmailCampaignDto?> SendEmailCampaignAsync(Guid campaignId, Guid tenantId)
     {
-        return await Task.FromResult<EmailCampaignDto?>(null);
+        try
+        {
+            var campaign = await _dbContext.EmailCampaigns
+                .FirstOrDefaultAsync(c => c.Id == campaignId && c.TenantId == tenantId && !c.IsDeleted);
+
+            if (campaign == null) return null;
+
+            if (campaign.Status == "cancelled")
+            {
+                throw new InvalidOperationException("Cannot send a cancelled campaign");
+            }
+
+            // Ensure recipients exist (campaign may have been created without recipients or roles changed)
+            var existingRecipients = await _dbContext.EmailCampaignRecipients
+                .Where(r => r.TenantId == tenantId && r.EmailCampaignId == campaignId && !r.IsDeleted)
+                .ToListAsync();
+
+            if (existingRecipients.Count == 0)
+            {
+                // No recipients were stored; do not attempt send.
+                throw new InvalidOperationException("Campaign has no recipients");
+            }
+
+            var scheduledFor = campaign.ScheduledFor ?? DateTime.UtcNow;
+            campaign.Status = scheduledFor > DateTime.UtcNow ? "scheduled" : "sending";
+
+            // Enqueue notifications for recipients that are not yet enqueued.
+            foreach (var recipient in existingRecipients.Where(r => r.NotificationId == null))
+            {
+                var payload = new
+                {
+                    email = new
+                    {
+                        isHtml = true,
+                        attachmentsOmitted = true,
+                        attachments = new List<object>()
+                    },
+                    campaign = new
+                    {
+                        id = campaign.Id,
+                        recipientId = recipient.Id
+                    }
+                };
+
+                var n = new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    NotificationType = "EmailCampaign",
+                    Title = campaign.Subject,
+                    Message = campaign.HtmlContent,
+                    Priority = "Normal",
+                    Status = "Pending",
+                    IsRead = false,
+                    ScheduledFor = scheduledFor,
+                    SentAt = null,
+                    AttemptCount = 0,
+                    LastError = null,
+                    DeliveryMethods = "Email",
+                    EmailAddress = recipient.Email,
+                    PhoneNumber = null,
+                    RecipientId = recipient.UserId ?? Guid.Empty,
+                    AdditionalData = JsonSerializer.Serialize(payload)
+                };
+
+                await _unitOfWork.Repository<Notification>().AddAsync(n);
+
+                recipient.NotificationId = n.Id;
+                recipient.Status = "Pending";
+                recipient.AttemptCount = 0;
+                recipient.LastError = null;
+            }
+
+            await _unitOfWork.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
+
+            return await MapCampaignToDtoAsync(campaign, tenantId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending email campaign {CampaignId} for tenant {TenantId}", campaignId, tenantId);
+            throw;
+        }
     }
 
     #endregion
@@ -565,6 +1081,8 @@ public class UnifiedNotificationService : INotificationService
                 Timestamp = notification.Timestamp,
                 IsRead = notification.IsRead,
                 ActionUrl = notification.ActionUrl,
+                EntityType = string.IsNullOrWhiteSpace(notification.EntityType) ? null : notification.EntityType,
+                EntityId = notification.EntityId.HasValue ? notification.EntityId.Value.ToString() : null,
                 Metadata = notification.Metadata
             };
             await _hubNotificationService.BroadcastNotificationAsync(userId.ToString(), dashboardNotification);
@@ -577,8 +1095,128 @@ public class UnifiedNotificationService : INotificationService
             "[BROADCAST] Broadcasting notification '{Title}' to tenant {TenantId} with roles: {Roles}",
             notification.Title, tenantId, roles?.Count > 0 ? string.Join(", ", roles) : "All");
 
-        // TODO: Implement role-based broadcast
-        await Task.CompletedTask;
+        try
+        {
+            if (tenantId == Guid.Empty)
+            {
+                _logger.LogWarning("[BROADCAST] TenantId is empty; skipping broadcast for '{Title}'", notification.Title);
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+
+            // Resolve tenant user IDs (prefer UserTenants; fall back to primary TenantId).
+            var tenantUserIds = await _dbContext.UserTenants
+                .AsNoTracking()
+                .Where(ut =>
+                    ut.TenantId == tenantId &&
+                    ut.Status == UserTenantStatus.Active &&
+                    !ut.IsDeleted &&
+                    (ut.ExpiresAt == null || ut.ExpiresAt > now))
+                .Select(ut => ut.UserId)
+                .Distinct()
+                .ToListAsync();
+
+            if (tenantUserIds.Count == 0)
+            {
+                tenantUserIds = await _dbContext.Users
+                    .AsNoTracking()
+                    .Where(u => u.TenantId == tenantId && u.IsActive)
+                    .Select(u => u.Id)
+                    .Distinct()
+                    .ToListAsync();
+            }
+
+            if (tenantUserIds.Count == 0)
+            {
+                _logger.LogWarning("[BROADCAST] No tenant users found for tenant {TenantId}", tenantId);
+                return;
+            }
+
+            // If roles are supplied, filter down to users that have ANY of the roles.
+            if (roles != null && roles.Count > 0)
+            {
+                var roleNames = roles
+                    .Where(r => !string.IsNullOrWhiteSpace(r))
+                    .Select(r => r.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (roleNames.Count > 0)
+                {
+                    var roleIds = await _dbContext.Roles
+                        .AsNoTracking()
+                        .Where(r => r.Name != null && roleNames.Contains(r.Name))
+                        .Select(r => r.Id)
+                        .ToListAsync();
+
+                    if (roleIds.Count == 0)
+                    {
+                        _logger.LogWarning("[BROADCAST] No matching roles found for {Roles}", string.Join(", ", roleNames));
+                        return;
+                    }
+
+                    var roleUserIds = await _dbContext.UserRoles
+                        .AsNoTracking()
+                        .Where(ur => roleIds.Contains(ur.RoleId))
+                        .Select(ur => ur.UserId)
+                        .Distinct()
+                        .ToListAsync();
+
+                    tenantUserIds = tenantUserIds.Intersect(roleUserIds).ToList();
+                }
+            }
+
+            if (tenantUserIds.Count == 0)
+            {
+                _logger.LogInformation("[BROADCAST] No recipients after role filtering for tenant {TenantId}", tenantId);
+                return;
+            }
+
+            // Persist per-user notifications and push via SignalR.
+            var repo = _unitOfWork.Repository<Notification>();
+            var entities = tenantUserIds.Select(userId => new Notification
+            {
+                NotificationType = notification.Type,
+                Title = notification.Title,
+                Message = notification.Message,
+                Status = "Sent",
+                IsRead = false,
+                ScheduledFor = DateTime.UtcNow,
+                SentAt = DateTime.UtcNow,
+                EntityType = notification.EntityType,
+                EntityId = notification.EntityId ?? Guid.Empty,
+                ActionUrl = notification.ActionUrl,
+                AdditionalData = notification.Metadata != null
+                    ? System.Text.Json.JsonSerializer.Serialize(notification.Metadata)
+                    : null,
+                DeliveryMethods = "InApp",
+                TenantId = tenantId,
+                RecipientId = userId,
+                Priority = string.IsNullOrWhiteSpace(notification.Severity) ? "Normal" : notification.Severity,
+                AttemptCount = 1
+            }).ToList();
+
+            await repo.AddRangeAsync(entities);
+            await _unitOfWork.SaveChangesAsync();
+
+            foreach (var n in entities)
+            {
+                try
+                {
+                    var dashboardNotification = MapToDashboardDto(n);
+                    await _hubNotificationService.BroadcastNotificationAsync(n.RecipientId.ToString(), dashboardNotification);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "[BROADCAST] Failed realtime broadcast for notification {NotificationId}", n.Id);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[BROADCAST] Error broadcasting notification '{Title}'", notification.Title);
+        }
     }
 
     #endregion
@@ -591,40 +1229,238 @@ public class UnifiedNotificationService : INotificationService
         {
             _logger.LogInformation("Processing pending notifications");
 
-            var pendingNotifications = await _unitOfWork.Repository<Notification>()
-                .FindAsync(n => n.Status == "Pending" && n.ScheduledFor <= DateTime.UtcNow);
+            var maxRetryAttempts = int.TryParse(_configuration["Notifications:MaxRetryAttempts"], out var max) ? max : 5;
+            var initialBackoffSeconds = int.TryParse(_configuration["Notifications:InitialBackoffSeconds"], out var backoff) ? backoff : 30;
+            var backoffMultiplier = double.TryParse(_configuration["Notifications:BackoffMultiplier"], out var mult) ? mult : 1.5;
+            var batchSize = int.TryParse(_configuration["Notifications:DispatchBatchSize"], out var bs) && bs > 0 ? bs : 200;
+            var processingLeaseSeconds = int.TryParse(_configuration["Notifications:ProcessingLeaseSeconds"], out var pls) && pls > 0 ? pls : 300;
 
-            var notificationsList = pendingNotifications.ToList();
+            var now = DateTime.UtcNow;
 
-            foreach (var notification in notificationsList)
+            var dueIds = await _dbContext.Notifications
+                .AsNoTracking()
+                .Where(n =>
+                    !n.IsDeleted &&
+                    (n.Status == "Pending" || n.Status == "Failed" || n.Status == "Processing") &&
+                    n.SentAt == null &&
+                    n.ScheduledFor <= now &&
+                    n.AttemptCount < maxRetryAttempts)
+                .OrderBy(n => n.ScheduledFor)
+                .ThenByDescending(n => n.CreatedAt)
+                .Select(n => n.Id)
+                .Take(batchSize)
+                .ToListAsync();
+
+            var processed = 0;
+            var skipped = 0;
+
+            foreach (var id in dueIds)
             {
+                // Atomically claim the notification before sending so multiple dispatchers/admin retries don't double-send.
+                var claimed = await ClaimNotificationForProcessingAsync(id, now, maxRetryAttempts, processingLeaseSeconds);
+                if (claimed == 0)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                var notification = await _dbContext.Notifications.FirstOrDefaultAsync(n => n.Id == id && !n.IsDeleted);
+                if (notification == null)
+                {
+                    skipped++;
+                    continue;
+                }
+
                 try
                 {
-                    // Attempt to send the notification
-                    notification.Status = "Sent";
-                    notification.SentAt = DateTime.UtcNow;
-                    notification.AttemptCount++;
+                    var sentAt = DateTime.UtcNow;
+                    var methods = notification.DeliveryMethods ?? string.Empty;
+                    var campaignRecipientId = TryParseCampaignRecipientId(notification.AdditionalData);
+
+                    if (methods.Contains("Email", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (string.IsNullOrWhiteSpace(notification.EmailAddress))
+                        {
+                            throw new InvalidOperationException("Missing recipient email address");
+                        }
+
+                        var emailPayload = TryParseEmailPayload(notification.AdditionalData);
+
+                        var emailDto = new ErpSystem.Core.Interfaces.Common.EmailDto
+                        {
+                            To = notification.EmailAddress,
+                            Subject = notification.Title ?? string.Empty,
+                            Body = notification.Message ?? string.Empty,
+                            IsHtml = emailPayload?.IsHtml ?? true,
+                            Attachments = emailPayload?.Attachments?.Select(a => new ErpSystem.Core.Interfaces.Common.EmailAttachmentDto
+                            {
+                                FileName = a.FileName,
+                                ContentType = a.ContentType,
+                                Content = string.IsNullOrWhiteSpace(a.ContentBase64) ? Array.Empty<byte>() : Convert.FromBase64String(a.ContentBase64)
+                            }).Where(a => a.Content.Length > 0).ToList() ?? new List<ErpSystem.Core.Interfaces.Common.EmailAttachmentDto>()
+                        };
+
+                        var ok = await _emailService.SendEmailAsync(emailDto);
+                        if (!ok)
+                        {
+                            throw new InvalidOperationException("Email service returned failure");
+                        }
+
+                        notification.Status = "Sent";
+                        notification.SentAt = sentAt;
+                        notification.ScheduledFor = sentAt;
+
+                        if (campaignRecipientId.HasValue)
+                        {
+                            var recipient = await _dbContext.EmailCampaignRecipients
+                                .FirstOrDefaultAsync(r => r.Id == campaignRecipientId.Value && r.TenantId == notification.TenantId && !r.IsDeleted);
+                            if (recipient != null)
+                            {
+                                recipient.Status = "Sent";
+                                recipient.SentAt = sentAt;
+                                recipient.AttemptCount = notification.AttemptCount;
+                                recipient.LastError = null;
+                            }
+                        }
+                    }
+                    else if (methods.Contains("InApp", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (notification.RecipientId == Guid.Empty)
+                        {
+                            throw new InvalidOperationException("Missing recipient user id");
+                        }
+
+                        var dashboardNotification = new DashboardNotificationDto
+                        {
+                            Id = notification.Id.ToString(),
+                            Type = notification.NotificationType,
+                            Title = notification.Title,
+                            Message = notification.Message,
+                            Severity = notification.Priority,
+                            Timestamp = notification.CreatedAt,
+                            IsRead = notification.IsRead,
+                            ActionUrl = notification.ActionUrl,
+                            EntityType = string.IsNullOrWhiteSpace(notification.EntityType) ? null : notification.EntityType,
+                            EntityId = notification.EntityId != Guid.Empty ? notification.EntityId.ToString() : null,
+                            Metadata = notification.AdditionalData != null
+                                ? JsonSerializer.Deserialize<Dictionary<string, object>>(notification.AdditionalData)
+                                : null
+                        };
+
+                        await _hubNotificationService.BroadcastNotificationAsync(notification.RecipientId.ToString(), dashboardNotification);
+
+                        notification.Status = "Sent";
+                        notification.SentAt = sentAt;
+                        notification.ScheduledFor = sentAt;
+                    }
+                    else if (methods.Contains("Push", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (notification.RecipientId == Guid.Empty)
+                        {
+                            throw new InvalidOperationException("Missing recipient user id for push notification");
+                        }
+
+                        await SendPushNotificationAsync(notification.RecipientId, notification.Title ?? string.Empty, notification.Message ?? string.Empty);
+                        notification.Status = "Sent";
+                        notification.SentAt = sentAt;
+                        notification.ScheduledFor = sentAt;
+                    }
+                    else if (methods.Contains("SMS", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (string.IsNullOrWhiteSpace(notification.PhoneNumber))
+                        {
+                            throw new InvalidOperationException("Missing recipient phone number");
+                        }
+
+                        await SendSmsAsync(notification.PhoneNumber, notification.Message ?? string.Empty);
+                        notification.Status = "Sent";
+                        notification.SentAt = sentAt;
+                        notification.ScheduledFor = sentAt;
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("Unsupported delivery method");
+                    }
 
                     await _unitOfWork.Repository<Notification>().UpdateAsync(notification);
+                    processed++;
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error processing notification {NotificationId}", notification.Id);
-                    notification.Status = "Failed";
+
                     notification.LastError = ex.Message;
-                    notification.AttemptCount++;
+
+                    if (notification.AttemptCount >= maxRetryAttempts)
+                    {
+                        notification.Status = "DeadLetter";
+                    }
+                    else
+                    {
+                        notification.Status = "Failed";
+                        // Exponential backoff for next attempt.
+                        var delaySeconds = initialBackoffSeconds * Math.Pow(backoffMultiplier, Math.Max(0, notification.AttemptCount - 1));
+                        delaySeconds = Math.Min(delaySeconds, 24 * 60 * 60); // cap at 24h
+                        notification.ScheduledFor = DateTime.UtcNow.AddSeconds(delaySeconds);
+                    }
+
+                    var campaignRecipientId = TryParseCampaignRecipientId(notification.AdditionalData);
+                    if (campaignRecipientId.HasValue)
+                    {
+                        try
+                        {
+                            var recipient = await _dbContext.EmailCampaignRecipients
+                                .FirstOrDefaultAsync(r => r.Id == campaignRecipientId.Value && r.TenantId == notification.TenantId && !r.IsDeleted);
+                            if (recipient != null)
+                            {
+                                recipient.Status = notification.Status == "DeadLetter" ? "Failed" : "Failed";
+                                recipient.SentAt = null;
+                                recipient.AttemptCount = notification.AttemptCount;
+                                recipient.LastError = notification.LastError;
+                            }
+                        }
+                        catch (Exception innerEx)
+                        {
+                            _logger.LogDebug(innerEx, "Failed to update email campaign recipient status for notification {NotificationId}", notification.Id);
+                        }
+                    }
 
                     await _unitOfWork.Repository<Notification>().UpdateAsync(notification);
+                    processed++;
                 }
             }
 
             await _unitOfWork.SaveChangesAsync();
-            _logger.LogInformation("Processed {Count} pending notifications", notificationsList.Count);
+            _logger.LogInformation(
+                "Processed {Processed} due notifications (skipped {Skipped} already-claimed/not-due).",
+                processed,
+                skipped);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in ProcessPendingNotificationsAsync");
         }
+    }
+
+    private async Task<int> ClaimNotificationForProcessingAsync(Guid notificationId, DateTime now, int maxRetryAttempts, int processingLeaseSeconds)
+    {
+        var leaseUntil = now.AddSeconds(processingLeaseSeconds);
+
+        // NOTE: This uses raw SQL to ensure only one dispatcher/admin retry can claim a record at a time.
+        // It also uses ScheduledFor as a processing lease expiry (so crashed processing can be recovered).
+        return await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+UPDATE [Notifications]
+SET [Status] = {"Processing"},
+    [ScheduledFor] = {leaseUntil},
+    [AttemptCount] = [AttemptCount] + 1,
+    [LastError] = NULL
+WHERE [Id] = {notificationId}
+  AND [IsDeleted] = 0
+  AND [SentAt] IS NULL
+  AND ([Status] = {"Pending"} OR [Status] = {"Failed"} OR [Status] = {"Processing"})
+  AND [ScheduledFor] <= {now}
+  AND [AttemptCount] < {maxRetryAttempts};
+");
     }
 
     public async Task CleanupExpiredNotificationsAsync()
@@ -658,6 +1494,174 @@ public class UnifiedNotificationService : INotificationService
 
     #region Helpers
 
+    private async Task<List<EmailCampaignRecipient>> ResolveCampaignRecipientsAsync(CreateEmailCampaignDto campaignDto, Guid tenantId)
+    {
+        var recipients = new List<EmailCampaignRecipient>();
+        var seenEmails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        static string Normalize(string email) => (email ?? string.Empty).Trim().ToLowerInvariant();
+
+        // Explicit emails
+        if (campaignDto.RecipientEmails != null)
+        {
+            foreach (var raw in campaignDto.RecipientEmails)
+            {
+                var email = Normalize(raw);
+                if (string.IsNullOrWhiteSpace(email)) continue;
+                if (!seenEmails.Add(email)) continue;
+
+                recipients.Add(new EmailCampaignRecipient
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Email = email,
+                    Source = "Email",
+                    Status = "Pending"
+                });
+            }
+        }
+
+        // Specific users
+        if (campaignDto.RecipientUserIds != null && campaignDto.RecipientUserIds.Count > 0)
+        {
+            var users = await _dbContext.Users
+                .AsNoTracking()
+                .Where(u => u.TenantId == tenantId && u.IsActive && campaignDto.RecipientUserIds.Contains(u.Id))
+                .Select(u => new { u.Id, u.Email })
+                .ToListAsync();
+
+            foreach (var u in users)
+            {
+                if (string.IsNullOrWhiteSpace(u.Email)) continue;
+                var email = Normalize(u.Email);
+                if (!seenEmails.Add(email)) continue;
+
+                recipients.Add(new EmailCampaignRecipient
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    UserId = u.Id,
+                    Email = email,
+                    Source = "UserId",
+                    Status = "Pending"
+                });
+            }
+        }
+
+        // Roles
+        if (campaignDto.RecipientRoles != null && campaignDto.RecipientRoles.Count > 0)
+        {
+            var roleNames = campaignDto.RecipientRoles
+                .Where(r => !string.IsNullOrWhiteSpace(r))
+                .Select(r => r.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (roleNames.Count > 0)
+            {
+                var roleIds = await _dbContext.Roles
+                    .AsNoTracking()
+                    .Where(r => r.Name != null && roleNames.Contains(r.Name))
+                    .Select(r => new { r.Id, r.Name })
+                    .ToListAsync();
+
+                if (roleIds.Count > 0)
+                {
+                    var ids = roleIds.Select(r => r.Id).ToList();
+                    var userIds = await _dbContext.UserRoles
+                        .AsNoTracking()
+                        .Where(ur => ids.Contains(ur.RoleId))
+                        .Select(ur => ur.UserId)
+                        .Distinct()
+                        .ToListAsync();
+
+                    var users = await _dbContext.Users
+                        .AsNoTracking()
+                        .Where(u => u.TenantId == tenantId && u.IsActive && userIds.Contains(u.Id))
+                        .Select(u => new { u.Id, u.Email })
+                        .ToListAsync();
+
+                    foreach (var user in users)
+                    {
+                        if (string.IsNullOrWhiteSpace(user.Email)) continue;
+                        var email = Normalize(user.Email);
+                        if (!seenEmails.Add(email)) continue;
+
+                        recipients.Add(new EmailCampaignRecipient
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = tenantId,
+                            UserId = user.Id,
+                            Email = email,
+                            Source = "Role",
+                            SourceRole = string.Join(",", roleNames),
+                            Status = "Pending"
+                        });
+                    }
+                }
+            }
+        }
+
+        return recipients;
+    }
+
+    private async Task<EmailCampaignDto> MapCampaignToDtoAsync(EmailCampaign campaign, Guid tenantId)
+    {
+        var recipients = await _dbContext.EmailCampaignRecipients
+            .AsNoTracking()
+            .Where(r => r.TenantId == tenantId && r.EmailCampaignId == campaign.Id && !r.IsDeleted)
+            .ToListAsync();
+
+        var tags = (Dictionary<string, string>?)null;
+        if (!string.IsNullOrWhiteSpace(campaign.TagsJson))
+        {
+            try
+            {
+                tags = JsonSerializer.Deserialize<Dictionary<string, string>>(campaign.TagsJson);
+            }
+            catch
+            {
+                tags = null;
+            }
+        }
+
+        var sentCount = recipients.Count(r => r.Status == "Sent");
+        var failedCount = recipients.Count(r => r.Status == "Failed");
+
+        return new EmailCampaignDto
+        {
+            Id = campaign.Id,
+            Name = campaign.Name,
+            Subject = campaign.Subject,
+            HtmlContent = campaign.HtmlContent,
+            TextContent = campaign.TextContent,
+            FromName = campaign.FromName,
+            FromEmail = campaign.FromEmail,
+            ReplyTo = campaign.ReplyTo,
+            TotalRecipients = recipients.Count,
+            SentCount = sentCount,
+            DeliveredCount = sentCount,
+            OpenedCount = 0,
+            ClickedCount = 0,
+            BouncedCount = failedCount,
+            UnsubscribedCount = 0,
+            Status = campaign.Status,
+            CreatedAt = campaign.CreatedAt,
+            ScheduledFor = campaign.ScheduledFor,
+            SentAt = campaign.SentAt,
+            CreatedBy = campaign.CreatedBy ?? string.Empty,
+            Tags = tags,
+            Statistics = new ErpSystem.Core.DTOs.Notifications.EmailCampaignStatsDto
+            {
+                DeliveryRate = recipients.Count > 0 ? (double)sentCount / recipients.Count : 0,
+                OpenRate = 0,
+                ClickRate = 0,
+                BounceRate = recipients.Count > 0 ? (double)failedCount / recipients.Count : 0,
+                UnsubscribeRate = 0
+            }
+        };
+    }
+
     private NotificationDto MapToDto(Notification notification)
     {
         return new NotificationDto
@@ -677,6 +1681,114 @@ public class UnifiedNotificationService : INotificationService
                 ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(notification.AdditionalData)
                 : null
         };
+    }
+
+    private static List<string>? TryParseTemplateVariables(string? templateVariablesJson)
+    {
+        if (string.IsNullOrWhiteSpace(templateVariablesJson)) return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(templateVariablesJson);
+
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                return doc.RootElement
+                    .EnumerateArray()
+                    .Where(e => e.ValueKind == JsonValueKind.String)
+                    .Select(e => e.GetString() ?? string.Empty)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
+            // Support legacy object map: { "var": "desc" }
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                return doc.RootElement
+                    .EnumerateObject()
+                    .Select(p => p.Name)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private sealed class EmailPayload
+    {
+        public bool IsHtml { get; set; } = true;
+        public List<EmailPayloadAttachment>? Attachments { get; set; }
+    }
+
+    private sealed class EmailPayloadAttachment
+    {
+        public string FileName { get; set; } = string.Empty;
+        public string ContentType { get; set; } = "application/octet-stream";
+        public string? ContentBase64 { get; set; }
+    }
+
+    private static EmailPayload? TryParseEmailPayload(string? additionalData)
+    {
+        if (string.IsNullOrWhiteSpace(additionalData)) return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(additionalData);
+
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("email", out var emailElem) &&
+                emailElem.ValueKind == JsonValueKind.Object)
+            {
+                return JsonSerializer.Deserialize<EmailPayload>(
+                    emailElem.GetRawText(),
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            }
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static Guid? TryParseCampaignRecipientId(string? additionalData)
+    {
+        if (string.IsNullOrWhiteSpace(additionalData)) return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(additionalData);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+
+            if (!doc.RootElement.TryGetProperty("campaign", out var campElem) || campElem.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            if (!campElem.TryGetProperty("recipientId", out var ridElem))
+            {
+                return null;
+            }
+
+            if (ridElem.ValueKind == JsonValueKind.String && Guid.TryParse(ridElem.GetString(), out var rid))
+            {
+                return rid;
+            }
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static DateTime GetCutoffDate(string period)
@@ -718,6 +1830,8 @@ public class UnifiedNotificationService : INotificationService
             Timestamp = notification.CreatedAt,
             IsRead = notification.IsRead,
             ActionUrl = notification.ActionUrl,
+            EntityType = string.IsNullOrWhiteSpace(notification.EntityType) ? null : notification.EntityType,
+            EntityId = notification.EntityId != Guid.Empty ? notification.EntityId.ToString() : null,
             Metadata = notification.AdditionalData != null
                 ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(notification.AdditionalData)
                 : null

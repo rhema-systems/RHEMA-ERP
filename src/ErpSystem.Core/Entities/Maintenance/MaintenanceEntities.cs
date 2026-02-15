@@ -31,6 +31,10 @@ public class MaintenanceAsset : TenantEntity
     [MaxLength(100)]
     public string? Model { get; set; }
 
+    public int? Year { get; set; }
+
+    public AssetOwnershipType OwnershipType { get; set; } = AssetOwnershipType.Owned;
+
     public Guid? EmployeeId { get; set; }
 
     [MaxLength(50)]
@@ -624,6 +628,18 @@ public class WorkOrder : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal ActualCost { get; set; } = 0;
 
+    /// <summary>
+    /// Billing type for the work order: "Maintenance" uses fixed amount, "Repairs" uses itemized costs
+    /// </summary>
+    [MaxLength(20)]
+    public string BillingType { get; set; } = "Repairs"; // Maintenance, Repairs
+
+    /// <summary>
+    /// Fixed billing amount for Maintenance billing type (copied from MaintenanceType.FixedAmount)
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal FixedAmount { get; set; } = 0;
+
     public double EstimatedHours { get; set; } = 0;
     public double ActualHours { get; set; } = 0;
 
@@ -678,11 +694,11 @@ public class WorkOrder : TenantEntity
     public virtual PriorityLevel PriorityLevel { get; set; } = null!;
     public virtual Employee AssignedTechnician { get; set; } = null!;
     public virtual TechnicianTeam? AssignedTeam { get; set; }
-    public virtual Employee? RequestedBy { get; set; }
-    public virtual Employee? ApprovedBy { get; set; }
-    public virtual Employee? Supervisor { get; set; }
-    public virtual Employee? CompletedBy { get; set; }
-    public virtual Employee? QualityCheckedBy { get; set; }
+    public virtual ApplicationUser? RequestedBy { get; set; }
+    public virtual ApplicationUser? ApprovedBy { get; set; }
+    public virtual ApplicationUser? Supervisor { get; set; }
+    public virtual ApplicationUser? CompletedBy { get; set; }
+    public virtual ApplicationUser? QualityCheckedBy { get; set; }
     public virtual WorkOrder? ParentWorkOrder { get; set; }
     public virtual MaintenanceSchedule? MaintenanceSchedule { get; set; }
     public virtual MaintenanceContractor? Contractor { get; set; }
@@ -792,6 +808,13 @@ public class MaintenanceType : TenantEntity
     public double EstimatedHours { get; set; } = 0;
     [Column(TypeName = "decimal(18,2)")]
     public decimal EstimatedCost { get; set; } = 0;
+
+    /// <summary>
+    /// Fixed billing amount for maintenance-type work orders.
+    /// When work order billing type is "Maintenance", this amount is used instead of itemized costs.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal FixedAmount { get; set; } = 0;
 
     // Priority and criticality
     public int DefaultPriority { get; set; } = 3; // 1=Critical, 2=High, 3=Medium, 4=Low, 5=Deferred
@@ -1347,7 +1370,7 @@ public class WorkOrderLabor : TenantEntity
     public Guid WorkOrderId { get; set; }
 
     /// <summary>
-    /// ID of the user (ApplicationUser) who performed the labor
+    /// ID of the employee (HR) who performed the labor
     /// </summary>
     [Required]
     public Guid TechnicianId { get; set; }
@@ -1372,8 +1395,8 @@ public class WorkOrderLabor : TenantEntity
     // Navigation properties
     public virtual WorkOrder WorkOrder { get; set; } = null!;
 
-    [ForeignKey("TechnicianId")]
-    public virtual ApplicationUser Technician { get; set; } = null!;
+    // NOTE: Technicians are now Employee-driven. We intentionally do not maintain an EF FK relationship here
+    // to allow a clean transition from previously user-based TechnicianId values.
 }
 
 public class WorkOrderDocument : TenantEntity
@@ -1588,6 +1611,10 @@ public class InspectionTemplate : TenantEntity
     [MaxLength(200)]
     public string Name { get; set; } = string.Empty;
 
+    [Required]
+    [MaxLength(20)]
+    public string Code { get; set; } = string.Empty;
+
     [MaxLength(1000)]
     public string? Description { get; set; }
 
@@ -1596,7 +1623,27 @@ public class InspectionTemplate : TenantEntity
 
     [Required]
     [MaxLength(50)]
-    public string InspectionType { get; set; } = "Safety"; // Safety, Quality, Regulatory, Maintenance
+    public string Frequency { get; set; } = "AdHoc"; // Daily, Weekly, Monthly, Quarterly, Yearly, AdHoc
+
+    [MaxLength(50)]
+    public string InspectionType { get; set; } = "General"; // Safety, Quality, Regulatory, Maintenance, Fleet
+
+    public int EstimatedDuration { get; set; } = 60; // minutes
+
+    public bool RequiresSignature { get; set; } = false;
+    public bool AllowPhotos { get; set; } = false;
+
+    [MaxLength(10)]
+    public string Version { get; set; } = "1.0";
+
+    [MaxLength(20)]
+    public string Priority { get; set; } = "Medium";
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string AssetTypes { get; set; } = "[]";
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string InspectorRoles { get; set; } = "[]";
 
     public bool IsActive { get; set; } = true;
 

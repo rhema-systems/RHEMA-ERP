@@ -144,7 +144,7 @@ public class SupplierRepository : GenericRepository<Supplier>, ISupplierReposito
     public async Task<(int TotalOrders, decimal TotalValue, double AverageLeadTime)> GetSupplierPerformanceAsync(Guid supplierId, DateTime startDate, DateTime endDate)
     {
         var orders = await _context.Set<PurchaseOrder>()
-            .Where(po => po.SupplierId == supplierId &&
+            .Where(po => po.BusinessPartnerId == supplierId &&
                         !po.IsDeleted &&
                         po.OrderDate >= startDate &&
                         po.OrderDate <= endDate)
@@ -247,7 +247,7 @@ public class SupplierRepository : GenericRepository<Supplier>, ISupplierReposito
     public async Task<bool> HasActivePurchaseOrdersAsync(Guid supplierId)
     {
         return await _context.Set<PurchaseOrder>()
-            .AnyAsync(po => po.SupplierId == supplierId &&
+            .AnyAsync(po => po.BusinessPartnerId == supplierId &&
                            !po.IsDeleted &&
                            (po.Status == "Sent" || po.Status == "Acknowledged" || po.Status == "Partial"));
     }

@@ -8,18 +8,17 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { formatPendingApprovers, useWorkflowEntitySummaries } from '@/hooks/useWorkflowEntitySummaries';
 import {
   Search,
   Eye,
   Edit,
-  FileText,
   Plus,
   Download,
   RefreshCw,
   Filter,
-  Send,
-  XCircle,
-  CheckCircle
+  XCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { tenderService, type TenderDto } from '@/services/tenderService';
@@ -36,6 +35,12 @@ export default function TendersPage() {
   const [tenderTypeFilter, setTenderTypeFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+
+  const { summariesById: workflowSummariesById } = useWorkflowEntitySummaries(
+    'Tender',
+    tenders.map((t) => t.id),
+    tenders.length > 0
+  );
 
   useEffect(() => {
     loadTenders();
@@ -76,16 +81,6 @@ export default function TendersPage() {
 
   const handleCreateNew = () => {
     router.push('/procurement/tenders/new');
-  };
-
-  const handlePublish = async (id: string) => {
-    try {
-      // TODO: Show publish dialog with dates
-      toast.info('Publish dialog not yet implemented');
-    } catch (error) {
-      console.error('Error publishing tender:', error);
-      toast.error('Failed to publish tender');
-    }
   };
 
   const handleClose = async (id: string) => {
@@ -152,10 +147,13 @@ export default function TendersPage() {
   const getStatusBadge = (status: string) => {
     const statusConfig: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', className: string }> = {
       'Draft': { variant: 'secondary', className: 'bg-gray-100 text-gray-800' },
+      'Submitted': { variant: 'outline', className: 'bg-yellow-100 text-yellow-800' },
+      'Approved': { variant: 'default', className: 'bg-green-100 text-green-800' },
       'Published': { variant: 'default', className: 'bg-blue-100 text-blue-800' },
       'Closed': { variant: 'outline', className: 'bg-yellow-100 text-yellow-800' },
       'Awarded': { variant: 'default', className: 'bg-green-100 text-green-800' },
       'Cancelled': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
+      'Rejected': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
     };
 
     const config = statusConfig[status] || { variant: 'outline' as const, className: '' };
@@ -209,13 +207,16 @@ export default function TendersPage() {
               <SelectTrigger>
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
-              <SelectContent>
+            <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
                 <SelectItem value="Draft">Draft</SelectItem>
+                <SelectItem value="Submitted">Pending Approval</SelectItem>
+                <SelectItem value="Approved">Approved</SelectItem>
                 <SelectItem value="Published">Published</SelectItem>
                 <SelectItem value="Closed">Closed</SelectItem>
                 <SelectItem value="Awarded">Awarded</SelectItem>
                 <SelectItem value="Cancelled">Cancelled</SelectItem>
+                <SelectItem value="Rejected">Rejected</SelectItem>
               </SelectContent>
             </Select>
 
@@ -275,9 +276,28 @@ export default function TendersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {tenders.map((tender) => (
+                  {tenders.map((tender) => {
+                    const summary = workflowSummariesById[tender.id];
+                    const stepName = summary?.currentStepName || tender.currentWorkflowStepName;
+                    const pending = formatPendingApprovers(summary?.pendingApprovers || []);
+
+                    return (
                     <TableRow key={tender.id}>
-                      <TableCell className="font-medium">{tender.tenderNumber}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{tender.tenderNumber}</span>
+                          {tender.status === 'Submitted' && stepName && (
+                            <Badge variant="outline" className="text-xs">
+                              Step: {stepName}
+                            </Badge>
+                          )}
+                          {tender.status === 'Submitted' && pending.short && (
+                            <Badge variant="outline" className="text-xs" title={pending.full}>
+                              Pending with: {pending.short}
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>
                         <div>
                           <div className="font-medium">{tender.title}</div>
@@ -313,6 +333,32 @@ export default function TendersPage() {
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
+
+                          <WorkflowApprovalActions
+                            entityType="Tender"
+                            entityId={tender.id}
+                            entityLabel="Tender"
+                            entityNumber={tender.tenderNumber}
+                            status={tender.status}
+                            currentStepName={stepName}
+                            workflowSummary={summary}
+                            canSubmit={tender.status === 'Draft'}
+                            canApproveReject={tender.status === 'Submitted'}
+                            onSubmit={async () => {
+                              await tenderService.submitTenderForApproval(tender.id);
+                            }}
+                            onApprove={async (comments) => {
+                              await tenderService.approveTender(tender.id, comments || undefined);
+                            }}
+                            onReject={async (comments) => {
+                              await tenderService.rejectTender(tender.id, comments);
+                            }}
+                            onAfterAction={loadTenders}
+                            onOpenWorkflows={() => router.push('/administration/workflow')}
+                            size="icon"
+                            iconOnly
+                          />
+
                           {tender.status === 'Draft' && (
                             <>
                               <Button
@@ -323,16 +369,9 @@ export default function TendersPage() {
                               >
                                 <Edit className="h-4 w-4" />
                               </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handlePublish(tender.id)}
-                                title="Publish"
-                              >
-                                <Send className="h-4 w-4" />
-                              </Button>
                             </>
                           )}
+
                           {tender.status === 'Published' && (
                             <Button
                               variant="ghost"
@@ -346,7 +385,8 @@ export default function TendersPage() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

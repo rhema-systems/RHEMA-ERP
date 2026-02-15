@@ -1,12 +1,11 @@
 "use client"
 
-import React, { useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { DashboardLayout } from '../../components/layout/dashboard-layout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs'
-import { Input } from '../../components/ui/input'
 import { 
   Bell, 
   Mail, 
@@ -14,6 +13,7 @@ import {
   History, 
   FileText, 
   BarChart3,
+  Tags,
   Search,
   Filter,
   Plus,
@@ -26,13 +26,16 @@ import {
   Download
 } from 'lucide-react'
 
-// Import notification components (to be created)
 import NotificationCenter from '../../components/notifications/NotificationCenter'
 import EmailNotifications from '../../components/notifications/EmailNotifications'
 import NotificationSettings from '../../components/notifications/NotificationSettings'
 import NotificationTemplates from '../../components/notifications/NotificationTemplates'
+import NotificationTopics from '../../components/notifications/NotificationTopics'
 import NotificationHistory from '../../components/notifications/NotificationHistory'
 import NotificationAnalytics from '../../components/notifications/NotificationAnalytics'
+import NotificationMonitoring from '../../components/notifications/NotificationMonitoring'
+import { apiService } from '../../services/api.service'
+import authService from '../../services/auth'
 
 interface NotificationStats {
   totalNotifications: number
@@ -44,15 +47,62 @@ interface NotificationStats {
 
 export default function NotificationsPage() {
   const [activeTab, setActiveTab] = useState('center')
-  const [searchQuery, setSearchQuery] = useState('')
+  const [stats, setStats] = useState<NotificationStats>({
+    totalNotifications: 0,
+    unreadCount: 0,
+    emailsSent: 0,
+    deliveryRate: 0,
+    avgResponseTime: '—'
+  })
 
-  // Mock notification statistics
-  const stats: NotificationStats = {
-    totalNotifications: 2847,
-    unreadCount: 23,
-    emailsSent: 1542,
-    deliveryRate: 98.5,
-    avgResponseTime: '2.3s'
+  const isAdmin = useMemo(() => authService.hasAnyRole(['SuperAdmin', 'TenantAdmin']), [])
+
+  const loadStats = async () => {
+    try {
+      const [unreadCount, paged] = await Promise.all([
+        apiService.silentRequest<number>('/notifications/unread-count'),
+        apiService.silentRequest<any>('/notifications?page=1&pageSize=1'),
+      ])
+
+      const totalNotifications = typeof paged?.totalCount === 'number' ? paged.totalCount : 0
+
+      if (!isAdmin) {
+        setStats(s => ({
+          ...s,
+          totalNotifications,
+          unreadCount,
+        }))
+        return
+      }
+
+      const adminStats = await apiService.silentRequest<any>('/notifications/statistics?period=last-30-days')
+      const avgSeconds = typeof adminStats?.averageDeliveryTimeSeconds === 'number'
+        ? adminStats.averageDeliveryTimeSeconds
+        : 0
+
+      setStats({
+        totalNotifications,
+        unreadCount,
+        emailsSent: adminStats?.emailNotificationsSent ?? 0,
+        deliveryRate: Math.round(((adminStats?.deliveryRate ?? 0) * 100) * 10) / 10,
+        avgResponseTime: avgSeconds > 0 ? `${avgSeconds.toFixed(1)}s` : '—'
+      })
+    } catch {
+      // Best-effort; keep UI usable even if stats fail to load.
+    }
+  }
+
+  useEffect(() => {
+    loadStats()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const deliveryRateLabel = isAdmin ? `${stats.deliveryRate}%` : '—'
+  const emailsSentLabel = isAdmin ? stats.emailsSent.toLocaleString() : '—'
+  const avgResponseLabel = isAdmin ? stats.avgResponseTime : '—'
+
+  const onCreateNotificationClick = () => {
+    // Placeholder – actual creation is typically module-driven.
   }
 
   return (
@@ -68,7 +118,7 @@ export default function NotificationsPage() {
           </div>
           
           <div className="flex items-center gap-3">
-            <Button>
+            <Button onClick={onCreateNotificationClick}>
               <Plus className="h-4 w-4 mr-2" />
               Create Notification
             </Button>
@@ -116,7 +166,7 @@ export default function NotificationsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Emails Sent</p>
-                  <p className="text-2xl font-bold">{stats.emailsSent.toLocaleString()}</p>
+                  <p className="text-2xl font-bold">{emailsSentLabel}</p>
                 </div>
                 <Mail className="h-8 w-8 text-green-600" />
               </div>
@@ -128,7 +178,7 @@ export default function NotificationsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Delivery Rate</p>
-                  <p className="text-2xl font-bold">{stats.deliveryRate}%</p>
+                  <p className="text-2xl font-bold">{deliveryRateLabel}</p>
                 </div>
                 <CheckCircle className="h-8 w-8 text-purple-600" />
               </div>
@@ -140,7 +190,7 @@ export default function NotificationsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Avg Response</p>
-                  <p className="text-2xl font-bold">{stats.avgResponseTime}</p>
+                  <p className="text-2xl font-bold">{avgResponseLabel}</p>
                 </div>
                 <Zap className="h-8 w-8 text-red-600" />
               </div>
@@ -150,7 +200,7 @@ export default function NotificationsPage() {
 
         {/* Main Content Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6" suppressHydrationWarning>
-          <TabsList className="grid grid-cols-6 gap-4" suppressHydrationWarning>
+          <TabsList className={`grid ${isAdmin ? 'grid-cols-8' : 'grid-cols-6'} gap-4`} suppressHydrationWarning>
             <TabsTrigger value="center" className="flex items-center gap-2" suppressHydrationWarning>
               <Bell className="h-4 w-4" />
               Notification Center
@@ -163,6 +213,18 @@ export default function NotificationsPage() {
               <FileText className="h-4 w-4" />
               Templates
             </TabsTrigger>
+            {isAdmin ? (
+              <TabsTrigger value="topics" className="flex items-center gap-2">
+                <Tags className="h-4 w-4" />
+                Topics / Groups
+              </TabsTrigger>
+            ) : null}
+            {isAdmin ? (
+              <TabsTrigger value="monitoring" className="flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                Queue Monitor
+              </TabsTrigger>
+            ) : null}
             <TabsTrigger value="history" className="flex items-center gap-2">
               <History className="h-4 w-4" />
               History
@@ -188,6 +250,18 @@ export default function NotificationsPage() {
           <TabsContent value="templates" className="space-y-6">
             <NotificationTemplates />
           </TabsContent>
+
+          {isAdmin ? (
+            <TabsContent value="topics" className="space-y-6">
+              <NotificationTopics />
+            </TabsContent>
+          ) : null}
+
+          {isAdmin ? (
+            <TabsContent value="monitoring" className="space-y-6">
+              <NotificationMonitoring mode="queueOnly" />
+            </TabsContent>
+          ) : null}
 
           <TabsContent value="history" className="space-y-6">
             <NotificationHistory />

@@ -1166,6 +1166,7 @@ public class TenderAwardRepository : GenericRepository<TenderAward>, ITenderAwar
             .Include(a => a.TenderBid)
                 .ThenInclude(b => b.BusinessPartner)
             .Include(a => a.AwardedBy)
+            .Include(a => a.Negotiation)
             .FirstOrDefaultAsync();
     }
 
@@ -1176,6 +1177,7 @@ public class TenderAwardRepository : GenericRepository<TenderAward>, ITenderAwar
             .Include(a => a.TenderBid)
                 .ThenInclude(b => b.BusinessPartner)
             .Include(a => a.AwardedBy)
+            .Include(a => a.Negotiation)
             .FirstOrDefaultAsync();
     }
 
@@ -1185,6 +1187,7 @@ public class TenderAwardRepository : GenericRepository<TenderAward>, ITenderAwar
             .Where(a => a.TenderBidId == bidId && !a.IsDeleted)
             .Include(a => a.Tender)
             .Include(a => a.AwardedBy)
+            .Include(a => a.Negotiation)
             .FirstOrDefaultAsync();
     }
 
@@ -1195,6 +1198,7 @@ public class TenderAwardRepository : GenericRepository<TenderAward>, ITenderAwar
             .Include(a => a.Tender)
             .Include(a => a.TenderBid)
                 .ThenInclude(b => b.BusinessPartner)
+            .Include(a => a.Negotiation)
             .OrderByDescending(a => a.AwardDate)
             .ToListAsync();
     }
@@ -1218,6 +1222,7 @@ public class TenderAwardRepository : GenericRepository<TenderAward>, ITenderAwar
             .Include(a => a.Tender)
             .Include(a => a.TenderBid)
                 .ThenInclude(b => b.BusinessPartner)
+            .Include(a => a.Negotiation)
             .OrderByDescending(a => a.AwardDate)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -1411,6 +1416,14 @@ public class EvaluationCriterionRepository : GenericRepository<EvaluationCriteri
             .Where(c => !c.IsDeleted && c.Category == category)
             .OrderBy(c => c.DisplayOrder)
             .ThenBy(c => c.CriterionName)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<EvaluationCriterion>> GetByIdsAsync(IEnumerable<Guid> ids)
+    {
+        var idList = ids.ToList();
+        return await _dbSet
+            .Where(c => !c.IsDeleted && idList.Contains(c.Id))
             .ToListAsync();
     }
 
@@ -1952,6 +1965,128 @@ public class PerformanceBondRequestRepository : GenericRepository<PerformanceBon
         {
             request.IsDeleted = true;
             _dbSet.Update(request);
+        }
+    }
+}
+
+#endregion
+
+#region Tender Negotiation Repository
+
+public class TenderNegotiationRepository : GenericRepository<TenderNegotiation>, ITenderNegotiationRepository
+{
+    public TenderNegotiationRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<TenderNegotiation?> GetByIdAsync(Guid id)
+    {
+        return await _dbSet
+            .Include(n => n.Tender)
+            .Include(n => n.TenderBid)
+            .Include(n => n.BusinessPartner)
+            .Include(n => n.Lot)
+            .Include(n => n.BidLot)
+            .Include(n => n.InvitedBy)
+            .Include(n => n.CompletedBy)
+            .FirstOrDefaultAsync(n => n.Id == id && !n.IsDeleted);
+    }
+
+    public async Task<TenderNegotiation?> GetByIdWithItemsAsync(Guid id)
+    {
+        return await _dbSet
+            .Include(n => n.Tender)
+            .Include(n => n.TenderBid)
+            .Include(n => n.BusinessPartner)
+            .Include(n => n.Lot)
+            .Include(n => n.BidLot)
+            .Include(n => n.InvitedBy)
+            .Include(n => n.CompletedBy)
+            .Include(n => n.Items)
+                .ThenInclude(i => i.TenderBidItem)
+            .FirstOrDefaultAsync(n => n.Id == id && !n.IsDeleted);
+    }
+
+    public async Task<TenderNegotiation?> GetByTenderAndBidAsync(Guid tenderId, Guid bidId)
+    {
+        return await _dbSet
+            .Include(n => n.Items)
+            .FirstOrDefaultAsync(n => n.TenderId == tenderId && n.TenderBidId == bidId && !n.IsDeleted);
+    }
+
+    public async Task<TenderNegotiation?> GetByTenderBidAndLotAsync(Guid tenderId, Guid bidId, Guid? lotId)
+    {
+        return await _dbSet
+            .Include(n => n.Items)
+            .FirstOrDefaultAsync(n => n.TenderId == tenderId && n.TenderBidId == bidId && n.LotId == lotId && !n.IsDeleted);
+    }
+
+    public async Task<IEnumerable<TenderNegotiation>> GetByTenderIdAsync(Guid tenderId)
+    {
+        return await _dbSet
+            .Include(n => n.TenderBid)
+            .Include(n => n.BusinessPartner)
+            .Include(n => n.Lot)
+            .Include(n => n.Items)
+            .Where(n => n.TenderId == tenderId && !n.IsDeleted)
+            .OrderByDescending(n => n.InvitedDate)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<TenderNegotiation>> GetByBidIdAsync(Guid bidId)
+    {
+        return await _dbSet
+            .Include(n => n.Tender)
+            .Include(n => n.Lot)
+            .Include(n => n.Items)
+            .Where(n => n.TenderBidId == bidId && !n.IsDeleted)
+            .OrderByDescending(n => n.InvitedDate)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<TenderNegotiation>> GetByBusinessPartnerIdAsync(Guid businessPartnerId)
+    {
+        return await _dbSet
+            .Include(n => n.Tender)
+            .Include(n => n.TenderBid)
+            .Include(n => n.Lot)
+            .Include(n => n.Items)
+            .Where(n => n.BusinessPartnerId == businessPartnerId && !n.IsDeleted)
+            .OrderByDescending(n => n.InvitedDate)
+            .ToListAsync();
+    }
+
+    public async Task<TenderNegotiation> CreateAsync(TenderNegotiation negotiation)
+    {
+        await _dbSet.AddAsync(negotiation);
+        return negotiation;
+    }
+
+    public Task<TenderNegotiation> UpdateAsync(TenderNegotiation negotiation)
+    {
+        _dbSet.Update(negotiation);
+        return Task.FromResult(negotiation);
+    }
+
+    public async Task<TenderNegotiationItem?> GetItemByIdAsync(Guid itemId)
+    {
+        return await _context.Set<TenderNegotiationItem>()
+            .Include(i => i.Negotiation)
+            .Include(i => i.TenderBidItem)
+            .FirstOrDefaultAsync(i => i.Id == itemId && !i.IsDeleted);
+    }
+
+    public Task<TenderNegotiationItem> UpdateItemAsync(TenderNegotiationItem item)
+    {
+        _context.Set<TenderNegotiationItem>().Update(item);
+        return Task.FromResult(item);
+    }
+
+    public async Task DeleteAsync(Guid id)
+    {
+        var negotiation = await _dbSet.FindAsync(id);
+        if (negotiation != null)
+        {
+            negotiation.IsDeleted = true;
+            _dbSet.Update(negotiation);
         }
     }
 }

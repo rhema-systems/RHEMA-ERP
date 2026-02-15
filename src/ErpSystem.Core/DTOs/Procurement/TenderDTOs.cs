@@ -20,6 +20,9 @@ public class TenderDto
     public int InvitationCount { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedByName { get; set; }
+
+    // Workflow display helpers (optional)
+    public string? CurrentWorkflowStepName { get; set; }
 }
 
 /// <summary>
@@ -108,6 +111,9 @@ public class TenderDetailDto
     public int TotalViews { get; set; }
     public int TotalDownloads { get; set; }
     public int LotCount { get; set; }
+
+    // Workflow display helpers (optional)
+    public string? CurrentWorkflowStepName { get; set; }
 }
 
 /// <summary>
@@ -262,6 +268,12 @@ public class PublishTenderDto
 
     public List<Guid> InvitedBusinessPartnerIds { get; set; } = new();
 
+    /// <summary>
+    /// Optional external/public recipients to receive the RFQ/Tender email (email-only; no in-app).
+    /// Each email will be sent individually (no shared BCC list) for privacy.
+    /// </summary>
+    public List<string> ExternalRecipientEmails { get; set; } = new();
+
     public bool SendNotifications { get; set; } = true;
 }
 
@@ -376,6 +388,12 @@ public class InviteTenderersDto
 {
     [Required]
     public List<Guid> BusinessPartnerIds { get; set; } = new();
+
+    /// <summary>
+    /// Optional external/public recipients to receive the RFQ/Tender email (email-only; no in-app).
+    /// Each email will be sent individually (no shared BCC list) for privacy.
+    /// </summary>
+    public List<string> ExternalRecipientEmails { get; set; } = new();
 
     public bool SendNotifications { get; set; } = true;
 }

@@ -37,6 +37,13 @@ public interface IStockMovementRepository : IGenericRepository<StockMovement>
     Task<IEnumerable<StockMovement>> GetMovementsByDateRangeAsync(DateTime startDate, DateTime endDate);
     Task<IEnumerable<StockMovement>> GetMovementsByReferenceAsync(ReferenceType referenceType, string referenceNumber);
     Task<IEnumerable<StockMovement>> GetMovementsByLocationAsync(Guid locationId);
+    Task<IEnumerable<StockMovement>> GetFilteredMovementsAsync(
+        Guid? warehouseId = null,
+        string? movementType = null,
+        DateTime? startDate = null,
+        DateTime? endDate = null,
+        string? referenceNumber = null,
+        int limit = 100);
 }
 
 /// <summary>
@@ -88,6 +95,8 @@ public interface IWarehouseLocationRepository : IGenericRepository<WarehouseLoca
 /// </summary>
 public interface IWarehouseQuantityRepository : IGenericRepository<WarehouseQuantity>
 {
+    Task<IEnumerable<WarehouseQuantity>> GetAllWithDetailsAsync();
+    Task<WarehouseQuantity?> GetByIdWithDetailsAsync(Guid id);
     Task<IEnumerable<WarehouseQuantity>> GetByWarehouseAsync(Guid warehouseId);
     Task<IEnumerable<WarehouseQuantity>> GetByWarehouseAndItemTypeAsync(Guid warehouseId, int itemType);
     Task<WarehouseQuantity?> GetByWarehouseAndItemAsync(Guid warehouseId, Guid inventoryItemId);
@@ -101,8 +110,50 @@ public interface IWarehouseQuantityRepository : IGenericRepository<WarehouseQuan
 /// </summary>
 public interface IStockAdjustmentRepository : IGenericRepository<StockAdjustment>
 {
+    Task<IEnumerable<StockAdjustment>> GetAllWithItemsAsync();
     Task<IEnumerable<StockAdjustment>> GetAdjustmentsByDateRangeAsync(DateTime startDate, DateTime endDate);
     Task<IEnumerable<StockAdjustment>> GetPendingAdjustmentsAsync();
     Task<StockAdjustment?> GetByAdjustmentNumberAsync(string adjustmentNumber);
     Task<StockAdjustment?> GetWithItemsAsync(Guid adjustmentId);
+    Task<IEnumerable<StockAdjustment>> GetByReasonCodeAsync(string reasonCode);
+    Task<string> GenerateAdjustmentNumberAsync();
+    Task<IEnumerable<StockAdjustment>> GetAdjustmentsRequiringApprovalAsync();
+}
+
+/// <summary>
+/// Repository interface for inventory movements (valuation source of truth)
+/// </summary>
+public interface IInventoryMovementRepository : IGenericRepository<InventoryMovement>
+{
+    Task<IEnumerable<InventoryMovement>> GetMovementsByItemAsync(Guid inventoryItemId);
+    Task<IEnumerable<InventoryMovement>> GetMovementsByWarehouseAsync(Guid warehouseId);
+    Task<IEnumerable<InventoryMovement>> GetMovementsByDateRangeAsync(DateTime startDate, DateTime endDate);
+    Task<IEnumerable<InventoryMovement>> GetMovementsByReferenceAsync(ReferenceType referenceType, Guid? referenceId);
+    Task<InventoryMovement?> GetByMovementNumberAsync(string movementNumber);
+    Task<IEnumerable<InventoryMovement>> GetUnpostedMovementsAsync();
+    Task<IEnumerable<InventoryMovement>> GetReversalsAsync(Guid originalMovementId);
+}
+
+/// <summary>
+/// Repository interface for inventory layers (FIFO cost layers)
+/// </summary>
+public interface IInventoryLayerRepository : IGenericRepository<InventoryLayer>
+{
+    Task<IEnumerable<InventoryLayer>> GetLayersByItemAsync(Guid inventoryItemId);
+    Task<IEnumerable<InventoryLayer>> GetActiveLayersAsync(Guid inventoryItemId, Guid warehouseId);
+    Task<IEnumerable<InventoryLayer>> GetLayersForConsumptionAsync(Guid inventoryItemId, Guid warehouseId, Guid? locationId);
+    Task<InventoryLayer?> GetByLayerNumberAsync(string layerNumber);
+    Task<IEnumerable<InventoryLayer>> GetExpiringLayersAsync(DateTime beforeDate);
+}
+
+/// <summary>
+/// Repository interface for inventory balances (performance cache)
+/// </summary>
+public interface IInventoryBalanceRepository : IGenericRepository<InventoryBalance>
+{
+    Task<IEnumerable<InventoryBalance>> GetBalancesByItemAsync(Guid inventoryItemId);
+    Task<IEnumerable<InventoryBalance>> GetBalancesByWarehouseAsync(Guid warehouseId);
+    Task<InventoryBalance?> GetBalanceAsync(Guid inventoryItemId, Guid warehouseId, Guid? locationId);
+    Task<IEnumerable<InventoryBalance>> GetLowStockBalancesAsync(Guid? warehouseId = null);
+    Task<IEnumerable<InventoryBalance>> GetBalancesRequiringRecalculationAsync(DateTime olderThan);
 }

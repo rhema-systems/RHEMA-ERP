@@ -18,6 +18,7 @@ import {
   ClipboardList,
   Users,
   ListTodo,
+  LifeBuoy,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -62,6 +63,11 @@ const menuItems: MenuItem[] = [
     icon: ClipboardList,
   },
   {
+    title: 'My RFQs',
+    href: '/external-portal/rfqs',
+    icon: FileText,
+  },
+  {
     title: 'My Tasks',
     href: '/external-portal/task-list',
     icon: ListTodo,
@@ -92,6 +98,11 @@ const menuItems: MenuItem[] = [
     title: 'Notifications',
     href: '/external-portal/notifications',
     icon: Bell,
+  },
+  {
+    title: 'Support Tickets',
+    href: '/support/tickets',
+    icon: LifeBuoy,
   },
 ];
 
@@ -137,7 +148,12 @@ export function ExternalSidebar() {
       <nav className="flex-1 overflow-y-auto p-4 space-y-2">
         {menuItems.map((item) => {
           const Icon = item.icon;
-          const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
+          const isActive = item.href === '/support/tickets'
+            ? pathname === '/support/tickets' ||
+              pathname?.startsWith('/support/tickets/') ||
+              pathname === '/external-portal/support/tickets' ||
+              pathname?.startsWith('/external-portal/support/tickets/')
+            : pathname === item.href || pathname?.startsWith(item.href + '/');
 
           return (
             <Link

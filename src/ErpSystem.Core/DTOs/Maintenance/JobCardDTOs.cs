@@ -367,6 +367,12 @@ public class JobCardApprovalActionDto
     // Updated estimates (if needed during approval)
     public double? RevisedEstimatedHours { get; set; }
     public decimal? RevisedEstimatedCost { get; set; }
+
+    /// <summary>
+    /// Work order billing type: "Maintenance" uses fixed amount, "Repairs" uses itemized costs
+    /// </summary>
+    [MaxLength(20)]
+    public string BillingType { get; set; } = "Repairs";
 }
 
 /// <summary>

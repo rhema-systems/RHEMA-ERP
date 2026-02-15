@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -201,7 +201,7 @@ const validateStep6 = (formData: TenderFormData): string[] => {
   return [];
 };
 
-export default function NewTenderPage() {
+function NewTenderPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [currentStep, setCurrentStep] = useState(1);
@@ -240,7 +240,7 @@ export default function NewTenderPage() {
   const [formData, setFormData] = useState<TenderFormData>({
     title: '',
     description: '',
-    tenderType: 'RFQ',
+    tenderType: 'ITB',
     submissionDeadline: '',
     openingDate: '',
     estimatedValue: null,
@@ -808,5 +808,13 @@ export default function NewTenderPage() {
         isLoading={loading}
       />
     </div>
+  );
+}
+
+export default function NewTenderPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen">Loading...</div>}>
+      <NewTenderPageContent />
+    </Suspense>
   );
 }

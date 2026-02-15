@@ -45,6 +45,10 @@ namespace ErpSystem.Core.DTOs.Dashboard
         public bool IsRead { get; set; }
         public string? ActionUrl { get; set; }
         public Dictionary<string, object>? Metadata { get; set; }
+
+        // Optional linking to a domain entity (enables real-time UI refresh on detail screens)
+        public string? EntityType { get; set; }
+        public string? EntityId { get; set; }
     }
 
     public class OnlineUserDto

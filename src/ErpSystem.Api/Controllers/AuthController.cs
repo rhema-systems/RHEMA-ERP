@@ -11,6 +11,7 @@ using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers
@@ -34,6 +35,7 @@ namespace ErpSystem.Api.Controllers
         private readonly ITwoFactorAuthService _twoFactorService;
         private readonly IPasswordResetService _passwordResetService;
         private readonly IEmailService _emailService;
+        private readonly ICaptchaVerificationService _captchaVerificationService;
         private readonly ApplicationDbContext _context;
         private readonly IConfiguration _configuration;
         private readonly ILogger<AuthController> _logger;
@@ -54,6 +56,7 @@ namespace ErpSystem.Api.Controllers
             ITwoFactorAuthService twoFactorService,
             IPasswordResetService passwordResetService,
             IEmailService emailService,
+            ICaptchaVerificationService captchaVerificationService,
             ApplicationDbContext context,
             IConfiguration configuration,
             ILogger<AuthController> logger)
@@ -73,13 +76,70 @@ namespace ErpSystem.Api.Controllers
             _twoFactorService = twoFactorService;
             _passwordResetService = passwordResetService;
             _emailService = emailService;
+            _captchaVerificationService = captchaVerificationService;
             _context = context;
             _configuration = configuration;
             _logger = logger;
         }
 
+        private string? GetEffectiveHost()
+        {
+            var forwardedHost = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
+            var raw = !string.IsNullOrWhiteSpace(forwardedHost) ? forwardedHost : Request.Host.Host;
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return null;
+            }
+
+            // X-Forwarded-Host can contain a comma-separated list and may include a port.
+            var host = raw.Split(',')[0].Trim();
+            var portIdx = host.IndexOf(':');
+            if (portIdx > 0)
+            {
+                host = host[..portIdx];
+            }
+
+            return string.IsNullOrWhiteSpace(host) ? null : host;
+        }
+
+        private bool IsSupportHostname(string? host)
+        {
+            if (string.IsNullOrWhiteSpace(host)) return false;
+
+            var h = host.Trim().ToLowerInvariant();
+            var configured = (_configuration["SUPPORT_PORTAL_HOSTNAME"] ?? string.Empty).Trim().ToLowerInvariant();
+
+            if (!string.IsNullOrWhiteSpace(configured) && h == configured) return true;
+            return h.StartsWith("support.");
+        }
+
+        private async Task<Guid> ResolveTenantIdForCaptchaAsync(string? tenantCode)
+        {
+            if (!string.IsNullOrWhiteSpace(tenantCode))
+            {
+                var tenant = await _tenantService.GetTenantByCodeAsync(tenantCode);
+                if (tenant != null && tenant.Status == TenantStatus.Active)
+                {
+                    return tenant.Id;
+                }
+            }
+
+            var host = GetEffectiveHost();
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                var tenantByDomain = await _tenantService.GetTenantByDomainAsync(host);
+                if (tenantByDomain != null && tenantByDomain.Status == TenantStatus.Active)
+                {
+                    return tenantByDomain.Id;
+                }
+            }
+
+            return Constants.Tenants.DefaultTenantId;
+        }
+
         [HttpPost("login")]
         [AllowAnonymous]
+        [EnableRateLimiting("AuthPolicy")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
             try
@@ -87,6 +147,19 @@ namespace ErpSystem.Api.Controllers
                 if (!ModelState.IsValid)
                 {
                     return BadRequest(ModelState);
+                }
+
+                // CAPTCHA enforcement (when enabled for tenant)
+                try
+                {
+                    var tenantIdForCaptcha = await ResolveTenantIdForCaptchaAsync(request.TenantCode);
+                    var host = GetEffectiveHost();
+                    var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    await _captchaVerificationService.EnsureCaptchaValidAsync(tenantIdForCaptcha, request.RecaptchaToken, host, remoteIp, HttpContext.RequestAborted);
+                }
+                catch (CaptchaVerificationException ex)
+                {
+                    return BadRequest(new { message = ex.Message });
                 }
 
                 _logger.LogInformation("Login attempt for user: {Username} with tenant: {TenantCode}", request.Username, request.TenantCode);
@@ -552,6 +625,7 @@ namespace ErpSystem.Api.Controllers
 
         [HttpPost("refresh")]
         [AllowAnonymous]
+        [EnableRateLimiting("AuthPolicy")]
         public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
         {
             try
@@ -746,6 +820,7 @@ namespace ErpSystem.Api.Controllers
 
         [HttpPost("user-tenants")]
         [AllowAnonymous]
+        [EnableRateLimiting("AuthPolicy")]
         public async Task<IActionResult> GetUserTenants([FromBody] GetUserTenantsRequest request)
         {
             try
@@ -938,6 +1013,21 @@ namespace ErpSystem.Api.Controllers
                 if (tenant == null || tenant.Status != TenantStatus.Active)
                 {
                     return BadRequest(new { message = "Invalid or inactive tenant" });
+                }
+
+                // Support portal hardening: if host resolves to a tenant, don't allow external (Local) users to
+                // select a different tenant. This prevents cross-tenant access on a tenant-branded subdomain.
+                var host = GetEffectiveHost();
+                if (user.AuthenticationProvider == AuthenticationProvider.Local && IsSupportHostname(host))
+                {
+                    var tenantByDomain = !string.IsNullOrWhiteSpace(host)
+                        ? await _tenantService.GetTenantByDomainAsync(host)
+                        : null;
+
+                    if (tenantByDomain != null && tenantByDomain.Status == TenantStatus.Active && tenantByDomain.Id != tenant.Id)
+                    {
+                        return BadRequest(new { message = $"This portal is restricted to tenant {tenantByDomain.Code}." });
+                    }
                 }
 
                 // Validate user has access to this tenant
@@ -1134,6 +1224,7 @@ namespace ErpSystem.Api.Controllers
 
         [HttpPost("register")]
         [AllowAnonymous]
+        [EnableRateLimiting("SensitivePolicy")]
         public async Task<IActionResult> Register([FromBody] RegisterRequest request)
         {
             try
@@ -1158,14 +1249,46 @@ namespace ErpSystem.Api.Controllers
                     return BadRequest(new { message = "A user with this email address already exists." });
                 }
 
-                // For now, we'll assign users to the first active tenant that allows self-registration
-                // Later this can be enhanced to support tenant selection during registration
+                // Prefer tenant selection by request host/domain for multi-tenant public portals (e.g. support.company.com)
+                Tenant? registrationTenant = null;
+                try
+                {
+                    var forwardedHost = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
+                    var host = !string.IsNullOrWhiteSpace(forwardedHost) ? forwardedHost : Request.Host.Host;
+
+                    if (!string.IsNullOrWhiteSpace(host))
+                    {
+                        registrationTenant = await _tenantService.GetTenantByDomainAsync(host);
+                        if (registrationTenant != null && (registrationTenant.Status != TenantStatus.Active || !registrationTenant.AllowSelfRegistration))
+                        {
+                            registrationTenant = null;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Best-effort: fall back to default selection below
+                }
+
+                // Fallback: assign users to the first active tenant that allows self-registration
                 var availableTenants = await _tenantService.GetAllTenantsAsync();
-                var registrationTenant = availableTenants.FirstOrDefault(t => t.Status == TenantStatus.Active && t.AllowSelfRegistration);
+                registrationTenant ??= availableTenants.FirstOrDefault(t => t.Status == TenantStatus.Active && t.AllowSelfRegistration);
 
                 if (registrationTenant == null)
                 {
                     return BadRequest(new { message = "Self-registration is not currently available." });
+                }
+
+                // CAPTCHA enforcement (when enabled for tenant)
+                try
+                {
+                    var host = GetEffectiveHost();
+                    var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    await _captchaVerificationService.EnsureCaptchaValidAsync(registrationTenant.Id, request.RecaptchaToken, host, remoteIp, HttpContext.RequestAborted);
+                }
+                catch (CaptchaVerificationException ex)
+                {
+                    return BadRequest(new { message = ex.Message });
                 }
 
                 // Create the user
@@ -1193,8 +1316,9 @@ namespace ErpSystem.Api.Controllers
                     return BadRequest(new { message = "Registration failed.", errors });
                 }
 
-                // Assign default role (Employee) to the new user
-                await _userManager.AddToRoleAsync(user, "Employee");
+                // Assign default role (ExternalUser) to the new self-registered user
+                // NOTE: Do not grant internal ERP roles to external portal users.
+                await _userManager.AddToRoleAsync(user, Constants.Roles.ExternalUser);
 
                 // Create user-tenant relationship
                 await _userTenantService.GrantUserAccessToTenantAsync(
@@ -1240,6 +1364,7 @@ namespace ErpSystem.Api.Controllers
 
         [HttpPost("verify-otp")]
         [AllowAnonymous]
+        [EnableRateLimiting("SensitivePolicy")]
         public async Task<IActionResult> VerifyOtp([FromBody] VerifyOtpRequest request)
         {
             try
@@ -1247,6 +1372,19 @@ namespace ErpSystem.Api.Controllers
                 if (!ModelState.IsValid)
                 {
                     return BadRequest(ModelState);
+                }
+
+                // CAPTCHA enforcement (when enabled for tenant)
+                try
+                {
+                    var tenantIdForCaptcha = await ResolveTenantIdForCaptchaAsync(null);
+                    var host = GetEffectiveHost();
+                    var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    await _captchaVerificationService.EnsureCaptchaValidAsync(tenantIdForCaptcha, request.RecaptchaToken, host, remoteIp, HttpContext.RequestAborted);
+                }
+                catch (CaptchaVerificationException ex)
+                {
+                    return BadRequest(new { message = ex.Message });
                 }
 
                 _logger.LogInformation("OTP verification attempt for phone: {PhoneNumber}", request.PhoneNumber);
@@ -1321,9 +1459,25 @@ namespace ErpSystem.Api.Controllers
 
                 // Try to get actual security settings from the database
                 Core.Entities.Security? settings = null;
+                Tenant? resolvedTenant = null;
                 try
                 {
-                    settings = await _settingsService.GetPublicSecuritySettingsAsync();
+                    // Prefer host-based tenant selection for public portals (e.g. support.company.com)
+                    var forwardedHost = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
+                    var host = !string.IsNullOrWhiteSpace(forwardedHost) ? forwardedHost : Request.Host.Host;
+
+                    if (!string.IsNullOrWhiteSpace(host))
+                    {
+                        var tenant = await _tenantService.GetTenantByDomainAsync(host);
+                        if (tenant != null && tenant.Status == TenantStatus.Active)
+                        {
+                            resolvedTenant = tenant;
+                            settings = await _settingsService.GetSecuritySettingsAsync(tenant.Id);
+                        }
+                    }
+
+                    // Fallback to the default tenant settings if host-based lookup didn't resolve
+                    settings ??= await _settingsService.GetPublicSecuritySettingsAsync();
                     _logger.LogInformation("Retrieved public security settings from database: CAPTCHA enabled = {CaptchaEnabled}, Site key = {SiteKeyPrefix}...",
                         settings?.CaptchaEnabled, settings?.RecaptchaSiteKey?.Length > 10 ? settings.RecaptchaSiteKey[..10] : settings?.RecaptchaSiteKey);
                 }
@@ -1335,6 +1489,8 @@ namespace ErpSystem.Api.Controllers
                 // Return actual security settings or defaults
                 var publicSettings = new
                 {
+                    tenantCode = resolvedTenant?.Code,
+                    tenantName = resolvedTenant?.Name,
                     passwordMinLength = settings?.PasswordMinLength ?? 8,
                     passwordRequireUppercase = settings?.PasswordRequireUppercase ?? true,
                     passwordRequireLowercase = settings?.PasswordRequireLowercase ?? true,
@@ -1428,6 +1584,7 @@ namespace ErpSystem.Api.Controllers
         /// </summary>
         [HttpPost("forgot-password")]
         [AllowAnonymous]
+        [EnableRateLimiting("SensitivePolicy")]
         public async Task<IActionResult> ForgotPassword([FromBody] ErpSystem.Core.DTOs.Auth.ForgotPasswordRequest request)
         {
             try
@@ -1435,6 +1592,19 @@ namespace ErpSystem.Api.Controllers
                 if (!ModelState.IsValid)
                 {
                     return BadRequest(ModelState);
+                }
+
+                // CAPTCHA enforcement (when enabled for tenant)
+                try
+                {
+                    var tenantIdForCaptcha = await ResolveTenantIdForCaptchaAsync(request.TenantCode);
+                    var host = GetEffectiveHost();
+                    var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    await _captchaVerificationService.EnsureCaptchaValidAsync(tenantIdForCaptcha, request.CaptchaToken, host, remoteIp, HttpContext.RequestAborted);
+                }
+                catch (CaptchaVerificationException ex)
+                {
+                    return BadRequest(new { message = ex.Message });
                 }
 
                 _logger.LogInformation("Password reset requested for email: {Email}", request.Email);
@@ -1525,6 +1695,7 @@ namespace ErpSystem.Api.Controllers
         /// </summary>
         [HttpPost("reset-password")]
         [AllowAnonymous]
+        [EnableRateLimiting("SensitivePolicy")]
         public async Task<IActionResult> ResetPassword([FromBody] ErpSystem.Core.DTOs.Auth.ResetPasswordRequest request)
         {
             try
@@ -1532,6 +1703,19 @@ namespace ErpSystem.Api.Controllers
                 if (!ModelState.IsValid)
                 {
                     return BadRequest(ModelState);
+                }
+
+                // CAPTCHA enforcement (when enabled for tenant)
+                try
+                {
+                    var tenantIdForCaptcha = await ResolveTenantIdForCaptchaAsync(null);
+                    var host = GetEffectiveHost();
+                    var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    await _captchaVerificationService.EnsureCaptchaValidAsync(tenantIdForCaptcha, request.CaptchaToken, host, remoteIp, HttpContext.RequestAborted);
+                }
+                catch (CaptchaVerificationException ex)
+                {
+                    return BadRequest(new { message = ex.Message });
                 }
 
                 _logger.LogInformation("Password reset attempt for email: {Email}", request.Email);
@@ -1573,10 +1757,24 @@ namespace ErpSystem.Api.Controllers
         /// </summary>
         [HttpPost("validate-reset-token")]
         [AllowAnonymous]
+        [EnableRateLimiting("SensitivePolicy")]
         public async Task<IActionResult> ValidateResetToken([FromBody] ErpSystem.Core.DTOs.Auth.ValidateResetTokenRequest request)
         {
             try
             {
+                // CAPTCHA enforcement (when enabled for tenant)
+                try
+                {
+                    var tenantIdForCaptcha = await ResolveTenantIdForCaptchaAsync(null);
+                    var host = GetEffectiveHost();
+                    var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    await _captchaVerificationService.EnsureCaptchaValidAsync(tenantIdForCaptcha, request.CaptchaToken, host, remoteIp, HttpContext.RequestAborted);
+                }
+                catch (CaptchaVerificationException ex)
+                {
+                    return BadRequest(new { message = ex.Message });
+                }
+
                 var user = await _userManager.FindByEmailAsync(request.Email);
                 if (user == null)
                 {

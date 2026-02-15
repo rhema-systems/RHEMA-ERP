@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,6 +40,7 @@ import workOrderToolService, { WorkOrderToolDto } from '@/services/workOrderTool
 import qualityControlService from '@/services/qualityControlService';
 import workflowApiService from '@/services/workflow-api.service';
 import { notificationService } from '@/services/notificationService';
+import { adminApiService, User } from '@/services/admin-api.service';
 import ClientOnly from '@/components/ui/client-only';
 import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -53,6 +54,7 @@ import assetConditionService, {
 import type { Employee } from '@/services/maintenanceDataService';
 import { ClipboardCheck, CheckCircle as CheckIcon, XCircle as XIcon } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 
 // Use the JobCard type from service instead of local interface
 interface JobCard {
@@ -85,6 +87,7 @@ interface JobCard {
 
 export default function JobCardsPage() {
   const { toast } = useToast();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [jobCards, setJobCards] = useState<JobCard[]>([]);
   const [filteredCards, setFilteredCards] = useState<JobCard[]>([]);
@@ -109,6 +112,7 @@ export default function JobCardsPage() {
 
   // Data from services
   const [technicians, setTechnicians] = useState<Employee[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [priorityLevels, setPriorityLevels] = useState<PriorityLevel[]>([]);
   const [maintenanceTypes, setMaintenanceTypes] = useState<any[]>([]);
@@ -168,6 +172,9 @@ export default function JobCardsPage() {
   const [activeAdmissionForJobCard, setActiveAdmissionForJobCard] = useState<AssetAdmission | null>(null);
   const [latestDischargeForAdmission, setLatestDischargeForAdmission] = useState<AssetDischarge | null>(null);
 
+  // Track which job cards have admissions (for grid action buttons)
+  const [jobCardsWithAdmissions, setJobCardsWithAdmissions] = useState<Set<string>>(new Set());
+
   // Condition Inspection states (at Job Card level)
   const [isConditionDialogOpen, setIsConditionDialogOpen] = useState(false);
   const [conditionTemplates, setConditionTemplates] = useState<AssetConditionChecklistTemplateDto[]>([]);
@@ -179,6 +186,15 @@ export default function JobCardsPage() {
   const [existingDischargeRecord, setExistingDischargeRecord] = useState<AssetConditionRecordDto | null>(null);
   const [isSubmittingInspection, setIsSubmittingInspection] = useState(false);
   const [inspectionAdmission, setInspectionAdmission] = useState<AssetAdmission | null>(null);
+  const [itemPhotos, setItemPhotos] = useState<Record<string, File[]>>({});
+  const [uploadingPhotoItemId, setUploadingPhotoItemId] = useState<string | null>(null);
+  const [selectedInspectorId, setSelectedInspectorId] = useState<string>('');
+  const photoInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Approval dialog state
+  const [isApprovalDialogOpen, setIsApprovalDialogOpen] = useState(false);
+  const [approvalCardId, setApprovalCardId] = useState<string | null>(null);
+  const [approvalBillingType, setApprovalBillingType] = useState<'Maintenance' | 'Repairs'>('Repairs');
 
   const [newJobCard, setNewJobCard] = useState({
     title: '',
@@ -330,22 +346,25 @@ export default function JobCardsPage() {
         console.log('🔑 Token preview:', authToken ? `${authToken.substring(0, 20)}...` : 'N/A');
 
         try {
-          const [assetsResponse, priorityLevelsList, maintenanceTypesList, techniciansList] = await Promise.all([
+          const [assetsResponse, priorityLevelsList, maintenanceTypesList, techniciansList, usersList] = await Promise.all([
             maintenanceApiService.getAssets(),
             maintenanceApiService.getPriorityLevels(),
             maintenanceApiService.getMaintenanceTypes(),
             maintenanceDataService.getTechnicians(),
+            adminApiService.getUsers(),
           ]);
 
           console.log('Loaded assets:', assetsResponse);
           console.log('Loaded priority levels:', priorityLevelsList);
           console.log('Loaded maintenance types:', maintenanceTypesList);
           console.log('Loaded technicians:', techniciansList);
+          console.log('Loaded users:', usersList);
 
           setAssets(assetsResponse.items || []);
           setPriorityLevels(priorityLevelsList || []);
           setMaintenanceTypes(maintenanceTypesList || []);
           setTechnicians(Array.isArray(techniciansList) ? techniciansList : []);
+          setUsers(Array.isArray(usersList) ? usersList.filter(u => u.isActive) : []);
 
           // Job cards are loaded separately based on the current Has Work Order filter
         } catch (error) {
@@ -421,6 +440,24 @@ export default function JobCardsPage() {
         handleOpenConditionInspection(admissionWithDetails, 'Admission');
       }
 
+      // Update the admission status tracking so the "Admit" button disappears
+      if (admissionForm.jobCardId) {
+        setJobCardsWithAdmissions(prev => {
+          const newSet = new Set(prev);
+          newSet.add(admissionForm.jobCardId);
+          return newSet;
+        });
+      }
+
+      // Update the admission status tracking so the "Admit" button disappears
+      if (admissionForm.jobCardId) {
+        setJobCardsWithAdmissions(prev => {
+          const newSet = new Set(prev);
+          newSet.add(admissionForm.jobCardId);
+          return newSet;
+        });
+      }
+
       setAdmissionForm({
         assetId: '',
         jobCardId: '',
@@ -460,11 +497,63 @@ export default function JobCardsPage() {
     setExistingDischargeRecord(null);
     setInspectionAdmission(null);
     setIsConditionDialogOpen(false);
+    setItemPhotos({});
+    setUploadingPhotoItemId(null);
+    setSelectedInspectorId('');
+  };
+
+  // Photo upload handler for checklist items
+  const handlePhotoUpload = async (itemId: string, files: FileList | null) => {
+    if (!files || files.length === 0 || !currentInspection) return;
+
+    setUploadingPhotoItemId(itemId);
+    try {
+      const file = files[0];
+      // Upload the photo - returns { filePath: string }
+      const uploadResult = await assetAdmissionService.uploadAdmissionPhoto(currentInspection.id, file);
+
+      // Update local state to show the photo
+      setItemPhotos(prev => ({
+        ...prev,
+        [itemId]: [...(prev[itemId] || []), file]
+      }));
+
+      // Update the item response with the photo path (extract the string from the object)
+      setItemResponses(prev => ({
+        ...prev,
+        [itemId]: {
+          ...prev[itemId],
+          checklistItemId: itemId,
+          photoPaths: [...(prev[itemId]?.photoPaths || []), uploadResult.filePath]
+        }
+      }));
+
+      toast({
+        title: "Photo uploaded",
+        description: "Photo has been attached to this checklist item",
+      });
+    } catch (err) {
+      console.error('Error uploading photo:', err);
+      toast({
+        title: "Upload failed",
+        description: "Failed to upload photo. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingPhotoItemId(null);
+    }
+  };
+
+  // Trigger photo input for a specific item
+  const triggerPhotoUpload = (itemId: string) => {
+    setUploadingPhotoItemId(itemId);
+    photoInputRef.current?.click();
   };
 
   // Condition Inspection handlers (at Job Card level)
   const handleOpenConditionInspection = async (admission: AssetAdmission, type: 'Admission' | 'Discharge') => {
-    const jobCardId = selectedCardDetails?.id;
+    // Use the admission's jobCardId directly, fallback to selectedCardDetails
+    const jobCardId = admission.jobCardId || selectedCardDetails?.id;
     console.log('🔍 handleOpenConditionInspection called with jobCardId:', jobCardId, 'type:', type);
     setInspectionAdmission(admission);
     setInspectionType(type);
@@ -524,7 +613,9 @@ export default function JobCardsPage() {
             textValue: result.textValue,
             numericValue: result.numericValue,
             selectedOption: result.selectedOption,
-            comment: result.comment
+            comment: result.comment,
+            repairReplacementAction: result.repairReplacementAction as 'None' | 'Repair' | 'Replace' | undefined,
+            photoPaths: result.photoPaths
           };
         });
         setItemResponses(responses);
@@ -545,7 +636,9 @@ export default function JobCardsPage() {
             textValue: result.textValue,
             numericValue: result.numericValue,
             selectedOption: result.selectedOption,
-            comment: result.comment
+            comment: result.comment,
+            repairReplacementAction: result.repairReplacementAction as 'None' | 'Repair' | 'Replace' | undefined,
+            photoPaths: result.photoPaths
           };
         });
         setItemResponses(responses);
@@ -576,6 +669,7 @@ export default function JobCardsPage() {
         templateId: selectedTemplate.id,
         inspectionType: inspectionType,
         admissionId: inspectionAdmission.id,
+        inspectorId: selectedInspectorId || undefined,
         generalNotes: ''
       };
 
@@ -620,7 +714,9 @@ export default function JobCardsPage() {
       for (const itemId of Object.keys(itemResponses)) {
         const response = itemResponses[itemId];
         // Only submit if there's actual data
-        if (response.isPresent !== undefined || response.textValue || response.numericValue !== undefined || response.selectedOption || response.comment) {
+        if (response.isPresent !== undefined || response.textValue || response.numericValue !== undefined ||
+            response.selectedOption || response.comment ||
+            (response.repairReplacementAction && response.repairReplacementAction !== 'None')) {
           await assetConditionService.submitItemResult(currentInspection.id, response);
         }
       }
@@ -712,12 +808,45 @@ export default function JobCardsPage() {
       setJobCards(mappedJobCards);
       setFilteredCards(mappedJobCards);
       console.log('✅ Job cards refreshed successfully:', mappedJobCards.length, 'cards loaded');
+
+      // Load admission status for all job cards
+      const allJobCardIds = mappedJobCards.map((card: JobCard) => card.id);
+
+      if (allJobCardIds.length > 0) {
+        loadAdmissionStatusForJobCards(allJobCardIds);
+      }
     } catch (error) {
       console.error('❌ Error refreshing job cards:', error);
       console.error('Error details:', error instanceof Error ? error.message : error);
     }
   };
 
+  // Load admission status for a list of job cards
+  const loadAdmissionStatusForJobCards = async (jobCardIds: string[]) => {
+    try {
+      const admissionsWithJobCard = new Set<string>();
+
+      // Check each job card for existing admissions
+      await Promise.all(jobCardIds.map(async (jobCardId) => {
+        try {
+          const admissions = await assetAdmissionService.getAdmissions({
+            jobCardId,
+            status: 'Active'
+          });
+          if (admissions.items && admissions.items.length > 0) {
+            admissionsWithJobCard.add(jobCardId);
+          }
+        } catch {
+          // Ignore errors for individual job cards
+        }
+      }));
+
+      setJobCardsWithAdmissions(admissionsWithJobCard);
+      console.log('✅ Loaded admission status for job cards:', admissionsWithJobCard.size, 'have admissions');
+    } catch (error) {
+      console.error('❌ Error loading admission status:', error);
+    }
+  };
 
   // Load job cards from API whenever the Has Work Order filter changes (and on initial mount)
   useEffect(() => {
@@ -1093,42 +1222,58 @@ export default function JobCardsPage() {
     }
   };
 
-  const approveJobCard = async (cardId: string) => {
+  // Opens the approval dialog to select billing type
+  const openApprovalDialog = (cardId: string) => {
+    setApprovalCardId(cardId);
+    setApprovalBillingType('Repairs'); // Default to Repairs
+    setIsApprovalDialogOpen(true);
+  };
+
+  // Process the actual approval after billing type is selected
+  const confirmApproveJobCard = async () => {
+    if (!approvalCardId) return;
+
     try {
-      const jobCard = jobCards.find(card => card.id === cardId);
+      const jobCard = jobCards.find(card => card.id === approvalCardId);
 
       if (TESTING_MODE) {
-        console.log('🧪 TESTING MODE: Approving mock job card');
+        console.log('🧪 TESTING MODE: Approving mock job card with billing type:', approvalBillingType);
 
         // Update mock job card status
         setJobCards(prev => prev.map(card =>
-          card.id === cardId
+          card.id === approvalCardId
             ? { ...card, jobCardStatus: 'Approved', approvalStatus: 'Approved' }
             : card
         ));
         setFilteredCards(prev => prev.map(card =>
-          card.id === cardId
+          card.id === approvalCardId
             ? { ...card, jobCardStatus: 'Approved', approvalStatus: 'Approved' }
             : card
         ));
 
         console.log('✅ Mock job card approved - ready for work order generation');
+        setIsApprovalDialogOpen(false);
+        setApprovalCardId(null);
         return;
       }
 
       const approvalAction: JobCardApprovalAction = {
         action: 'Approve',
-        comments: 'Approved via job card management'
+        comments: 'Approved via job card management',
+        billingType: approvalBillingType
       };
-      await jobCardService.processApproval(cardId, approvalAction);
+      await jobCardService.processApproval(approvalCardId, approvalAction);
 
       // Refresh job cards list
       await refreshJobCards();
 
       toast({
         title: "Success",
-        description: `Job card ${jobCard?.jobCardNumber || ''} approved successfully`,
+        description: `Job card ${jobCard?.jobCardNumber || ''} approved successfully with ${approvalBillingType} billing type`,
       });
+
+      setIsApprovalDialogOpen(false);
+      setApprovalCardId(null);
     } catch (error) {
       console.error('Error approving job card:', error);
       toast({
@@ -1781,39 +1926,125 @@ export default function JobCardsPage() {
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => submitJobCard(card.id)}
-                            title="Submit for approval"
-                          >
-                            <Send className="h-4 w-4" />
-                          </Button>
+                          <WorkflowApprovalActions
+                            entityType="JobCard"
+                            entityId={card.id}
+                            entityLabel="Job Card"
+                            entityNumber={card.jobCardNumber}
+                            status={card.jobCardStatus}
+                            iconOnly
+                            size="icon"
+                            canSubmit
+                            canApproveReject={false}
+                            onSubmit={async () => {
+                              if (TESTING_MODE) {
+                                setJobCards(prev => prev.map(c =>
+                                  c.id === card.id
+                                    ? { ...c, jobCardStatus: 'Submitted', approvalStatus: 'Pending' }
+                                    : c
+                                ));
+                                setFilteredCards(prev => prev.map(c =>
+                                  c.id === card.id
+                                    ? { ...c, jobCardStatus: 'Submitted', approvalStatus: 'Pending' }
+                                    : c
+                                ));
+                                return;
+                              }
+
+                              try {
+                                await jobCardService.submitJobCard(card.id, { confirmReadiness: true });
+                              } catch (err: any) {
+                                const msg =
+                                  err?.response?.data?.error ||
+                                  err?.response?.data ||
+                                  err?.message ||
+                                  'Failed to submit job card';
+                                throw new Error(typeof msg === 'string' ? msg : 'Failed to submit job card');
+                              }
+                            }}
+                            onAfterAction={refreshJobCards}
+                            onOpenWorkflows={() => router.push('/administration/workflow')}
+                          />
                         </>
                       )}
 
                       {/* Submitted/Pending approval actions */}
                       {card.jobCardStatus === 'Submitted' && card.approvalStatus === 'Pending' && (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => approveJobCard(card.id)}
-                            className="bg-green-50 hover:bg-green-100"
-                            title="Approve job card"
-                          >
-                            <CheckCircle className="h-4 w-4 text-green-600" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => rejectJobCard(card.id)}
-                            className="bg-red-50 hover:bg-red-100"
-                            title="Reject job card"
-                          >
-                            <AlertCircle className="h-4 w-4 text-red-600" />
-                          </Button>
-                        </>
+                        <WorkflowApprovalActions
+                          entityType="JobCard"
+                          entityId={card.id}
+                          entityLabel="Job Card"
+                          entityNumber={card.jobCardNumber}
+                          status={card.jobCardStatus}
+                          iconOnly
+                          size="icon"
+                          loadWorkflowSummary
+                          canSubmit={false}
+                          canApproveReject
+                          onApprove={async (comments) => {
+                            if (TESTING_MODE) {
+                              setJobCards(prev => prev.map(c =>
+                                c.id === card.id
+                                  ? { ...c, jobCardStatus: 'Approved', approvalStatus: 'Approved' }
+                                  : c
+                              ));
+                              setFilteredCards(prev => prev.map(c =>
+                                c.id === card.id
+                                  ? { ...c, jobCardStatus: 'Approved', approvalStatus: 'Approved' }
+                                  : c
+                              ));
+                              return;
+                            }
+
+                            try {
+                              const approvalAction: JobCardApprovalAction = {
+                                action: 'Approve',
+                                comments: comments || undefined,
+                                billingType: approvalBillingType,
+                              };
+                              await jobCardService.processApproval(card.id, approvalAction);
+                            } catch (err: any) {
+                              const msg =
+                                err?.response?.data?.error ||
+                                err?.response?.data ||
+                                err?.message ||
+                                'Failed to approve job card';
+                              throw new Error(typeof msg === 'string' ? msg : 'Failed to approve job card');
+                            }
+                          }}
+                          onReject={async (comments) => {
+                            if (TESTING_MODE) {
+                              setJobCards(prev => prev.map(c =>
+                                c.id === card.id
+                                  ? { ...c, jobCardStatus: 'Rejected', approvalStatus: 'Rejected' }
+                                  : c
+                              ));
+                              setFilteredCards(prev => prev.map(c =>
+                                c.id === card.id
+                                  ? { ...c, jobCardStatus: 'Rejected', approvalStatus: 'Rejected' }
+                                  : c
+                              ));
+                              return;
+                            }
+
+                            try {
+                              const approvalAction: JobCardApprovalAction = {
+                                action: 'Reject',
+                                comments,
+                              };
+                              await jobCardService.processApproval(card.id, approvalAction);
+                            } catch (err: any) {
+                              const msg =
+                                err?.response?.data?.error ||
+                                err?.response?.data ||
+                                err?.message ||
+                                'Failed to reject job card';
+                              throw new Error(typeof msg === 'string' ? msg : 'Failed to reject job card');
+                            }
+                          }}
+                          onAfterAction={refreshJobCards}
+                          onOpenWorkflows={() => router.push('/administration/workflow')}
+                        />
                       )}
 
                       {/* Approved status - work order is generated automatically on approval */}
@@ -1833,6 +2064,29 @@ export default function JobCardsPage() {
                           title="Work order already generated"
                         >
                           WO Generated
+                        </Button>
+                      )}
+
+                      {/* Admit Asset button - shown for job cards without admission */}
+                      {!jobCardsWithAdmissions.has(card.id) && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="bg-blue-50 hover:bg-blue-100"
+                          onClick={() => {
+                            // Pre-fill the admission form with job card data
+                            setAdmissionForm(prev => ({
+                              ...prev,
+                              assetId: card.assetId,
+                              jobCardId: card.id,
+                              workOrderId: card.generatedWorkOrderId || '',
+                            }));
+                            setIsAdmissionDialogOpen(true);
+                          }}
+                          title="Admit asset for maintenance"
+                        >
+                          <ClipboardCheck className="h-4 w-4 text-blue-600 mr-1" />
+                          Admit
                         </Button>
                       )}
                     </div>
@@ -2477,6 +2731,72 @@ export default function JobCardsPage() {
                         </div>
                       </div>
                     ))}
+
+                    {/* Asset Admission Step */}
+                    {(
+                      <div className="flex gap-4">
+                        <div className="flex flex-col items-center">
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                            activeAdmissionForJobCard ? 'bg-green-100' : 'bg-yellow-100'
+                          }`}>
+                            {activeAdmissionForJobCard ? (
+                              <CheckCircle className="h-5 w-5 text-green-600" />
+                            ) : (
+                              <Clock className="h-5 w-5 text-yellow-600" />
+                            )}
+                          </div>
+                          {(activeAdmissionForJobCard || selectedCardDetails.generatedWorkOrderId) && (
+                            <div className="w-0.5 h-full bg-gray-200 mt-2"></div>
+                          )}
+                        </div>
+                        <div className="flex-1 pb-6">
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-semibold text-base">Asset Admission</h4>
+                            <Badge style={activeAdmissionForJobCard
+                              ? { backgroundColor: '#d1fae5', color: '#065f46' }
+                              : { backgroundColor: '#fef3c7', color: '#92400e' }
+                            }>
+                              {activeAdmissionForJobCard ? 'Completed' : 'Pending'}
+                            </Badge>
+                          </div>
+                          {activeAdmissionForJobCard ? (
+                            <>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                Admission #{activeAdmissionForJobCard.admissionNumber}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {format(new Date(activeAdmissionForJobCard.admissionDate), 'MMM dd, yyyy HH:mm:ss')}
+                              </p>
+                              <p className="text-sm mt-1">
+                                Condition: <span className="font-medium">{activeAdmissionForJobCard.assetConditionOnAdmission}</span>
+                              </p>
+                            </>
+                          ) : (
+                            <div className="mt-2">
+                              <p className="text-sm text-muted-foreground mb-2">
+                                Admit the asset to record its condition before maintenance work begins.
+                              </p>
+                              <Button
+                                size="sm"
+                                onClick={() => {
+                                  // Pre-fill the admission form with job card data
+                                  setAdmissionForm(prev => ({
+                                    ...prev,
+                                    assetId: selectedCardDetails.assetId,
+                                    jobCardId: selectedCardDetails.id,
+                                    workOrderId: selectedCardDetails.generatedWorkOrderId || '',
+                                  }));
+                                  setIsAdmissionDialogOpen(true);
+                                }}
+                              >
+                                <ClipboardCheck className="h-4 w-4 mr-2" />
+                                Admit Asset
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Work Order Generation */}
                     {selectedCardDetails.generatedWorkOrderId && (
@@ -3355,6 +3675,26 @@ export default function JobCardsPage() {
                 </Select>
               </div>
 
+              <div className="space-y-2">
+                <Label>Inspector</Label>
+                <Select
+                  value={selectedInspectorId}
+                  onValueChange={(value) => setSelectedInspectorId(value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select inspector" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {users.map(user => (
+                      <SelectItem key={user.id} value={user.id}>
+                        {user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : user.username}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Select the person who performed the inspection</p>
+              </div>
+
               {conditionTemplates.length === 0 && (
                 <div className="p-4 border rounded-lg bg-yellow-50 text-yellow-700">
                   <p className="font-medium">No checklist templates available</p>
@@ -3431,7 +3771,9 @@ export default function JobCardsPage() {
                           textValue: result.textValue,
                           numericValue: result.numericValue,
                           selectedOption: result.selectedOption,
-                          comment: result.comment
+                          comment: result.comment,
+                          repairReplacementAction: result.repairReplacementAction as 'None' | 'Repair' | 'Replace' | undefined,
+                          photoPaths: result.photoPaths
                         };
                       });
                       setItemResponses(responses);
@@ -3572,9 +3914,100 @@ export default function JobCardsPage() {
                         }))}
                       />
                     </div>
+
+                    {/* Photo upload for items that require photos */}
+                    {item.requiresPhoto && (
+                      <div className="mt-3 p-3 border rounded-lg bg-muted/50">
+                        <div className="flex items-center justify-between mb-2">
+                          <Label className="text-sm font-medium">📷 Photo Required</Label>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => triggerPhotoUpload(item.id)}
+                            disabled={uploadingPhotoItemId === item.id}
+                          >
+                            {uploadingPhotoItemId === item.id ? 'Uploading...' : 'Browse & Attach Photo'}
+                          </Button>
+                        </div>
+                        {/* Show uploaded photos */}
+                        {(itemResponses[item.id]?.photoPaths?.length ?? 0) > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {itemResponses[item.id]?.photoPaths?.map((path, idx) => (
+                              <Badge key={idx} variant="secondary" className="text-xs">
+                                📷 Photo {idx + 1} attached
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                        {/* Show local file previews */}
+                        {(itemPhotos[item.id]?.length ?? 0) > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {itemPhotos[item.id]?.map((file, idx) => (
+                              <div key={idx} className="relative">
+                                <img
+                                  src={URL.createObjectURL(file)}
+                                  alt={`Photo ${idx + 1}`}
+                                  className="h-16 w-16 object-cover rounded border"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Repair/Replacement option for items that allow it */}
+                    {item.allowRepairReplacement && inspectionType === 'Admission' && (
+                      <div className="mt-3 p-3 border rounded-lg bg-orange-50 dark:bg-orange-950/20">
+                        <div className="flex items-center gap-4">
+                          <Label className="text-sm font-medium">🔧 Action Required:</Label>
+                          <Select
+                            value={itemResponses[item.id]?.repairReplacementAction || item.defaultRepairReplacementAction || 'None'}
+                            onValueChange={(value) => setItemResponses(prev => ({
+                              ...prev,
+                              [item.id]: { ...prev[item.id], checklistItemId: item.id, repairReplacementAction: value }
+                            }))}
+                          >
+                            <SelectTrigger className="w-40">
+                              <SelectValue placeholder="Select action" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="None">None</SelectItem>
+                              <SelectItem value="Repair">Repair</SelectItem>
+                              <SelectItem value="Replace">Replace</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {itemResponses[item.id]?.repairReplacementAction && itemResponses[item.id]?.repairReplacementAction !== 'None' && (
+                            <span className="text-xs text-muted-foreground">
+                              Est. {itemResponses[item.id]?.repairReplacementAction === 'Repair'
+                                ? `${item.estimatedRepairHours ?? 1} hrs`
+                                : `${item.estimatedReplacementHours ?? 1} hrs`}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          This will create a task in the work order for this item.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
+
+              {/* Hidden file input for photo uploads */}
+              <input
+                type="file"
+                ref={photoInputRef}
+                className="hidden"
+                accept="image/*"
+                onChange={(e) => {
+                  if (uploadingPhotoItemId) {
+                    handlePhotoUpload(uploadingPhotoItemId, e.target.files);
+                    e.target.value = ''; // Reset input
+                  }
+                }}
+              />
 
               <DialogFooter>
                 <Button variant="outline" onClick={handleSaveDraft} disabled={isSubmittingInspection}>
@@ -3586,6 +4019,78 @@ export default function JobCardsPage() {
               </DialogFooter>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Approval Dialog with Billing Type Selection */}
+      <Dialog open={isApprovalDialogOpen} onOpenChange={setIsApprovalDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-green-600" />
+              Approve Job Card
+            </DialogTitle>
+            <DialogDescription>
+              Select the billing type for the work order that will be created from this job card.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4 space-y-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Work Order Billing Type</Label>
+              <Select
+                value={approvalBillingType}
+                onValueChange={(value: 'Maintenance' | 'Repairs') => setApprovalBillingType(value)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select billing type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Repairs">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">Repairs</span>
+                      <span className="text-xs text-muted-foreground">- Itemized costs (parts, labor, tools, expenses)</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="Maintenance">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">Maintenance</span>
+                      <span className="text-xs text-muted-foreground">- Fixed amount from maintenance type</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-sm text-blue-700">
+                {approvalBillingType === 'Repairs' ? (
+                  <>
+                    <strong>Repairs:</strong> The work order will use itemized costing.
+                    Parts, labor hours, tools, and expenses will be tracked individually.
+                  </>
+                ) : (
+                  <>
+                    <strong>Maintenance:</strong> The work order will use the fixed billing amount
+                    defined in the maintenance type configuration.
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsApprovalDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmApproveJobCard}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              <CheckCircle className="mr-2 h-4 w-4" />
+              Approve & Create Work Order
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

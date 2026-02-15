@@ -307,7 +307,7 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.WorkOrder, opt => opt.Ignore());
 
         CreateMap<WorkOrderLabor, WorkOrderLaborDto>()
-            .ForMember(dest => dest.Technician, opt => opt.MapFrom(src => src.Technician));
+            .ForMember(dest => dest.Technician, opt => opt.Ignore());
 
         CreateMap<CreateWorkOrderLaborDto, WorkOrderLabor>()
             .ForMember(dest => dest.Id, opt => opt.Ignore())
@@ -319,8 +319,7 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.UpdatedAt, opt => opt.Ignore())
             .ForMember(dest => dest.IsDeleted, opt => opt.Ignore())
             .ForMember(dest => dest.DeletedAt, opt => opt.Ignore())
-            .ForMember(dest => dest.WorkOrder, opt => opt.Ignore())
-            .ForMember(dest => dest.Technician, opt => opt.Ignore());
+            .ForMember(dest => dest.WorkOrder, opt => opt.Ignore());
 
         CreateMap<UpdateWorkOrderLaborDto, WorkOrderLabor>()
             .ForMember(dest => dest.Id, opt => opt.Ignore())
@@ -332,8 +331,7 @@ public class MaintenanceMappingProfile : Profile
             .ForMember(dest => dest.UpdatedAt, opt => opt.Ignore())
             .ForMember(dest => dest.IsDeleted, opt => opt.Ignore())
             .ForMember(dest => dest.DeletedAt, opt => opt.Ignore())
-            .ForMember(dest => dest.WorkOrder, opt => opt.Ignore())
-            .ForMember(dest => dest.Technician, opt => opt.Ignore());
+            .ForMember(dest => dest.WorkOrder, opt => opt.Ignore());
 
         // CreateMap<WorkOrderDocument, WorkOrderDocumentDto>()
         //     .ForMember(dest => dest.UploadedBy, opt => opt.MapFrom(src => src.UploadedBy));

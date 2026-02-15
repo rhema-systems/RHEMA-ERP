@@ -160,39 +160,21 @@ class MaintenanceDataService {
   // Fetch technicians (users available for maintenance assignments)
   async getTechnicians(): Promise<Employee[]> {
     try {
-      console.log('🔧 Fetching technicians from /user endpoint (ApplicationUser)...');
-      
-      try {
-        const response = await apiService.get('/user');
-        console.log('🔧 SUCCESS! Users response:', response);
-        
-        const users = Array.isArray(response) ? response : [];
-        
-        if (users.length > 0) {
-          const mappedTechnicians = users.map((user: any) => ({
-            id: user.id, // This is the UserId (ApplicationUser ID)
-            firstName: user.firstName,
-            lastName: user.lastName,
-            email: user.email,
-            department: user.department || '',
-            position: user.position || '',
-            isActive: user.isActive
-          }));
-          
-          console.log(`✅ Successfully loaded ${mappedTechnicians.length} users from /user endpoint`);
-          return mappedTechnicians;
-        }
-      } catch (userError) {
-        console.warn('⚠️ /user endpoint failed:', userError);
-      }
-      
-      // Fallback to all employees if users endpoint fails
-      console.log('🔧 Falling back to employees endpoint...');
-      const employees = await this.getEmployees();
-      const activeTechnicians = employees.filter(emp => emp.isActive);
-      
-      console.log(`🔧 Using ${activeTechnicians.length} active employees as fallback technicians`);
-      return activeTechnicians;
+      // Technicians are employee-driven (HR). Scheduling/labor now uses Employee IDs.
+      const response = await apiService.get('/employees/maintenance-available');
+      const employees = Array.isArray(response) ? response : [];
+
+      return employees
+        .filter((emp: any) => emp && emp.isActive !== false)
+        .map((emp: any) => ({
+          id: emp.id,
+          firstName: emp.firstName,
+          lastName: emp.lastName,
+          email: emp.emailAddress,
+          department: emp.departmentName,
+          position: emp.positionTitle,
+          isActive: emp.isActive !== false,
+        }));
       
     } catch (error) {
       console.error('❌ Error fetching technicians:', error);

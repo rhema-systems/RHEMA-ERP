@@ -22,6 +22,18 @@ public interface IWorkflowEngine
         object? stepData = null);
 
     /// <summary>
+    /// Executes a specific transition from the current step (supports branching workflows).
+    /// </summary>
+    Task<WorkflowExecutionResult> ExecuteTransitionAsync(Guid workflowInstanceId, Guid userId, Guid transitionId,
+        object? stepData = null);
+
+    /// <summary>
+    /// Executes a specific transition from the current step by name (supports branching workflows).
+    /// </summary>
+    Task<WorkflowExecutionResult> ExecuteTransitionAsync(Guid workflowInstanceId, Guid userId, string transitionName,
+        object? stepData = null);
+
+    /// <summary>
     /// Processes a specific step in a workflow instance
     /// </summary>
     Task<WorkflowExecutionResult> ProcessStepAsync(Guid workflowStepInstanceId, Guid userId,
@@ -42,6 +54,12 @@ public interface IWorkflowEngine
     /// Gets the current status and progress of a workflow instance
     /// </summary>
     Task<WorkflowStatusDto> GetWorkflowStatusAsync(Guid workflowInstanceId);
+
+    /// <summary>
+    /// Ensures approval rows are materialized for an approval step instance (self-heals older instances
+    /// where approvals were not created due to missing/mismatched configuration parsing).
+    /// </summary>
+    Task EnsureApprovalsForStepAsync(Guid workflowStepInstanceId, object? dataContext = null);
 }
 
 /// <summary>
@@ -224,6 +242,11 @@ public interface IWorkflowConditionEvaluator
 public interface IWorkflowNotificationService
 {
     /// <summary>
+    /// Sends notification when a workflow is submitted/started for an entity.
+    /// </summary>
+    Task SendWorkflowSubmittedNotificationAsync(Guid workflowInstanceId);
+
+    /// <summary>
     /// Sends notification when a step is assigned
     /// </summary>
     Task SendStepAssignmentNotificationAsync(Guid stepInstanceId, Guid assignedToId);
@@ -244,7 +267,30 @@ public interface IWorkflowNotificationService
     Task SendWorkflowCompletionNotificationAsync(Guid workflowInstanceId);
 
     /// <summary>
+    /// Sends notification when workflow is rejected/cancelled.
+    /// </summary>
+    Task SendWorkflowRejectedNotificationAsync(Guid workflowInstanceId, Guid rejectedById, string? comments = null);
+
+    /// <summary>
     /// Sends overdue step reminders
     /// </summary>
     Task SendOverdueStepRemindersAsync();
+}
+
+/// <summary>
+/// Resolves human-friendly entity display info for workflow-related UX (notifications, logs, etc.).
+/// Centralized so modules don't have to hardcode per-entity naming.
+/// </summary>
+public interface IWorkflowEntityDisplayService
+{
+    Task<WorkflowEntityDisplayInfo> GetEntityDisplayInfoAsync(string entityType, Guid entityId);
+}
+
+public class WorkflowEntityDisplayInfo
+{
+    public string EntityType { get; set; } = string.Empty; // canonical type for UI navigation (e.g., "PurchaseRequisition")
+    public Guid EntityId { get; set; }
+    public string? EntityNumber { get; set; } // PR-2026-0002, PO-..., etc
+    public string? EntityName { get; set; } // optional: supplier name, tender title, etc
+    public string? ActionUrl { get; set; } // optional: explicit UI route
 }

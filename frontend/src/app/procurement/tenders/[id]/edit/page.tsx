@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -33,7 +33,9 @@ const STEPS = [
 export default function EditTenderPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const tenderId = params.id as string;
+  const fromRequisitionId = searchParams.get('fromRequisitionId');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -409,7 +411,7 @@ export default function EditTenderPage() {
       case 5:
         return <TenderFees formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
       case 6:
-        return <TenderInvitations formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
+        return <TenderInvitations formData={formData} updateFormData={updateFormData} tenderId={tenderId} fromRequisitionId={fromRequisitionId} />;
       case 7:
         return <TenderReview formData={formData} onSubmit={handleSubmit} loading={saving} tenderDocuments={tender?.documents || []} />;
       default:

@@ -40,6 +40,8 @@ interface MaintenanceType {
   color?: string;
   icon?: string;
   estimatedDuration?: number;
+  /** Fixed billing amount for maintenance-type work orders */
+  fixedAmount?: number;
   requiresDowntime?: boolean;
   skillLevel?: string;
   frequency?: string;
@@ -74,6 +76,7 @@ export default function MaintenanceTypesPage() {
     color: '#10b981',
     icon: 'wrench',
     estimatedDuration: 120,
+    fixedAmount: 0,
     requiresDowntime: false,
     skillLevel: 'Intermediate',
     frequency: 'Monthly',
@@ -148,6 +151,7 @@ export default function MaintenanceTypesPage() {
         location: formData.location || 'Internal',
         priority: formData.priority,
         estimatedDuration: formData.estimatedDuration / 60, // Convert minutes to hours
+        fixedAmount: formData.fixedAmount || 0,
         isActive: formData.isActive,
         requiresDowntime: formData.requiresDowntime,
         color: formData.color,
@@ -185,6 +189,7 @@ export default function MaintenanceTypesPage() {
       color: type.color || '#10b981',
       icon: type.icon || 'wrench',
       estimatedDuration: (type.estimatedDuration || 2) * 60, // Convert hours to minutes for form
+      fixedAmount: type.fixedAmount || 0,
       requiresDowntime: type.requiresDowntime ?? false,
       skillLevel: type.skillLevel || 'Intermediate',
       frequency: type.frequency || 'Monthly',
@@ -207,6 +212,7 @@ export default function MaintenanceTypesPage() {
         location: formData.location || 'Internal',
         priority: formData.priority,
         estimatedDuration: formData.estimatedDuration / 60, // Convert minutes to hours
+        fixedAmount: formData.fixedAmount || 0,
         isActive: formData.isActive,
         requiresDowntime: formData.requiresDowntime,
         color: formData.color,
@@ -260,6 +266,7 @@ export default function MaintenanceTypesPage() {
       color: '#10b981',
       icon: 'wrench',
       estimatedDuration: 120,
+      fixedAmount: 0,
       requiresDowntime: false,
       skillLevel: 'Intermediate',
       frequency: 'Monthly',
@@ -439,6 +446,23 @@ export default function MaintenanceTypesPage() {
                     placeholder="120"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="fixedAmount">Fixed Amount (for Maintenance billing)</Label>
+                  <Input
+                    id="fixedAmount"
+                    type="number"
+                    step="0.01"
+                    value={formData.fixedAmount}
+                    onChange={(e) => setFormData({...formData, fixedAmount: parseFloat(e.target.value) || 0})}
+                    placeholder="0.00"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Used when work order billing type is &quot;Maintenance&quot;
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="icon">Icon</Label>
                   <Input
@@ -912,6 +936,23 @@ export default function MaintenanceTypesPage() {
                   placeholder="2.5"
                 />
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-fixedAmount">Fixed Amount (for Maintenance billing)</Label>
+                <Input
+                  id="edit-fixedAmount"
+                  type="number"
+                  step="0.01"
+                  value={formData.fixedAmount}
+                  onChange={(e) => setFormData({...formData, fixedAmount: parseFloat(e.target.value) || 0})}
+                  placeholder="0.00"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Used when work order billing type is &quot;Maintenance&quot;
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="edit-color">Color</Label>
                 <div className="flex items-center space-x-2">

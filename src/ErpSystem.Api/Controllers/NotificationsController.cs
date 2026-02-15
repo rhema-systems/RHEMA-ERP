@@ -457,6 +457,93 @@ namespace ErpSystem.Api.Controllers
         }
 
         /// <summary>
+        /// Get notification templates (Admin only)
+        /// </summary>
+        [HttpGet("templates")]
+        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        public async Task<ActionResult<List<NotificationTemplateDto>>> GetTemplates([FromQuery] string? type = null)
+        {
+            try
+            {
+                var tenantId = _currentUserService.TenantId;
+                if (!tenantId.HasValue)
+                {
+                    return BadRequest("TenantId not found in token");
+                }
+
+                var templates = await _notificationService.GetNotificationTemplatesAsync(tenantId.Value, type);
+                return Ok(templates);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving notification templates");
+                return StatusCode(500, "An error occurred while retrieving templates");
+            }
+        }
+
+        /// <summary>
+        /// Create a notification template (Admin only)
+        /// </summary>
+        [HttpPost("templates")]
+        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        public async Task<ActionResult<NotificationTemplateDto>> CreateTemplate(CreateNotificationTemplateDto templateDto)
+        {
+            try
+            {
+                var tenantId = _currentUserService.TenantId;
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
+
+                if (!tenantId.HasValue)
+                {
+                    return BadRequest("TenantId not found in token");
+                }
+
+                if (!userId.HasValue)
+                {
+                    return BadRequest("UserId not found in token");
+                }
+
+                var template = await _notificationService.CreateNotificationTemplateAsync(templateDto, userId.Value, tenantId.Value);
+                return CreatedAtAction(nameof(GetTemplates), new { id = template.Id }, template);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating notification template");
+                return StatusCode(500, "An error occurred while creating template");
+            }
+        }
+
+        /// <summary>
+        /// Delete a notification template (Admin only)
+        /// </summary>
+        [HttpDelete("templates/{templateId:guid}")]
+        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        public async Task<ActionResult> DeleteTemplate(Guid templateId)
+        {
+            try
+            {
+                var tenantId = _currentUserService.TenantId;
+                if (!tenantId.HasValue)
+                {
+                    return BadRequest("TenantId not found in token");
+                }
+
+                var ok = await _notificationService.DeleteNotificationTemplateAsync(templateId, tenantId.Value);
+                if (!ok) return NotFound();
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting notification template {TemplateId}", templateId);
+                return StatusCode(500, "An error occurred while deleting template");
+            }
+        }
+
+        /// <summary>
         /// Create email campaign (Admin only)
         /// </summary>
         [HttpPost("campaigns")]
@@ -543,6 +630,59 @@ namespace ErpSystem.Api.Controllers
             {
                 _logger.LogError(ex, "Error retrieving email campaigns");
                 return StatusCode(500, "An error occurred while retrieving email campaigns");
+            }
+        }
+
+        /// <summary>
+        /// Send email campaign (Admin only)
+        /// </summary>
+        [HttpPost("campaigns/{campaignId:guid}/send")]
+        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        public async Task<ActionResult<EmailCampaignDto>> SendEmailCampaign(Guid campaignId)
+        {
+            try
+            {
+                var tenantId = _currentUserService.TenantId;
+                if (!tenantId.HasValue)
+                {
+                    return BadRequest("TenantId not found in token");
+                }
+
+                var campaign = await _notificationService.SendEmailCampaignAsync(campaignId, tenantId.Value);
+                if (campaign == null) return NotFound();
+
+                return Ok(campaign);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending email campaign {CampaignId}", campaignId);
+                return StatusCode(500, "An error occurred while sending campaign");
+            }
+        }
+
+        /// <summary>
+        /// Delete email campaign (Admin only)
+        /// </summary>
+        [HttpDelete("campaigns/{campaignId:guid}")]
+        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        public async Task<ActionResult> DeleteEmailCampaign(Guid campaignId)
+        {
+            try
+            {
+                var tenantId = _currentUserService.TenantId;
+                if (!tenantId.HasValue)
+                {
+                    return BadRequest("TenantId not found in token");
+                }
+
+                var ok = await _notificationService.DeleteEmailCampaignAsync(campaignId, tenantId.Value);
+                if (!ok) return NotFound();
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting email campaign {CampaignId}", campaignId);
+                return StatusCode(500, "An error occurred while deleting email campaign");
             }
         }
 

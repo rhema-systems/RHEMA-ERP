@@ -12,9 +12,13 @@ public class TenderAwardService : ITenderAwardService
     private readonly ITenderAwardRepository _awardRepository;
     private readonly ITenderRepository _tenderRepository;
     private readonly ITenderBidRepository _bidRepository;
+    private readonly ITenderBidItemRepository _bidItemRepository;
     private readonly ITenderEvaluationRepository _evaluationRepository;
     private readonly ITenderEvaluatorRepository _evaluatorRepository;
     private readonly ITenderNotificationService _notificationService;
+    private readonly IPurchaseOrderRepository _purchaseOrderRepository;
+    private readonly IPurchaseOrderItemRepository _purchaseOrderItemRepository;
+    private readonly ITenderNegotiationRepository _negotiationRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<TenderAwardService> _logger;
@@ -23,9 +27,13 @@ public class TenderAwardService : ITenderAwardService
         ITenderAwardRepository awardRepository,
         ITenderRepository tenderRepository,
         ITenderBidRepository bidRepository,
+        ITenderBidItemRepository bidItemRepository,
         ITenderEvaluationRepository evaluationRepository,
         ITenderEvaluatorRepository evaluatorRepository,
         ITenderNotificationService notificationService,
+        IPurchaseOrderRepository purchaseOrderRepository,
+        IPurchaseOrderItemRepository purchaseOrderItemRepository,
+        ITenderNegotiationRepository negotiationRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ILogger<TenderAwardService> logger)
@@ -33,9 +41,13 @@ public class TenderAwardService : ITenderAwardService
         _awardRepository = awardRepository;
         _tenderRepository = tenderRepository;
         _bidRepository = bidRepository;
+        _bidItemRepository = bidItemRepository;
         _evaluationRepository = evaluationRepository;
         _evaluatorRepository = evaluatorRepository;
         _notificationService = notificationService;
+        _purchaseOrderRepository = purchaseOrderRepository;
+        _purchaseOrderItemRepository = purchaseOrderItemRepository;
+        _negotiationRepository = negotiationRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
@@ -75,6 +87,25 @@ public class TenderAwardService : ITenderAwardService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving award for tender {TenderId}", tenderId);
+            throw;
+        }
+    }
+
+    public async Task<TenderAwardDto?> GetAwardByBidIdAsync(Guid bidId)
+    {
+        try
+        {
+            var award = await _awardRepository.GetByBidIdAsync(bidId);
+            if (award == null) return null;
+
+            var bid = await _bidRepository.GetByIdAsync(bidId);
+            var tender = bid != null ? await _tenderRepository.GetByIdAsync(bid.TenderId) : null;
+
+            return MapToDto(award, bid, tender);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving award for bid {BidId}", bidId);
             throw;
         }
     }
@@ -203,6 +234,14 @@ public class TenderAwardService : ITenderAwardService
                 throw new InvalidOperationException($"Award already exists for tender {tender.TenderNumber}");
             }
 
+            // Award is created with the bid amount as both original and awarded amount
+            // Negotiation happens AFTER award creation and will update these values
+            var awardAmount = dto.AwardedAmount;
+
+            _logger.LogInformation(
+                "Creating award for tender {TenderId}. Amount: {Amount}. Negotiation will update this if completed later.",
+                tenderId, awardAmount);
+
             var award = new TenderAward
             {
                 Id = Guid.NewGuid(),
@@ -211,7 +250,10 @@ public class TenderAwardService : ITenderAwardService
                 TenderBidId = dto.TenderBidId,
                 BusinessPartnerId = bid.BusinessPartnerId,
                 AwardDate = dto.AwardDate ?? DateTime.UtcNow,
-                AwardedAmount = dto.AwardedAmount,
+                OriginalBidAmount = awardAmount, // Will be preserved when negotiation updates AwardedAmount
+                AwardedAmount = awardAmount,
+                NegotiationId = null, // Will be set when negotiation is completed
+                IsNegotiated = false, // Will be set to true when negotiation is completed
                 Currency = dto.Currency ?? "USD",
                 AwardedById = _currentUserProvider.UserId,
                 AwardJustification = dto.AwardJustification,
@@ -248,15 +290,10 @@ public class TenderAwardService : ITenderAwardService
             _logger.LogInformation("Created award {AwardId} for tender {TenderId}. Rejected {RejectedCount} other bids.",
                 award.Id, tenderId, rejectedBids.Count);
 
-            // Send award notification to winner
-            await _notificationService.SendAwardNotificationAsync(award.Id);
-
-            // Send rejection notifications to unsuccessful bidders
-            var rejectedBidIds = rejectedBids.Select(b => b.Id).ToList();
-            if (rejectedBidIds.Any())
-            {
-                await _notificationService.SendRejectionNotificationsAsync(tenderId, rejectedBidIds);
-            }
+            // NOTE: Award notification is NOT sent automatically here.
+            // The workflow is: Award -> Negotiation -> Complete Negotiation -> Send Notification
+            // Notifications should be sent manually via SendAwardNotificationsAsync after negotiation is complete.
+            // This allows for price negotiation before the final award letter is sent to the supplier.
 
             return MapToDto(award, bid, tender);
         }
@@ -359,8 +396,193 @@ public class TenderAwardService : ITenderAwardService
         }
     }
 
+    public async Task<PurchaseOrderFromAwardResponseDto> CreatePurchaseOrderFromAwardAsync(CreatePurchaseOrderFromAwardDto dto)
+    {
+        try
+        {
+            // Get the tender award
+            var award = await _awardRepository.GetByIdAsync(dto.TenderAwardId)
+                ?? throw new InvalidOperationException($"Tender award with ID {dto.TenderAwardId} not found");
+
+            // Check if PO already exists for this award
+            if (award.PurchaseOrderId.HasValue)
+            {
+                throw new InvalidOperationException($"Purchase order already exists for this award (PO ID: {award.PurchaseOrderId})");
+            }
+
+            // Get the bid and tender
+            var bid = await _bidRepository.GetByIdAsync(award.TenderBidId)
+                ?? throw new InvalidOperationException($"Bid with ID {award.TenderBidId} not found");
+
+            var tender = await _tenderRepository.GetByIdAsync(award.TenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {award.TenderId} not found");
+
+            // Get bid items
+            var bidItems = await _bidItemRepository.GetByBidIdAsync(bid.Id);
+            if (!bidItems.Any())
+            {
+                throw new InvalidOperationException("Cannot create PO: No items found in the bid");
+            }
+
+            // Check if there's a negotiation and get negotiated prices
+            TenderNegotiation? negotiation = null;
+            Dictionary<Guid, TenderNegotiationItem> negotiatedItemsMap = new();
+            
+            if (award.NegotiationId.HasValue && award.IsNegotiated)
+            {
+                negotiation = await _negotiationRepository.GetByIdWithItemsAsync(award.NegotiationId.Value);
+                if (negotiation != null && negotiation.Items.Any())
+                {
+                    // Create a map of bid item ID to negotiated item for quick lookup
+                    negotiatedItemsMap = negotiation.Items.ToDictionary(ni => ni.TenderBidItemId, ni => ni);
+                    
+                    _logger.LogInformation(
+                        "Using negotiated prices from negotiation {NegotiationId} for PO creation. Found {Count} negotiated items.",
+                        negotiation.Id, negotiatedItemsMap.Count);
+                }
+            }
+
+            // Generate PO number
+            var orderNumber = await _purchaseOrderRepository.GenerateOrderNumberAsync();
+
+            // Create purchase order
+            var purchaseOrder = new PurchaseOrder
+            {
+                Id = Guid.NewGuid(),
+                TenantId = _currentUserProvider.TenantId,
+                OrderNumber = orderNumber,
+                BusinessPartnerId = award.BusinessPartnerId,
+                OrderDate = DateTime.UtcNow,
+                RequiredDate = dto.RequiredDate,
+                Status = dto.AutoApprove ? "Approved" : "Draft",
+                RequestedById = _currentUserProvider.UserId,
+                ApprovedById = dto.AutoApprove ? _currentUserProvider.UserId : null,
+                ApprovedAt = dto.AutoApprove ? DateTime.UtcNow : null,
+                
+                // Financial details from award (uses negotiated amount if available)
+                SubTotal = award.AwardedAmount,
+                TaxAmount = 0, // Can be calculated based on items
+                ShippingCost = 0,
+                DiscountAmount = 0,
+                TotalAmount = award.AwardedAmount,
+                Currency = award.Currency ?? "USD",
+                ExchangeRate = 1,
+                
+                // Terms
+                PaymentTerms = dto.PaymentTerms ?? bid.PaymentTerms,
+                ShippingTerms = dto.ShippingTerms,
+                Notes = dto.Notes,
+                
+                // Delivery information
+                DeliveryWarehouseId = dto.DeliveryWarehouseId,
+                DeliveryAddress = dto.DeliveryAddress,
+                DeliveryInstructions = dto.DeliveryInstructions,
+                
+                // Tender/Contract integration
+                TenderAwardId = award.Id,
+                TenderNumber = tender.TenderNumber,
+                ContractId = dto.ContractId,
+                ContractNumber = dto.ContractNumber,
+                
+                // PO Type
+                OrderType = "Standard",
+                
+                CreatedAt = DateTime.UtcNow,
+                CreatedById = _currentUserProvider.UserId
+            };
+
+            await _purchaseOrderRepository.CreatePurchaseOrderAsync(purchaseOrder);
+
+            // Create PO items from bid items, using negotiated prices if available
+            var itemCount = 0;
+            foreach (var bidItem in bidItems)
+            {
+                // Check if this item has a negotiated price
+                decimal unitPrice = bidItem.UnitPrice;
+                decimal lineTotal = bidItem.TotalPrice;
+                string? itemNotes = bidItem.Specifications;
+
+                if (negotiatedItemsMap.TryGetValue(bidItem.Id, out var negotiatedItem))
+                {
+                    // Use negotiated prices
+                    unitPrice = negotiatedItem.NegotiatedUnitPrice ?? bidItem.UnitPrice;
+                    lineTotal = negotiatedItem.NegotiatedTotalPrice ?? bidItem.TotalPrice;
+                    
+                    // Add negotiation note
+                    var savingsPerUnit = bidItem.UnitPrice - unitPrice;
+                    var savingsTotal = bidItem.TotalPrice - lineTotal;
+                    itemNotes = $"[NEGOTIATED] Original: {bidItem.UnitPrice:C} → Negotiated: {unitPrice:C} (Savings: {savingsPerUnit:C}/unit, {savingsTotal:C} total). {bidItem.Specifications}";
+                    
+                    _logger.LogInformation(
+                        "Using negotiated price for item {ItemId}: Original {OriginalPrice} → Negotiated {NegotiatedPrice}",
+                        bidItem.Id, bidItem.UnitPrice, unitPrice);
+                }
+
+                var poItem = new PurchaseOrderItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = _currentUserProvider.TenantId,
+                    PurchaseOrderId = purchaseOrder.Id,
+                    InventoryItemId = null, // TenderItem doesn't have InventoryItemId - needs to be mapped separately or created later
+                    ItemDescription = bidItem.TenderItem?.Description ?? "Item from tender",
+                    OrderedQuantity = bidItem.OfferedQuantity,
+                    ReceivedQuantity = 0,
+                    RemainingQuantity = bidItem.OfferedQuantity,
+                    UnitOfMeasure = bidItem.TenderItem?.UnitOfMeasure ?? "EA",
+                    UnitPrice = unitPrice,
+                    LineTotal = lineTotal,
+                    ExpectedDeliveryDate = dto.RequiredDate,
+                    Notes = itemNotes,
+                    IsDeleted = false,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedById = _currentUserProvider.UserId
+                };
+
+                await _purchaseOrderItemRepository.CreateItemAsync(poItem);
+                itemCount++;
+            }
+
+            // Update award with PO reference
+            award.PurchaseOrderId = purchaseOrder.Id;
+            award.UpdatedAt = DateTime.UtcNow;
+            await _awardRepository.UpdateAsync(award);
+
+            await _unitOfWork.SaveChangesAsync();
+
+            var logMessage = negotiation != null
+                ? $"Created purchase order {orderNumber} from tender award {award.Id} with {itemCount} items using negotiated prices (Negotiation: {negotiation.Id})"
+                : $"Created purchase order {orderNumber} from tender award {award.Id} with {itemCount} items using original bid prices";
+            
+            _logger.LogInformation(logMessage);
+
+            return new PurchaseOrderFromAwardResponseDto
+            {
+                PurchaseOrderId = purchaseOrder.Id,
+                OrderNumber = orderNumber,
+                TenderAwardId = award.Id,
+                TenderNumber = tender.TenderNumber,
+                BusinessPartnerId = award.BusinessPartnerId,
+                BusinessPartnerName = bid.BusinessPartner?.PartnerName ?? string.Empty,
+                TotalAmount = purchaseOrder.TotalAmount,
+                Status = purchaseOrder.Status,
+                OrderDate = purchaseOrder.OrderDate,
+                ItemCount = itemCount,
+                ContractNumber = dto.ContractNumber
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating purchase order from tender award {AwardId}", dto.TenderAwardId);
+            throw;
+        }
+    }
+
     private static TenderAwardDto MapToDto(TenderAward award, TenderBid? bid, Tender? tender)
     {
+        var originalAmount = award.OriginalBidAmount;
+        var finalAmount = award.AwardedAmount;
+        var savings = originalAmount - finalAmount;
+
         return new TenderAwardDto
         {
             Id = award.Id,
@@ -372,7 +594,11 @@ public class TenderAwardService : ITenderAwardService
             BusinessPartnerId = award.BusinessPartnerId,
             BusinessPartnerName = bid?.BusinessPartner?.PartnerName ?? string.Empty,
             AwardDate = award.AwardDate,
-            AwardedAmount = award.AwardedAmount,
+            OriginalBidAmount = originalAmount,
+            AwardedAmount = finalAmount,
+            NegotiationId = award.NegotiationId,
+            IsNegotiated = award.IsNegotiated,
+            NegotiationSavings = savings > 0 ? savings : 0,
             Currency = award.Currency,
             Status = award.Status,
             AwardJustification = award.AwardJustification,

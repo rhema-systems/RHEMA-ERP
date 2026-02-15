@@ -35,7 +35,7 @@ public class MaintenanceAttachmentsController : ControllerBase
     }
 
     /// <summary>
-    /// Uploads files for work orders, assets, or inspections
+    /// Uploads files for supported maintenance entities (work orders, assets, inspections, and fleet records)
     /// </summary>
     [HttpPost("upload/{entityType}/{entityId:guid}")]
     [RequestSizeLimit(52428800)] // 50MB
@@ -54,7 +54,7 @@ public class MaintenanceAttachmentsController : ControllerBase
                 return BadRequest("No files provided");
             }
 
-            var allowedTypes = new[] { "WorkOrder", "Asset", "Inspection" };
+            var allowedTypes = new[] { "WorkOrder", "Asset", "Inspection", "FleetCompliance", "FleetIncident" };
             if (!allowedTypes.Contains(entityType, StringComparer.OrdinalIgnoreCase))
             {
                 return BadRequest($"Entity type must be one of: {string.Join(", ", allowedTypes)}");
@@ -368,7 +368,7 @@ public class MaintenanceAttachmentsController : ControllerBase
     {
         try
         {
-            await _attachmentService.AddAttachmentTagsAsync(id, tagsDto.Tags.Cast<ErpSystem.Core.DTOs.Maintenance.AttachmentTagDto>().ToList());
+            await _attachmentService.AddAttachmentTagsAsync(id, tagsDto.Tags);
             return Ok(new { message = "Tags added successfully" });
         }
         catch (ArgumentException ex)
@@ -407,6 +407,8 @@ public class MaintenanceAttachmentsController : ControllerBase
             "workorder" => "maintenance-workorders",
             "asset" => "maintenance-assets",
             "inspection" => "maintenance-inspections",
+            "fleetcompliance" => "maintenance-fleet",
+            "fleetincident" => "maintenance-fleet",
             _ => "maintenance-general"
         };
     }
@@ -491,108 +493,7 @@ public class MaintenanceAttachmentsController : ControllerBase
     }
 }
 
-#region DTOs
-
-public class CreateMaintenanceAttachmentDto
-{
-    [Required]
-    public string FileName { get; set; } = string.Empty;
-
-    [Required]
-    public string FilePath { get; set; } = string.Empty;
-
-    [Required]
-    public string ContentType { get; set; } = string.Empty;
-
-    public long FileSizeBytes { get; set; }
-    public string? Description { get; set; }
-
-    [Required]
-    public string AttachmentType { get; set; } = string.Empty;
-
-    [Required]
-    public string EntityType { get; set; } = string.Empty;
-
-    [Required]
-    public Guid EntityId { get; set; }
-
-    public bool IsMainImage { get; set; }
-    public int? ImageWidth { get; set; }
-    public int? ImageHeight { get; set; }
-    public string? ThumbnailPath { get; set; }
-    public double? Latitude { get; set; }
-    public double? Longitude { get; set; }
-    public string? LocationDescription { get; set; }
-    public string? Category { get; set; }
-}
-
-public class UpdateMaintenanceAttachmentDto
-{
-    public string? Description { get; set; }
-    public bool? IsMainImage { get; set; }
-    public string? LocationDescription { get; set; }
-    public List<AttachmentTagDto>? Tags { get; set; }
-}
-
-public class MaintenanceAttachmentDto
-{
-    public Guid Id { get; set; }
-    public string FileName { get; set; } = string.Empty;
-    public string FilePath { get; set; } = string.Empty;
-    public string ContentType { get; set; } = string.Empty;
-    public long FileSizeBytes { get; set; }
-    public string? Description { get; set; }
-    public string AttachmentType { get; set; } = string.Empty;
-    public string EntityType { get; set; } = string.Empty;
-    public Guid EntityId { get; set; }
-    public DateTime UploadedDate { get; set; }
-    public string UploadedByUserName { get; set; } = string.Empty;
-    public bool IsMainImage { get; set; }
-    public int? ImageWidth { get; set; }
-    public int? ImageHeight { get; set; }
-    public string? ThumbnailPath { get; set; }
-    public double? Latitude { get; set; }
-    public double? Longitude { get; set; }
-    public string? LocationDescription { get; set; }
-    public string? DocumentVersion { get; set; }
-    public List<AttachmentTagDto> Tags { get; set; } = new List<AttachmentTagDto>();
-    public string FileSizeFormatted => FormatFileSize(FileSizeBytes);
-
-    private static string FormatFileSize(long bytes)
-    {
-        string[] sizes = { "B", "KB", "MB", "GB" };
-        double len = bytes;
-        int order = 0;
-        while (len >= 1024 && order < sizes.Length - 1)
-        {
-            order++;
-            len = len / 1024;
-        }
-        return $"{len:0.##} {sizes[order]}";
-    }
-}
-
-public class AttachmentTagDto
-{
-    public string TagName { get; set; } = string.Empty;
-    public string? TagValue { get; set; }
-}
-
-public class AddAttachmentTagsDto
-{
-    [Required]
-    public List<AttachmentTagDto> Tags { get; set; } = new List<AttachmentTagDto>();
-}
-
-public class AttachmentAccessLogDto
-{
-    public Guid Id { get; set; }
-    public DateTime AccessedDate { get; set; }
-    public string AccessType { get; set; } = string.Empty;
-    public string AccessedByUserName { get; set; } = string.Empty;
-    public string? IpAddress { get; set; }
-    public string? UserAgent { get; set; }
-}
+#region Helpers
 
 public class ImageMetadata
 {

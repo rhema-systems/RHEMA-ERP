@@ -17,6 +17,7 @@ public class InventoryItemRepository : GenericRepository<InventoryItem>, IInvent
         return await _dbSet
             .Where(i => i.Status == ItemStatus.Active && !i.IsDeleted)
             .Include(i => i.Category)
+            .Include(i => i.UnitOfMeasureSchedule)
             .OrderBy(i => i.ItemCode)
             .ToListAsync();
     }
@@ -31,6 +32,7 @@ public class InventoryItemRepository : GenericRepository<InventoryItem>, IInvent
         return await _dbSet
             .Where(i => i.Id == id && !i.IsDeleted)
             .Include(i => i.Category)
+            .Include(i => i.UnitOfMeasureSchedule)
             .Include(i => i.InventoryLocations)
                 .ThenInclude(il => il.Location)
                     .ThenInclude(l => l.Warehouse)
@@ -165,6 +167,7 @@ public class StockMovementRepository : GenericRepository<StockMovement>, IStockM
             .Where(sm => sm.InventoryItemId == inventoryItemId && !sm.IsDeleted)
             .Include(sm => sm.InventoryItem)
             .Include(sm => sm.Location)
+                .ThenInclude(l => l!.Warehouse)
             .OrderByDescending(sm => sm.MovementDate)
             .Take(count)
             .ToListAsync();
@@ -183,6 +186,7 @@ public class StockMovementRepository : GenericRepository<StockMovement>, IStockM
                         sm.MovementDate <= endDate)
             .Include(sm => sm.InventoryItem)
             .Include(sm => sm.Location)
+                .ThenInclude(l => l!.Warehouse)
             .OrderByDescending(sm => sm.MovementDate)
             .ToListAsync();
     }
@@ -216,6 +220,69 @@ public class StockMovementRepository : GenericRepository<StockMovement>, IStockM
             .Include(sm => sm.InventoryItem)
             .Include(sm => sm.Location)
             .OrderByDescending(sm => sm.MovementDate)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<StockMovement>> GetFilteredMovementsAsync(
+        Guid? warehouseId = null,
+        string? movementType = null,
+        DateTime? startDate = null,
+        DateTime? endDate = null,
+        string? referenceNumber = null,
+        int limit = 100)
+    {
+        var query = _dbSet
+            .Where(sm => !sm.IsDeleted)
+            .Include(sm => sm.InventoryItem)
+            .Include(sm => sm.Warehouse)
+            .Include(sm => sm.Location)
+                .ThenInclude(l => l!.Warehouse)
+            .AsQueryable();
+
+        // If searching by reference number, skip date filter to search all history
+        if (string.IsNullOrEmpty(referenceNumber))
+        {
+            // Apply date filter - default to last 30 days if no dates provided
+            var effectiveStartDate = startDate ?? DateTime.UtcNow.AddDays(-30);
+            var effectiveEndDate = endDate ?? DateTime.UtcNow;
+            query = query.Where(sm => sm.MovementDate >= effectiveStartDate && sm.MovementDate <= effectiveEndDate);
+        }
+        else
+        {
+            // Apply date filters only if explicitly provided when searching by reference
+            if (startDate.HasValue)
+            {
+                query = query.Where(sm => sm.MovementDate >= startDate.Value);
+            }
+            if (endDate.HasValue)
+            {
+                query = query.Where(sm => sm.MovementDate <= endDate.Value);
+            }
+        }
+
+        // Apply warehouse filter using the direct WarehouseId on the movement
+        if (warehouseId.HasValue && warehouseId.Value != Guid.Empty)
+        {
+            query = query.Where(sm => sm.WarehouseId == warehouseId.Value);
+        }
+
+        // Apply movement type filter (case-insensitive)
+        if (!string.IsNullOrEmpty(movementType))
+        {
+            var lowerType = movementType.ToLower();
+            query = query.Where(sm => sm.MovementType.ToLower() == lowerType);
+        }
+
+        // Apply reference number filter (partial match, case-insensitive)
+        if (!string.IsNullOrEmpty(referenceNumber))
+        {
+            var lowerRef = referenceNumber.ToLower();
+            query = query.Where(sm => sm.ReferenceNumber != null && sm.ReferenceNumber.ToLower().Contains(lowerRef));
+        }
+
+        return await query
+            .OrderByDescending(sm => sm.MovementDate)
+            .Take(limit)
             .ToListAsync();
     }
 }
@@ -387,6 +454,33 @@ public class WarehouseRepository : GenericRepository<Warehouse>, IWarehouseRepos
 public class WarehouseQuantityRepository : GenericRepository<WarehouseQuantity>, IWarehouseQuantityRepository
 {
     public WarehouseQuantityRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<IEnumerable<WarehouseQuantity>> GetAllWithDetailsAsync()
+    {
+        return await _dbSet
+            .Where(wq => !wq.IsDeleted)
+            .Include(wq => wq.InventoryItem)
+                .ThenInclude(i => i.Category)
+            .Include(wq => wq.Warehouse)
+            .OrderBy(wq => wq.Warehouse.Name)
+            .ThenBy(wq => wq.InventoryItem.ItemCode)
+            .ToListAsync();
+    }
+
+    public async Task<WarehouseQuantity?> GetByIdWithDetailsAsync(Guid id)
+    {
+        if (id == Guid.Empty)
+        {
+            return null;
+        }
+
+        return await _dbSet
+            .Where(wq => wq.Id == id && !wq.IsDeleted)
+            .Include(wq => wq.InventoryItem)
+                .ThenInclude(i => i.Category)
+            .Include(wq => wq.Warehouse)
+            .FirstOrDefaultAsync();
+    }
 
     public async Task<IEnumerable<WarehouseQuantity>> GetByWarehouseAsync(Guid warehouseId)
     {

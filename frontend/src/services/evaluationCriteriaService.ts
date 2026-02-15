@@ -5,6 +5,8 @@ export interface EvaluationCriterion {
   criterionName: string;
   criterionCode: string;
   category: string;
+  /** Specifies whether this criterion is used for Technical or Financial evaluation in QCBS */
+  evaluationType: 'Technical' | 'Financial';
   description?: string;
   maxScore: number;
   weight: number;
@@ -18,6 +20,8 @@ export interface CreateEvaluationCriterionDto {
   criterionName: string;
   criterionCode: string;
   category: string;
+  /** Specifies whether this criterion is used for Technical or Financial evaluation in QCBS */
+  evaluationType: 'Technical' | 'Financial';
   description?: string;
   maxScore: number;
   weight: number;
@@ -27,6 +31,8 @@ export interface CreateEvaluationCriterionDto {
 
 export interface UpdateEvaluationCriterionDto {
   criterionName: string;
+  /** Specifies whether this criterion is used for Technical or Financial evaluation in QCBS */
+  evaluationType: 'Technical' | 'Financial';
   description?: string;
   maxScore: number;
   weight: number;

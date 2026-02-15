@@ -1,18 +1,21 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation } from '@tanstack/react-query';
 import { z } from 'zod';
 import { Building2, Mail, ArrowLeft, CheckCircle, Loader2, Shield } from 'lucide-react';
+import ReCAPTCHA from 'react-google-recaptcha';
 
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { authService } from '../../services/auth';
+import { settingsService } from '../../services/settings';
+import { toast } from 'sonner';
 
 const forgotPasswordSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -22,6 +25,23 @@ type ForgotPasswordForm = z.infer<typeof forgotPasswordSchema>;
 
 export default function ForgotPasswordPage() {
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaEnabled, setCaptchaEnabled] = useState(false);
+  const [captchaProvider, setCaptchaProvider] = useState<'recaptcha' | 'hcaptcha'>('recaptcha');
+  const [recaptchaSiteKey, setRecaptchaSiteKey] = useState<string | null>(null);
+  const [hCaptchaSiteKey, setHCaptchaSiteKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Best-effort: fetch public security settings for CAPTCHA
+    settingsService.getPublicSecuritySettings().then((s) => {
+      setCaptchaEnabled(!!s.captchaEnabled);
+      setCaptchaProvider((s.captchaProvider || 'recaptcha') as any);
+      setRecaptchaSiteKey(s.recaptchaSiteKey || null);
+      setHCaptchaSiteKey(s.hCaptchaSiteKey || null);
+    }).catch(() => {
+      // ignore
+    });
+  }, []);
 
   const {
     register,
@@ -33,18 +53,22 @@ export default function ForgotPasswordPage() {
   });
 
   const forgotPasswordMutation = useMutation({
-    mutationFn: (email: string) => authService.forgotPassword({ email }),
+    mutationFn: (email: string) => authService.forgotPassword({ email, captchaToken }),
     onSuccess: () => {
       setIsSubmitted(true);
     },
     onError: (error: any) => {
       const message = error.message || 'Failed to request password reset. Please try again.';
       console.error('Forgot password error:', message);
-      alert(message);
+      toast.error(message);
     },
   });
 
   const onSubmit = (data: ForgotPasswordForm) => {
+    if (captchaEnabled && !captchaToken) {
+      toast.error('Please complete the CAPTCHA verification.');
+      return;
+    }
     forgotPasswordMutation.mutate(data.email);
   };
 
@@ -174,6 +198,21 @@ export default function ForgotPasswordPage() {
                   <strong>Note:</strong> If you don&rsquo;t remember your email, please contact your system administrator for assistance.
                 </p>
               </div>
+
+              {/* CAPTCHA */}
+              {captchaEnabled ? (
+                <div className="space-y-2 flex flex-col items-center">
+                  {captchaProvider === 'recaptcha' && recaptchaSiteKey ? (
+                    <ReCAPTCHA sitekey={recaptchaSiteKey} onChange={(t) => setCaptchaToken(t)} />
+                  ) : captchaProvider === 'hcaptcha' && hCaptchaSiteKey ? (
+                    <ReCAPTCHA sitekey={hCaptchaSiteKey} onChange={(t) => setCaptchaToken(t)} />
+                  ) : (
+                    <p className="text-sm text-slate-600 dark:text-slate-400 text-center">
+                      CAPTCHA is enabled but not configured. Please contact your system administrator.
+                    </p>
+                  )}
+                </div>
+              ) : null}
 
               {/* Submit Button */}
               <Button

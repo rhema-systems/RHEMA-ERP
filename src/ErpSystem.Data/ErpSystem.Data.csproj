@@ -28,4 +28,10 @@
     <ProjectReference Include="../ErpSystem.Shared/ErpSystem.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Exclude duplicate migration artifacts (same class name) -->
+    <Compile Remove="Migrations\20260207050009_AddSystemExceptionLogs.cs" />
+    <Compile Remove="Migrations\20260207050009_AddSystemExceptionLogs.Designer.cs" />
+  </ItemGroup>
+
 </Project>

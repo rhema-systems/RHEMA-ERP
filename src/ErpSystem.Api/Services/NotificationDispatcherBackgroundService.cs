@@ -1,4 +1,5 @@
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -32,9 +33,19 @@ public class NotificationDispatcherBackgroundService : BackgroundService
 
         // Load configuration with sensible defaults
         _maxRetryAttempts = int.TryParse(_configuration["Notifications:MaxRetryAttempts"], out var max) ? max : 5;
-        _dispatchInterval = int.TryParse(_configuration["Notifications:DispatchIntervalMinutes"], out var interval)
-            ? TimeSpan.FromMinutes(interval)
-            : TimeSpan.FromMinutes(5);
+        if (int.TryParse(_configuration["Notifications:DispatchIntervalSeconds"], out var intervalSeconds) && intervalSeconds > 0)
+        {
+            _dispatchInterval = TimeSpan.FromSeconds(intervalSeconds);
+        }
+        else if (int.TryParse(_configuration["Notifications:DispatchIntervalMinutes"], out var intervalMinutes) && intervalMinutes > 0)
+        {
+            _dispatchInterval = TimeSpan.FromMinutes(intervalMinutes);
+        }
+        else
+        {
+            // Default to a short interval so in-app/email queue processing feels near real-time.
+            _dispatchInterval = TimeSpan.FromSeconds(30);
+        }
         _initialBackoffDelay = int.TryParse(_configuration["Notifications:InitialBackoffSeconds"], out var backoff)
             ? TimeSpan.FromSeconds(backoff)
             : TimeSpan.FromSeconds(30);
@@ -50,7 +61,7 @@ public class NotificationDispatcherBackgroundService : BackgroundService
 
         // Initialize with default values since configuration is not provided
         _maxRetryAttempts = 5;
-        _dispatchInterval = TimeSpan.FromMinutes(5);
+        _dispatchInterval = TimeSpan.FromSeconds(30);
         _initialBackoffDelay = TimeSpan.FromSeconds(30);
         _backoffMultiplier = 1.5;
     }
@@ -64,7 +75,7 @@ public class NotificationDispatcherBackgroundService : BackgroundService
         try
         {
             // Wait a bit before starting the first dispatch to allow app to fully start
-            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -122,6 +133,16 @@ public class NotificationDispatcherBackgroundService : BackgroundService
         {
             _logger.LogError(ex, "Error during pending notification dispatch");
         }
+
+        try
+        {
+            var unifiedNotificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
+            await unifiedNotificationService.ProcessPendingNotificationsAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during unified pending notification dispatch");
+        }
     }
 
     private async Task ArchiveExpiredNotificationsAsync()
@@ -154,6 +175,17 @@ public class NotificationDispatcherBackgroundService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during dead-letter archival");
+        }
+
+        try
+        {
+            using var scope2 = _serviceProvider.CreateScope();
+            var unifiedNotificationService = scope2.ServiceProvider.GetRequiredService<INotificationService>();
+            await unifiedNotificationService.CleanupExpiredNotificationsAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during unified notification cleanup");
         }
     }
 }

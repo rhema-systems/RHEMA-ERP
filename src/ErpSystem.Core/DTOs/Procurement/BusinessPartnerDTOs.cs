@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Validation;
 
 namespace ErpSystem.Core.DTOs.Procurement;
 
@@ -14,7 +15,7 @@ public class BusinessPartnerDto
     public Guid Id { get; set; }
     public string PartnerCode { get; set; } = string.Empty;
     public string PartnerName { get; set; } = string.Empty;
-    public string PartnerType { get; set; } = "Supplier"; // Supplier, Contractor, Both
+    public string PartnerType { get; set; } = "Supplier"; // Supplier, Contractor, Both, Customer
     public string? TradingName { get; set; }
     public string? RegistrationNumber { get; set; }
     public string? TaxNumber { get; set; }
@@ -36,6 +37,19 @@ public class BusinessPartnerDto
     public DateTime CreatedAt { get; set; }
     public List<string> Categories { get; set; } = new();
     public List<string> Specializations { get; set; } = new();
+    
+    // Customer-specific fields for list view
+    public string? CustomerType { get; set; }
+    public decimal? CreditLimit { get; set; }
+    public decimal? OutstandingBalance { get; set; }
+    public bool IsOnCreditHold { get; set; }
+    
+    // Parent Business Partner
+    public Guid? ParentId { get; set; }
+    public string? ParentName { get; set; }
+
+    // Workflow display helpers (optional)
+    public string? CurrentWorkflowStepName { get; set; }
 }
 
 /// <summary>
@@ -113,6 +127,28 @@ public class BusinessPartnerDetailDto : BusinessPartnerDto
     public decimal? InsuranceCoverageAmount { get; set; }
     public DateTime? InsuranceExpiryDate { get; set; }
 
+    // Customer-Specific Fields (for Debtors/Sales)
+    public string? CustomerAccountNumber { get; set; }
+    public string? PaymentTerms { get; set; }
+    public decimal? DefaultDiscount { get; set; }
+    public string? PriceList { get; set; }
+    public Guid? SalesRepresentativeId { get; set; }
+    public string? SalesRepresentativeName { get; set; }
+    public string? SalesTerritory { get; set; }
+    public bool IsTaxExempt { get; set; }
+    public string? TaxExemptionNumber { get; set; }
+    public DateTime? TaxExemptionExpiry { get; set; }
+    public string? PreferredShippingMethod { get; set; }
+    public string? DeliveryInstructions { get; set; }
+    public DateTime? CustomerSince { get; set; }
+    public DateTime? LastPurchaseDate { get; set; }
+    public decimal? TotalLifetimePurchases { get; set; }
+    public decimal? AverageOrderValue { get; set; }
+    public string? LoyaltyTier { get; set; }
+    public int? LoyaltyPoints { get; set; }
+    public string? CreditHoldReason { get; set; }
+    public DateTime? CreditHoldDate { get; set; }
+
     // Approval Information
     public string? ApprovedBy { get; set; }
     public DateTime? ApprovedDate { get; set; }
@@ -140,7 +176,7 @@ public class CreateBusinessPartnerDto
 
     [Required]
     [MaxLength(20)]
-    public string PartnerType { get; set; } = "Supplier"; // Supplier, Contractor, Both
+    public string PartnerType { get; set; } = "Supplier"; // Supplier, Contractor, Both, Customer
 
     [MaxLength(200)]
     public string? TradingName { get; set; }
@@ -151,11 +187,13 @@ public class CreateBusinessPartnerDto
     [MaxLength(100)]
     public string? TaxNumber { get; set; }
 
-    [EmailAddress]
+    // Validates email format only when not empty
+    [OptionalEmailAddress]
     [MaxLength(200)]
     public string? Email { get; set; }
 
-    [Phone]
+    // Validates phone format only when not empty
+    [OptionalPhone]
     [MaxLength(50)]
     public string? Phone { get; set; }
 
@@ -176,6 +214,54 @@ public class CreateBusinessPartnerDto
 
     public List<Guid> CategoryIds { get; set; } = new();
     public List<Guid> SpecializationIds { get; set; } = new();
+
+    // Customer-Specific Fields (for Debtors/Sales)
+    [MaxLength(50)]
+    public string? CustomerType { get; set; } // Retail, Wholesale, Corporate, Government
+
+    public decimal? CreditLimit { get; set; }
+
+    [MaxLength(50)]
+    public string? PaymentTerms { get; set; } // Net 30, Net 60, COD, etc.
+
+    [MaxLength(50)]
+    public string? Currency { get; set; }
+
+    public decimal? DefaultDiscount { get; set; }
+
+    [MaxLength(50)]
+    public string? PriceList { get; set; }
+
+    public Guid? SalesRepresentativeId { get; set; }
+
+    [MaxLength(100)]
+    public string? SalesTerritory { get; set; }
+
+    public bool IsTaxExempt { get; set; }
+
+    [MaxLength(100)]
+    public string? TaxExemptionNumber { get; set; }
+
+    public DateTime? TaxExemptionExpiry { get; set; }
+
+    [MaxLength(100)]
+    public string? PreferredShippingMethod { get; set; }
+
+    [MaxLength(500)]
+    public string? DeliveryInstructions { get; set; }
+
+    public DateTime? CustomerSince { get; set; }
+
+    [MaxLength(50)]
+    public string? LoyaltyTier { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+    
+    /// <summary>
+    /// Optional parent business partner ID for hierarchy/categorization
+    /// </summary>
+    public Guid? ParentId { get; set; }
 }
 
 /// <summary>
@@ -196,11 +282,13 @@ public class UpdateBusinessPartnerDto
     [MaxLength(100)]
     public string? TaxNumber { get; set; }
 
-    [EmailAddress]
+    // Validates email format only when not empty
+    [OptionalEmailAddress]
     [MaxLength(200)]
     public string? Email { get; set; }
 
-    [Phone]
+    // Validates phone format only when not empty
+    [OptionalPhone]
     [MaxLength(50)]
     public string? Phone { get; set; }
 
@@ -229,6 +317,56 @@ public class UpdateBusinessPartnerDto
 
     public List<Guid> CategoryIds { get; set; } = new();
     public List<Guid> SpecializationIds { get; set; } = new();
+
+    // Customer-Specific Fields (for Debtors/Sales)
+    [MaxLength(50)]
+    public string? CustomerType { get; set; } // Retail, Wholesale, Corporate, Government
+
+    public decimal? CreditLimit { get; set; }
+
+    [MaxLength(50)]
+    public string? PaymentTerms { get; set; } // Net 30, Net 60, COD, etc.
+
+    [MaxLength(50)]
+    public string? Currency { get; set; }
+
+    public decimal? DefaultDiscount { get; set; }
+
+    [MaxLength(50)]
+    public string? PriceList { get; set; }
+
+    public Guid? SalesRepresentativeId { get; set; }
+
+    [MaxLength(100)]
+    public string? SalesTerritory { get; set; }
+
+    public bool IsTaxExempt { get; set; }
+
+    [MaxLength(100)]
+    public string? TaxExemptionNumber { get; set; }
+
+    public DateTime? TaxExemptionExpiry { get; set; }
+
+    [MaxLength(100)]
+    public string? PreferredShippingMethod { get; set; }
+
+    [MaxLength(500)]
+    public string? DeliveryInstructions { get; set; }
+
+    [MaxLength(50)]
+    public string? LoyaltyTier { get; set; }
+
+    public bool IsOnCreditHold { get; set; }
+
+    [MaxLength(500)]
+    public string? CreditHoldReason { get; set; }
+
+    public DateTime? CreditHoldDate { get; set; }
+    
+    /// <summary>
+    /// Optional parent business partner ID for hierarchy/categorization
+    /// </summary>
+    public Guid? ParentId { get; set; }
 }
 
 // ============================================================================

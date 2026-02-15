@@ -1,0 +1,208 @@
+using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.EntityFrameworkCore;
+
+namespace ErpSystem.Core.Services.Maintenance.Fleet;
+
+public class FleetVehicleService : IFleetVehicleService
+{
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IMaintenanceAssetService _maintenanceAssetService;
+
+    public FleetVehicleService(
+        IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
+        IMaintenanceAssetService maintenanceAssetService)
+    {
+        _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
+        _maintenanceAssetService = maintenanceAssetService;
+    }
+
+    public async Task<PagedResult<FleetVehicleListDto>> GetVehiclesPagedAsync(
+        int page,
+        int pageSize,
+        string? searchTerm = null,
+        Guid? categoryId = null)
+    {
+        if (page <= 0) page = 1;
+        if (pageSize <= 0) pageSize = 25;
+        if (pageSize > 100) pageSize = 100;
+
+        var tenantId = _currentUserProvider.TenantId;
+        var assetRepo = _unitOfWork.Repository<MaintenanceAsset>();
+        var assignmentRepo = _unitOfWork.Repository<FleetVehicleAssignment>();
+        var activeAssignmentsQ = assignmentRepo.GetQueryable(x => x.TenantId == tenantId && x.IsActive);
+
+        var q = assetRepo.GetQueryable(a => a.TenantId == tenantId)
+            .Where(a => a.AssetCategory != null && a.AssetCategory.AssetType == "Vehicle");
+
+        if (categoryId.HasValue && categoryId.Value != Guid.Empty)
+        {
+            q = q.Where(a => a.AssetCategoryId == categoryId.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            var term = searchTerm.Trim();
+            q = q.Where(a =>
+                a.Name.Contains(term) ||
+                a.AssetNumber.Contains(term) ||
+                (a.LicensePlate != null && a.LicensePlate.Contains(term)) ||
+                (a.VIN != null && a.VIN.Contains(term)));
+        }
+
+        var total = await q.CountAsync();
+
+        var items = await q
+            .OrderByDescending(a => a.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(a => new FleetVehicleListDto
+            {
+                Id = a.Id,
+                Name = a.Name,
+                AssetNumber = a.AssetNumber,
+                AssetCategoryId = a.AssetCategoryId,
+                LicensePlate = a.LicensePlate,
+                Vin = a.VIN,
+                Status = a.Status.ToString(),
+                CategoryName = a.AssetCategory != null ? a.AssetCategory.Name : string.Empty,
+                Manufacturer = a.Manufacturer,
+                Model = a.Model,
+                Mileage = a.Mileage,
+                OperatingHours = a.OperatingHours,
+                CurrentDriverEmployeeId = activeAssignmentsQ
+                    .Where(x => x.VehicleAssetId == a.Id)
+                    .OrderByDescending(x => x.AssignedFromUtc)
+                    .Select(x => (Guid?)x.EmployeeId)
+                    .FirstOrDefault(),
+                CurrentDriverEmployeeName = activeAssignmentsQ
+                    .Where(x => x.VehicleAssetId == a.Id)
+                    .OrderByDescending(x => x.AssignedFromUtc)
+                    .Select(x => x.Employee.FirstName + " " + x.Employee.LastName)
+                    .FirstOrDefault()
+            })
+            .ToListAsync();
+
+        return new PagedResult<FleetVehicleListDto>
+        {
+            Items = items,
+            TotalCount = total,
+            Page = page,
+            PageSize = pageSize
+        };
+    }
+
+    public async Task<MaintenanceAssetDto?> GetVehicleByIdAsync(Guid vehicleAssetId)
+    {
+        if (vehicleAssetId == Guid.Empty) return null;
+
+        var asset = await _maintenanceAssetService.GetAssetByIdAsync(vehicleAssetId);
+        if (asset == null) return null;
+
+        var assetType = asset.AssetCategory?.AssetType ?? asset.AssetType;
+        if (!string.Equals(assetType, "Vehicle", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return asset;
+    }
+
+    public async Task<MaintenanceAssetDto> CreateVehicleAsync(CreateFleetVehicleDto dto)
+    {
+        dto ??= new CreateFleetVehicleDto();
+
+        var category = await _unitOfWork.Repository<MaintenanceAssetCategory>()
+            .FirstOrDefaultAsync(c => c.Id == dto.AssetCategoryId && c.TenantId == _currentUserProvider.TenantId);
+
+        if (category == null)
+            throw new ArgumentException("Asset category not found.");
+
+        if (!string.Equals(category.AssetType, "Vehicle", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Selected asset category is not a Vehicle category.");
+
+        var createAssetDto = new CreateMaintenanceAssetDto
+        {
+            Name = dto.Name,
+            AssetCategoryId = dto.AssetCategoryId,
+            Manufacturer = dto.Manufacturer,
+            Model = dto.Model,
+            SerialNumber = dto.SerialNumber,
+            Location = dto.Location,
+            Status = "Active",
+            Criticality = "Medium",
+            Mileage = dto.Mileage,
+            OperatingHours = dto.OperatingHours,
+            LicensePlate = dto.LicensePlate,
+            VIN = dto.Vin
+        };
+
+        return await _maintenanceAssetService.CreateAssetAsync(createAssetDto);
+    }
+
+    public async Task<MaintenanceAssetDto> UpdateVehicleAsync(Guid vehicleAssetId, UpdateFleetVehicleDto dto)
+    {
+        if (vehicleAssetId == Guid.Empty) throw new ArgumentException("VehicleAssetId is required.");
+        dto ??= new UpdateFleetVehicleDto();
+
+        var existingEntity = await _unitOfWork.Repository<MaintenanceAsset>()
+            .FirstOrDefaultAsync(a => a.Id == vehicleAssetId && a.TenantId == _currentUserProvider.TenantId, a => a.AssetCategory);
+
+        if (existingEntity == null)
+            throw new ArgumentException($"Vehicle with ID {vehicleAssetId} not found");
+
+        if (!string.Equals(existingEntity.AssetCategory?.AssetType, "Vehicle", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException($"Asset with ID {vehicleAssetId} is not a Vehicle.");
+
+        var category = await _unitOfWork.Repository<MaintenanceAssetCategory>()
+            .FirstOrDefaultAsync(c => c.Id == dto.AssetCategoryId && c.TenantId == _currentUserProvider.TenantId);
+
+        if (category == null)
+            throw new ArgumentException("Asset category not found.");
+
+        if (!string.Equals(category.AssetType, "Vehicle", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Selected asset category is not a Vehicle category.");
+
+        var updateAssetDto = new UpdateMaintenanceAssetDto
+        {
+            Name = dto.Name,
+            Description = existingEntity.Description,
+            AssetCategoryId = dto.AssetCategoryId,
+            Manufacturer = dto.Manufacturer,
+            Model = dto.Model,
+            SerialNumber = dto.SerialNumber,
+            PurchaseDate = existingEntity.PurchaseDate,
+            PurchasePrice = existingEntity.PurchasePrice,
+            CurrentValue = existingEntity.CurrentValue,
+            Location = dto.Location,
+            Status = string.IsNullOrWhiteSpace(dto.Status) ? existingEntity.Status.ToString() : dto.Status,
+            Criticality = existingEntity.Criticality.ToString(),
+            WarrantyStartDate = existingEntity.WarrantyStartDate,
+            WarrantyEndDate = existingEntity.WarrantyEndDate,
+            WarrantyProvider = existingEntity.WarrantyProvider,
+            ParentAssetId = existingEntity.ParentAssetId,
+            Specifications = existingEntity.Specifications,
+            DocumentLinks = existingEntity.DocumentLinks,
+            Images = existingEntity.Images,
+            LicensePlate = dto.LicensePlate,
+            VIN = dto.Vin
+        };
+
+        var updated = await _maintenanceAssetService.UpdateAssetAsync(vehicleAssetId, updateAssetDto);
+
+        // Initial/override readings should be updated via the dedicated endpoints.
+        if (dto.Mileage.HasValue)
+        {
+            await _maintenanceAssetService.UpdateAssetMileageAsync(vehicleAssetId, dto.Mileage.Value);
+        }
+        if (dto.OperatingHours.HasValue)
+        {
+            await _maintenanceAssetService.UpdateAssetOperatingHoursAsync(vehicleAssetId, dto.OperatingHours.Value);
+        }
+
+        return updated;
+    }
+}

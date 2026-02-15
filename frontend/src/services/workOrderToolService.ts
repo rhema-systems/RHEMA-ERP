@@ -39,6 +39,10 @@ export interface WorkOrderToolDto {
   requiresTraining: boolean;
   safetyNotes?: string;
   notes?: string;
+  isExcludedFromBilling?: boolean;
+  billingExclusionReason?: string;
+  billingExcludedAt?: string;
+  billingExcludedBy?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -66,6 +70,10 @@ export interface ReturnWorkOrderToolDto {
   damageReported: boolean;
   damageDescription?: string;
   damageCost?: number;
+}
+
+export interface ExcludeWorkOrderToolFromBillingDto {
+  reason: string;
 }
 
 export interface WorkOrderToolSummaryDto {
@@ -166,6 +174,22 @@ const workOrderToolService = {
       `${API_BASE_URL}/maintenance/workorders/${workOrderId}/tools/${toolId}`,
       { headers: getHeaders() }
     );
+  },
+
+  /**
+   * Exclude a tool allocation from billing (keeps operational history)
+   */
+  excludeToolFromBilling: async (
+    workOrderId: string,
+    toolId: string,
+    data: ExcludeWorkOrderToolFromBillingDto
+  ): Promise<WorkOrderToolDto> => {
+    const response = await axios.post(
+      `${API_BASE_URL}/maintenance/workorders/${workOrderId}/tools/${toolId}/exclude-from-billing`,
+      data,
+      { headers: getHeaders() }
+    );
+    return response.data;
   },
 
   /**

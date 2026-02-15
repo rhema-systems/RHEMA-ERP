@@ -1,0 +1,26 @@
+Absolutely — nice practical example.
+
+Given:
+- Item A value = `10 × 200 = 2,000`
+- Item B value = `12 × 200 = 2,400`
+- Total item value = `4,400`
+- Additional cost to spread = `Shipping 200 + Misc 200 = 400`
+- Spread basis = **By Value**
+
+Allocation ratio:
+- Item A ratio = `2,000 / 4,400 = 0.454545...`
+- Item B ratio = `2,400 / 4,400 = 0.545454...`
+
+Allocated additional cost:
+- Item A allocated = `400 × 2,000/4,400 = 181.818... ≈ 181.82`
+- Item B allocated = `400 × 2,400/4,400 = 218.181... ≈ 218.18`
+
+Per-unit allocated cost:
+- Item A per-unit add-on = `181.82 / 10 = 18.182`
+- Item B per-unit add-on = `218.18 / 12 = 18.1817`
+
+Landed unit cost:
+- Item A landed unit = `200 + 18.182 = 218.182`
+- Item B landed unit = `200 + 18.1817 = 218.1817`
+
+So both are effectively around **218.18 per unit** (small difference only from rounding).

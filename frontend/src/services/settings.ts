@@ -79,6 +79,10 @@ interface PublicSecuritySettingsApiDto {
   passwordRequireLowercase: boolean;
   passwordRequireDigits: boolean;
   passwordRequireSpecialChars: boolean;
+
+  // Tenant (optional; resolved from host for public portals like support.company.com)
+  tenantCode?: string | null;
+  tenantName?: string | null;
   
   // CAPTCHA (for registration)
   captchaEnabled: boolean;

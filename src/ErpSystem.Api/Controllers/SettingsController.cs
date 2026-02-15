@@ -444,6 +444,135 @@ public class SettingsController : ControllerBase
         }
     }
 
+    #region Field Labels
+
+    /// <summary>
+    /// Get all field labels for a specific module (e.g., "InventoryItem")
+    /// </summary>
+    [HttpGet("field-labels/{module}")]
+    public async Task<ActionResult<FieldLabelsDto>> GetFieldLabels(string module)
+    {
+        try
+        {
+            var labels = await _settingsService.GetFieldLabelsAsync(module);
+            return Ok(new FieldLabelsDto
+            {
+                Module = module,
+                Labels = labels
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving field labels for module {Module}", module);
+            return StatusCode(500, "An error occurred while retrieving field labels");
+        }
+    }
+
+    /// <summary>
+    /// Update field labels for a specific module
+    /// </summary>
+    [HttpPut("field-labels/{module}")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<FieldLabelsDto>> UpdateFieldLabels(string module, [FromBody] UpdateFieldLabelsRequest request)
+    {
+        try
+        {
+            // Get existing labels for audit logging
+            var existingLabels = await _settingsService.GetFieldLabelsAsync(module);
+
+            var updatedLabels = await _settingsService.SetFieldLabelsAsync(module, request.Labels);
+
+            // Log the audit event
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var usernameClaim = User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst(ClaimTypes.Email)?.Value;
+            var tenantId = _currentUserService.TenantId;
+
+            if (Guid.TryParse(userIdClaim, out var userId) && !string.IsNullOrEmpty(usernameClaim) && tenantId.HasValue)
+            {
+                var auditLog = new Core.Entities.AuditLog
+                {
+                    UserId = userId,
+                    Username = usernameClaim,
+                    Action = "UPDATE",
+                    Resource = $"FieldLabels:{module}",
+                    ResourceId = module,
+                    OldValues = System.Text.Json.JsonSerializer.Serialize(existingLabels),
+                    NewValues = System.Text.Json.JsonSerializer.Serialize(request.Labels),
+                    IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                    UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                    TenantId = tenantId.Value
+                };
+
+                await _auditLogService.CreateAuditLogAsync(auditLog);
+            }
+
+            _logger.LogInformation("Updated field labels for module {Module}", module);
+
+            return Ok(new FieldLabelsDto
+            {
+                Module = module,
+                Labels = updatedLabels
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating field labels for module {Module}", module);
+            return StatusCode(500, "An error occurred while updating field labels");
+        }
+    }
+
+    /// <summary>
+    /// Get a single field label
+    /// </summary>
+    [HttpGet("field-labels/{module}/{fieldName}")]
+    public async Task<ActionResult<FieldLabelDto>> GetFieldLabel(string module, string fieldName)
+    {
+        try
+        {
+            var label = await _settingsService.GetFieldLabelAsync(module, fieldName);
+            return Ok(new FieldLabelDto
+            {
+                Module = module,
+                FieldName = fieldName,
+                Label = label
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving field label {Module}:{FieldName}", module, fieldName);
+            return StatusCode(500, "An error occurred while retrieving field label");
+        }
+    }
+
+    /// <summary>
+    /// Update a single field label
+    /// </summary>
+    [HttpPut("field-labels/{module}/{fieldName}")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<FieldLabelDto>> UpdateFieldLabel(string module, string fieldName, [FromBody] UpdateFieldLabelRequest request)
+    {
+        try
+        {
+            await _settingsService.SetFieldLabelAsync(module, fieldName, request.Label);
+
+            _logger.LogInformation("Updated field label {Module}:{FieldName} = {Label}", module, fieldName, request.Label);
+
+            return Ok(new FieldLabelDto
+            {
+                Module = module,
+                FieldName = fieldName,
+                Label = request.Label
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating field label {Module}:{FieldName}", module, fieldName);
+            return StatusCode(500, "An error occurred while updating field label");
+        }
+    }
+
+    #endregion
+
 }
 
 // DTOs
@@ -504,5 +633,29 @@ public class SecuritySettingsDto
     // Legal URLs
     public string? TermsOfServiceUrl { get; set; }
     public string? PrivacyPolicyUrl { get; set; }
+}
+
+// Field Label DTOs
+public class FieldLabelsDto
+{
+    public string Module { get; set; } = string.Empty;
+    public Dictionary<string, string> Labels { get; set; } = new();
+}
+
+public class FieldLabelDto
+{
+    public string Module { get; set; } = string.Empty;
+    public string FieldName { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+}
+
+public class UpdateFieldLabelsRequest
+{
+    public Dictionary<string, string> Labels { get; set; } = new();
+}
+
+public class UpdateFieldLabelRequest
+{
+    public string Label { get; set; } = string.Empty;
 }
 

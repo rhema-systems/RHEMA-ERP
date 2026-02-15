@@ -44,7 +44,8 @@ public interface IBusinessPartnerService
     // Business Logic
     Task<bool> IsPartnerCodeUniqueAsync(string partnerCode, Guid? excludeId = null);
     Task UpdateStatusAsync(Guid partnerId, string status);
-    Task ApprovePartnerAsync(Guid partnerId, Guid approvedById);
+    Task SubmitPartnerForApprovalAsync(Guid partnerId, Guid submittedById);
+    Task ApprovePartnerAsync(Guid partnerId, Guid approvedById, string? comments = null);
     Task RejectPartnerAsync(Guid partnerId, Guid rejectedById, string reason);
     Task UpdatePerformanceRatingAsync(Guid partnerId, decimal rating);
     Task AddToBlacklistAsync(Guid partnerId, string reason, DateTime? expiryDate = null);

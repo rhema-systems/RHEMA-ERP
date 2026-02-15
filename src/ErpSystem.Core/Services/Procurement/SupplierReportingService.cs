@@ -33,14 +33,14 @@ public class SupplierReportingService : ISupplierReportingService
         // Get all purchase orders in the date range
         var orders = await _purchaseOrderRepository.GetOrdersByDateRangeAsync(startDate, endDate);
 
-        // Filter by supplier IDs if provided
+        // Filter by business partner IDs if provided
         if (request.SupplierIds != null && request.SupplierIds.Any())
         {
-            orders = orders.Where(o => request.SupplierIds.Contains(o.SupplierId)).ToList();
+            orders = orders.Where(o => request.SupplierIds.Contains(o.BusinessPartnerId)).ToList();
         }
 
-        // Group by supplier
-        var supplierGroups = orders.GroupBy(o => o.SupplierId);
+        // Group by business partner
+        var supplierGroups = orders.GroupBy(o => o.BusinessPartnerId);
 
         var results = new List<SupplierSpendAnalysisDto>();
         decimal totalSpend = orders.Sum(o => o.TotalAmount);

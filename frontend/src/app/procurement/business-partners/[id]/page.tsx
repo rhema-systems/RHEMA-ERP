@@ -30,12 +30,15 @@ import {
   Clock,
   TrendingUp,
   BarChart3,
-  Activity
+  Activity,
+  Plus
 } from 'lucide-react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import { businessPartnerService, type BusinessPartnerDetailDto } from '@/services/businessPartnerService';
 import { licenseTypeService, type LicenseTypeDto } from '@/services/partnerConfigService';
 import { performanceTrackingService, type SupplierPerformanceMetricDto, type QualityIncidentDto, type PerformanceReviewDto } from '@/services/performanceTrackingService';
+import { purchasingService, type PurchaseOrderSummaryDto } from '@/services/purchasingService';
 import { PerformanceReviewDialog } from '@/components/procurement/PerformanceReviewDialog';
 import { PerformanceReviewDetailDialog } from '@/components/procurement/PerformanceReviewDetailDialog';
 import { PerformanceTrendsChart } from '@/components/procurement/PerformanceTrendsChart';
@@ -57,6 +60,10 @@ export default function BusinessPartnerDetailPage() {
   const [qualityIncidents, setQualityIncidents] = useState<QualityIncidentDto[]>([]);
   const [performanceReviews, setPerformanceReviews] = useState<PerformanceReviewDto[]>([]);
   const [performanceLoading, setPerformanceLoading] = useState(false);
+  
+  // Purchase orders state
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderSummaryDto[]>([]);
+  const [purchaseOrdersLoading, setPurchaseOrdersLoading] = useState(false);
 
   // Dialog states
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false);
@@ -77,6 +84,7 @@ export default function BusinessPartnerDetailPage() {
     loadPartner();
     loadLicenseTypes();
     loadPerformanceData();
+    loadPurchaseOrders();
   }, [id]);
 
   const loadPartner = async () => {
@@ -117,6 +125,19 @@ export default function BusinessPartnerDetailPage() {
       // Don't show error toast as this is optional data
     } finally {
       setPerformanceLoading(false);
+    }
+  };
+  
+  const loadPurchaseOrders = async () => {
+    try {
+      setPurchaseOrdersLoading(true);
+      const orders = await purchasingService.getPurchaseOrdersBySupplier(id);
+      setPurchaseOrders(orders);
+    } catch (error) {
+      console.error('Error loading purchase orders:', error);
+      // Don't show error toast as this is optional data
+    } finally {
+      setPurchaseOrdersLoading(false);
     }
   };
 
@@ -425,6 +446,11 @@ export default function BusinessPartnerDetailPage() {
             )}
           </TabsTrigger>
           <TabsTrigger value="financial">Financial Info</TabsTrigger>
+          {(partner.partnerType === 'Supplier' || partner.partnerType === 'Both') && (
+            <TabsTrigger value="purchase-orders">
+              Purchase Orders ({purchaseOrders.length})
+            </TabsTrigger>
+          )}
           <TabsTrigger value="performance" className="relative">
             <Activity className="w-4 h-4 mr-2" />
             Performance
@@ -792,6 +818,12 @@ export default function BusinessPartnerDetailPage() {
                             <p className="font-semibold font-mono">{partner.iban}</p>
                           </div>
                         )}
+                        {partner.currency && (
+                          <div>
+                            <Label className="text-gray-600">Currency</Label>
+                            <p className="font-semibold">{partner.currency}</p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -859,6 +891,94 @@ export default function BusinessPartnerDetailPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Purchase Orders Tab */}
+        {(partner.partnerType === 'Supplier' || partner.partnerType === 'Both') && (
+          <TabsContent value="purchase-orders">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="w-5 h-5" />
+                    Purchase Orders
+                  </CardTitle>
+                  <Link href={`/procurement/purchase-orders/new?supplierId=${id}`}>
+                    <Button size="sm">
+                      <Plus className="w-4 h-4 mr-2" />
+                      New Purchase Order
+                    </Button>
+                  </Link>
+                </div>
+                <CardDescription>
+                  Purchase orders placed with this supplier
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {purchaseOrdersLoading ? (
+                  <p className="text-center text-gray-500 py-8">Loading purchase orders...</p>
+                ) : purchaseOrders.length === 0 ? (
+                  <div className="text-center py-8">
+                    <FileText className="w-12 h-12 mx-auto text-gray-400 mb-3" />
+                    <p className="text-gray-500 mb-4">No purchase orders yet</p>
+                    <Link href={`/procurement/purchase-orders/new?supplierId=${id}`}>
+                      <Button>
+                        <Plus className="w-4 h-4 mr-2" />
+                        Create First Purchase Order
+                      </Button>
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {purchaseOrders.slice(0, 10).map((po) => (
+                      <Link key={po.id} href={`/procurement/purchase-orders/${po.id}`}>
+                        <div className="p-4 border rounded-lg hover:bg-gray-50 transition-colors cursor-pointer">
+                          <div className="flex items-center justify-between mb-2">
+                            <div>
+                              <div className="font-semibold">{po.orderNumber}</div>
+                              <div className="text-sm text-gray-600">
+                                {format(new Date(po.orderDate), 'MMM dd, yyyy')}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant={
+                                po.status === 'Received' ? 'default' :
+                                po.status === 'Approved' || po.status === 'Sent' ? 'secondary' :
+                                po.status === 'Cancelled' ? 'destructive' :
+                                'outline'
+                              }>
+                                {po.status}
+                              </Badge>
+                              <div className="text-right">
+                                <div className="font-semibold">
+                                  ${po.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                </div>
+                                <div className="text-xs text-gray-500">{po.itemCount} items</div>
+                              </div>
+                            </div>
+                          </div>
+                          {po.requiredDate && (
+                            <div className="text-xs text-gray-500">
+                              Required: {format(new Date(po.requiredDate), 'MMM dd, yyyy')}
+                            </div>
+                          )}
+                        </div>
+                      </Link>
+                    ))}
+                    {purchaseOrders.length > 10 && (
+                      <div className="text-center pt-2">
+                        <Link href={`/procurement/purchase-orders?supplierId=${id}`}>
+                          <Button variant="outline" size="sm">
+                            View All {purchaseOrders.length} Orders
+                          </Button>
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
 
         {/* Performance Tab */}
         <TabsContent value="performance">

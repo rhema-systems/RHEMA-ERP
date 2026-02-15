@@ -341,7 +341,7 @@ public interface IWorkOrderService
     Task<IEnumerable<WorkOrderListDto>> GetChildWorkOrdersAsync(Guid parentId);
 
     // Task management
-    Task<ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto?> UpdateTaskStatusAsync(Guid taskId, string status, double? actualHours = null, string? completionNotes = null);
+    Task<ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto?> UpdateTaskStatusAsync(Guid taskId, string status, double? actualHours = null, string? completionNotes = null, Guid? technicianId = null);
     Task<ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto?> UpdateTaskPhotoAsync(Guid taskId, string? photoPath);
 }
 
@@ -382,6 +382,7 @@ public interface IWorkOrderToolService
     Task<IEnumerable<WorkOrderToolDto>> GetToolsByWorkOrderAsync(Guid workOrderId);
     Task<WorkOrderToolSummaryDto> GetWorkOrderToolSummaryAsync(Guid workOrderId);
     Task RemoveToolAllocationAsync(Guid workOrderId, Guid toolId);
+    Task<WorkOrderToolDto> ExcludeToolFromBillingAsync(Guid workOrderId, Guid toolId, string reason);
 
     // Bulk operations
     Task<IEnumerable<WorkOrderToolDto>> AllocateToolsBulkAsync(IEnumerable<AllocateWorkOrderToolDto> allocateDtos);

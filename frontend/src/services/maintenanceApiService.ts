@@ -101,6 +101,10 @@ export interface WorkOrderPart {
   pickedAt?: string;
   usedAt?: string;
   notes?: string;
+  isExcludedFromBilling?: boolean;
+  billingExclusionReason?: string;
+  billingExcludedAt?: string;
+  billingExcludedBy?: string;
   createdAt: string;
   updatedAt?: string;
 }

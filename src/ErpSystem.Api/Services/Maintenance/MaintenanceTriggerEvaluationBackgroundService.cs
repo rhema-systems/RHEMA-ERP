@@ -37,7 +37,7 @@ public class MaintenanceTriggerEvaluationBackgroundService : BackgroundService
             {
                 try
                 {
-                    await EvaluateTriggersAsync();
+                    await EvaluateTriggersAsync(stoppingToken);
                 }
                 catch (Exception ex)
                 {
@@ -62,11 +62,24 @@ public class MaintenanceTriggerEvaluationBackgroundService : BackgroundService
         _logger.LogInformation("Maintenance Trigger Evaluation Background Service is stopping");
     }
 
-    private async Task EvaluateTriggersAsync()
+    private async Task EvaluateTriggersAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Starting scheduled trigger evaluation for default tenant");
 
         using var scope = _serviceProvider.CreateScope();
+        var lockService = scope.ServiceProvider.GetRequiredService<IDistributedLockService>();
+
+        await using var leader = await lockService.TryAcquireAsync(
+            lockName: "bg:maintenance-trigger-evaluation",
+            leaseDuration: TimeSpan.FromMinutes(25),
+            cancellationToken: cancellationToken);
+
+        if (leader == null)
+        {
+            _logger.LogDebug("Skipping maintenance trigger evaluation run (lock not acquired)");
+            return;
+        }
+
         var evaluationService = scope.ServiceProvider.GetRequiredService<MaintenanceTriggerEvaluationService>();
         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 

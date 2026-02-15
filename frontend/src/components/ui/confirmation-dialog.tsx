@@ -19,7 +19,11 @@ export interface ConfirmationDialogProps {
   confirmText?: string
   cancelText?: string
   variant?: "default" | "destructive"
-  onConfirm: () => void | Promise<void>
+  /**
+   * Return `false` to keep the dialog open (e.g. validation or API error).
+   * Any other return value will allow the dialog to close automatically.
+   */
+  onConfirm: () => void | boolean | Promise<void | boolean>
   isLoading?: boolean
   confirmDisabled?: boolean
   maxWidth?: string
@@ -41,7 +45,10 @@ export function ConfirmationDialog({
   children
 }: ConfirmationDialogProps) {
   const handleConfirm = async () => {
-    await onConfirm()
+    const result = await onConfirm()
+    if (result === false) {
+      return
+    }
     if (!isLoading) {
       onOpenChange(false)
     }

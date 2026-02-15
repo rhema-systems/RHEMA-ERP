@@ -27,6 +27,7 @@ import {
   Upload,
   Loader2,
   Bell,
+  TrendingDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as tenderBidService from '@/services/tenderBidService';
@@ -34,6 +35,8 @@ import { type TenderBidDetailDto } from '@/services/tenderBidService';
 import { tenderService, type TenderDetailDto } from '@/services/tenderService';
 import * as performanceBondService from '@/services/performanceBondService';
 import { type PerformanceBondRequestDto } from '@/services/performanceBondService';
+import * as tenderAwardService from '@/services/tenderAwardService';
+import { type TenderAwardDto } from '@/services/tenderAwardService';
 import { format } from 'date-fns';
 
 export default function BidDetailPage() {
@@ -46,6 +49,9 @@ export default function BidDetailPage() {
   const [tender, setTender] = useState<TenderDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [withdrawing, setWithdrawing] = useState(false);
+
+  // Award state (for showing negotiated pricing)
+  const [award, setAward] = useState<TenderAwardDto | null>(null);
 
   // Performance bond state
   const [performanceBondRequest, setPerformanceBondRequest] = useState<PerformanceBondRequestDto | null>(null);
@@ -76,13 +82,21 @@ export default function BidDetailPage() {
         }
       }
 
-      // Check for performance bond request
+      // Check for performance bond request and award info
       if (data.status === 'Awarded') {
         try {
           const bondRequest = await performanceBondService.getPerformanceBondByBidId(bidId);
           setPerformanceBondRequest(bondRequest);
         } catch {
           // No performance bond request yet, that's fine
+        }
+
+        // Fetch award information to get negotiated pricing
+        try {
+          const awardData = await tenderAwardService.getAwardByBidId(bidId);
+          setAward(awardData);
+        } catch {
+          // Award info not available, that's fine
         }
       }
     } catch (error) {
@@ -295,6 +309,68 @@ export default function BidDetailPage() {
             </Badge>
           </div>
         </div>
+      )}
+
+      {/* Negotiated Pricing Information */}
+      {bid.status === 'Awarded' && award && (
+        <Card className="border-emerald-200 bg-gradient-to-r from-emerald-50 to-green-50">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-emerald-800">
+              <DollarSign className="h-5 w-5" />
+              Award Pricing Details
+              {award.isNegotiated && (
+                <Badge className="bg-emerald-600 text-white ml-2">
+                  <TrendingDown className="h-3 w-3 mr-1" />
+                  Negotiated
+                </Badge>
+              )}
+            </CardTitle>
+            <CardDescription className="text-emerald-700">
+              {award.isNegotiated
+                ? 'Final contract amount after successful negotiation'
+                : 'Contract amount as per your original bid'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Original Bid Amount */}
+              <div className="bg-white rounded-lg p-4 border border-emerald-100 shadow-sm">
+                <p className="text-sm text-gray-500 mb-1">Original Bid Amount</p>
+                <p className="text-xl font-bold text-gray-700">
+                  {award.currency || bid.currency} {award.originalBidAmount.toLocaleString()}
+                </p>
+              </div>
+
+              {/* Final Contract Amount */}
+              <div className="bg-white rounded-lg p-4 border border-emerald-200 shadow-sm ring-2 ring-emerald-500/20">
+                <p className="text-sm text-emerald-600 mb-1 font-medium">Final Contract Amount</p>
+                <p className="text-2xl font-bold text-emerald-700">
+                  {award.currency || bid.currency} {award.awardedAmount.toLocaleString()}
+                </p>
+              </div>
+
+              {/* Negotiation Savings (only show if negotiated) */}
+              {award.isNegotiated && award.negotiationSavings > 0 && (
+                <div className="bg-white rounded-lg p-4 border border-amber-100 shadow-sm">
+                  <p className="text-sm text-amber-600 mb-1">Negotiation Adjustment</p>
+                  <p className="text-xl font-bold text-amber-700 flex items-center gap-1">
+                    <TrendingDown className="h-5 w-5" />
+                    {award.currency || bid.currency} {award.negotiationSavings.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    ({((award.negotiationSavings / award.originalBidAmount) * 100).toFixed(1)}% reduction)
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Award Date */}
+            <div className="mt-4 pt-4 border-t border-emerald-100 flex items-center justify-between text-sm">
+              <span className="text-gray-500">Award Date:</span>
+              <span className="font-medium text-gray-700">{formatDate(award.awardDate)}</span>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Accepted Status Alert (legacy support) */}

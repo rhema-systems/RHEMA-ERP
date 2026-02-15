@@ -74,6 +74,8 @@ export interface InventoryItemDto {
   description?: string;
   unitOfMeasure: string;
   unitCost: number;
+  listPrice?: number;
+  salePrice?: number;
   currentStock: number;
   availableStock: number;
   standardCost: number;

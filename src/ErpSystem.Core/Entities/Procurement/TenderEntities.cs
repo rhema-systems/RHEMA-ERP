@@ -580,8 +580,27 @@ public class TenderAward : TenantEntity
 
     public DateTime AwardDate { get; set; } = DateTime.UtcNow;
 
+    /// <summary>
+    /// Original bid amount before any negotiation
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal OriginalBidAmount { get; set; }
+
+    /// <summary>
+    /// Final award amount (uses negotiated amount if negotiation exists, otherwise uses original bid amount)
+    /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal AwardedAmount { get; set; }
+
+    /// <summary>
+    /// Reference to the negotiation that produced the final award amount (if any)
+    /// </summary>
+    public Guid? NegotiationId { get; set; }
+
+    /// <summary>
+    /// Indicates if this award was based on a negotiated price
+    /// </summary>
+    public bool IsNegotiated { get; set; } = false;
 
     [MaxLength(3)]
     public string? Currency { get; set; } = "USD";
@@ -604,6 +623,7 @@ public class TenderAward : TenantEntity
     public virtual TenderBid TenderBid { get; set; } = null!;
     public virtual BusinessPartner BusinessPartner { get; set; } = null!;
     public virtual ApplicationUser? AwardedBy { get; set; }
+    public virtual TenderNegotiation? Negotiation { get; set; }
 }
 
 /// <summary>
@@ -1086,6 +1106,15 @@ public class EvaluationCriterion : TenantEntity
     [MaxLength(50)]
     public string Category { get; set; } = "General"; // Financial, Technical, Experience, Schedule, Quality, Other
 
+    /// <summary>
+    /// Specifies whether this criterion is used for Technical or Financial evaluation in QCBS.
+    /// Technical criteria contribute to the Technical Score.
+    /// Financial criteria contribute to the Financial Score (alongside price-based calculation).
+    /// </summary>
+    [Required]
+    [MaxLength(20)]
+    public string EvaluationType { get; set; } = "Technical"; // Technical, Financial
+
     [MaxLength(500)]
     public string? Description { get; set; }
 
@@ -1270,4 +1299,127 @@ public class TenderDocumentType : TenantEntity
 
     // Navigation Properties
     public virtual ApplicationUser? CreatedBy { get; set; }
+}
+
+/// <summary>
+/// Tender negotiation - tracks price negotiations with a bidder before final award
+/// </summary>
+public class TenderNegotiation : TenantEntity
+{
+    [Required]
+    public Guid TenderId { get; set; }
+
+    [Required]
+    public Guid TenderBidId { get; set; }
+
+    [Required]
+    public Guid BusinessPartnerId { get; set; }
+
+    /// <summary>
+    /// Optional reference to specific LOT being negotiated
+    /// </summary>
+    public Guid? LotId { get; set; }
+
+    /// <summary>
+    /// Optional reference to specific bid LOT being negotiated
+    /// </summary>
+    public Guid? BidLotId { get; set; }
+
+    [MaxLength(50)]
+    public string Status { get; set; } = "Invited"; // Invited, InProgress, Completed, Cancelled
+
+    public DateTime InvitedDate { get; set; } = DateTime.UtcNow;
+
+    public Guid? InvitedById { get; set; }
+
+    public DateTime? CompletedDate { get; set; }
+
+    public Guid? CompletedById { get; set; }
+
+    /// <summary>
+    /// Original total bid amount before negotiation
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal OriginalAmount { get; set; }
+
+    /// <summary>
+    /// Final negotiated total amount
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? NegotiatedAmount { get; set; }
+
+    [MaxLength(3)]
+    public string? Currency { get; set; } = "USD";
+
+    public string? Notes { get; set; }
+
+    // Navigation Properties
+    public virtual Tender Tender { get; set; } = null!;
+    public virtual TenderBid TenderBid { get; set; } = null!;
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
+    public virtual TenderLot? Lot { get; set; }
+    public virtual TenderBidLot? BidLot { get; set; }
+    public virtual ApplicationUser? InvitedBy { get; set; }
+    public virtual ApplicationUser? CompletedBy { get; set; }
+    public virtual ICollection<TenderNegotiationItem> Items { get; set; } = new List<TenderNegotiationItem>();
+}
+
+/// <summary>
+/// Individual item in a negotiation with original and negotiated prices
+/// </summary>
+public class TenderNegotiationItem : TenantEntity
+{
+    [Required]
+    public Guid NegotiationId { get; set; }
+
+    [Required]
+    public Guid TenderBidItemId { get; set; }
+
+    /// <summary>
+    /// Item description from the bid item
+    /// </summary>
+    [MaxLength(500)]
+    public string ItemDescription { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Quantity from the bid
+    /// </summary>
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal Quantity { get; set; }
+
+    /// <summary>
+    /// Unit of measure
+    /// </summary>
+    [MaxLength(50)]
+    public string? UnitOfMeasure { get; set; }
+
+    /// <summary>
+    /// Original unit price from the bid
+    /// </summary>
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal OriginalUnitPrice { get; set; }
+
+    /// <summary>
+    /// Original total price from the bid
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal OriginalTotalPrice { get; set; }
+
+    /// <summary>
+    /// Negotiated unit price (can be edited)
+    /// </summary>
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? NegotiatedUnitPrice { get; set; }
+
+    /// <summary>
+    /// Negotiated total price (calculated from negotiated unit price * quantity)
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? NegotiatedTotalPrice { get; set; }
+
+    public string? Notes { get; set; }
+
+    // Navigation Properties
+    public virtual TenderNegotiation Negotiation { get; set; } = null!;
+    public virtual TenderBidItem TenderBidItem { get; set; } = null!;
 }

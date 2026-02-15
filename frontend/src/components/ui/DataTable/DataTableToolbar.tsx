@@ -28,6 +28,7 @@ import { useDeviceType } from '@/hooks/useResponsive';
 
 export interface DataTableToolbarProps<TData> {
   table: Table<TData>;
+  compact?: boolean;
   enableGlobalFilter?: boolean;
   enableColumnFilters?: boolean;
   enableColumnVisibility?: boolean;
@@ -57,6 +58,7 @@ export interface DataTableToolbarProps<TData> {
 
 export function DataTableToolbar<TData>({
   table,
+  compact = false,
   enableGlobalFilter = true,
   enableColumnFilters = true,
   enableColumnVisibility = true,
@@ -83,7 +85,7 @@ export function DataTableToolbar<TData>({
   };
 
   return (
-    <div className="flex flex-col space-y-4 p-4">
+    <div className={compact ? 'flex flex-col space-y-3 p-3' : 'flex flex-col space-y-4 p-4'}>
       {/* Top row - Main actions */}
       <div className={`${isMobile ? 'flex-col space-y-3' : 'flex items-center justify-between'}`}>
         <div className={`${isMobile ? 'flex flex-col space-y-2' : 'flex items-center space-x-2'}`}>
@@ -95,7 +97,7 @@ export function DataTableToolbar<TData>({
                 placeholder={searchPlaceholder}
                 value={globalFilter}
                 onChange={(event) => handleGlobalFilterChange(event.target.value)}
-                className={`${isMobile ? 'w-full' : 'w-64'} pl-8`}
+                className={`${isMobile ? 'w-full' : compact ? 'w-56' : 'w-64'} pl-8`}
                 disabled={loading}
               />
               {globalFilter && (
@@ -141,7 +143,7 @@ export function DataTableToolbar<TData>({
           {enableColumnVisibility && !isMobile && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="default" disabled={loading}>
+                <Button variant="outline" size={compact ? 'sm' : 'default'} disabled={loading}>
                   <EyeIcon className="mr-1 h-3 w-3" />
                   {isMobile ? '' : 'View'}
                 </Button>

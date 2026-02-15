@@ -3,6 +3,16 @@ using ErpSystem.Core.DTOs.Notifications;
 namespace ErpSystem.Core.Interfaces;
 
 /// <summary>
+/// Email attachment information for sending emails with attachments
+/// </summary>
+public class EmailAttachmentInfo
+{
+    public string FileName { get; set; } = string.Empty;
+    public byte[] Content { get; set; } = Array.Empty<byte>();
+    public string ContentType { get; set; } = "application/octet-stream";
+}
+
+/// <summary>
 /// Unified notification service interface for the entire ERP system.
 /// Single consolidated interface for all notification operations across all modules (maintenance, HR, procurement, etc.).
 /// All modules use this interface instead of creating their own notification interfaces.
@@ -15,6 +25,11 @@ public interface INotificationService
     /// Sends email notification to recipients
     /// </summary>
     Task SendEmailAsync(string to, string subject, string body, bool isHtml = true);
+
+    /// <summary>
+    /// Sends email notification with attachments
+    /// </summary>
+    Task SendEmailWithAttachmentsAsync(string to, string subject, string body, List<EmailAttachmentInfo> attachments, bool isHtml = true);
 
     /// <summary>
     /// Sends SMS notification to phone number

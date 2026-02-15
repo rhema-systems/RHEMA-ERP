@@ -17,6 +17,11 @@ export interface AssetConditionChecklistItemDto {
   defaultValue?: string;
   helpText?: string;
   requiresPhoto: boolean;
+  // Repair/Replacement options
+  allowRepairReplacement: boolean;
+  defaultRepairReplacementAction?: 'None' | 'Repair' | 'Replace';
+  estimatedRepairHours: number;
+  estimatedReplacementHours: number;
 }
 
 export interface AssetConditionChecklistTemplateDto {
@@ -50,6 +55,11 @@ export interface CreateAssetConditionItemDto {
   defaultValue?: string;
   helpText?: string;
   requiresPhoto: boolean;
+  // Repair/Replacement options
+  allowRepairReplacement: boolean;
+  defaultRepairReplacementAction?: 'None' | 'Repair' | 'Replace';
+  estimatedRepairHours: number;
+  estimatedReplacementHours: number;
 }
 
 export interface CreateAssetConditionTemplateDto {
@@ -83,6 +93,12 @@ export interface AssetConditionItemResultDto {
   comment?: string;
   photoPaths?: string[];
   inspectedAt?: string;
+  // Repair/Replacement tracking
+  repairReplacementAction?: 'None' | 'Repair' | 'Replace';
+  taskCreated: boolean;
+  createdTaskId?: string;
+  // From checklist item
+  allowRepairReplacement: boolean;
 }
 
 export interface AssetConditionRecordDto {
@@ -129,6 +145,7 @@ export interface CreateAssetConditionRecordDto {
   templateId: string;
   inspectionType: 'Admission' | 'Discharge';
   admissionId?: string;
+  inspectorId?: string;
   generalNotes?: string;
 }
 
@@ -139,6 +156,8 @@ export interface SubmitAssetConditionItemDto {
   numericValue?: number;
   selectedOption?: string;
   comment?: string;
+  repairReplacementAction?: 'None' | 'Repair' | 'Replace';
+  photoPaths?: string[];
 }
 
 export interface CompleteAssetConditionRecordDto {

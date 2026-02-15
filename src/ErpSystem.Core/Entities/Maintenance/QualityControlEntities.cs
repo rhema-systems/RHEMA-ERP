@@ -634,22 +634,47 @@ public class QualityControlChecklist
     public string? Description { get; set; }
 
     /// <summary>
-    /// Type of work order this checklist applies to
+    /// Type of work order this checklist applies to (legacy text field for backward compatibility)
     /// </summary>
     [MaxLength(50)]
     public string? WorkOrderType { get; set; }
 
     /// <summary>
-    /// Asset category this checklist applies to
+    /// Work Order Type ID (foreign key) - preferred over text field
+    /// </summary>
+    public Guid? WorkOrderTypeId { get; set; }
+
+    /// <summary>
+    /// Asset category this checklist applies to (legacy text field for backward compatibility)
     /// </summary>
     [MaxLength(50)]
     public string? AssetCategory { get; set; }
 
     /// <summary>
-    /// Maintenance type this checklist applies to
+    /// Asset Category ID (foreign key) - preferred over text field
+    /// </summary>
+    public Guid? AssetCategoryId { get; set; }
+
+    /// <summary>
+    /// Maintenance type this checklist applies to (legacy text field for backward compatibility)
     /// </summary>
     [MaxLength(50)]
     public string? MaintenanceType { get; set; }
+
+    /// <summary>
+    /// Maintenance Type ID (foreign key) - preferred over text field
+    /// </summary>
+    public Guid? MaintenanceTypeId { get; set; }
+
+    // Navigation properties for ID-based relationships
+    [ForeignKey("WorkOrderTypeId")]
+    public virtual WorkOrderType? WorkOrderTypeNav { get; set; }
+
+    [ForeignKey("AssetCategoryId")]
+    public virtual MaintenanceAssetCategory? AssetCategoryNav { get; set; }
+
+    [ForeignKey("MaintenanceTypeId")]
+    public virtual MaintenanceType? MaintenanceTypeNav { get; set; }
 
     /// <summary>
     /// Whether this checklist is mandatory

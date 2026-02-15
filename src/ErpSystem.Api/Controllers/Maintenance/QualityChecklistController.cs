@@ -167,6 +167,35 @@ public class QualityChecklistController : ControllerBase
             var currentUserId = Guid.Empty; // TODO: Get from current user service when auth is enabled
             var now = DateTime.UtcNow;
 
+            // Resolve IDs from names if not provided
+            Guid? workOrderTypeId = request.WorkOrderTypeId;
+            Guid? assetCategoryId = request.AssetCategoryId;
+            Guid? maintenanceTypeId = request.MaintenanceTypeId;
+
+            // Look up WorkOrderType by name if ID not provided
+            if (!workOrderTypeId.HasValue && !string.IsNullOrEmpty(request.WorkOrderType))
+            {
+                var workOrderType = await _context.WorkOrderTypes
+                    .FirstOrDefaultAsync(w => w.Name == request.WorkOrderType && w.TenantId == tenantId);
+                workOrderTypeId = workOrderType?.Id;
+            }
+
+            // Look up AssetCategory by name if ID not provided
+            if (!assetCategoryId.HasValue && !string.IsNullOrEmpty(request.AssetCategory))
+            {
+                var assetCategory = await _context.MaintenanceAssetCategories
+                    .FirstOrDefaultAsync(a => a.Name == request.AssetCategory && a.TenantId == tenantId);
+                assetCategoryId = assetCategory?.Id;
+            }
+
+            // Look up MaintenanceType by name if ID not provided
+            if (!maintenanceTypeId.HasValue && !string.IsNullOrEmpty(request.MaintenanceType))
+            {
+                var maintenanceType = await _context.MaintenanceTypes
+                    .FirstOrDefaultAsync(m => m.Name == request.MaintenanceType && m.TenantId == tenantId);
+                maintenanceTypeId = maintenanceType?.Id;
+            }
+
             // Convert items to JSON
             var itemsJson = JsonSerializer.Serialize(request.Items.Select((item, index) => new
             {
@@ -181,8 +210,11 @@ public class QualityChecklistController : ControllerBase
                 Name = request.Name,
                 Description = request.Description,
                 WorkOrderType = request.WorkOrderType,
+                WorkOrderTypeId = workOrderTypeId,
                 AssetCategory = request.AssetCategory,
+                AssetCategoryId = assetCategoryId,
                 MaintenanceType = request.MaintenanceType,
+                MaintenanceTypeId = maintenanceTypeId,
                 IsMandatory = request.IsMandatory,
                 IsActive = true,
                 ChecklistItems = itemsJson,
@@ -204,8 +236,11 @@ public class QualityChecklistController : ControllerBase
                 name = checklist.Name,
                 description = checklist.Description,
                 workOrderType = checklist.WorkOrderType,
+                workOrderTypeId = checklist.WorkOrderTypeId?.ToString(),
                 assetCategory = checklist.AssetCategory,
+                assetCategoryId = checklist.AssetCategoryId?.ToString(),
                 maintenanceType = checklist.MaintenanceType,
+                maintenanceTypeId = checklist.MaintenanceTypeId?.ToString(),
                 isMandatory = checklist.IsMandatory,
                 isActive = checklist.IsActive,
                 minimumPassingScore = checklist.MinimumPassingScore,
@@ -255,6 +290,35 @@ public class QualityChecklistController : ControllerBase
             var currentUserId = Guid.Empty; // TODO: Get from current user service when auth is enabled
             var now = DateTime.UtcNow;
 
+            // Resolve IDs from names if not provided
+            Guid? workOrderTypeId = request.WorkOrderTypeId;
+            Guid? assetCategoryId = request.AssetCategoryId;
+            Guid? maintenanceTypeId = request.MaintenanceTypeId;
+
+            // Look up WorkOrderType by name if ID not provided
+            if (!workOrderTypeId.HasValue && !string.IsNullOrEmpty(request.WorkOrderType))
+            {
+                var workOrderType = await _context.WorkOrderTypes
+                    .FirstOrDefaultAsync(w => w.Name == request.WorkOrderType && w.TenantId == existingChecklist.TenantId);
+                workOrderTypeId = workOrderType?.Id;
+            }
+
+            // Look up AssetCategory by name if ID not provided
+            if (!assetCategoryId.HasValue && !string.IsNullOrEmpty(request.AssetCategory))
+            {
+                var assetCategory = await _context.MaintenanceAssetCategories
+                    .FirstOrDefaultAsync(a => a.Name == request.AssetCategory && a.TenantId == existingChecklist.TenantId);
+                assetCategoryId = assetCategory?.Id;
+            }
+
+            // Look up MaintenanceType by name if ID not provided
+            if (!maintenanceTypeId.HasValue && !string.IsNullOrEmpty(request.MaintenanceType))
+            {
+                var maintenanceType = await _context.MaintenanceTypes
+                    .FirstOrDefaultAsync(m => m.Name == request.MaintenanceType && m.TenantId == existingChecklist.TenantId);
+                maintenanceTypeId = maintenanceType?.Id;
+            }
+
             // Convert items to JSON
             var itemsJson = JsonSerializer.Serialize(request.Items.Select((item, index) => new
             {
@@ -267,8 +331,11 @@ public class QualityChecklistController : ControllerBase
             existingChecklist.Name = request.Name;
             existingChecklist.Description = request.Description;
             existingChecklist.WorkOrderType = request.WorkOrderType;
+            existingChecklist.WorkOrderTypeId = workOrderTypeId;
             existingChecklist.AssetCategory = request.AssetCategory;
+            existingChecklist.AssetCategoryId = assetCategoryId;
             existingChecklist.MaintenanceType = request.MaintenanceType;
+            existingChecklist.MaintenanceTypeId = maintenanceTypeId;
             existingChecklist.IsMandatory = request.IsMandatory;
             existingChecklist.IsActive = request.IsActive;
             existingChecklist.ChecklistItems = itemsJson;
@@ -285,8 +352,11 @@ public class QualityChecklistController : ControllerBase
                 name = existingChecklist.Name,
                 description = existingChecklist.Description,
                 workOrderType = existingChecklist.WorkOrderType,
+                workOrderTypeId = existingChecklist.WorkOrderTypeId?.ToString(),
                 assetCategory = existingChecklist.AssetCategory,
+                assetCategoryId = existingChecklist.AssetCategoryId?.ToString(),
                 maintenanceType = existingChecklist.MaintenanceType,
+                maintenanceTypeId = existingChecklist.MaintenanceTypeId?.ToString(),
                 isMandatory = existingChecklist.IsMandatory,
                 isActive = existingChecklist.IsActive,
                 minimumPassingScore = existingChecklist.MinimumPassingScore,
@@ -531,8 +601,11 @@ public class QualityChecklistController : ControllerBase
         public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
         public string WorkOrderType { get; set; } = string.Empty;
+        public Guid? WorkOrderTypeId { get; set; }
         public string AssetCategory { get; set; } = string.Empty;
+        public Guid? AssetCategoryId { get; set; }
         public string? MaintenanceType { get; set; }
+        public Guid? MaintenanceTypeId { get; set; }
         public bool IsMandatory { get; set; } = true;
         public int MinimumPassingScore { get; set; } = 80;
         public List<CreateChecklistItemRequest> Items { get; set; } = new();
@@ -543,8 +616,11 @@ public class QualityChecklistController : ControllerBase
         public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
         public string WorkOrderType { get; set; } = string.Empty;
+        public Guid? WorkOrderTypeId { get; set; }
         public string AssetCategory { get; set; } = string.Empty;
+        public Guid? AssetCategoryId { get; set; }
         public string? MaintenanceType { get; set; }
+        public Guid? MaintenanceTypeId { get; set; }
         public bool IsMandatory { get; set; } = true;
         public bool IsActive { get; set; } = true;
         public int MinimumPassingScore { get; set; } = 80;

@@ -18,7 +18,9 @@ public enum AttachmentEntityType
 {
     WorkOrder = 0,
     Asset = 1,
-    Inspection = 2
+    Inspection = 2,
+    FleetCompliance = 3,
+    FleetIncident = 4
 }
 
 /// <summary>
@@ -105,4 +107,14 @@ public enum AssetTypeClassification
     Tool = 6,
     Safety = 7,
     Other = 99
+}
+
+/// <summary>
+/// Ownership classification for assets (primarily vehicles).
+/// </summary>
+public enum AssetOwnershipType
+{
+    Owned = 0,
+    Leased = 1,
+    Rented = 2
 }

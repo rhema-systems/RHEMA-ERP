@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Maintenance;
 
@@ -1133,6 +1134,10 @@ public class MaintenanceTypeDto
     public string Location { get; set; } = string.Empty; // Internal, External, Onsite, Offsite
     public string Priority { get; set; } = string.Empty;
     public decimal EstimatedDuration { get; set; }
+    /// <summary>
+    /// Fixed billing amount for maintenance-type work orders
+    /// </summary>
+    public decimal FixedAmount { get; set; }
     public bool IsActive { get; set; }
     public bool RequiresDowntime { get; set; }
     public string Color { get; set; } = string.Empty;
@@ -1168,6 +1173,12 @@ public class CreateMaintenanceTypeDto
 
     [Range(0.1, 24)]
     public decimal EstimatedDuration { get; set; } = 1.0m;
+
+    /// <summary>
+    /// Fixed billing amount for maintenance-type work orders
+    /// </summary>
+    [Range(0, double.MaxValue)]
+    public decimal FixedAmount { get; set; } = 0;
 
     public bool IsActive { get; set; } = true;
     public bool RequiresDowntime { get; set; } = false;
@@ -1963,7 +1974,11 @@ public class MaintenanceAssetDto
     public Guid AssetCategoryId { get; set; }
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
+    public int? Year { get; set; }
+    public AssetOwnershipType OwnershipType { get; set; } = AssetOwnershipType.Owned;
     public string? SerialNumber { get; set; }
+    public string? LicensePlate { get; set; }
+    public string? VIN { get; set; }
     public DateTime? PurchaseDate { get; set; }
     public decimal? PurchasePrice { get; set; }
     public decimal? CurrentValue { get; set; }
@@ -2005,6 +2020,10 @@ public class MaintenanceAssetListDto
     public string? AssetType { get; set; }
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
+    public int? Year { get; set; }
+    public AssetOwnershipType OwnershipType { get; set; } = AssetOwnershipType.Owned;
+    public string? LicensePlate { get; set; }
+    public string? VIN { get; set; }
     public string Status { get; set; } = string.Empty;
     public string Criticality { get; set; } = string.Empty;
     public string? Location { get; set; }
@@ -2039,8 +2058,18 @@ public class CreateMaintenanceAssetDto
     [StringLength(100)]
     public string? Model { get; set; }
 
+    public int? Year { get; set; }
+
+    public AssetOwnershipType OwnershipType { get; set; } = AssetOwnershipType.Owned;
+
     [StringLength(50)]
     public string? SerialNumber { get; set; }
+
+    [StringLength(50)]
+    public string? LicensePlate { get; set; }
+
+    [StringLength(50)]
+    public string? VIN { get; set; }
 
     public DateTime? PurchaseDate { get; set; }
     public decimal? PurchasePrice { get; set; }
@@ -2089,8 +2118,18 @@ public class UpdateMaintenanceAssetDto
     [StringLength(100)]
     public string? Model { get; set; }
 
+    public int? Year { get; set; }
+
+    public AssetOwnershipType OwnershipType { get; set; } = AssetOwnershipType.Owned;
+
     [StringLength(50)]
     public string? SerialNumber { get; set; }
+
+    [StringLength(50)]
+    public string? LicensePlate { get; set; }
+
+    [StringLength(50)]
+    public string? VIN { get; set; }
 
     public DateTime? PurchaseDate { get; set; }
     public decimal? PurchasePrice { get; set; }
@@ -2341,6 +2380,14 @@ public class WorkOrderDto
     public DateTime? ActualCompletionDate { get; set; }
     public decimal EstimatedCost { get; set; }
     public decimal ActualCost { get; set; }
+    /// <summary>
+    /// Billing type: "Maintenance" uses fixed amount, "Repairs" uses itemized costs
+    /// </summary>
+    public string BillingType { get; set; } = "Repairs";
+    /// <summary>
+    /// Fixed billing amount for Maintenance billing type
+    /// </summary>
+    public decimal FixedAmount { get; set; }
     public double EstimatedHours { get; set; }
     public double ActualHours { get; set; }
     public Guid? RequestedById { get; set; }
@@ -2476,6 +2523,17 @@ public class CreateWorkOrderDto
 
     public decimal EstimatedCost { get; set; }
     public double EstimatedHours { get; set; }
+
+    /// <summary>
+    /// Billing type: "Maintenance" uses fixed amount, "Repairs" uses itemized costs
+    /// </summary>
+    [StringLength(20)]
+    public string BillingType { get; set; } = "Repairs";
+
+    /// <summary>
+    /// Fixed billing amount for Maintenance billing type
+    /// </summary>
+    public decimal FixedAmount { get; set; } = 0;
 
     [StringLength(500)]
     public string? SafetyRequirements { get; set; }

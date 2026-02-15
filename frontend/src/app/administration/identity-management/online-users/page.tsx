@@ -717,14 +717,14 @@ export default function OnlineUsersPage() {
                         <ClientOnly fallback={
                           <div className="h-10 bg-muted/50 rounded-md border" />
                         }>
-                          <Select onValueChange={field.onChange} value={field.value}>
+                          <Select onValueChange={v => field.onChange(v === '__all__' ? '' : v)} value={field.value || '__all__'}>
                             <FormControl>
                               <SelectTrigger>
                                 <SelectValue placeholder="All device types" />
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              <SelectItem value="">All device types</SelectItem>
+                              <SelectItem value="__all__">All device types</SelectItem>
                               <SelectItem value="Desktop">Desktop</SelectItem>
                               <SelectItem value="Mobile">Mobile</SelectItem>
                               <SelectItem value="Tablet">Tablet</SelectItem>
@@ -1008,14 +1008,14 @@ export default function OnlineUsersPage() {
                         <ClientOnly fallback={
                           <div className="h-10 bg-muted/50 rounded-md border" />
                         }>
-                          <Select onValueChange={field.onChange} value={field.value}>
+                          <Select onValueChange={v => field.onChange(v === '__all__' ? '' : v)} value={field.value || '__all__'}>
                             <FormControl>
                               <SelectTrigger>
                                 <SelectValue placeholder="Any device type" />
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              <SelectItem value="">Any device type</SelectItem>
+                              <SelectItem value="__all__">Any device type</SelectItem>
                               <SelectItem value="Desktop">Desktop</SelectItem>
                               <SelectItem value="Mobile">Mobile</SelectItem>
                               <SelectItem value="Tablet">Tablet</SelectItem>

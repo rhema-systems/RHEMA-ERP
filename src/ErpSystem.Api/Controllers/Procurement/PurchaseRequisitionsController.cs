@@ -1,7 +1,11 @@
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -18,15 +22,39 @@ public class PurchaseRequisitionsController : ControllerBase
 {
     private readonly IPurchaseRequisitionRepository _purchaseRequisitionRepository;
     private readonly IPurchaseRequisitionItemRepository _purchaseRequisitionItemRepository;
+    private readonly IRfqService _rfqService;
+    private readonly ITenantContext _tenantContext;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
+    private readonly IWorkflowService _workflowService;
+    private readonly IAppEventBus _appEventBus;
     private readonly ILogger<PurchaseRequisitionsController> _logger;
 
     public PurchaseRequisitionsController(
         IPurchaseRequisitionRepository purchaseRequisitionRepository,
         IPurchaseRequisitionItemRepository purchaseRequisitionItemRepository,
+        IRfqService rfqService,
+        ITenantContext tenantContext,
+        IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
+        IWorkflowService workflowService,
+        IAppEventBus appEventBus,
         ILogger<PurchaseRequisitionsController> logger)
     {
         _purchaseRequisitionRepository = purchaseRequisitionRepository;
         _purchaseRequisitionItemRepository = purchaseRequisitionItemRepository;
+        _rfqService = rfqService;
+        _tenantContext = tenantContext;
+        _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
+        _workflowService = workflowService;
+        _appEventBus = appEventBus;
         _logger = logger;
     }
 
@@ -62,6 +90,27 @@ public class PurchaseRequisitionsController : ControllerBase
                 TotalAmount = r.TotalAmount,
                 ItemCount = r.Items?.Count ?? 0
             }).ToList();
+
+            // Provide more accurate UX for pending approvals: show the actual current workflow step name.
+            var pendingDtos = requisitionDtos
+                .Where(d => d.Status == "Pending Approval" || d.Status == "Submitted")
+                .ToList();
+
+            if (pendingDtos.Count > 0)
+            {
+                await Task.WhenAll(pendingDtos.Select(async dto =>
+                {
+                    try
+                    {
+                        var currentStep = await _workflowService.GetCurrentWorkflowStepAsync("PurchaseRequisition", dto.Id);
+                        dto.CurrentWorkflowStepName = currentStep?.StepName;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to resolve current workflow step for PR {RequisitionId}", dto.Id);
+                    }
+                }));
+            }
 
             var result = new PagedResult<PurchaseRequisitionSummaryDto>
             {
@@ -125,8 +174,8 @@ public class PurchaseRequisitionsController : ControllerBase
                     EstimatedUnitPrice = item.EstimatedUnitPrice,
                     LineTotal = item.LineTotal,
                     RequiredDate = item.RequiredDate,
-                    PreferredSupplierId = item.PreferredSupplierId,
-                    PreferredSupplierName = item.PreferredSupplier?.Name,
+                    PreferredSupplierId = item.PreferredBusinessPartnerId,
+                    PreferredSupplierName = item.PreferredBusinessPartner?.PartnerName,
                     Notes = item.Notes,
                     Specifications = item.Specifications,
                     Status = item.Status,
@@ -136,6 +185,19 @@ public class PurchaseRequisitionsController : ControllerBase
                     ItemName = item.InventoryItem?.Name
                 }).ToList()
             };
+
+            if (requisitionDto.Status == "Pending Approval" || requisitionDto.Status == "Submitted")
+            {
+                try
+                {
+                    var currentStep = await _workflowService.GetCurrentWorkflowStepAsync("PurchaseRequisition", requisitionDto.Id);
+                    requisitionDto.CurrentWorkflowStepName = currentStep?.StepName;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to resolve current workflow step for PR {RequisitionId}", requisitionDto.Id);
+                }
+            }
 
             return Ok(requisitionDto);
         }
@@ -160,6 +222,9 @@ public class PurchaseRequisitionsController : ControllerBase
                 return BadRequest(ModelState);
             }
 
+            // Get tenant ID from context
+            var tenantId = _tenantContext.GetCurrentTenantId();
+
             // Generate requisition number
             var requisitionNumber = await _purchaseRequisitionRepository.GenerateRequisitionNumberAsync();
 
@@ -169,6 +234,7 @@ public class PurchaseRequisitionsController : ControllerBase
             var requisition = new PurchaseRequisition
             {
                 Id = Guid.NewGuid(),
+                TenantId = tenantId,
                 RequisitionNumber = requisitionNumber,
                 RequisitionDate = DateTime.UtcNow,
                 RequestedById = createDto.RequestedById,
@@ -192,15 +258,16 @@ public class PurchaseRequisitionsController : ControllerBase
                 var item = new PurchaseRequisitionItem
                 {
                     Id = Guid.NewGuid(),
+                    TenantId = tenantId,
                     RequisitionId = requisition.Id,
                     InventoryItemId = itemDto.InventoryItemId,
                     ItemDescription = itemDto.ItemDescription,
                     Quantity = itemDto.Quantity,
-                    UnitOfMeasure = itemDto.UnitOfMeasure,
+                    UnitOfMeasure = itemDto.UnitOfMeasure ?? "EA",
                     EstimatedUnitPrice = itemDto.EstimatedUnitPrice,
                     LineTotal = itemDto.Quantity * itemDto.EstimatedUnitPrice,
                     RequiredDate = itemDto.RequiredDate,
-                    PreferredSupplierId = itemDto.PreferredSupplierId,
+                    PreferredBusinessPartnerId = itemDto.PreferredSupplierId,
                     Notes = itemDto.Notes,
                     Specifications = itemDto.Specifications,
                     Status = "Pending",
@@ -209,6 +276,38 @@ public class PurchaseRequisitionsController : ControllerBase
                 };
 
                 await _purchaseRequisitionItemRepository.CreateItemAsync(item);
+            }
+
+            // CRITICAL: Save changes to database
+            await _unitOfWork.SaveChangesAsync();
+
+            // Publish event for admin-configurable notification topics (best-effort).
+            try
+            {
+                var triggeredBy = _currentUserProvider.IsAuthenticated ? _currentUserProvider.UserId : (Guid?)null;
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = tenantId,
+                    EntityType = "PurchaseRequisition",
+                    Activity = "Created",
+                    Audience = "Internal",
+                    EntityId = requisition.Id,
+                    TriggeredByUserId = triggeredBy,
+                    Data = new Dictionary<string, object>
+                    {
+                        ["PurchaseRequisitionId"] = requisition.Id,
+                        ["RequisitionNumber"] = requisition.RequisitionNumber ?? string.Empty,
+                        ["Status"] = requisition.Status ?? string.Empty,
+                        ["Priority"] = requisition.Priority ?? string.Empty,
+                        ["Department"] = requisition.Department ?? string.Empty,
+                        ["TotalAmount"] = requisition.TotalAmount,
+                        ["RequestedById"] = requisition.RequestedById
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish PurchaseRequisition.Created entity activity event for requisition {RequisitionId}", requisition.Id);
             }
 
             // Return the created requisition
@@ -242,6 +341,7 @@ public class PurchaseRequisitionsController : ControllerBase
             }
 
             await _purchaseRequisitionRepository.UpdateStatusAsync(id, statusDto.Status);
+            await _unitOfWork.SaveChangesAsync();
 
             return NoContent();
         }
@@ -265,6 +365,11 @@ public class PurchaseRequisitionsController : ControllerBase
                 return BadRequest(ModelState);
             }
 
+            if (!_currentUserProvider.IsAuthenticated)
+            {
+                return Unauthorized("User is not authenticated");
+            }
+
             var requisition = await _purchaseRequisitionRepository.GetRequisitionByIdAsync(id);
             if (requisition == null)
             {
@@ -276,21 +381,84 @@ public class PurchaseRequisitionsController : ControllerBase
                 return BadRequest($"Purchase requisition cannot be approved in current status: {requisition.Status}");
             }
 
-            if (approvalDto.Approved)
+            var userId = _currentUserProvider.UserId;
+            if (userId == Guid.Empty)
             {
-                await _purchaseRequisitionRepository.UpdateStatusAsync(id, "Approved");
-            }
-            else
-            {
-                await _purchaseRequisitionRepository.UpdateStatusAsync(id, "Rejected");
-                if (!string.IsNullOrEmpty(approvalDto.RejectionReason))
-                {
-                    requisition.RejectionReason = approvalDto.RejectionReason;
-                    await _purchaseRequisitionRepository.UpdateRequisitionAsync(requisition);
-                }
+                return Unauthorized("User identifier claim is missing or invalid");
             }
 
-            return NoContent();
+            var canApprove = await _workflowIntegrationService.CanUserApproveAsync("PurchaseRequisition", id, userId);
+            if (!canApprove)
+            {
+                return StatusCode(403, "You are not assigned as an approver for the current workflow step");
+            }
+
+            var action = approvalDto.Approved ? "approve" : "reject";
+            var comments = approvalDto.Comments;
+            if (!approvalDto.Approved && string.IsNullOrWhiteSpace(comments))
+            {
+                comments = approvalDto.RejectionReason;
+            }
+
+            if (!approvalDto.Approved && string.IsNullOrWhiteSpace(comments))
+            {
+                return BadRequest("Rejection comment is required");
+            }
+
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                "PurchaseRequisition",
+                id,
+                userId,
+                action,
+                comments);
+
+            var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("PurchaseRequisition");
+            statusAdapter.ApplyApprovalOutcome(requisition, workflowResult.Outcome, userId, approvalDto.RejectionReason);
+
+            await _purchaseRequisitionRepository.UpdateRequisitionAsync(requisition);
+            await _unitOfWork.SaveChangesAsync();
+
+            // Publish event for admin-configurable notification topics (best-effort).
+            try
+            {
+                var activity = approvalDto.Approved ? "Approved" : "Rejected";
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = requisition.TenantId,
+                    EntityType = "PurchaseRequisition",
+                    Activity = activity,
+                    Audience = "Internal",
+                    EntityId = requisition.Id,
+                    TriggeredByUserId = userId,
+                    Data = new Dictionary<string, object>
+                    {
+                        ["PurchaseRequisitionId"] = requisition.Id,
+                        ["RequisitionNumber"] = requisition.RequisitionNumber ?? string.Empty,
+                        ["Status"] = requisition.Status ?? string.Empty,
+                        ["WorkflowInstanceId"] = workflowResult.ExecutionResult.WorkflowInstanceId,
+                        ["WorkflowOutcome"] = workflowResult.Outcome.ToString(),
+                        ["Comments"] = comments ?? string.Empty,
+                        ["RejectionReason"] = approvalDto.RejectionReason ?? string.Empty
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish PurchaseRequisition approval entity activity event for requisition {RequisitionId}", requisition.Id);
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = approvalDto.Approved ? "Purchase requisition approved" : "Purchase requisition rejected",
+                data = new
+                {
+                    id = requisition.Id,
+                    status = requisition.Status,
+                    workflowInstanceId = workflowResult.ExecutionResult.WorkflowInstanceId,
+                    workflowOutcome = workflowResult.Outcome.ToString()
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -307,6 +475,11 @@ public class PurchaseRequisitionsController : ControllerBase
     {
         try
         {
+            if (!_currentUserProvider.IsAuthenticated)
+            {
+                return Unauthorized();
+            }
+
             var requisition = await _purchaseRequisitionRepository.GetRequisitionByIdAsync(id);
             if (requisition == null)
             {
@@ -318,9 +491,60 @@ public class PurchaseRequisitionsController : ControllerBase
                 return BadRequest($"Purchase requisition cannot be submitted in current status: {requisition.Status}");
             }
 
-            await _purchaseRequisitionRepository.UpdateStatusAsync(id, "Pending Approval");
+            WorkflowIntegrationResult workflowResult;
+            try
+            {
+                workflowResult = await _workflowIntegrationService.SubmitAsync("PurchaseRequisition", id);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
 
-            return NoContent();
+            var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("PurchaseRequisition");
+            statusAdapter.ApplySubmitOutcome(requisition, workflowResult.Outcome, _currentUserProvider.UserId);
+
+            await _purchaseRequisitionRepository.UpdateRequisitionAsync(requisition);
+            await _unitOfWork.SaveChangesAsync();
+
+            // Publish event for admin-configurable notification topics (best-effort).
+            try
+            {
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = requisition.TenantId,
+                    EntityType = "PurchaseRequisition",
+                    Activity = "Submitted",
+                    Audience = "Internal",
+                    EntityId = requisition.Id,
+                    TriggeredByUserId = _currentUserProvider.UserId,
+                    Data = new Dictionary<string, object>
+                    {
+                        ["PurchaseRequisitionId"] = requisition.Id,
+                        ["RequisitionNumber"] = requisition.RequisitionNumber ?? string.Empty,
+                        ["Status"] = requisition.Status ?? string.Empty,
+                        ["WorkflowInstanceId"] = workflowResult.ExecutionResult.WorkflowInstanceId,
+                        ["WorkflowOutcome"] = workflowResult.Outcome.ToString()
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish PurchaseRequisition.Submitted entity activity event for requisition {RequisitionId}", requisition.Id);
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = "Purchase requisition submitted for approval",
+                data = new
+                {
+                    id = requisition.Id,
+                    status = requisition.Status,
+                    workflowInstanceId = workflowResult.ExecutionResult.WorkflowInstanceId,
+                    workflowOutcome = workflowResult.Outcome.ToString()
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -353,6 +577,7 @@ public class PurchaseRequisitionsController : ControllerBase
                 ItemCount = r.Items?.Count ?? 0
             }).ToList();
 
+            await PopulateCurrentStepNamesAsync(requisitionDtos);
             return Ok(requisitionDtos);
         }
         catch (Exception ex)
@@ -386,6 +611,7 @@ public class PurchaseRequisitionsController : ControllerBase
                 ItemCount = r.Items?.Count ?? 0
             }).ToList();
 
+            await PopulateCurrentStepNamesAsync(requisitionDtos);
             return Ok(requisitionDtos);
         }
         catch (Exception ex)
@@ -419,6 +645,7 @@ public class PurchaseRequisitionsController : ControllerBase
                 ItemCount = r.Items?.Count ?? 0
             }).ToList();
 
+            await PopulateCurrentStepNamesAsync(requisitionDtos);
             return Ok(requisitionDtos);
         }
         catch (Exception ex)
@@ -452,6 +679,7 @@ public class PurchaseRequisitionsController : ControllerBase
                 ItemCount = r.Items?.Count ?? 0
             }).ToList();
 
+            await PopulateCurrentStepNamesAsync(requisitionDtos);
             return Ok(requisitionDtos);
         }
         catch (Exception ex)
@@ -486,6 +714,7 @@ public class PurchaseRequisitionsController : ControllerBase
                 ItemCount = r.Items?.Count ?? 0
             }).ToList();
 
+            await PopulateCurrentStepNamesAsync(requisitionDtos);
             return Ok(requisitionDtos);
         }
         catch (Exception ex)
@@ -516,10 +745,10 @@ public class PurchaseRequisitionsController : ControllerBase
 
             var items = await _purchaseRequisitionItemRepository.GetItemsByRequisitionIdAsync(id);
 
-            // Group items by preferred supplier
+            // Group items by preferred business partner
             var supplierGroups = items
-                .Where(i => i.PreferredSupplierId.HasValue)
-                .GroupBy(i => i.PreferredSupplierId.Value);
+                .Where(i => i.PreferredBusinessPartnerId.HasValue)
+                .GroupBy(i => i.PreferredBusinessPartnerId.Value);
 
             var purchaseOrderDtos = new List<CreatePurchaseOrderDto>();
 
@@ -571,6 +800,118 @@ public class PurchaseRequisitionsController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Suggest suppliers for an RFQ based on the requisition's preferred suppliers and item-supplier mappings.
+    /// Returns suppliers ordered by relevance (preferred suppliers first).
+    /// </summary>
+    [HttpGet("{id}/suggested-suppliers")]
+    public async Task<ActionResult<List<SuggestedSupplierDto>>> GetSuggestedSuppliers(Guid id)
+    {
+        try
+        {
+            var requisition = await _purchaseRequisitionRepository.GetRequisitionByIdAsync(id);
+            if (requisition == null)
+                return NotFound($"Purchase requisition with ID {id} not found");
+
+            var items = (await _purchaseRequisitionItemRepository.GetItemsByRequisitionIdAsync(id)).ToList();
+
+            // Preferred suppliers from PR items.
+            var preferredSupplierIds = items
+                .Where(i => i.PreferredBusinessPartnerId.HasValue && i.PreferredBusinessPartnerId.Value != Guid.Empty)
+                .Select(i => i.PreferredBusinessPartnerId!.Value)
+                .ToList();
+
+            // Item-supplier mappings for PR inventory items.
+            var inventoryItemIds = items
+                .Where(i => i.InventoryItemId.HasValue && i.InventoryItemId.Value != Guid.Empty)
+                .Select(i => i.InventoryItemId!.Value)
+                .Distinct()
+                .ToList();
+
+            var itemSupplierRepo = _unitOfWork.Repository<ItemSupplier>();
+            var itemSuppliers = inventoryItemIds.Count == 0
+                ? new List<ItemSupplier>()
+                : (await itemSupplierRepo.FindAsync(x => inventoryItemIds.Contains(x.InventoryItemId) && !x.IsDeleted)).ToList();
+
+            // Score suppliers: preferred suppliers get priority; item matches are next.
+            var counts = new Dictionary<Guid, SuggestedSupplierDto>();
+
+            foreach (var prefId in preferredSupplierIds)
+            {
+                if (!counts.TryGetValue(prefId, out var dto))
+                {
+                    dto = new SuggestedSupplierDto { SupplierId = prefId };
+                    counts[prefId] = dto;
+                }
+                dto.PreferredItemCount++;
+            }
+
+            // For each PR item, count which suppliers can supply it.
+            var supplierIdsByItem = itemSuppliers
+                .GroupBy(s => s.InventoryItemId)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.SupplierId).Distinct().ToList());
+
+            foreach (var prItem in items)
+            {
+                if (!prItem.InventoryItemId.HasValue || prItem.InventoryItemId.Value == Guid.Empty)
+                    continue;
+
+                if (!supplierIdsByItem.TryGetValue(prItem.InventoryItemId.Value, out var supplierIds))
+                    continue;
+
+                foreach (var supplierId in supplierIds)
+                {
+                    if (!counts.TryGetValue(supplierId, out var dto))
+                    {
+                        dto = new SuggestedSupplierDto { SupplierId = supplierId };
+                        counts[supplierId] = dto;
+                    }
+                    dto.ItemMatchCount++;
+                }
+            }
+
+            var ordered = counts.Values
+                .OrderByDescending(x => x.PreferredItemCount)
+                .ThenByDescending(x => x.ItemMatchCount)
+                .ToList();
+
+            return Ok(ordered);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating suggested suppliers for requisition {RequisitionId}", id);
+            return StatusCode(500, "An error occurred while generating suggested suppliers");
+        }
+    }
+
+    /// <summary>
+    /// Creates a Draft RFQ from an approved purchase requisition.
+    /// The RFQ can then be edited (suppliers, deadline) and sent to notify suppliers.
+    /// </summary>
+    [HttpPost("{id}/create-rfq")]
+    public async Task<ActionResult<CreateRfqFromPurchaseRequisitionResponseDto>> CreateRfqFromPurchaseRequisition(Guid id)
+    {
+        try
+        {
+            var rfq = await _rfqService.CreateRfqFromPurchaseRequisitionAsync(id);
+
+            return Ok(new CreateRfqFromPurchaseRequisitionResponseDto
+            {
+                RfqId = rfq.Id,
+                RfqNumber = rfq.RfqNumber
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating RFQ from requisition {RequisitionId}", id);
+            return StatusCode(500, "An error occurred while creating the RFQ");
+        }
+    }
+
     #region Private Helper Methods
 
     private async Task<PurchaseRequisitionDetailDto> GetPurchaseRequisitionDetailDto(Guid requisitionId)
@@ -612,8 +953,8 @@ public class PurchaseRequisitionsController : ControllerBase
                 EstimatedUnitPrice = item.EstimatedUnitPrice,
                 LineTotal = item.LineTotal,
                 RequiredDate = item.RequiredDate,
-                PreferredSupplierId = item.PreferredSupplierId,
-                PreferredSupplierName = item.PreferredSupplier?.Name,
+                PreferredSupplierId = item.PreferredBusinessPartnerId,
+                PreferredSupplierName = item.PreferredBusinessPartner?.PartnerName,
                 Notes = item.Notes,
                 Specifications = item.Specifications,
                 Status = item.Status,
@@ -623,6 +964,31 @@ public class PurchaseRequisitionsController : ControllerBase
                 ItemName = item.InventoryItem?.Name
             }).ToList()
         };
+    }
+
+    private async Task PopulateCurrentStepNamesAsync(IEnumerable<PurchaseRequisitionSummaryDto> requisitions)
+    {
+        var pending = requisitions
+            .Where(d => d.Status == "Pending Approval" || d.Status == "Submitted")
+            .ToList();
+
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        await Task.WhenAll(pending.Select(async dto =>
+        {
+            try
+            {
+                var currentStep = await _workflowService.GetCurrentWorkflowStepAsync("PurchaseRequisition", dto.Id);
+                dto.CurrentWorkflowStepName = currentStep?.StepName;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to resolve current workflow step for PR {RequisitionId}", dto.Id);
+            }
+        }));
     }
 
     #endregion

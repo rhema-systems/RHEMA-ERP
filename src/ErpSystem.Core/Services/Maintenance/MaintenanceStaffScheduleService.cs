@@ -40,6 +40,14 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
     {
         try
         {
+            var technician = await _employeeRepository.GetByIdAsync(createDto.TechnicianId, e => e.Department);
+            if (technician == null)
+                throw new ArgumentException($"Technician with ID {createDto.TechnicianId} not found in HR system");
+            if (!technician.IsActive)
+                throw new InvalidOperationException($"Technician {technician.FullName} is not active");
+            if (!technician.CanBeAssignedToMaintenance)
+                throw new InvalidOperationException($"Employee {technician.FullName} is not qualified for maintenance assignments");
+
             var schedule = new MaintenanceStaffSchedule
             {
                 TechnicianId = createDto.TechnicianId,
@@ -325,14 +333,18 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
     {
         string technicianName = string.Empty;
 
-        // TechnicianId now references ApplicationUser (Users table) instead of Employee.
-        // Resolve via IUserService (which queries identity users) so we get names from the Users table.
+        // TechnicianId is employee-driven (HR Employees table).
+        // Backward compatibility: if an old schedule still has a user-based TechnicianId, fall back to IUserService.
         try
         {
-            var user = await _userService.GetUserByIdAsync(schedule.TechnicianId);
-            if (user != null)
+            var employee = await _employeeRepository.GetByIdAsync(schedule.TechnicianId);
+            if (employee != null)
+                technicianName = employee.FullName;
+            else
             {
-                technicianName = $"{user.FirstName} {user.LastName}";
+                var user = await _userService.GetUserByIdAsync(schedule.TechnicianId);
+                if (user != null)
+                    technicianName = $"{user.FirstName} {user.LastName}";
             }
         }
         catch { }

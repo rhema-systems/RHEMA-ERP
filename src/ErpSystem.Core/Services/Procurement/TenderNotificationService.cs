@@ -15,7 +15,9 @@ public class TenderNotificationService : ITenderNotificationService
     private readonly ITenderClarificationRepository _clarificationRepository;
     private readonly ITenderRevisionRepository _revisionRepository;
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
+    private readonly ITenderInvitationDocumentService _tenderInvitationDocumentService;
     private readonly INotificationService _notificationService;
+    private readonly IAwardLetterService _awardLetterService;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IConfiguration _configuration;
     private readonly ILogger<TenderNotificationService> _logger;
@@ -28,7 +30,9 @@ public class TenderNotificationService : ITenderNotificationService
         ITenderClarificationRepository clarificationRepository,
         ITenderRevisionRepository revisionRepository,
         IBusinessPartnerRepository businessPartnerRepository,
+        ITenderInvitationDocumentService tenderInvitationDocumentService,
         INotificationService notificationService,
+        IAwardLetterService awardLetterService,
         ICurrentUserProvider currentUserProvider,
         IConfiguration configuration,
         ILogger<TenderNotificationService> logger)
@@ -40,18 +44,45 @@ public class TenderNotificationService : ITenderNotificationService
         _clarificationRepository = clarificationRepository;
         _revisionRepository = revisionRepository;
         _businessPartnerRepository = businessPartnerRepository;
+        _tenderInvitationDocumentService = tenderInvitationDocumentService;
         _notificationService = notificationService;
+        _awardLetterService = awardLetterService;
         _currentUserProvider = currentUserProvider;
         _configuration = configuration;
         _logger = logger;
     }
 
-    public async Task SendTenderPublishedNotificationAsync(Guid tenderId, List<Guid> businessPartnerIds)
+    public async Task SendTenderPublishedNotificationAsync(Guid tenderId, List<Guid> businessPartnerIds, List<string>? externalRecipientEmails = null)
     {
         try
         {
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+
+            // For RFQs, attach a concise PDF package so even pending/unregistered suppliers can respond.
+            // We generate once per tender and attach to each recipient (sent individually for privacy).
+            List<EmailAttachmentInfo>? rfqAttachments = null;
+            if (string.Equals(tender.TenderType, "RFQ", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var (content, fileName) = await _tenderInvitationDocumentService.GenerateTenderInvitationPdfAsync(tenderId);
+                    rfqAttachments = new List<EmailAttachmentInfo>
+                    {
+                        new EmailAttachmentInfo
+                        {
+                            FileName = fileName,
+                            Content = content,
+                            ContentType = "application/pdf"
+                        }
+                    };
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to generate RFQ invitation PDF for tender {TenderId}. Continuing without attachments.", tenderId);
+                    rfqAttachments = null;
+                }
+            }
 
             foreach (var businessPartnerId in businessPartnerIds)
             {
@@ -98,21 +129,77 @@ public class TenderNotificationService : ITenderNotificationService
                 {
                     var emailSubject = $"Tender Invitation: {tender.TenderNumber}";
                     var emailBody = GenerateTenderInvitationEmailBody(tender, businessPartner);
-
-                    await _notificationService.SendEmailAsync(
-                        businessPartner.PrimaryEmail,
-                        emailSubject,
-                        emailBody,
-                        isHtml: true
-                    );
+                    if (rfqAttachments != null && rfqAttachments.Count > 0)
+                    {
+                        await _notificationService.SendEmailWithAttachmentsAsync(
+                            businessPartner.PrimaryEmail,
+                            emailSubject,
+                            emailBody,
+                            rfqAttachments,
+                            isHtml: true
+                        );
+                    }
+                    else
+                    {
+                        await _notificationService.SendEmailAsync(
+                            businessPartner.PrimaryEmail,
+                            emailSubject,
+                            emailBody,
+                            isHtml: true
+                        );
+                    }
 
                     _logger.LogInformation("Sent tender invitation email to {Email} for tender {TenderId}",
                         businessPartner.PrimaryEmail, tenderId);
                 }
             }
 
-            _logger.LogInformation("Sent tender published notifications for tender {TenderId} to {Count} business partners",
-                tenderId, businessPartnerIds.Count);
+            if (externalRecipientEmails != null && externalRecipientEmails.Any())
+            {
+                var distinctExternalEmails = externalRecipientEmails
+                    .Where(e => !string.IsNullOrWhiteSpace(e))
+                    .Select(e => e.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                foreach (var email in distinctExternalEmails)
+                {
+                    if (!email.Contains('@'))
+                    {
+                        _logger.LogWarning("Skipping invalid external recipient email: {Email}", email);
+                        continue;
+                    }
+
+                    var emailSubject = $"Tender Invitation: {tender.TenderNumber}";
+                    var emailBody = GenerateTenderInvitationEmailBody(tender, businessPartner: null);
+
+                    if (rfqAttachments != null && rfqAttachments.Count > 0)
+                    {
+                        await _notificationService.SendEmailWithAttachmentsAsync(
+                            email,
+                            emailSubject,
+                            emailBody,
+                            rfqAttachments,
+                            isHtml: true
+                        );
+                    }
+                    else
+                    {
+                        await _notificationService.SendEmailAsync(
+                            email,
+                            emailSubject,
+                            emailBody,
+                            isHtml: true
+                        );
+                    }
+
+                    _logger.LogInformation("Sent external tender invitation email to {Email} for tender {TenderId}", email, tenderId);
+                }
+            }
+
+            _logger.LogInformation(
+                "Sent tender published notifications for tender {TenderId} to {BusinessPartnerCount} business partners and {ExternalCount} external recipients",
+                tenderId, businessPartnerIds.Count, externalRecipientEmails?.Count ?? 0);
         }
         catch (Exception ex)
         {
@@ -133,10 +220,12 @@ public class TenderNotificationService : ITenderNotificationService
         };
     }
 
-    private string GenerateTenderInvitationEmailBody(Entities.Procurement.Tender tender, Entities.Procurement.BusinessPartner businessPartner)
+    private string GenerateTenderInvitationEmailBody(Entities.Procurement.Tender tender, Entities.Procurement.BusinessPartner? businessPartner)
     {
         var portalUrl = _configuration["FrontendUrl"] ?? "http://localhost:3000";
         var tenderTypeFullName = GetTenderTypeFullName(tender.TenderType);
+        var recipientName = businessPartner?.PartnerName ?? "Supplier";
+        var showPortalCta = businessPartner?.UserId.HasValue == true;
 
         return $@"
 <!DOCTYPE html>
@@ -158,7 +247,7 @@ public class TenderNotificationService : ITenderNotificationService
             <h1>Tender Invitation</h1>
         </div>
         <div class=""content"">
-            <p>Dear {businessPartner.PartnerName},</p>
+            <p>Dear {recipientName},</p>
 
             <p>You have been invited to participate in the following tender:</p>
 
@@ -173,10 +262,12 @@ public class TenderNotificationService : ITenderNotificationService
 
             {(!string.IsNullOrEmpty(tender.Description) ? $"<p><strong>Description:</strong><br/>{tender.Description}</p>" : "")}
 
-            <p>Please log in to the supplier portal to view the full tender details and submit your bid.</p>
+            {(string.Equals(tender.TenderType, "RFQ", StringComparison.OrdinalIgnoreCase)
+                ? "<p>Please find the RFQ details attached as a PDF.</p>"
+                : "<p>Please review the tender details and prepare your submission.</p>")}
 
             <div style=""text-align: center;"">
-                <a href=""{portalUrl}/external-portal/tenders/{tender.Id}"" class=""button"">View Tender Details</a>
+                {(showPortalCta ? $@"<a href=""{portalUrl}/external-portal/tenders/{tender.Id}"" class=""button"">View Tender Details</a>" : "")}
             </div>
 
             <p><strong>Important Notes:</strong></p>
@@ -331,13 +422,18 @@ public class TenderNotificationService : ITenderNotificationService
             // Send in-app notification if business partner has a linked user account
             if (businessPartner.UserId.HasValue)
             {
+                // Build award amount message including negotiation info if applicable
+                var awardAmountMessage = award.IsNegotiated
+                    ? $"Award amount: {award.AwardedAmount:N2} {award.Currency} (negotiated from {award.OriginalBidAmount:N2})"
+                    : $"Award amount: {award.AwardedAmount:N2} {award.Currency}";
+
                 await _notificationService.CreateNotificationAsync(
                     new CreateNotificationDto
                     {
                         RecipientId = businessPartner.UserId.Value,
                         Type = "InApp",
                         Title = "🏆 Congratulations! Tender Awarded",
-                        Message = $"Your bid for tender {tender.TenderNumber} - {tender.Title} has been awarded! Award amount: {award.AwardedAmount:N2} {award.Currency}",
+                        Message = $"Your bid for tender {tender.TenderNumber} - {tender.Title} has been awarded! {awardAmountMessage}",
                         Priority = "High",
                         EntityType = "TenderAward",
                         EntityId = awardId,
@@ -365,15 +461,36 @@ public class TenderNotificationService : ITenderNotificationService
                 var emailSubject = $"🏆 Congratulations! You Have Been Awarded Tender {tender.TenderNumber}";
                 var emailBody = GenerateAwardEmailBody(tender, businessPartner, award, bid);
 
-                await _notificationService.SendEmailAsync(
+                // Generate PDF award letter
+                var attachments = new List<EmailAttachmentInfo>();
+                try
+                {
+                    var (pdfBytes, fileName) = await _awardLetterService.GenerateAwardLetterAsync(awardId);
+                    attachments.Add(new EmailAttachmentInfo
+                    {
+                        FileName = fileName,
+                        Content = pdfBytes,
+                        ContentType = "application/pdf"
+                    });
+                    _logger.LogInformation("Generated PDF award letter {FileName} ({Size} bytes) for award {AwardId}",
+                        fileName, pdfBytes.Length, awardId);
+                }
+                catch (Exception pdfEx)
+                {
+                    _logger.LogWarning(pdfEx, "Failed to generate PDF award letter for award {AwardId}, sending email without attachment", awardId);
+                }
+
+                // Send email with PDF attachment
+                await _notificationService.SendEmailWithAttachmentsAsync(
                     businessPartner.PrimaryEmail,
                     emailSubject,
                     emailBody,
+                    attachments,
                     isHtml: true
                 );
 
-                _logger.LogInformation("Award email sent successfully to {Email} for award {AwardId}",
-                    businessPartner.PrimaryEmail, awardId);
+                _logger.LogInformation("Award email sent successfully to {Email} for award {AwardId} with {AttachmentCount} attachment(s)",
+                    businessPartner.PrimaryEmail, awardId, attachments.Count);
             }
             else
             {
@@ -440,8 +557,9 @@ public class TenderNotificationService : ITenderNotificationService
 
             <!-- Award Amount Highlight -->
             <div style=""background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 2px solid #f59e0b; border-radius: 12px; padding: 25px; margin-bottom: 25px; text-align: center;"">
-                <p style=""margin: 0 0 8px 0; color: #92400e; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;"">Award Amount</p>
+                <p style=""margin: 0 0 8px 0; color: #92400e; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;"">Award Amount{(award.IsNegotiated ? " (Negotiated)" : "")}</p>
                 <p style=""margin: 0; color: #78350f; font-size: 32px; font-weight: 700;"">{award.Currency} {award.AwardedAmount:N2}</p>
+                {(award.IsNegotiated ? $@"<p style=""margin: 8px 0 0 0; color: #92400e; font-size: 13px; text-decoration: line-through;"">Original: {award.Currency} {award.OriginalBidAmount:N2}</p>" : "")}
                 <p style=""margin: 10px 0 0 0; color: #92400e; font-size: 14px;"">Awarded on {award.AwardDate:MMMM dd, yyyy}</p>
             </div>
 
@@ -707,4 +825,3 @@ public class TenderNotificationService : ITenderNotificationService
         }
     }
 }
-

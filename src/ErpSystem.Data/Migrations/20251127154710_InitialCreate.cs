@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -8416,20 +8416,21 @@ namespace ErpSystem.Data.Migrations
                     { new Guid("00000000-0000-0000-0000-000000000010"), new Guid("00000000-0000-0000-0000-000000000004"), new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(5040), "System" }
                 });
 
+            // Seed default tenant modules (stable IDs; later migrations should not re-seed TenantModules)
+            var seedDateUtc = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             migrationBuilder.InsertData(
                 table: "TenantModules",
                 columns: new[] { "Id", "Configuration", "CreatedAt", "CreatedBy", "CreatedById", "DeletedAt", "DeletedBy", "Description", "DisabledDate", "EnabledDate", "IsDeleted", "LastModifiedById", "ModuleName", "Status", "TenantId", "UpdatedAt", "UpdatedBy" },
                 values: new object[,]
                 {
-                    { new Guid("00c7e607-254c-4be8-bcf6-c92f4702b913"), null, new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(4287), null, null, null, null, null, null, new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(4287), false, null, "Inventory", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("07adf90a-a98d-48df-8bf9-23039890a3ad"), null, new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(4301), null, null, null, null, null, null, new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(4300), false, null, "Marketing", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("469ec2d8-6973-4486-9674-be385aae40ee"), null, new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(4216), null, null, null, null, null, null, new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(4209), false, null, "Finance", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("6dfa83f6-c926-45bd-b110-9df5098e8fee"), null, new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(4247), null, null, null, null, null, null, new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(4247), false, null, "Sales", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("849598e0-fce8-4d27-9afd-f1d802939fc1"), null, new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(4314), null, null, null, null, null, null, new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(4313), false, null, "WorkflowEngine", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("8e037250-2ef9-4e07-b763-af622c02cc2c"), null, new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(4235), null, null, null, null, null, null, new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(4234), false, null, "HR", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
-                    { new Guid("cfa3a4fd-22c7-4ce8-acec-bc08c69c13d9"), null, new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(4274), null, null, null, null, null, null, new DateTime(2025, 11, 27, 15, 47, 6, 874, DateTimeKind.Utc).AddTicks(4274), false, null, "Procurement", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null }
+                    { new Guid("00000000-0000-0000-0000-000000010001"), null, seedDateUtc, null, null, null, null, null, null, seedDateUtc, false, null, "Finance", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
+                    { new Guid("00000000-0000-0000-0000-000000010002"), null, seedDateUtc, null, null, null, null, null, null, seedDateUtc, false, null, "HR", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
+                    { new Guid("00000000-0000-0000-0000-000000010003"), null, seedDateUtc, null, null, null, null, null, null, seedDateUtc, false, null, "Sales", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
+                    { new Guid("00000000-0000-0000-0000-000000010004"), null, seedDateUtc, null, null, null, null, null, null, seedDateUtc, false, null, "Procurement", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
+                    { new Guid("00000000-0000-0000-0000-000000010005"), null, seedDateUtc, null, null, null, null, null, null, seedDateUtc, false, null, "Inventory", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
+                    { new Guid("00000000-0000-0000-0000-000000010006"), null, seedDateUtc, null, null, null, null, null, null, seedDateUtc, false, null, "Marketing", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
+                    { new Guid("00000000-0000-0000-0000-000000010007"), null, seedDateUtc, null, null, null, null, null, null, seedDateUtc, false, null, "WorkflowEngine", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null }
                 });
-
             migrationBuilder.CreateIndex(
                 name: "IX_AspNetRoleClaims_RoleId",
                 table: "AspNetRoleClaims",

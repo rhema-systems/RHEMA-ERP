@@ -10,14 +10,29 @@ public class InventoryMappingProfile : Profile
     {
         // InventoryItem mappings
         CreateMap<InventoryItem, InventoryItemDto>()
-            .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.Category != null ? src.Category.Name : string.Empty));
+            .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.Category != null ? src.Category.Name : string.Empty))
+            .ForMember(dest => dest.IsActive, opt => opt.MapFrom(src => src.Status == ErpSystem.Core.Enums.ItemStatus.Active))
+            .ForMember(dest => dest.UnitOfMeasureScheduleId, opt => opt.MapFrom(src => src.UnitOfMeasureScheduleId))
+            .ForMember(dest => dest.UnitOfMeasureScheduleName, opt => opt.MapFrom(src => src.UnitOfMeasureSchedule != null ? src.UnitOfMeasureSchedule.Description : null))
+            .ForMember(dest => dest.ValuationMethod, opt => opt.MapFrom(src => src.ValuationMethod))
+            .ForMember(dest => dest.IsValuationLocked, opt => opt.MapFrom(src => src.IsValuationLocked));
 
         CreateMap<InventoryItem, InventoryItemDetailDto>()
             .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.Category != null ? src.Category.Name : string.Empty))
+            .ForMember(dest => dest.IsActive, opt => opt.MapFrom(src => src.Status == ErpSystem.Core.Enums.ItemStatus.Active))
+            .ForMember(dest => dest.UnitOfMeasureScheduleId, opt => opt.MapFrom(src => src.UnitOfMeasureScheduleId))
+            .ForMember(dest => dest.UnitOfMeasureScheduleName, opt => opt.MapFrom(src => src.UnitOfMeasureSchedule != null ? src.UnitOfMeasureSchedule.Description : null))
             .ForMember(dest => dest.Locations, opt => opt.MapFrom(src => src.InventoryLocations))
             .ForMember(dest => dest.RecentMovements, opt => opt.Ignore());
 
         CreateMap<CreateInventoryItemDto, InventoryItem>();
+        
+        CreateMap<UpdateInventoryItemDto, InventoryItem>()
+            .ForMember(dest => dest.Id, opt => opt.Ignore())
+            .ForMember(dest => dest.TenantId, opt => opt.Ignore())
+            .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())
+            .ForMember(dest => dest.CreatedBy, opt => opt.Ignore())
+            .ForMember(dest => dest.Status, opt => opt.Ignore()); // Handled separately in controller
 
         // InventoryLocation mappings
         CreateMap<InventoryLocation, InventoryLocationDto>()

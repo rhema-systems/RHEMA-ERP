@@ -17,6 +17,10 @@ public class WorkflowApprovalRepository : GenericRepository<WorkflowApproval>, I
     public async Task<IEnumerable<WorkflowApproval>> GetByStepInstanceAsync(Guid stepInstanceId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
+            .Include(a => a.Approver)
+            .Include(a => a.ProcessedBy)
+            .Include(a => a.StepInstance)
+            .ThenInclude(si => si.WorkflowStep)
             .Where(a => a.StepInstanceId == stepInstanceId && !a.IsDeleted)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync(cancellationToken);
@@ -42,7 +46,10 @@ public class WorkflowApprovalRepository : GenericRepository<WorkflowApproval>, I
     public async Task<IEnumerable<WorkflowApproval>> GetByStatusAsync(WorkflowApprovalStatus status, Guid tenantId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
+            .Include(a => a.Approver)
+            .Include(a => a.ProcessedBy)
             .Include(a => a.StepInstance)
+            .ThenInclude(si => si.WorkflowStep)
             .Where(a => a.Status == status && a.TenantId == tenantId && !a.IsDeleted)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync(cancellationToken);
@@ -55,7 +62,10 @@ public class WorkflowApprovalRepository : GenericRepository<WorkflowApproval>, I
     {
         var currentTime = DateTime.UtcNow;
         return await _dbSet
+            .Include(a => a.Approver)
+            .Include(a => a.ProcessedBy)
             .Include(a => a.StepInstance)
+            .ThenInclude(si => si.WorkflowStep)
             .Where(a => a.TenantId == tenantId && a.Status == WorkflowApprovalStatus.Pending &&
                        a.DueDate.HasValue && a.DueDate < currentTime && !a.IsDeleted)
             .OrderBy(a => a.DueDate)

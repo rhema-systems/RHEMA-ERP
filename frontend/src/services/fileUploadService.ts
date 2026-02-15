@@ -7,6 +7,8 @@ export interface UploadedFile {
   mimeType: string;
   size: number;
   url: string;
+  filePath?: string;
+  publicUrl?: string;
   thumbnailUrl?: string;
   uploadedAt: string;
   uploadedBy: string;
@@ -50,14 +52,22 @@ class FileUploadService {
         });
 
         // Map the response to UploadedFile format
+        // Prepend the backend base URL if the publicUrl is a relative path starting with /uploads
+        const backendBaseUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api').replace('/api', '');
+        const fullUrl = response.publicUrl.startsWith('/uploads')
+          ? `${backendBaseUrl}${response.publicUrl}`
+          : response.publicUrl;
+
         return {
           id: response.fileName,
           filename: response.fileName,
           originalName: response.originalFileName,
           mimeType: response.contentType,
           size: response.fileSize,
-          url: response.publicUrl,
-          thumbnailUrl: response.contentType?.startsWith('image/') ? response.publicUrl : undefined,
+          url: fullUrl,
+          filePath: response.filePath,
+          publicUrl: response.publicUrl,
+          thumbnailUrl: response.contentType?.startsWith('image/') ? fullUrl : undefined,
           uploadedAt: response.uploadedAt,
           uploadedBy: 'Current User'
         };

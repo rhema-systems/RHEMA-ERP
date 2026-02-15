@@ -1,0 +1,78 @@
+using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using Microsoft.Extensions.Logging;
+
+namespace ErpSystem.Core.Services.Workflow;
+
+/// <summary>
+/// Centralized helper for workflow integration across modules
+/// </summary>
+public class WorkflowIntegrationService : IWorkflowIntegrationService
+{
+    private readonly IWorkflowService _workflowService;
+    private readonly ILogger<WorkflowIntegrationService> _logger;
+
+    public WorkflowIntegrationService(
+        IWorkflowService workflowService,
+        ILogger<WorkflowIntegrationService> logger)
+    {
+        _workflowService = workflowService;
+        _logger = logger;
+    }
+
+    public async Task<WorkflowIntegrationResult> SubmitAsync(string entityType, Guid entityId)
+    {
+        var executionResult = await _workflowService.StartApprovalWorkflowAsync(entityType, entityId);
+        return CreateResult(entityType, entityId, executionResult, "submit");
+    }
+
+    public async Task<WorkflowIntegrationResult> ProcessApprovalAsync(
+        string entityType,
+        Guid entityId,
+        Guid userId,
+        string action,
+        string? comments = null)
+    {
+        var executionResult = await _workflowService.ProcessApprovalStepAsync(entityType, entityId, userId, action, comments);
+        return CreateResult(entityType, entityId, executionResult, "process");
+    }
+
+    public Task<bool> CanUserApproveAsync(string entityType, Guid entityId, Guid userId)
+        => _workflowService.CanUserApproveAsync(entityType, entityId, userId);
+
+    public Task<WorkflowExecutionResult> CancelWorkflowAsync(string entityType, Guid entityId, string reason)
+        => _workflowService.CancelWorkflowAsync(entityType, entityId, reason);
+
+    private WorkflowIntegrationResult CreateResult(
+        string entityType,
+        Guid entityId,
+        WorkflowExecutionResult executionResult,
+        string operation)
+    {
+        var outcome = MapOutcome(executionResult.Status);
+        if (!executionResult.Success)
+        {
+            _logger.LogWarning(
+                "Workflow {Operation} returned Success=false for {EntityType} {EntityId}. Status: {Status}. Message: {Message}",
+                operation,
+                entityType,
+                entityId,
+                executionResult.Status,
+                executionResult.Message);
+        }
+
+        return new WorkflowIntegrationResult(executionResult, outcome);
+    }
+
+    private static WorkflowOutcome MapOutcome(WorkflowInstanceStatus status)
+    {
+        return status switch
+        {
+            WorkflowInstanceStatus.Completed => WorkflowOutcome.Approved,
+            WorkflowInstanceStatus.Cancelled => WorkflowOutcome.Rejected,
+            WorkflowInstanceStatus.Failed => WorkflowOutcome.Rejected,
+            _ => WorkflowOutcome.Pending
+        };
+    }
+}

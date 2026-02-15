@@ -139,7 +139,10 @@ export default function BasicInformation({ formData, updateFormData }: BasicInfo
                 <SelectValue placeholder="Select tender type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="RFQ">RFQ - Request for Quotation</SelectItem>
+                {/* RFQ is now handled by the dedicated RFQ module. Keep legacy RFQ value for existing records only. */}
+                {formData.tenderType === 'RFQ' && (
+                  <SelectItem value="RFQ">RFQ (Legacy)</SelectItem>
+                )}
                 <SelectItem value="RFP">RFP - Request for Proposal</SelectItem>
                 <SelectItem value="ITB">ITB - Invitation to Bid</SelectItem>
                 <SelectItem value="EOI">EOI - Expression of Interest</SelectItem>
@@ -460,7 +463,7 @@ export default function BasicInformation({ formData, updateFormData }: BasicInfo
                 <div className="mt-4 p-3 bg-gray-50 rounded-lg text-xs text-muted-foreground">
                   <strong>QCBS Formula:</strong> Combined Score = (Technical Score × {formData.technicalWeight}%) + (Financial Score × {formData.financialWeight}%)
                   <br />
-                  Financial Score is calculated as: (Lowest Bid / Bidder&apos;s Price) × 100
+                  Financial Score is calculated based on Financial evaluation criteria (if defined)
                 </div>
               </CardContent>
             </Card>

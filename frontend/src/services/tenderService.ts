@@ -32,6 +32,7 @@ export interface TenderDto {
   invitationCount: number;
   createdAt: string;
   createdByName?: string;
+  currentWorkflowStepName?: string;
 }
 
 export interface TenderDetailDto extends TenderDto {
@@ -142,6 +143,7 @@ export interface PublishTenderDto {
   submissionDeadline: string;
   openingDate?: string;
   invitedBusinessPartnerIds?: string[];
+  externalRecipientEmails?: string[];
   sendNotifications?: boolean;
 }
 
@@ -331,6 +333,7 @@ export interface TenderBidSummaryDto {
 
 export interface InviteTenderersDto {
   businessPartnerIds: string[];
+  externalRecipientEmails?: string[];
   sendNotifications?: boolean;
 }
 
@@ -521,6 +524,53 @@ class TenderService {
     }
 
     return response.json();
+  }
+
+  /**
+   * Submit a tender for approval (unified workflow)
+   */
+  async submitTenderForApproval(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${id}/submit`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to submit tender for approval');
+    }
+  }
+
+  /**
+   * Approve a tender (unified workflow)
+   */
+  async approveTender(id: string, notes?: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${id}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ notes: notes || undefined }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to approve tender');
+    }
+  }
+
+  /**
+   * Reject a tender (unified workflow)
+   */
+  async rejectTender(id: string, reason: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${id}/reject`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ reason }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to reject tender');
+    }
   }
 
   /**
@@ -1055,6 +1105,9 @@ export const getTenderById = (id: string) => tenderService.getTenderById(id);
 export const getMyAssignedTenders = () => tenderService.getMyAssignedTenders();
 export const createTender = (data: CreateTenderDto) => tenderService.createTender(data);
 export const updateTender = (id: string, data: UpdateTenderDto) => tenderService.updateTender(id, data);
+export const submitTenderForApproval = (id: string) => tenderService.submitTenderForApproval(id);
+export const approveTender = (id: string, notes?: string) => tenderService.approveTender(id, notes);
+export const rejectTender = (id: string, reason: string) => tenderService.rejectTender(id, reason);
 export const publishTender = (id: string, data: PublishTenderDto) => tenderService.publishTender(id, data);
 export const closeTender = (id: string) => tenderService.closeTender(id);
 export const deleteTender = (id: string) => tenderService.deleteTender(id);

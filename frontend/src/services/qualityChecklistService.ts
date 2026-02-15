@@ -35,8 +35,11 @@ export interface CreateQualityChecklistDto {
   name: string;
   description?: string;
   workOrderType: string;
+  workOrderTypeId?: string;
   assetCategory: string;
+  assetCategoryId?: string;
   maintenanceType?: string;
+  maintenanceTypeId?: string;
   isMandatory: boolean;
   minimumPassingScore: number;
   items: Omit<QualityChecklistItem, 'id'>[];
@@ -44,6 +47,12 @@ export interface CreateQualityChecklistDto {
 
 export interface UpdateQualityChecklistDto extends CreateQualityChecklistDto {
   isActive: boolean;
+}
+
+// Helper interfaces for dropdown options with IDs
+export interface DropdownOption {
+  id: string;
+  name: string;
 }
 
 // No mock data - force backend usage
@@ -407,7 +416,53 @@ class QualityChecklistService {
   }
 
   async getMaintenanceTypes(): Promise<string[]> {
-    return ['Scheduled', 'Inspection', 'Regulatory', 'Preventive', 'Reactive'];
+    try {
+      console.log('Fetching maintenance types from database...');
+      const response = await apiService.get('/maintenance/maintenance-types/active');
+      console.log('Maintenance types fetched successfully:', response);
+      // Extract names from MaintenanceTypeDto objects
+      return response.map((type: any) => type.name);
+    } catch (error: any) {
+      console.error('Backend API not available for maintenance types, using fallback data:', error.message);
+      return ['Scheduled', 'Inspection', 'Regulatory', 'Preventive', 'Reactive'];
+    }
+  }
+
+  // Methods returning full objects with IDs for proper foreign key matching
+  async getMaintenanceTypesWithIds(): Promise<DropdownOption[]> {
+    try {
+      console.log('Fetching maintenance types with IDs from database...');
+      const response = await apiService.get('/maintenance/maintenance-types/active');
+      console.log('Maintenance types fetched successfully:', response);
+      return response.map((type: any) => ({ id: type.id, name: type.name }));
+    } catch (error: any) {
+      console.error('Backend API not available for maintenance types:', error.message);
+      return [];
+    }
+  }
+
+  async getWorkOrderTypesWithIds(): Promise<DropdownOption[]> {
+    try {
+      console.log('Fetching work order types with IDs from database...');
+      const response = await apiService.get('/maintenance/work-order-types/active');
+      console.log('Work order types fetched successfully:', response);
+      return response.map((type: any) => ({ id: type.id, name: type.name }));
+    } catch (error: any) {
+      console.error('Backend API not available for work order types:', error.message);
+      return [];
+    }
+  }
+
+  async getAssetCategoriesWithIds(): Promise<DropdownOption[]> {
+    try {
+      console.log('Fetching asset categories with IDs from database...');
+      const response = await apiService.get('/maintenance/asset-categories');
+      console.log('Asset categories fetched successfully:', response);
+      return response.map((cat: any) => ({ id: cat.id, name: cat.name }));
+    } catch (error: any) {
+      console.error('Backend API not available for asset categories:', error.message);
+      return [];
+    }
   }
 }
 

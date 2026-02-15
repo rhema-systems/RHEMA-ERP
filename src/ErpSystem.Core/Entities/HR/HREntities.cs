@@ -218,6 +218,7 @@ public class Employee : TenantEntity
 
     [NotMapped]
     public bool CanBeAssignedToMaintenance => IsActive &&
+        !IsDeleted &&
         (StaffStatus == StaffStatus.Active || StaffStatus == StaffStatus.Probation) &&
         Department?.DepartmentType == DepartmentType.Maintenance;
 

@@ -90,7 +90,7 @@ public class WorkflowInstanceService : IWorkflowInstanceService
         await _workflowStepInstanceRepository.SaveChangesAsync();
 
         // Update workflow instance with current step
-        workflowInstance.CurrentStepId = firstStepInstance.Id;
+        workflowInstance.CurrentStepId = startStep.Id;
         await _workflowInstanceRepository.UpdateAsync(workflowInstance);
         await _workflowInstanceRepository.SaveChangesAsync();
 
@@ -226,7 +226,7 @@ public class WorkflowInstanceService : IWorkflowInstanceService
 
         // Update workflow instance
         instance.Status = WorkflowInstanceStatus.InProgress;
-        instance.CurrentStepId = newStepInstance.Id;
+        instance.CurrentStepId = startStep.Id;
         instance.CompletedDate = null;
         instance.Notes = "Workflow restarted";
 

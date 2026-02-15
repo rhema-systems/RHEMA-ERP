@@ -164,8 +164,9 @@ public class PurchaseOrderSummaryDto
 {
     public Guid Id { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
-    public Guid SupplierId { get; set; }
-    public string SupplierName { get; set; } = string.Empty;
+    public string OrderType { get; set; } = "Standard";
+    public Guid SupplierId { get; set; } // Keep for backward compatibility, maps to BusinessPartnerId
+    public string SupplierName { get; set; } = string.Empty; // Keep for backward compatibility, maps to BusinessPartner.PartnerName
     public DateTime OrderDate { get; set; }
     public DateTime? RequiredDate { get; set; }
     public DateTime? PromisedDate { get; set; }
@@ -173,6 +174,10 @@ public class PurchaseOrderSummaryDto
     public decimal TotalAmount { get; set; }
     public int ItemCount { get; set; }
     public string? RequestedByName { get; set; }
+    /// <summary>
+    /// Runtime workflow info (populated when status is workflow-driven)
+    /// </summary>
+    public string? CurrentWorkflowStepName { get; set; }
 }
 
 /// <summary>
@@ -186,6 +191,12 @@ public class PurchaseOrderDetailDto : PurchaseOrderSummaryDto
     public decimal SubTotal { get; set; }
     public decimal TaxAmount { get; set; }
     public decimal ShippingCost { get; set; }
+    public decimal MiscellaneousCost { get; set; }
+    public decimal TotalAdditionalCost { get; set; }
+    public string CostAllocationMethod { get; set; } = "SpreadToItemCost";
+    public string CostApportionmentBasis { get; set; } = "Value";
+    public string? ExpenseGLAccount { get; set; }
+    public bool CostsAllocated { get; set; }
     public decimal DiscountAmount { get; set; }
     public string? PaymentTerms { get; set; }
     public string? ShippingTerms { get; set; }
@@ -194,13 +205,27 @@ public class PurchaseOrderDetailDto : PurchaseOrderSummaryDto
     public Guid? DeliveryWarehouseId { get; set; }
     public string? DeliveryAddress { get; set; }
     public string? DeliveryInstructions { get; set; }
-    public string? SupplierOrderNumber { get; set; }
+    public string? SupplierOrderNumber { get; set; } // Keep for backward compatibility, maps to BusinessPartnerOrderNumber
     public string? ReferenceNumber { get; set; }
 
-    // Supplier details
+    // Business Partner details (keeping Supplier names for backward compatibility)
     public string? SupplierPhone { get; set; }
     public string? SupplierEmail { get; set; }
     public string? SupplierAddress { get; set; }
+
+    // Tender/Contract Integration
+    public Guid? TenderAwardId { get; set; }
+    public string? TenderNumber { get; set; }
+    public Guid? ContractId { get; set; }
+    public string? ContractNumber { get; set; }
+    public bool IsFromTender { get; set; }
+    public bool IsFromContract { get; set; }
+    
+    // Contract Utilization (if applicable)
+    public decimal? ContractValue { get; set; }
+    public decimal? ContractUsedValue { get; set; }
+    public decimal? ContractRemainingValue { get; set; }
+    public decimal? ContractUtilizationPercent { get; set; }
 
     public List<PurchaseOrderItemDto> Items { get; set; } = new();
     public List<PurchaseOrderReceiptDto> Receipts { get; set; } = new();
@@ -214,17 +239,30 @@ public class PurchaseOrderItemDto
     public Guid Id { get; set; }
     public Guid PurchaseOrderId { get; set; }
     public Guid InventoryItemId { get; set; }
-    public string? SupplierItemCode { get; set; }
+    public string? SupplierItemCode { get; set; } // Keep for backward compatibility, maps to BusinessPartnerItemCode
     public string? ItemDescription { get; set; }
     public decimal OrderedQuantity { get; set; }
     public decimal ReceivedQuantity { get; set; }
     public decimal RemainingQuantity { get; set; }
+    public string UnitOfMeasure { get; set; } = "EA";
+    public Guid? ItemUnitOfMeasureId { get; set; }
+    public Guid? WarehouseId { get; set; }
+    public string? WarehouseName { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal LineTotal { get; set; }
+    public decimal AllocatedAdditionalCost { get; set; }
+    public decimal AllocatedCostPerUnit { get; set; }
+    public decimal LandedUnitCost { get; set; }
+    public Guid? PriceListLineId { get; set; }
+    public string? PriceListName { get; set; }
     public DateTime? ExpectedDeliveryDate { get; set; }
     public string? Notes { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
+    
+    // UOM conversion info
+    public decimal? BaseUnitConversionFactor { get; set; }
+    public string? BaseUnitOfMeasure { get; set; }
 }
 
 /// <summary>
@@ -234,6 +272,11 @@ public class CreatePurchaseOrderDto
 {
     [Required]
     public Guid SupplierId { get; set; }
+
+    /// <summary>
+    /// Purchase order type (e.g. Standard, Consignment, DropShip).
+    /// </summary>
+    public string? OrderType { get; set; }
 
     public DateTime? RequiredDate { get; set; }
     public DateTime? PromisedDate { get; set; }
@@ -247,6 +290,14 @@ public class CreatePurchaseOrderDto
     public string? DeliveryAddress { get; set; }
     public string? DeliveryInstructions { get; set; }
     public string? ReferenceNumber { get; set; }
+
+    public decimal? TaxAmount { get; set; }
+    public decimal? ShippingCost { get; set; }
+    public decimal? MiscellaneousCost { get; set; }
+    public string? CostAllocationMethod { get; set; }
+    public string? CostApportionmentBasis { get; set; }
+    public string? ExpenseGLAccount { get; set; }
+    public decimal? DiscountAmount { get; set; }
 
     [Required]
     public Guid RequestedById { get; set; }
@@ -270,7 +321,16 @@ public class CreatePurchaseOrderItemDto
     public decimal OrderedQuantity { get; set; }
 
     [Required]
+    public string UnitOfMeasure { get; set; } = "EA";
+
+    public Guid? ItemUnitOfMeasureId { get; set; }
+    
+    public Guid? WarehouseId { get; set; }
+
+    [Required]
     public decimal UnitPrice { get; set; }
+
+    public Guid? PriceListLineId { get; set; }
 
     public DateTime? ExpectedDeliveryDate { get; set; }
     public string? Notes { get; set; }
@@ -316,6 +376,10 @@ public class PurchaseOrderReceiptItemDto
     public decimal ReceivedQuantity { get; set; }
     public decimal AcceptedQuantity { get; set; }
     public decimal RejectedQuantity { get; set; }
+    public string? UnitOfMeasure { get; set; }
+    public Guid? WarehouseId { get; set; }
+    public string? WarehouseCode { get; set; }
+    public string? WarehouseName { get; set; }
     public Guid? LocationId { get; set; }
     public string? SerialNumber { get; set; }
     public string? LotNumber { get; set; }
@@ -365,6 +429,7 @@ public class ReceivePurchaseOrderItemDto
 
     public decimal AcceptedQuantity { get; set; }
     public decimal RejectedQuantity { get; set; }
+    public Guid? WarehouseId { get; set; }
     public Guid? LocationId { get; set; }
     public string? SerialNumber { get; set; }
     public string? LotNumber { get; set; }
@@ -394,6 +459,9 @@ public class PurchaseRequisitionSummaryDto
     public string? Department { get; set; }
     public decimal TotalAmount { get; set; }
     public int ItemCount { get; set; }
+
+    // Workflow display helpers (optional)
+    public string? CurrentWorkflowStepName { get; set; }
 }
 
 /// <summary>
@@ -424,8 +492,8 @@ public class PurchaseRequisitionItemDto
     public decimal EstimatedUnitPrice { get; set; }
     public decimal LineTotal { get; set; }
     public DateTime? RequiredDate { get; set; }
-    public Guid? PreferredSupplierId { get; set; }
-    public string? PreferredSupplierName { get; set; }
+    public Guid? PreferredSupplierId { get; set; } // Keep for backward compatibility, maps to PreferredBusinessPartnerId
+    public string? PreferredSupplierName { get; set; } // Keep for backward compatibility, maps to PreferredBusinessPartner.PartnerName
     public string? Notes { get; set; }
     public string? Specifications { get; set; }
     public string Status { get; set; } = string.Empty;
@@ -470,7 +538,7 @@ public class CreatePurchaseRequisitionItemDto
     public string UnitOfMeasure { get; set; } = "EA";
     public decimal EstimatedUnitPrice { get; set; } = 0;
     public DateTime? RequiredDate { get; set; }
-    public Guid? PreferredSupplierId { get; set; }
+    public Guid? PreferredSupplierId { get; set; } // Keep for backward compatibility, maps to PreferredBusinessPartnerId
     public string? Notes { get; set; }
     public string? Specifications { get; set; }
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, ChevronDown, User, Users, ClipboardList, History, FileText, Wrench, Package, Trash2, Pencil, FlaskConical, CalendarClock, DollarSign, HelpCircle, ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, CalendarIcon, ShieldCheck, Camera, Image, X } from 'lucide-react';
+import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, ChevronDown, User, Users, ClipboardList, ClipboardCheck, History, FileText, Wrench, Package, Trash2, Pencil, FlaskConical, CalendarClock, DollarSign, HelpCircle, ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, CalendarIcon, ShieldCheck, Camera, Image, X, Receipt } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { DateRange } from '@/components/ui/calendar';
@@ -25,6 +25,16 @@ import {
   DialogTrigger,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   Table,
   TableBody,
@@ -45,6 +55,7 @@ import { ClientOnly } from '@/components/ClientOnly';
 import workOrderLaborService, { WorkOrderLaborDto, CreateWorkOrderLaborDto } from '@/services/workOrderLaborService';
 
 import assetAdmissionService from '@/services/assetAdmissionService';
+import assetConditionService, { AssetConditionRecordDto } from '@/services/assetConditionService';
 
 interface WorkOrderTask {
   id: string;
@@ -88,6 +99,10 @@ interface WorkOrder {
   workOrderTypeId?: string;
   priorityLevelId?: string;
   maintenanceTypeId?: string;
+  maintenanceTypeName?: string;
+  // Billing properties
+  billingType?: 'Maintenance' | 'Repairs';
+  fixedAmount?: number;
 }
 
 interface JobCard {
@@ -98,8 +113,28 @@ interface JobCard {
   status: string;
 }
 
+type BillingLineItemType = 'part' | 'labor' | 'tool' | 'expense';
 
-export default function WorkOrdersPage() {
+interface BillingLineToDelete {
+  id: string;
+  type: BillingLineItemType;
+  label: string;
+}
+
+interface BillingLineItem {
+  key: string;
+  id: string;
+  type: BillingLineItemType;
+  category: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  totalAmount: number;
+  canDelete: boolean;
+}
+
+
+function WorkOrdersPageContent() {
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
@@ -126,6 +161,7 @@ export default function WorkOrdersPage() {
   const [taskCompletionNotes, setTaskCompletionNotes] = useState<string>('');
   const [taskLaborType, setTaskLaborType] = useState<string>('Regular');
   const [taskHourlyRate, setTaskHourlyRate] = useState<number>(0);
+  const [taskTechnicianId, setTaskTechnicianId] = useState<string>('');
 
   // Manual labor entry dialog state
   const [isLaborDialogOpen, setIsLaborDialogOpen] = useState(false);
@@ -219,10 +255,18 @@ export default function WorkOrdersPage() {
   const [availableVehicles, setAvailableVehicles] = useState<Asset[]>([]);
   const [expenseReceiptFile, setExpenseReceiptFile] = useState<File | null>(null);
   const [pendingExpenseDeletes, setPendingExpenseDeletes] = useState<string[]>([]);
+  const [billingLineToDelete, setBillingLineToDelete] = useState<BillingLineToDelete | null>(null);
+  const [billingDeleteReason, setBillingDeleteReason] = useState('');
+  const [isBillingDeleteDialogOpen, setIsBillingDeleteDialogOpen] = useState(false);
+  const [isDeletingBillingLine, setIsDeletingBillingLine] = useState(false);
 
   // Task photo preview state
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
   const [previewPhotoTaskName, setPreviewPhotoTaskName] = useState<string>('');
+
+  // Admission checklist state
+  const [admissionChecklist, setAdmissionChecklist] = useState<AssetConditionRecordDto | null>(null);
+  const [loadingChecklist, setLoadingChecklist] = useState(false);
 
   // Helper function to get file URL from storage path
   const getFileUrl = (filePath: string | undefined | null): string => {
@@ -795,6 +839,201 @@ export default function WorkOrdersPage() {
     );
   };
 
+  const getPartSellingPrice = (item: Partial<InventoryItemDto> | null | undefined): number => {
+    if (!item) return 0;
+    const candidate = (item as any).salePrice ?? (item as any).listPrice ?? item.unitCost ?? item.standardCost ?? 0;
+    return Number(candidate || 0);
+  };
+
+  const getBillableToolCostTotal = (tools: WorkOrderToolDto[] = workOrderTools): number => {
+    return tools
+      .filter(tool => !tool.isExcludedFromBilling)
+      .reduce((sum, tool) => {
+        const lineTotal = Number((tool as any).totalCost || tool.dailyRentalRate || 0);
+        return sum + lineTotal;
+      }, 0);
+  };
+
+  const recalculateAndCacheSelectedWorkOrderCost = (
+    parts: WorkOrderPartDto[] = workOrderParts,
+    labor: any[] = workOrderLabor,
+    expensesList: MaintenanceExpense[] = expenses,
+    toolCost: number = getBillableToolCostTotal()
+  ) => {
+    if (!selectedOrder?.id) return;
+
+    const total =
+      parts.reduce((sum, part) => sum + Number(part.totalCost || 0), 0) +
+      labor.reduce((sum, record) => sum + Number(record.totalCost || 0), 0) +
+      Number(toolCost || 0) +
+      expensesList.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+
+    setWorkOrderCosts(prev => ({ ...prev, [selectedOrder.id]: total }));
+  };
+
+  const getBillingLineItems = (): BillingLineItem[] => {
+    const canDelete = !!selectedOrder && selectedOrder.status !== 'Completed' && selectedOrder.status !== 'Cancelled';
+
+    const partLines: BillingLineItem[] = workOrderParts.map(part => {
+      const quantity = Number(part.quantityUsed || part.quantityRequired || 0);
+      const unitPrice = Number(part.unitCost || 0);
+      const totalAmount = Number(part.totalCost || quantity * unitPrice);
+
+      return {
+        key: `part-${part.id}`,
+        id: part.id,
+        type: 'part',
+        category: 'Part',
+        description: `${part.itemCode} - ${part.itemName}`,
+        quantity,
+        unitPrice,
+        totalAmount,
+        canDelete,
+      };
+    });
+
+    const laborLines: BillingLineItem[] = workOrderLabor.map((labor: any) => {
+      const quantity = Number(labor.hoursWorked ?? labor.hours ?? 0);
+      const unitPrice = Number(labor.hourlyRate || 0);
+      const totalAmount = Number(labor.totalCost || quantity * unitPrice);
+      const technicianName = labor.technician?.fullName || labor.technicianName || 'Labor';
+
+      return {
+        key: `labor-${labor.id}`,
+        id: labor.id,
+        type: 'labor',
+        category: 'Labor',
+        description: technicianName,
+        quantity,
+        unitPrice,
+        totalAmount,
+        canDelete,
+      };
+    });
+
+    const toolLines: BillingLineItem[] = workOrderTools
+      .filter(tool => !tool.isExcludedFromBilling)
+      .map(tool => {
+      const unitPrice = Number(tool.dailyRentalRate || 0);
+      const totalAmount = Number((tool as any).totalCost || unitPrice);
+
+      return {
+        key: `tool-${tool.toolId}`,
+        id: tool.toolId,
+        type: 'tool',
+        category: 'Tool',
+        description: `${tool.toolCode || ''} ${tool.toolName || 'Tool'}`.trim(),
+        quantity: 1,
+        unitPrice,
+        totalAmount,
+        canDelete,
+      };
+    });
+
+    const expenseLines: BillingLineItem[] = expenses
+      .filter(expense => !!expense.id)
+      .map(expense => {
+        const amount = Number(expense.amount || 0);
+        const description = expense.description || expense.expenseType || 'Expense';
+
+        return {
+          key: `expense-${expense.id}`,
+          id: expense.id!,
+          type: 'expense',
+          category: 'Expense',
+          description,
+          quantity: 1,
+          unitPrice: amount,
+          totalAmount: amount,
+          canDelete,
+        };
+      });
+
+    return [...partLines, ...laborLines, ...toolLines, ...expenseLines];
+  };
+
+  const requestBillingLineDelete = (line: BillingLineItem) => {
+    setBillingLineToDelete({
+      id: line.id,
+      type: line.type,
+      label: `${line.category}: ${line.description}`,
+    });
+    setBillingDeleteReason('');
+    setIsBillingDeleteDialogOpen(true);
+  };
+
+  const handleConfirmBillingLineDelete = async () => {
+    if (!selectedOrder?.id || !billingLineToDelete) return;
+    if (billingLineToDelete.type === 'tool' && !billingDeleteReason.trim()) {
+      toast({
+        title: 'Reason required',
+        description: 'Please provide a reason for excluding this tool from billing.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsDeletingBillingLine(true);
+
+    try {
+      if (billingLineToDelete.type === 'part') {
+        await workOrderPartService.deletePart(billingLineToDelete.id);
+        const nextParts = workOrderParts.filter(part => part.id !== billingLineToDelete.id);
+        setWorkOrderParts(nextParts);
+        recalculateAndCacheSelectedWorkOrderCost(nextParts, workOrderLabor, expenses, getBillableToolCostTotal());
+      } else if (billingLineToDelete.type === 'labor') {
+        await workOrderLaborService.deleteLabor(billingLineToDelete.id);
+        const nextLabor = workOrderLabor.filter((labor: any) => labor.id !== billingLineToDelete.id);
+        setWorkOrderLabor(nextLabor);
+        recalculateAndCacheSelectedWorkOrderCost(workOrderParts, nextLabor, expenses, getBillableToolCostTotal());
+      } else if (billingLineToDelete.type === 'tool') {
+        await workOrderToolService.excludeToolFromBilling(selectedOrder.id, billingLineToDelete.id, {
+          reason: billingDeleteReason.trim(),
+        });
+
+        const nextTools = workOrderTools.map(tool =>
+          tool.toolId === billingLineToDelete.id
+            ? {
+                ...tool,
+                isExcludedFromBilling: true,
+                billingExclusionReason: billingDeleteReason.trim(),
+                billingExcludedAt: new Date().toISOString(),
+              }
+            : tool
+        );
+        setWorkOrderTools(nextTools);
+        const updatedToolCost = getBillableToolCostTotal(nextTools);
+        recalculateAndCacheSelectedWorkOrderCost(workOrderParts, workOrderLabor, expenses, updatedToolCost);
+      } else if (billingLineToDelete.type === 'expense') {
+        await maintenanceApiService.deleteExpense(billingLineToDelete.id);
+        const nextExpenses = expenses.filter(expense => expense.id !== billingLineToDelete.id);
+        setExpenses(nextExpenses);
+        setTotalExpenses(nextExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0));
+        recalculateAndCacheSelectedWorkOrderCost(workOrderParts, workOrderLabor, nextExpenses, getBillableToolCostTotal());
+      }
+
+      toast({
+        title: 'Success',
+        description:
+          billingLineToDelete.type === 'tool'
+            ? 'Tool line item excluded from billing successfully'
+            : 'Billing line item removed successfully',
+        className: 'bg-green-50 border-green-200',
+      });
+    } catch (error: any) {
+      console.error('Error deleting billing line item:', error);
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.message || 'Failed to remove billing line item',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeletingBillingLine(false);
+      setIsBillingDeleteDialogOpen(false);
+      setBillingLineToDelete(null);
+    }
+  };
+
   const updateWorkOrderStatus = async (orderId: string, newStatus: WorkOrder['status']) => {
     try {
       // If trying to complete work order, validate quality control first
@@ -908,7 +1147,7 @@ export default function WorkOrdersPage() {
   };
 
 
-  const handleTaskStatusUpdate = async (taskId: string, newStatus: string, actualHours: number | null = null, completionNotes: string | null = null) => {
+  const handleTaskStatusUpdate = async (taskId: string, newStatus: string, actualHours: number | null = null, completionNotes: string | null = null, technicianId: string | null = null) => {
     try {
       // Update task status via API
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/maintenance/work-orders/tasks/${taskId}/status`, {
@@ -920,7 +1159,8 @@ export default function WorkOrdersPage() {
         body: JSON.stringify({
           status: newStatus,
           actualHours: actualHours,
-          completionNotes: completionNotes
+          completionNotes: completionNotes,
+          technicianId: technicianId
         })
       });
 
@@ -958,6 +1198,16 @@ export default function WorkOrdersPage() {
     setTaskCompletionNotes('');
     setTaskLaborType('Regular');
     setTaskHourlyRate(50); // Default hourly rate - could be fetched from technician profile
+    // Pre-select technician from scheduled technicians for this work order
+    // First try to find a matching scheduled technician, otherwise use the first scheduled technician
+    const scheduledTechnicianIds = staffSchedules.map(s => s.technicianId);
+    if (task.assignedTechnicianId && scheduledTechnicianIds.includes(task.assignedTechnicianId)) {
+      setTaskTechnicianId(task.assignedTechnicianId);
+    } else if (scheduledTechnicianIds.length > 0) {
+      setTaskTechnicianId(scheduledTechnicianIds[0]);
+    } else {
+      setTaskTechnicianId('');
+    }
     setIsTaskCompletionDialogOpen(true);
   };
 
@@ -965,57 +1215,53 @@ export default function WorkOrdersPage() {
     if (!selectedTask || !selectedOrder) return;
 
     try {
-      // Complete the task first
-      await handleTaskStatusUpdate(selectedTask.id, 'Completed', taskActualHours, taskCompletionNotes);
+      // Complete the task first - pass the technician ID to save it on the task
+      await handleTaskStatusUpdate(selectedTask.id, 'Completed', taskActualHours, taskCompletionNotes, taskTechnicianId || null);
 
-      // Auto-create labor record if hours > 0 and hourly rate is set
-      if (taskActualHours > 0 && taskHourlyRate > 0) {
-        const technicianId = selectedTask.assignedTechnicianId || selectedOrder.assignedTechnicianId;
+      // Auto-create labor record if hours > 0 and hourly rate is set and technician is selected
+      if (taskActualHours > 0 && taskHourlyRate > 0 && taskTechnicianId) {
+        const laborData: CreateWorkOrderLaborDto = {
+          workOrderId: selectedOrder.id,
+          technicianId: taskTechnicianId,
+          startTime: new Date().toISOString(),
+          hourlyRate: taskHourlyRate,
+          notes: `Task: ${selectedTask.taskName}${taskCompletionNotes ? ' - ' + taskCompletionNotes : ''}`,
+          laborType: taskLaborType,
+        };
 
-        if (technicianId) {
-          const laborData: CreateWorkOrderLaborDto = {
-            workOrderId: selectedOrder.id,
-            technicianId: technicianId,
-            startTime: new Date().toISOString(),
-            hourlyRate: taskHourlyRate,
-            notes: `Task: ${selectedTask.taskName}${taskCompletionNotes ? ' - ' + taskCompletionNotes : ''}`,
-            laborType: taskLaborType,
-          };
+        try {
+          // Calculate start time based on hours worked (start = now - hours)
+          const endTime = new Date();
+          const startTime = new Date(endTime.getTime() - (taskActualHours * 60 * 60 * 1000));
 
-          try {
-            // Calculate start time based on hours worked (start = now - hours)
-            const endTime = new Date();
-            const startTime = new Date(endTime.getTime() - (taskActualHours * 60 * 60 * 1000));
+          // Update laborData with the calculated start time
+          laborData.startTime = startTime.toISOString();
 
-            // Update laborData with the calculated start time
-            laborData.startTime = startTime.toISOString();
+          // Start labor with calculated start time
+          const labor = await workOrderLaborService.startLabor(laborData);
 
-            // Start labor with calculated start time
-            const labor = await workOrderLaborService.startLabor(laborData);
+          // End labor with current time - hours will be calculated correctly
+          await workOrderLaborService.endLabor(labor.id, {
+            endTime: endTime.toISOString(),
+            notes: `Completed: ${taskActualHours} hours`,
+          });
 
-            // End labor with current time - hours will be calculated correctly
-            await workOrderLaborService.endLabor(labor.id, {
-              endTime: endTime.toISOString(),
-              notes: `Completed: ${taskActualHours} hours`,
-            });
+          // Refresh labor records
+          const laborRecords = await workOrderLaborService.getLaborByWorkOrder(selectedOrder.id);
+          setWorkOrderLabor(laborRecords);
 
-            // Refresh labor records
-            const laborRecords = await workOrderLaborService.getLaborByWorkOrder(selectedOrder.id);
-            setWorkOrderLabor(laborRecords);
-
-            toast({
-              title: 'Success',
-              description: `Task completed and ${taskActualHours} hours of labor recorded`,
-              className: 'bg-green-50 border-green-200',
-            });
-          } catch (laborError) {
-            console.error('Error creating labor record:', laborError);
-            toast({
-              title: 'Partial Success',
-              description: 'Task completed but failed to create labor record',
-              variant: 'destructive',
-            });
-          }
+          toast({
+            title: 'Success',
+            description: `Task completed and ${taskActualHours} hours of labor recorded`,
+            className: 'bg-green-50 border-green-200',
+          });
+        } catch (laborError) {
+          console.error('Error creating labor record:', laborError);
+          toast({
+            title: 'Partial Success',
+            description: 'Task completed but failed to create labor record',
+            variant: 'destructive',
+          });
         }
       }
     } catch (error) {
@@ -1028,6 +1274,7 @@ export default function WorkOrdersPage() {
     setTaskCompletionNotes('');
     setTaskLaborType('Regular');
     setTaskHourlyRate(0);
+    setTaskTechnicianId('');
   };
 
   // Handle manual labor entry submission
@@ -1196,6 +1443,13 @@ export default function WorkOrdersPage() {
       </TableHead>
     );
   };
+
+  const billingLineItems = getBillingLineItems();
+  const itemizedBillingTotal =
+    workOrderParts.reduce((sum, part) => sum + Number(part.totalCost || 0), 0) +
+    workOrderLabor.reduce((sum, labor: any) => sum + Number(labor.totalCost || 0), 0) +
+    getBillableToolCostTotal() +
+    expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -1399,12 +1653,14 @@ export default function WorkOrdersPage() {
                           setLoadingTasks(true);
                           setLoadingParts(true);
                           setLoadingTools(true);
+                          setLoadingChecklist(true);
                           setSelectedOrderTasks([]); // Clear previous tasks
                           setWorkOrderParts([]);
                           setWorkOrderTools([]);
                           setWorkOrderLabor([]);
                           setStaffSchedules([]);
                           setExpenses([]);
+                          setAdmissionChecklist(null);
 
                           try {
                             console.log('Fetching work order details for ID:', order.id);
@@ -1534,6 +1790,23 @@ export default function WorkOrdersPage() {
                               setTotalExpenses(0);
                             }
 
+                            // Load admission checklist if this work order has a job card
+                            if (workOrderDetails.jobCardId) {
+                              try {
+                                const checklistData = await assetConditionService.getAdmissionRecordForJobCard(workOrderDetails.jobCardId);
+                                setAdmissionChecklist(checklistData);
+                                console.log('Loaded admission checklist:', checklistData);
+                              } catch (error) {
+                                console.error('Error loading admission checklist:', error);
+                                setAdmissionChecklist(null);
+                              } finally {
+                                setLoadingChecklist(false);
+                              }
+                            } else {
+                              setAdmissionChecklist(null);
+                              setLoadingChecklist(false);
+                            }
+
                             // Calculate and cache total cost for this work order (after all data is loaded)
                             const laborCost = (workOrderDetails.labor || []).reduce((sum: number, l: any) => sum + (l.totalCost || 0), 0);
                             const partsCost = (workOrderDetails.parts || []).reduce((sum: number, p: any) => sum + (p.totalCost || 0), 0);
@@ -1618,6 +1891,22 @@ export default function WorkOrdersPage() {
                                   console.error('Error loading expenses:', error);
                                   setExpenses([]);
                                 }
+
+                                // Load admission checklist if this work order has a job card
+                                if (order.jobCardId) {
+                                  setLoadingChecklist(true);
+                                  try {
+                                    const checklistData = await assetConditionService.getAdmissionRecordForJobCard(order.jobCardId);
+                                    setAdmissionChecklist(checklistData);
+                                  } catch (error) {
+                                    console.error('Error loading admission checklist:', error);
+                                    setAdmissionChecklist(null);
+                                  } finally {
+                                    setLoadingChecklist(false);
+                                  }
+                                } else {
+                                  setAdmissionChecklist(null);
+                                }
                               }
                             }}
                           >
@@ -1693,10 +1982,14 @@ export default function WorkOrdersPage() {
           </DialogHeader>
           {selectedOrder && (
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col flex-1 overflow-hidden">
-              <TabsList className="grid w-full grid-cols-9 flex-shrink-0 bg-muted/50 p-1 rounded-lg gap-1">
+              <TabsList className="grid w-full grid-cols-11 flex-shrink-0 bg-muted/50 p-1 rounded-lg gap-1">
                 <TabsTrigger value="details">
                   <FileText className="h-4 w-4 mr-2" />
                   Details
+                </TabsTrigger>
+                <TabsTrigger value="checklist">
+                  <ClipboardCheck className="h-4 w-4 mr-2" />
+                  Checklist
                 </TabsTrigger>
                 <TabsTrigger value="quality">
                   <ShieldCheck className="h-4 w-4 mr-2" />
@@ -1725,6 +2018,10 @@ export default function WorkOrdersPage() {
                 <TabsTrigger value="labor">
                   <Users className="h-4 w-4 mr-2" />
                   Labour ({workOrderLabor.length})
+                </TabsTrigger>
+                <TabsTrigger value="billing">
+                  <Receipt className="h-4 w-4 mr-2" />
+                  Billing
                 </TabsTrigger>
                 <TabsTrigger value="history">
                   <History className="h-4 w-4 mr-2" />
@@ -1865,6 +2162,202 @@ export default function WorkOrdersPage() {
                       <Label className="text-sm font-medium text-muted-foreground">Actual Hours</Label>
                       <p className="text-sm">{selectedOrder.actualHours} hrs</p>
                     </div>
+                  )}
+                </div>
+              </TabsContent>
+
+              {/* Checklist Tab - Admission Inspection Checklist */}
+              <TabsContent value="checklist" className="flex-1 overflow-y-auto mt-4">
+                <div className="space-y-4">
+                  {loadingChecklist ? (
+                    <div className="flex items-center justify-center py-12">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                      <span className="ml-3 text-muted-foreground">Loading admission checklist...</span>
+                    </div>
+                  ) : !selectedOrder.jobCardId ? (
+                    <Card className="border-dashed">
+                      <CardContent className="flex flex-col items-center justify-center py-12">
+                        <ClipboardCheck className="h-16 w-16 text-muted-foreground/30 mb-4" />
+                        <p className="text-lg font-medium text-muted-foreground">No Job Card Associated</p>
+                        <p className="text-sm text-muted-foreground/70 mt-1">This work order was not created from a job card.</p>
+                        <p className="text-xs text-muted-foreground/50 mt-2">Admission checklists are only available for work orders generated from job cards.</p>
+                      </CardContent>
+                    </Card>
+                  ) : !admissionChecklist ? (
+                    <Card className="border-dashed">
+                      <CardContent className="flex flex-col items-center justify-center py-12">
+                        <ClipboardCheck className="h-16 w-16 text-muted-foreground/30 mb-4" />
+                        <p className="text-lg font-medium text-muted-foreground">No Admission Checklist</p>
+                        <p className="text-sm text-muted-foreground/70 mt-1">No admission checklist was completed for this work order.</p>
+                        <p className="text-xs text-muted-foreground/50 mt-2">The asset may not have been admitted with a pre-inspection checklist.</p>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <>
+                      {/* Checklist Summary Header */}
+                      <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200 dark:border-blue-800">
+                        <CardHeader className="pb-3">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <CardTitle className="text-xl flex items-center gap-2 text-blue-900 dark:text-blue-100">
+                                <ClipboardCheck className="h-6 w-6" />
+                                {admissionChecklist.templateName}
+                              </CardTitle>
+                              <CardDescription className="text-blue-700/70 dark:text-blue-300/70 mt-1">
+                                Pre-Admission Inspection • #{admissionChecklist.inspectionNumber}
+                              </CardDescription>
+                            </div>
+                            <Badge
+                              variant={admissionChecklist.status === 'Completed' ? 'default' : 'secondary'}
+                              className={admissionChecklist.status === 'Completed' ? 'bg-green-600' : ''}
+                            >
+                              {admissionChecklist.status}
+                            </Badge>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="bg-white/60 dark:bg-gray-900/40 rounded-lg p-3">
+                              <p className="text-xs text-muted-foreground uppercase tracking-wide">Inspector</p>
+                              <p className="font-semibold mt-1">{admissionChecklist.inspectorName}</p>
+                            </div>
+                            <div className="bg-white/60 dark:bg-gray-900/40 rounded-lg p-3">
+                              <p className="text-xs text-muted-foreground uppercase tracking-wide">Inspection Date</p>
+                              <p className="font-semibold mt-1">{format(new Date(admissionChecklist.inspectionDate), 'PPP')}</p>
+                            </div>
+                            <div className="bg-white/60 dark:bg-gray-900/40 rounded-lg p-3">
+                              <p className="text-xs text-muted-foreground uppercase tracking-wide">Items Completed</p>
+                              <p className="font-semibold mt-1">{admissionChecklist.completedItems} of {admissionChecklist.totalItems}</p>
+                            </div>
+                            <div className="bg-white/60 dark:bg-gray-900/40 rounded-lg p-3">
+                              <p className="text-xs text-muted-foreground uppercase tracking-wide">Actions Required</p>
+                              <p className="font-semibold mt-1">
+                                {admissionChecklist.itemResults.filter(i => i.repairReplacementAction && i.repairReplacementAction !== 'None').length} items
+                              </p>
+                            </div>
+                          </div>
+                          {admissionChecklist.generalNotes && (
+                            <div className="mt-4 pt-4 border-t border-blue-200 dark:border-blue-800">
+                              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">General Notes</p>
+                              <p className="text-sm bg-white/60 dark:bg-gray-900/40 rounded-lg p-3">{admissionChecklist.generalNotes}</p>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+
+                      {/* Checklist Items Table */}
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <FileText className="h-4 w-4" />
+                            Inspection Items ({admissionChecklist.itemResults.length})
+                          </CardTitle>
+                          <CardDescription>Detailed breakdown of each inspection item with findings and photos</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-muted/50">
+                                <TableHead className="w-[50px] font-semibold">#</TableHead>
+                                <TableHead className="font-semibold min-w-[200px]">Checklist Item</TableHead>
+                                <TableHead className="font-semibold">Inspection Result</TableHead>
+                                <TableHead className="font-semibold w-[120px]">Action Required</TableHead>
+                                <TableHead className="font-semibold w-[200px]">Photos</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {admissionChecklist.itemResults.map((item, index) => (
+                                <TableRow key={item.id} className="hover:bg-muted/30">
+                                  <TableCell className="font-medium text-muted-foreground">{index + 1}</TableCell>
+                                  <TableCell>
+                                    <div className="space-y-1">
+                                      <p className="font-semibold text-foreground">{item.itemName}</p>
+                                      {item.comment && (
+                                        <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded px-2 py-1">
+                                          <p className="text-xs text-amber-800 dark:text-amber-200">
+                                            <span className="font-medium">Note:</span> {item.comment}
+                                          </p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="space-y-1">
+                                      {item.isPresent !== null && (
+                                        <div className="flex items-center gap-2">
+                                          {item.isPresent ? (
+                                            <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/30 px-2 py-0.5 rounded text-sm">
+                                              <CheckCircle className="h-3.5 w-3.5" /> Present
+                                            </span>
+                                          ) : (
+                                            <span className="inline-flex items-center gap-1 text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/30 px-2 py-0.5 rounded text-sm">
+                                              <X className="h-3.5 w-3.5" /> Not Present
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+                                      {item.textValue && (
+                                        <p className="text-sm"><span className="text-muted-foreground">Value:</span> {item.textValue}</p>
+                                      )}
+                                      {item.numericValue !== null && item.numericValue !== undefined && (
+                                        <p className="text-sm"><span className="text-muted-foreground">Reading:</span> {item.numericValue}</p>
+                                      )}
+                                      {item.selectedOption && (
+                                        <p className="text-sm"><span className="text-muted-foreground">Selected:</span> {item.selectedOption}</p>
+                                      )}
+                                      {!item.isPresent && !item.textValue && item.numericValue === null && !item.selectedOption && (
+                                        <span className="text-muted-foreground text-sm">—</span>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    {item.repairReplacementAction && item.repairReplacementAction !== 'None' ? (
+                                      <Badge
+                                        variant={item.repairReplacementAction === 'Repair' ? 'outline' : 'destructive'}
+                                        className={item.repairReplacementAction === 'Repair'
+                                          ? 'bg-orange-50 text-orange-700 border-orange-300 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-700'
+                                          : 'bg-red-100 text-red-800 dark:bg-red-950/30 dark:text-red-400'}
+                                      >
+                                        {item.repairReplacementAction === 'Repair' ? '🔧 Repair' : '🔄 Replace'}
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-green-600 dark:text-green-400 text-sm">✓ OK</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {item.photoPaths && item.photoPaths.length > 0 ? (
+                                      <div className="flex flex-wrap gap-2">
+                                        {item.photoPaths.map((photoPath, photoIndex) => (
+                                          <a
+                                            key={photoIndex}
+                                            href={getFileUrl(photoPath)}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="relative group block"
+                                            title={`View photo ${photoIndex + 1} - ${item.itemName}`}
+                                          >
+                                            <img
+                                              src={getFileUrl(photoPath)}
+                                              alt={`${item.itemName} - Photo ${photoIndex + 1}`}
+                                              className="h-14 w-14 object-cover rounded-lg border-2 border-gray-200 dark:border-gray-700 hover:border-primary transition-all shadow-sm hover:shadow-md"
+                                            />
+                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
+                                              <ExternalLink className="h-4 w-4 text-white" />
+                                            </div>
+                                          </a>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-muted-foreground text-sm">No photos</span>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </CardContent>
+                      </Card>
+                    </>
                   )}
                 </div>
               </TabsContent>
@@ -2294,6 +2787,11 @@ export default function WorkOrdersPage() {
                                     {tool.requiresCertification && (
                                       <Badge variant="destructive" className="text-xs">Certification Required</Badge>
                                     )}
+                                    {tool.isExcludedFromBilling && (
+                                      <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-900 border-amber-200">
+                                        Excluded From Billing
+                                      </Badge>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -2358,6 +2856,17 @@ export default function WorkOrdersPage() {
                                       return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
                                     })()}
                                   </span>
+                                </div>
+                              )}
+                              {tool.isExcludedFromBilling && (
+                                <div className="col-span-2 rounded-md border border-amber-200 bg-amber-50 p-2">
+                                  <p className="text-xs font-medium text-amber-900">Billing Exclusion Reason</p>
+                                  <p className="text-sm text-amber-800">{tool.billingExclusionReason || 'No reason provided'}</p>
+                                  {tool.billingExcludedAt && (
+                                    <p className="text-xs text-amber-700 mt-1">
+                                      Excluded on {new Date(tool.billingExcludedAt).toLocaleString()}
+                                    </p>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -2588,7 +3097,7 @@ export default function WorkOrdersPage() {
                                 {schedule.endDateTime ? format(new Date(schedule.endDateTime), 'PPp') : 'N/A'}
                               </TableCell>
                               <TableCell>{schedule.workLocation || 'N/A'}</TableCell>
-                              <TableCell>{schedule.assignedVehicleName || '-'}</TableCell>
+                              <TableCell>{schedule.vehicleName || '-'}</TableCell>
                               <TableCell>
                                 <Badge
                                   variant={schedule.status === 'Completed' ? 'default' : schedule.status === 'InProgress' ? 'secondary' : 'outline'}
@@ -2764,6 +3273,148 @@ export default function WorkOrdersPage() {
                 </div>
               </TabsContent>
 
+              {/* Billing Tab */}
+              <TabsContent value="billing" className="flex-1 overflow-y-auto mt-4">
+                <div className="space-y-4">
+                  {/* Billing Type Header */}
+                  <Card className="bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Receipt className="h-5 w-5 text-green-600" />
+                          <CardTitle className="text-lg text-green-800">Billing Summary</CardTitle>
+                        </div>
+                        <Badge variant={selectedOrder.billingType === 'Maintenance' ? 'default' : 'secondary'} className="text-sm">
+                          {selectedOrder.billingType || 'Repairs'} Billing
+                        </Badge>
+                      </div>
+                      <CardDescription className="text-green-700">
+                        {selectedOrder.billingType === 'Maintenance'
+                          ? 'This work order uses fixed pricing from the maintenance type configuration'
+                          : 'This work order uses itemized costing (parts, labor, tools, expenses)'}
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+
+                  {selectedOrder.billingType === 'Maintenance' ? (
+                    /* Fixed Amount Billing */
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <DollarSign className="h-5 w-5 text-green-600" />
+                          Fixed Maintenance Amount
+                        </CardTitle>
+                        <CardDescription>
+                          Standard maintenance billing rate
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="flex items-center justify-between p-4 bg-green-50 rounded-lg border border-green-200">
+                          <div>
+                            <p className="text-sm text-muted-foreground">Fixed Amount</p>
+                            <p className="text-3xl font-bold text-green-700">
+                              ${(selectedOrder.fixedAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm text-muted-foreground">Maintenance Type</p>
+                            <p className="text-lg font-medium">{selectedOrder.maintenanceTypeName || 'N/A'}</p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    /* Itemized Billing */
+                    <div className="space-y-4">
+                      {/* Itemized Breakdown Table */}
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-base">Itemized Breakdown</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Category</TableHead>
+                                <TableHead>Description</TableHead>
+                                <TableHead className="text-right">Quantity</TableHead>
+                                <TableHead className="text-right">Price</TableHead>
+                                <TableHead className="text-right">Total Amount</TableHead>
+                                <TableHead className="text-right">Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {billingLineItems.map(line => (
+                                <TableRow key={line.key}>
+                                  <TableCell>
+                                    <Badge
+                                      variant="outline"
+                                      className={
+                                        line.type === 'part'
+                                          ? 'bg-blue-50 text-blue-700'
+                                          : line.type === 'labor'
+                                          ? 'bg-purple-50 text-purple-700'
+                                          : line.type === 'tool'
+                                          ? 'bg-orange-50 text-orange-700'
+                                          : 'bg-red-50 text-red-700'
+                                      }
+                                    >
+                                      {line.category}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>{line.description}</TableCell>
+                                  <TableCell className="text-right">
+                                    {Number.isInteger(line.quantity) ? line.quantity : line.quantity.toFixed(2)}
+                                  </TableCell>
+                                  <TableCell className="text-right">${line.unitPrice.toFixed(2)}</TableCell>
+                                  <TableCell className="text-right font-medium">${line.totalAmount.toFixed(2)}</TableCell>
+                                  <TableCell className="text-right">
+                                    {line.canDelete ? (
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => requestBillingLineDelete(line)}
+                                      >
+                                        <Trash2 className="h-4 w-4 text-destructive" />
+                                      </Button>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">-</span>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                              {/* Empty state */}
+                              {billingLineItems.length === 0 && (
+                                <TableRow>
+                                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                                    No billing items recorded yet
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </TableBody>
+                          </Table>
+                        </CardContent>
+                      </Card>
+
+                      {/* Total Cost */}
+                      <Card className="border-2 border-green-500 bg-green-50">
+                        <CardContent className="pt-4">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-lg font-medium text-green-700">Total Cost</p>
+                              <p className="text-xs text-green-600">Sum of all itemized costs</p>
+                            </div>
+                            <p className="text-3xl font-bold text-green-800">
+                              ${itemizedBillingTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+
               {/* Workflow History Tab */}
               <TabsContent value="history" className="flex-1 overflow-y-auto mt-4">
                   <div className="space-y-4">
@@ -2874,8 +3525,9 @@ export default function WorkOrdersPage() {
           </DialogHeader>
           {selectedOrder && (
             <Tabs defaultValue="details" className="w-full flex-1 overflow-hidden flex flex-col">
-              <TabsList className="grid w-full grid-cols-5 bg-muted/50 p-1 rounded-lg gap-1">
+              <TabsList className="grid w-full grid-cols-6 bg-muted/50 p-1 rounded-lg gap-1">
                 <TabsTrigger value="details">Details</TabsTrigger>
+                <TabsTrigger value="checklist">Checklist</TabsTrigger>
                 <TabsTrigger value="tools">Tools</TabsTrigger>
                 <TabsTrigger value="consumables">Parts</TabsTrigger>
                 <TabsTrigger value="schedule">Schedule</TabsTrigger>
@@ -3031,6 +3683,174 @@ export default function WorkOrdersPage() {
                       />
                     </div>
                   </div>
+                </div>
+              </TabsContent>
+
+              {/* Checklist Tab - Admission Inspection Checklist (Read-only) */}
+              <TabsContent value="checklist" className="flex-1 overflow-y-auto mt-4">
+                <div className="space-y-4">
+                  {loadingChecklist ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                      <span className="ml-3 text-muted-foreground">Loading admission checklist...</span>
+                    </div>
+                  ) : !selectedOrder.jobCardId ? (
+                    <Card className="border-dashed">
+                      <CardContent className="flex flex-col items-center justify-center py-8">
+                        <ClipboardCheck className="h-12 w-12 text-muted-foreground/30 mb-3" />
+                        <p className="font-medium text-muted-foreground">No Job Card Associated</p>
+                        <p className="text-sm text-muted-foreground/70 mt-1">Admission checklists are only available for work orders generated from job cards.</p>
+                      </CardContent>
+                    </Card>
+                  ) : !admissionChecklist ? (
+                    <Card className="border-dashed">
+                      <CardContent className="flex flex-col items-center justify-center py-8">
+                        <ClipboardCheck className="h-12 w-12 text-muted-foreground/30 mb-3" />
+                        <p className="font-medium text-muted-foreground">No Admission Checklist</p>
+                        <p className="text-sm text-muted-foreground/70 mt-1">No admission checklist was completed for this work order.</p>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <>
+                      {/* Checklist Summary - Compact header for edit dialog */}
+                      <Card className="bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+                        <CardContent className="pt-4 pb-3">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <ClipboardCheck className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                              <span className="font-semibold text-blue-900 dark:text-blue-100">{admissionChecklist.templateName}</span>
+                              <span className="text-sm text-muted-foreground">• #{admissionChecklist.inspectionNumber}</span>
+                            </div>
+                            <Badge
+                              variant={admissionChecklist.status === 'Completed' ? 'default' : 'secondary'}
+                              className={admissionChecklist.status === 'Completed' ? 'bg-green-600' : ''}
+                            >
+                              {admissionChecklist.status}
+                            </Badge>
+                          </div>
+                          <div className="grid grid-cols-4 gap-3 text-sm">
+                            <div>
+                              <span className="text-xs text-muted-foreground">Inspector</span>
+                              <p className="font-medium">{admissionChecklist.inspectorName}</p>
+                            </div>
+                            <div>
+                              <span className="text-xs text-muted-foreground">Date</span>
+                              <p className="font-medium">{format(new Date(admissionChecklist.inspectionDate), 'PP')}</p>
+                            </div>
+                            <div>
+                              <span className="text-xs text-muted-foreground">Completed</span>
+                              <p className="font-medium">{admissionChecklist.completedItems}/{admissionChecklist.totalItems}</p>
+                            </div>
+                            <div>
+                              <span className="text-xs text-muted-foreground">Actions</span>
+                              <p className="font-medium text-orange-600 dark:text-orange-400">
+                                {admissionChecklist.itemResults.filter(i => i.repairReplacementAction && i.repairReplacementAction !== 'None').length} required
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      {/* Checklist Items Table - Enhanced for edit dialog */}
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm flex items-center gap-2">
+                            <FileText className="h-4 w-4" />
+                            Inspection Items
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="pt-0">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-muted/50">
+                                <TableHead className="w-[40px] font-semibold">#</TableHead>
+                                <TableHead className="font-semibold">Checklist Item</TableHead>
+                                <TableHead className="font-semibold">Result</TableHead>
+                                <TableHead className="font-semibold w-[100px]">Action</TableHead>
+                                <TableHead className="font-semibold w-[140px]">Photos</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {admissionChecklist.itemResults.map((item, index) => (
+                                <TableRow key={item.id} className="hover:bg-muted/30">
+                                  <TableCell className="text-muted-foreground font-medium">{index + 1}</TableCell>
+                                  <TableCell>
+                                    <div className="space-y-1">
+                                      <p className="font-semibold">{item.itemName}</p>
+                                      {item.comment && (
+                                        <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-2 py-0.5 rounded inline-block">
+                                          {item.comment}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    {item.isPresent !== null && (
+                                      <span className={`inline-flex items-center gap-1 text-sm px-2 py-0.5 rounded ${
+                                        item.isPresent
+                                          ? 'text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/30'
+                                          : 'text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/30'
+                                      }`}>
+                                        {item.isPresent ? <CheckCircle className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+                                        {item.isPresent ? 'Present' : 'Missing'}
+                                      </span>
+                                    )}
+                                    {item.textValue && <span className="text-sm">{item.textValue}</span>}
+                                    {item.numericValue !== null && item.numericValue !== undefined && <span className="text-sm">{item.numericValue}</span>}
+                                    {item.selectedOption && <span className="text-sm">{item.selectedOption}</span>}
+                                    {!item.isPresent && !item.textValue && item.numericValue === null && !item.selectedOption && (
+                                      <span className="text-muted-foreground">—</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {item.repairReplacementAction && item.repairReplacementAction !== 'None' ? (
+                                      <Badge
+                                        variant={item.repairReplacementAction === 'Repair' ? 'outline' : 'destructive'}
+                                        className={item.repairReplacementAction === 'Repair'
+                                          ? 'bg-orange-50 text-orange-700 border-orange-300 dark:bg-orange-950/30 dark:text-orange-400'
+                                          : ''}
+                                      >
+                                        {item.repairReplacementAction === 'Repair' ? '🔧' : '🔄'} {item.repairReplacementAction}
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-green-600 dark:text-green-400 text-sm">✓ OK</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {item.photoPaths && item.photoPaths.length > 0 ? (
+                                      <div className="flex gap-1">
+                                        {item.photoPaths.map((photoPath, photoIndex) => (
+                                          <a
+                                            key={photoIndex}
+                                            href={getFileUrl(photoPath)}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="relative group block"
+                                            title={`View photo - ${item.itemName}`}
+                                          >
+                                            <img
+                                              src={getFileUrl(photoPath)}
+                                              alt={`Photo ${photoIndex + 1}`}
+                                              className="h-10 w-10 object-cover rounded border-2 border-gray-200 dark:border-gray-700 hover:border-primary transition-all"
+                                            />
+                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded">
+                                              <ExternalLink className="h-3 w-3 text-white" />
+                                            </div>
+                                          </a>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-muted-foreground text-sm">—</span>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </CardContent>
+                      </Card>
+                    </>
+                  )}
                 </div>
               </TabsContent>
 
@@ -3219,6 +4039,8 @@ export default function WorkOrdersPage() {
                                   name: item.itemName,
                                   availableStock: item.availableStock,
                                   unitOfMeasure: item.unitOfMeasure,
+                                  unitCost: item.unitCost,
+                                  listPrice: item.unitCost,
                                   standardCost: item.unitCost,
                                   category: item.categoryName || ''
                                 } as InventoryItemDto);
@@ -3304,6 +4126,7 @@ export default function WorkOrdersPage() {
                           }
 
                           if (editingPart) {
+                            const lineUnitPrice = getPartSellingPrice(selectedInventoryItem);
                             // Update existing part in local state
                             setWorkOrderParts(prev => prev.map(part =>
                               part.id === editingPart.id
@@ -3313,14 +4136,15 @@ export default function WorkOrdersPage() {
                                     itemCode: selectedInventoryItem.itemCode,
                                     itemName: selectedInventoryItem.name,
                                     quantityRequired: partQuantity,
-                                    unitCost: selectedInventoryItem.standardCost,
-                                    totalCost: partQuantity * selectedInventoryItem.standardCost,
+                                    unitCost: lineUnitPrice,
+                                    totalCost: partQuantity * lineUnitPrice,
                                     notes: partNotes
                                   }
                                 : part
                             ));
                             setEditingPart(null);
                           } else {
+                            const lineUnitPrice = getPartSellingPrice(selectedInventoryItem);
                             // Add new part to local state
                             const warehouse = warehouses.find(w => w.id === selectedWarehouse);
                             const newPart: WorkOrderPartDto = {
@@ -3333,8 +4157,8 @@ export default function WorkOrdersPage() {
                               quantityAllocated: 0,
                               quantityUsed: 0,
                               quantityReturned: 0,
-                              unitCost: selectedInventoryItem.standardCost,
-                              totalCost: partQuantity * selectedInventoryItem.standardCost,
+                              unitCost: lineUnitPrice,
+                              totalCost: partQuantity * lineUnitPrice,
                               status: 'Pending',
                               notes: partNotes,
                               createdAt: new Date().toISOString(),
@@ -3533,6 +4357,7 @@ export default function WorkOrdersPage() {
                             <TableHead>Start Date/Time</TableHead>
                             <TableHead>End Date/Time</TableHead>
                             <TableHead>Location</TableHead>
+                            <TableHead>Vehicle</TableHead>
                             <TableHead>Status</TableHead>
                             <TableHead>Actions</TableHead>
                           </TableRow>
@@ -3551,6 +4376,7 @@ export default function WorkOrdersPage() {
                                 {schedule.endDateTime ? format(new Date(schedule.endDateTime), 'PPp') : 'N/A'}
                               </TableCell>
                               <TableCell>{schedule.workLocation || 'N/A'}</TableCell>
+                              <TableCell>{schedule.vehicleName || '-'}</TableCell>
                               <TableCell>
                                 <Badge
                                   variant={schedule.status === 'Completed' ? 'default' : schedule.status === 'InProgress' ? 'secondary' : 'outline'}
@@ -4133,6 +4959,29 @@ export default function WorkOrdersPage() {
                 <Label className="text-sm font-medium">Task</Label>
                 <p className="text-sm text-muted-foreground">{selectedTask.taskName}</p>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="taskTechnician">Technician <span className="text-red-500">*</span></Label>
+                {/* Only show technicians scheduled for this work order */}
+                {staffSchedules.length > 0 ? (
+                  <Select value={taskTechnicianId} onValueChange={setTaskTechnicianId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select technician who performed the work" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {/* Extract unique technicians from staff schedules */}
+                      {Array.from(new Map(staffSchedules.map(s => [s.technicianId, s])).values()).map((schedule) => (
+                        <SelectItem key={schedule.technicianId} value={schedule.technicianId}>
+                          {schedule.technicianFullName || schedule.technicianName || 'Unknown Technician'}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="text-sm text-amber-600 bg-amber-50 p-3 rounded-md border border-amber-200">
+                    No technicians scheduled for this work order. Please add technicians in the Schedule tab first.
+                  </div>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="actualHours">Actual Hours <span className="text-red-500">*</span></Label>
@@ -4183,7 +5032,7 @@ export default function WorkOrdersPage() {
                   rows={3}
                 />
               </div>
-              {taskActualHours > 0 && taskHourlyRate > 0 && (
+              {taskActualHours > 0 && taskHourlyRate > 0 && taskTechnicianId && (
                 <div className="bg-muted/50 rounded-lg p-3">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Labour Cost:</span>
@@ -4197,7 +5046,7 @@ export default function WorkOrdersPage() {
             <Button variant="outline" onClick={() => setIsTaskCompletionDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCompleteTaskSubmit} disabled={taskActualHours <= 0 || taskHourlyRate <= 0}>
+            <Button onClick={handleCompleteTaskSubmit} disabled={taskActualHours <= 0 || taskHourlyRate <= 0 || !taskTechnicianId}>
               Complete Task
             </Button>
           </DialogFooter>
@@ -5235,6 +6084,48 @@ export default function WorkOrdersPage() {
         </DialogContent>
       </Dialog>
 
+      <AlertDialog open={isBillingDeleteDialogOpen} onOpenChange={setIsBillingDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {billingLineToDelete?.type === 'tool' ? 'Exclude Tool From Billing?' : 'Remove Billing Line Item?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {billingLineToDelete
+                ? billingLineToDelete.type === 'tool'
+                  ? `This will exclude "${billingLineToDelete.label}" from billing while keeping allocation and checkout history for audit purposes.`
+                  : `This will remove "${billingLineToDelete.label}" from the work order billing lines. This action cannot be undone.`
+                : 'This action cannot be undone.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {billingLineToDelete?.type === 'tool' && (
+            <div className="space-y-2">
+              <Label htmlFor="billing-exclusion-reason">Reason for exclusion</Label>
+              <Textarea
+                id="billing-exclusion-reason"
+                value={billingDeleteReason}
+                onChange={(event) => setBillingDeleteReason(event.target.value)}
+                placeholder="Explain why this tool line should be excluded from billing..."
+                rows={3}
+                disabled={isDeletingBillingLine}
+              />
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingBillingLine}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isDeletingBillingLine || (billingLineToDelete?.type === 'tool' && !billingDeleteReason.trim())}
+              onClick={(event) => {
+                event.preventDefault();
+                handleConfirmBillingLineDelete();
+              }}
+            >
+              {isDeletingBillingLine ? 'Saving...' : billingLineToDelete?.type === 'tool' ? 'Exclude From Billing' : 'Remove Item'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Task Photo Preview Modal */}
       {previewPhotoUrl && (
         <div
@@ -5297,5 +6188,13 @@ export default function WorkOrdersPage() {
       )}
 
     </div>
+  );
+}
+
+export default function WorkOrdersPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen">Loading...</div>}>
+      <WorkOrdersPageContent />
+    </Suspense>
   );
 }

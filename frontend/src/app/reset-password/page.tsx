@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
@@ -8,12 +8,14 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation } from '@tanstack/react-query';
 import { z } from 'zod';
 import { Building2, Lock, Eye, EyeOff, CheckCircle, AlertCircle, Loader2, ArrowLeft, Shield } from 'lucide-react';
+import ReCAPTCHA from 'react-google-recaptcha';
 
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { apiService } from '../../services/api.service';
+import { settingsService } from '../../services/settings';
 
 const resetPasswordSchema = z.object({
   newPassword: z.string()
@@ -30,13 +32,18 @@ const resetPasswordSchema = z.object({
 
 type ResetPasswordForm = z.infer<typeof resetPasswordSchema>;
 
-export default function ResetPasswordPage() {
+function ResetPasswordContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaEnabled, setCaptchaEnabled] = useState(false);
+  const [captchaProvider, setCaptchaProvider] = useState<'recaptcha' | 'hcaptcha'>('recaptcha');
+  const [recaptchaSiteKey, setRecaptchaSiteKey] = useState<string | null>(null);
+  const [hCaptchaSiteKey, setHCaptchaSiteKey] = useState<string | null>(null);
 
   const token = searchParams.get('token');
   const email = searchParams.get('email');
@@ -57,6 +64,17 @@ export default function ResetPasswordPage() {
     }
   }, [token, email, setFormError]);
 
+  useEffect(() => {
+    settingsService.getPublicSecuritySettings().then((s) => {
+      setCaptchaEnabled(!!s.captchaEnabled);
+      setCaptchaProvider((s.captchaProvider || 'recaptcha') as any);
+      setRecaptchaSiteKey(s.recaptchaSiteKey || null);
+      setHCaptchaSiteKey(s.hCaptchaSiteKey || null);
+    }).catch(() => {
+      // ignore
+    });
+  }, []);
+
   const resetPasswordMutation = useMutation({
     mutationFn: async (data: ResetPasswordForm) => {
       if (!token || !email) {
@@ -67,7 +85,8 @@ export default function ResetPasswordPage() {
         email: decodeURIComponent(email),
         resetToken: token,
         newPassword: data.newPassword,
-        confirmPassword: data.confirmPassword
+        confirmPassword: data.confirmPassword,
+        captchaToken,
       });
     },
     onSuccess: () => {
@@ -83,6 +102,10 @@ export default function ResetPasswordPage() {
 
   const onSubmit = (data: ResetPasswordForm) => {
     setError(null);
+    if (captchaEnabled && !captchaToken) {
+      setFormError('root', { message: 'Please complete the CAPTCHA verification.' });
+      return;
+    }
     resetPasswordMutation.mutate(data);
   };
 
@@ -260,7 +283,7 @@ export default function ResetPasswordPage() {
               <Button
                 type="submit"
                 className="w-full h-12 text-base font-semibold"
-                disabled={resetPasswordMutation.isPending}
+                disabled={resetPasswordMutation.isPending || (captchaEnabled && !captchaToken)}
               >
                 {resetPasswordMutation.isPending ? (
                   <>
@@ -274,6 +297,19 @@ export default function ResetPasswordPage() {
                   </>
                 )}
               </Button>
+
+              {captchaEnabled ? (
+                <div className="flex justify-center pt-2">
+                  {captchaProvider === 'recaptcha' && recaptchaSiteKey ? (
+                    <ReCAPTCHA sitekey={recaptchaSiteKey} onChange={(t) => setCaptchaToken(t)} />
+                  ) : (
+                    <p className="text-sm text-slate-600 dark:text-slate-400 text-center">
+                      CAPTCHA is enabled but not configured for this portal. Please contact support.
+                      {captchaProvider === 'hcaptcha' && hCaptchaSiteKey ? null : null}
+                    </p>
+                  )}
+                </div>
+              ) : null}
             </form>
           </CardContent>
         </Card>
@@ -284,5 +320,13 @@ export default function ResetPasswordPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen">Loading...</div>}>
+      <ResetPasswordContent />
+    </Suspense>
   );
 }

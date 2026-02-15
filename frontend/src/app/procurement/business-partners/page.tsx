@@ -132,12 +132,25 @@ export default function BusinessPartnersPage() {
     return <Badge variant={config.variant}>{config.label}</Badge>;
   };
 
+  // Color-coded badge for partner type
+  const getPartnerTypeBadge = (partnerType: string) => {
+    const typeConfig: Record<string, { label: string; className: string }> = {
+      Supplier: { label: 'Supplier', className: 'bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-100' },
+      Contractor: { label: 'Contractor', className: 'bg-orange-100 text-orange-800 border-orange-200 hover:bg-orange-100' },
+      Customer: { label: 'Customer', className: 'bg-green-100 text-green-800 border-green-200 hover:bg-green-100' },
+      Both: { label: 'Supplier & Contractor', className: 'bg-purple-100 text-purple-800 border-purple-200 hover:bg-purple-100' },
+    };
+
+    const config = typeConfig[partnerType] || { label: partnerType, className: 'bg-gray-100 text-gray-800 border-gray-200' };
+    return <Badge variant="outline" className={config.className}>{config.label}</Badge>;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Business Partners</h1>
-          <p className="text-gray-600 mt-2">Manage suppliers and contractors</p>
+          <p className="text-gray-600 mt-2">Manage suppliers, contractors, and customers</p>
         </div>
         <Button onClick={() => router.push('/procurement/business-partners/new')}>
           <Plus className="w-4 h-4 mr-2" />
@@ -190,7 +203,8 @@ export default function BusinessPartnersPage() {
                 <SelectItem value="all">All Types</SelectItem>
                 <SelectItem value="Supplier">Supplier</SelectItem>
                 <SelectItem value="Contractor">Contractor</SelectItem>
-                <SelectItem value="Both">Both</SelectItem>
+                <SelectItem value="Customer">Customer</SelectItem>
+                <SelectItem value="Both">Both (Supplier & Contractor)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -250,7 +264,7 @@ export default function BusinessPartnersPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{partner.partnerType}</Badge>
+                        {getPartnerTypeBadge(partner.partnerType)}
                       </TableCell>
                       <TableCell>{getStatusBadge(partner.status)}</TableCell>
                       <TableCell>

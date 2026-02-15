@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.Extensions.Logging;
 
@@ -24,6 +25,7 @@ public class TenderBidService : ITenderBidService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<TenderBidService> _logger;
+    private readonly IAppEventBus _appEventBus;
 
     public TenderBidService(
         ITenderBidRepository bidRepository,
@@ -40,6 +42,7 @@ public class TenderBidService : ITenderBidService
         ISupplierValidationService supplierValidationService,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IAppEventBus appEventBus,
         ILogger<TenderBidService> logger)
     {
         _bidRepository = bidRepository;
@@ -56,6 +59,7 @@ public class TenderBidService : ITenderBidService
         _supplierValidationService = supplierValidationService;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _appEventBus = appEventBus;
         _logger = logger;
     }
 
@@ -377,6 +381,48 @@ public class TenderBidService : ITenderBidService
 
             _logger.LogInformation("Created bid {BidId} for tender {TenderId}", bid.Id, dto.TenderId);
 
+            // Publish events for admin-configurable notification topics (best-effort).
+            try
+            {
+                var baseData = new Dictionary<string, object>
+                {
+                    ["BidId"] = bid.Id,
+                    ["BidNumber"] = bid.BidNumber ?? string.Empty,
+                    ["TenderId"] = bid.TenderId,
+                    ["TenderNumber"] = tender.TenderNumber ?? string.Empty,
+                    ["BusinessPartnerId"] = bid.BusinessPartnerId,
+                    ["Status"] = bid.Status ?? string.Empty,
+                    ["TotalBidAmount"] = bid.TotalBidAmount,
+                    ["Currency"] = bid.Currency ?? string.Empty
+                };
+
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = bid.TenantId,
+                    EntityType = "Bid",
+                    Activity = "Created",
+                    Audience = "Supplier",
+                    EntityId = bid.Id,
+                    TriggeredByUserId = _currentUserProvider.UserId,
+                    Data = new Dictionary<string, object>(baseData)
+                });
+
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = bid.TenantId,
+                    EntityType = "Bid",
+                    Activity = "Created",
+                    Audience = "Internal",
+                    EntityId = bid.Id,
+                    TriggeredByUserId = _currentUserProvider.UserId,
+                    Data = new Dictionary<string, object>(baseData)
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish Bid.Created entity activity event for bid {BidId}", bid.Id);
+            }
+
             return MapToDetailDto(bid, tender, items, new List<TenderBidDocument>());
         }
         catch (Exception ex)
@@ -528,6 +574,49 @@ public class TenderBidService : ITenderBidService
 
             // Send notification
             await _notificationService.SendBidSubmittedNotificationAsync(id);
+
+            // Publish events for admin-configurable notification topics (best-effort).
+            try
+            {
+                var baseData = new Dictionary<string, object>
+                {
+                    ["BidId"] = bid.Id,
+                    ["BidNumber"] = bid.BidNumber ?? string.Empty,
+                    ["TenderId"] = bid.TenderId,
+                    ["TenderNumber"] = tender.TenderNumber ?? string.Empty,
+                    ["BusinessPartnerId"] = bid.BusinessPartnerId,
+                    ["Status"] = bid.Status ?? string.Empty,
+                    ["SubmittedDate"] = bid.SubmittedDate.ToString("o"),
+                    ["TotalBidAmount"] = bid.TotalBidAmount,
+                    ["Currency"] = bid.Currency ?? string.Empty
+                };
+
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = bid.TenantId,
+                    EntityType = "Bid",
+                    Activity = "Submitted",
+                    Audience = "Supplier",
+                    EntityId = bid.Id,
+                    TriggeredByUserId = _currentUserProvider.UserId,
+                    Data = new Dictionary<string, object>(baseData)
+                });
+
+                await _appEventBus.PublishAsync(new EntityActivityEvent
+                {
+                    TenantId = bid.TenantId,
+                    EntityType = "Bid",
+                    Activity = "Submitted",
+                    Audience = "Internal",
+                    EntityId = bid.Id,
+                    TriggeredByUserId = _currentUserProvider.UserId,
+                    Data = new Dictionary<string, object>(baseData)
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish Bid.Submitted entity activity event for bid {BidId}", bid.Id);
+            }
 
             var documents = await _bidDocumentRepository.GetByBidIdAsync(id);
 
@@ -1512,4 +1601,3 @@ public class TenderBidService : ITenderBidService
 
     #endregion
 }
-
