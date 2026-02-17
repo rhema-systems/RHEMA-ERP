@@ -231,7 +231,7 @@ public class Transfer : TenantEntity
     public Guid MovementId { get; set; }
     public EmployeeMovement Movement { get; set; } = null!;
 
-    public TransferType Type { get; set; } // Interdepartmental, Inter-station, Cross-functional
+    public StaffTransferType Type { get; set; } // Interdepartmental, Inter-station, Cross-functional
     public TransferReason Reason { get; set; }
 
     // Relocation

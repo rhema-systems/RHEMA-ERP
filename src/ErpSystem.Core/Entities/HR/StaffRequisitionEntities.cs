@@ -22,9 +22,9 @@ public class StaffRequisition : TenantEntity
     public WorkStation? Station { get; set; }
 
     // Requisition Type
-    public RequisitionType Type { get; set; } // New Position, Replacement, Temporary
-    public RequisitionPriority Priority { get; set; }
-    public RequisitionStatus Status { get; set; }
+    public StaffRequisitionType Type { get; set; } // New Position, Replacement, Temporary
+    public StaffRequisitionPriority Priority { get; set; }
+    public StaffRequisitionStatus Status { get; set; }
 
     // If Replacement
     public Guid? ReplacementForEmployeeId { get; set; }

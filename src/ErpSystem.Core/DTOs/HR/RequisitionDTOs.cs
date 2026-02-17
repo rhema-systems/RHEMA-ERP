@@ -12,7 +12,7 @@ public class StaffRequisitionListDto
     public RequisitionType Type { get; set; }
     public string TypeName { get; set; }
     public int NumberOfPositions { get; set; }
-    public RequisitionPriority Priority { get; set; }
+    public StaffRequisitionPriority Priority { get; set; }
     public string PriorityName { get; set; }
     public RequisitionStatus Status { get; set; }
     public string StatusName { get; set; }
@@ -40,7 +40,7 @@ public class StaffRequisitionDetailDto
     public RequisitionType Type { get; set; }
     public string TypeName { get; set; }
     public int NumberOfPositions { get; set; }
-    public RequisitionPriority Priority { get; set; }
+    public StaffRequisitionPriority Priority { get; set; }
     public string PriorityName { get; set; }
     // public EmploymentType EmploymentType { get; set; }
     public string EmploymentTypeName { get; set; }
@@ -144,7 +144,7 @@ public class CreateStaffRequisitionDto
     public Guid? StationId { get; set; }
     public RequisitionType Type { get; set; }
     public int NumberOfPositions { get; set; }
-    public RequisitionPriority Priority { get; set; }
+    public StaffRequisitionPriority Priority { get; set; }
     // public EmploymentType EmploymentType { get; set; }
     public string ContractDuration { get; set; }
     public Guid? ReplacementForEmployeeId { get; set; }
@@ -170,7 +170,7 @@ public class UpdateStaffRequisitionDto
 {
     public Guid Id { get; set; }
     public int NumberOfPositions { get; set; }
-    public RequisitionPriority Priority { get; set; }
+    public StaffRequisitionPriority Priority { get; set; }
     public string BusinessJustification { get; set; }
     public string ImpactIfNotFilled { get; set; }
     public decimal? ProposedMinSalary { get; set; }
@@ -240,8 +240,8 @@ public class RequisitionDashboardDto
     public int InRecruitment { get; set; }
     public int Fulfilled { get; set; }
     public int Rejected { get; set; }
-    public Dictionary<RequisitionStatus, int> RequisitionsByStatus { get; set; }
-    public Dictionary<RequisitionPriority, int> RequisitionsByPriority { get; set; }
+    public Dictionary<StaffRequisitionStatus, int> RequisitionsByStatus { get; set; }
+    public Dictionary<StaffRequisitionPriority, int> RequisitionsByPriority { get; set; }
     public List<StaffRequisitionListDto> UrgentRequisitions { get; set; }
     public List<StaffRequisitionListDto> PendingMyApproval { get; set; }
 }

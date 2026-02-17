@@ -275,7 +275,7 @@ public class TransferDetailDto
 {
     public Guid Id { get; set; }
     public Guid MovementId { get; set; }
-    public TransferType TransferType { get; set; }
+    public StaffTransferType TransferType { get; set; }
     public string TransferTypeName { get; set; }
     public TransferReason TransferReason { get; set; }
     public string TransferReasonName { get; set; }

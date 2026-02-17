@@ -249,6 +249,86 @@ public enum ContractStatus
     Terminated = 3
 }
 
+
+public enum DependentRelationship
+{
+    Spouse = 1,
+    
+    Son = 2,
+    
+    Daughter = 3,
+    
+    Mother = 4,
+    
+    Father = 5,
+    
+    Brother = 6,
+
+    Sister = 7,
+
+    Uncle = 8,
+
+    Aunt = 9,
+
+    Nephew = 10,
+    
+    Niece = 11,
+
+    Grandfather = 12,
+
+    Grandmother = 13,
+
+    Other = 14
+}
+
+public enum PayFrequency
+{
+    Weekly = 1,
+    BiWeekly = 2,
+    Monthly = 3,
+    Quarterly = 4,
+    Annually = 5
+}
+
+public enum TaxTreatmentType
+{
+    None = 0,
+
+    /// <summary>
+    /// Pay As You Earn (standard employee payroll tax)
+    /// </summary>
+    PAYE = 1,
+
+    /// <summary>
+    /// Withholding tax (typically for contractors / consultants)
+    /// </summary>
+    WithholdingTax = 2
+}
+
+public enum RefereeType
+{
+    Professional,
+    Academic,
+    Personal
+}
+
+public enum PositionChangeReason
+{
+    InitialAssignment = 0,
+
+    Promotion = 1,
+    
+    Demotion = 2,
+    
+    Transfer = 3,
+    
+    Restructure = 4,
+
+    Termination = 5,
+    
+    Other = 6
+}
+
 #endregion Employee Details
 
 #region Organization Structure
@@ -328,6 +408,26 @@ public enum StationType
     Other = 99
 }
 
+public enum LocationContactType
+{
+    Primary = 1,
+    
+    Secondary = 2,
+    
+    Emergency = 3,
+
+    Other = 4
+}
+
+public enum WorkMode
+{
+    OnSite = 1,
+    
+    Remote = 2,
+    
+    Hybrid = 3
+}
+
 #endregion Organization Structure
 
 #region Staff Benefits
@@ -385,6 +485,54 @@ public enum BenefitPolicyType
     LeaveAndPTO = 10,
 
     Other = 11
+}
+
+public enum BenefitRelationType
+{
+    Any = 1,
+
+    Spouse = 2,
+
+    Child = 3,
+
+    Son = 4,
+
+    Daughter = 5,
+
+    Mother = 6,
+
+    Father = 7,
+
+    Parent = 8,
+
+    Sibling = 9,
+
+    Brother = 10,
+
+    Sister = 11,
+
+    Uncle = 12,
+    
+    Aunt = 13,
+
+    Nephew = 14,
+    
+    Niece = 15,
+    
+    Grandparent = 16,
+
+    Grandfather = 17,
+
+    Grandmother = 18,
+}
+
+public enum BenefitLimitPeriod
+{
+    Monthly = 1,
+
+    Annual = 2,
+    
+    Lifetime = 3
 }
 
 #endregion Staff Benefits
@@ -2172,7 +2320,7 @@ public enum NineBoxCategory
 
 #region Staff Requisition
 
-public enum RequisitionType
+public enum StaffRequisitionType
 {
     [Description("New Position")]
     NewPosition = 1,
@@ -2190,7 +2338,7 @@ public enum RequisitionType
     Backfill = 5
 }
 
-public enum RequisitionPriority
+public enum StaffRequisitionPriority
 {
     [Description("Urgent")]
     Urgent = 1,
@@ -2205,7 +2353,7 @@ public enum RequisitionPriority
     Low = 4
 }
 
-public enum RequisitionStatus
+public enum StaffRequisitionStatus
 {
     [Description("Draft")]
     Draft = 1,
@@ -2533,7 +2681,7 @@ public enum AssetTransferType
     DepartmentToDepartment = 3
 }
 
-public enum TransferStatus
+public enum HRAssetTransferStatus
 {
     [Description("Pending")]
     Pending = 1,
@@ -2567,6 +2715,21 @@ public enum AssetAttributeDataType
     Integer = 5,
 
     Text = 6
+}
+
+public enum HRAssetRequisitionPriority
+{
+    [Description("Urgent")]
+    Urgent = 1,
+
+    [Description("High")]
+    High = 2,
+
+    [Description("Medium")]
+    Medium = 3,
+
+    [Description("Low")]
+    Low = 4
 }
 
 #endregion Staff Assets
@@ -2708,7 +2871,7 @@ public enum PromotionType
     Automatic = 5
 }
 
-public enum TransferType
+public enum StaffTransferType
 {
     [Description("Interdepartmental Transfer")]
     Interdepartmental = 1,

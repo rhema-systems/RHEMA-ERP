@@ -99,7 +99,7 @@ public class LeaveCategoryAllocation : TenantEntity
 
     public Guid? LeaveSubTypeId { get; set; }
 
-    public Guid StaffCategoryId { get; set; }
+    public Guid StaffLevelId { get; set; }
 
     public int AllocationDays { get; set; }
 
@@ -109,8 +109,8 @@ public class LeaveCategoryAllocation : TenantEntity
     [ForeignKey(nameof(LeaveSubTypeId))]
     public virtual LeaveSubType? LeaveSubType { get; set; }
 
-    [ForeignKey(nameof(StaffCategoryId))]
-    public virtual StaffCategory StaffCategory { get; set; } = null!;
+    [ForeignKey(nameof(StaffLevelId))]
+    public virtual StaffLevel StaffLevel {get; set; } = null!;
 }
 
 /// <summary>

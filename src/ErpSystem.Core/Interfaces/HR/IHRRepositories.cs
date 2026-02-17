@@ -13,24 +13,46 @@ namespace ErpSystem.Core.Interfaces.HR;
 public interface IEmployeeRepository : IGenericRepository<Employee>
 {
     Task<Employee?> GetByEmployeeNumberAsync(string employeeNumber);
+    Task<Employee?> GetByEmployeeNumberWithDetailsAsync(string employeeNumber);
+    Task<Employee?> GetByEmployeeNumberWithFullProfileAsync(string employeeNumber);
+    Task<Employee?> GetByEmailAsync(string email);
     Task<Employee?> GetByIdWithDetailsAsync(Guid id);
     Task<Employee?> GetByApplicationUserIdAsync(Guid applicationUserId);
+    Task<Employee?> GetByIdWithFullProfileAsync(Guid id);
     Task<IEnumerable<Employee>> GetActiveEmployeesAsync();
+    Task<IEnumerable<Employee>> GetByOrganizationUnitAsync(Guid organizationUnitId);
+    Task<IEnumerable<Employee>> GetByOrganizationLevelAsync(Guid organizationLevelId);
     Task<IEnumerable<Employee>> GetByStationAsync(Guid stationId);
     Task<IEnumerable<Employee>> GetByDivisionAsync(Guid divisionId);
     Task<IEnumerable<Employee>> GetByDepartmentAsync(Guid departmentId);
     Task<IEnumerable<Employee>> GetBySectionAsync(Guid sectionId);
     Task<IEnumerable<Employee>> GetByUnitAsync(Guid unitId);
     Task<IEnumerable<Employee>> GetByPositionAsync(Guid positionId);
+    Task<IEnumerable<Employee>> GetByManagerAsync(Guid managerId);
     Task<IEnumerable<Employee>> GetByStatusAsync(StaffStatus status);
+    Task<IEnumerable<Employee>> GetByContractTypeAsync(ContractType contractType);
     Task<IEnumerable<Employee>> SearchEmployeesAsync(string searchTerm);
     Task<Employee?> GetEmployeeWithPositionHistoryAsync(Guid employeeId);
     Task<IEnumerable<Employee>> GetMaintenanceTechniciansAsync();
     Task<IEnumerable<Employee>> GetAvailableTechniciansAsync();
     Task<IEnumerable<Employee>> GetEmployeesBySkillAsync(Guid skillId, SkillLevel? minLevel = null);
+    Task<Employee?> GetByBadgeNumberAsync(string badgeNumber);
+    Task<Employee?> GetByTaxNumberAsync(string taxNumber);
+    Task<Employee?> GetBySocialSecurityNumberAsync(string socialSecurityNumber);
+    Task<Employee?> GetByTinNumberAsync(string tinNumber);
     Task<bool> EmployeeNumberExistsAsync(string employeeNumber);
+    Task<bool> EmployeeNumberExistsAsync(string employeeNumber, Guid excludeEmployeeId);
     Task<bool> EmailExistsAsync(string email);
-    Task<string> GenerateEmployeeNumberAsync();
+    Task<bool> EmailExistsAsync(string email, Guid excludeEmployeeId);
+    Task<bool> BadgeNumberExistsAsync(string badgeNumber);
+    Task<bool> BadgeNumberExistsAsync(string badgeNumber, Guid excludeEmployeeId);
+    Task<bool> TaxNumberExistsAsync(string taxNumber);
+    Task<bool> TaxNumberExistsAsync(string taxNumber, Guid excludeEmployeeId);
+    Task<bool> SocialSecurityNumberExistsAsync(string socialSecurityNumber);
+    Task<bool> SocialSecurityNumberExistsAsync(string socialSecurityNumber, Guid excludeEmployeeId);
+    Task<bool> TinNumberExistsAsync(string tinNumber);
+    Task<bool> TinNumberExistsAsync(string tinNumber, Guid excludeEmployeeId);
+    Task<string> GenerateEmployeeNumberAsync();    
 }
 
 /// <summary>

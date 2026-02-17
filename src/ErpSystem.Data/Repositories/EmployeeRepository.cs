@@ -15,31 +15,146 @@ namespace ErpSystem.Data.Repositories
         {
         }
 
-        public async Task<Employee?> GetByEmployeeNumberAsync(string employeeNumber)
+        private IQueryable<Employee> BaseQuery(bool asNoTracking = true)
         {
-            return await _dbSet
+            var query = asNoTracking ? _dbSet.AsNoTracking() : _dbSet.AsQueryable();
+            return query.Where(e => !e.IsDeleted);
+        }
+
+        private IQueryable<Employee> WithBasicIncludes(IQueryable<Employee> query)
+        {
+            return query
                 .Include(e => e.Department)
                 .Include(e => e.Position)
+                    .ThenInclude(p => p.StaffLevel)
                 .Include(e => e.Section)
-                .Include(e => e.Manager)
-                .FirstOrDefaultAsync(e => e.EmployeeNumber == employeeNumber && !e.IsDeleted);
+                .Include(e => e.Manager);
+        }
+
+        private IQueryable<Employee> WithDetailsIncludes(IQueryable<Employee> query)
+        {
+            return WithBasicIncludes(query)
+                .Include(e => e.OrganizationLevel)
+                .Include(e => e.OrganizationUnit)
+                .Include(e => e.LocationLevel)
+                .Include(e => e.Location)
+                .Include(e => e.Country)
+                .Include(e => e.Shift)
+                .Include(e => e.EmergencyContacts)
+                .Include(e => e.Dependents)
+                .Include(e => e.Qualifications)
+                .Include(e => e.ContractDetails)
+                .Include(e => e.Skills)
+                    .ThenInclude(es => es.Skill);
+        }
+
+        private IQueryable<Employee> WithFullProfileIncludes(IQueryable<Employee> query)
+        {
+            return WithBasicIncludes(query)
+                .Include(e => e.Country)
+                .Include(e => e.Shift)
+                .Include(e => e.LocationLevel)
+                .Include(e => e.Location)
+                .Include(e => e.OrganizationLevel)
+                .Include(e => e.OrganizationUnit)
+
+                // Contacts & family
+                .Include(e => e.EmergencyContacts)
+                    .ThenInclude(ec => ec.Country)
+                .Include(e => e.Dependents)
+                    .ThenInclude(d => d.EmployeeDependentBenefits)
+                        .ThenInclude(db => db.BenefitPolicy)
+
+                // Qualifications & skills
+                .Include(e => e.Qualifications)
+                    .ThenInclude(q => q.Qualification)
+                .Include(e => e.Qualifications)
+                    .ThenInclude(q => q.Country)
+                .Include(e => e.Skills)
+                    .ThenInclude(es => es.Skill)
+
+                // Documents & history
+                .Include(e => e.IdentificationCards)
+                    .ThenInclude(ic => ic.IdentificationType)
+                .Include(e => e.WorkHistories)
+
+                // Contracts & expatriate assignments
+                .Include(e => e.ContractDetails)
+                .Include(e => e.ExpatriateAssignments)
+                    .ThenInclude(a => a.Country)
+
+                // Career & compensation
+                .Include(e => e.PositionHistories)
+                    .ThenInclude(ph => ph.Position)
+                .Include(e => e.PositionHistories)
+                    .ThenInclude(ph => ph.LocationLevel)
+                .Include(e => e.PositionHistories)
+                    .ThenInclude(ph => ph.Location)
+                .Include(e => e.PositionHistories)
+                    .ThenInclude(ph => ph.OrganizationLevel)
+                .Include(e => e.PositionHistories)
+                    .ThenInclude(ph => ph.OrganizationUnit)
+                .Include(e => e.SalaryAssignments)
+                    .ThenInclude(sa => sa.Grade)
+                .Include(e => e.SalaryAssignments)
+                    .ThenInclude(sa => sa.Level)
+                .Include(e => e.SalaryAssignments)
+                    .ThenInclude(sa => sa.Notch)
+
+                // References & guarantors
+                .Include(e => e.Referees)
+                .Include(e => e.Guarantors)
+                    .ThenInclude(g => g.Country)
+                .Include(e => e.Guarantors)
+                    .ThenInclude(g => g.VerifiedByEmployee);
+        }
+
+        public async Task<Employee?> GetByEmployeeNumberAsync(string employeeNumber)
+        {
+            return await WithBasicIncludes(BaseQuery())
+                .FirstOrDefaultAsync(e => e.EmployeeNumber == employeeNumber);
         }
 
         public async Task<Employee?> GetByEmailAsync(string email)
         {
-            return await _dbSet
-                .Include(e => e.Department)
-                .Include(e => e.Position)
-                .FirstOrDefaultAsync(e => e.EmailAddress == email && !e.IsDeleted);
+            return await WithBasicIncludes(BaseQuery())
+                .FirstOrDefaultAsync(e => e.EmailAddress == email);
+        }
+
+        public async Task<Employee?> GetByEmployeeNumberWithDetailsAsync(string employeeNumber)
+        {
+            return await WithDetailsIncludes(BaseQuery())
+                .FirstOrDefaultAsync(e => e.EmployeeNumber == employeeNumber);
+        }
+
+        public async Task<Employee?> GetByEmployeeNumberWithFullProfileAsync(string employeeNumber)
+        {
+            return await WithFullProfileIncludes(BaseQuery())
+                .FirstOrDefaultAsync(e => e.EmployeeNumber == employeeNumber);
         }
 
         public async Task<IEnumerable<Employee>> GetByDepartmentAsync(Guid departmentId)
         {
-            return await _dbSet
-                .Include(e => e.Position)
-                .Include(e => e.Section)
-                .Include(e => e.Manager)
-                .Where(e => e.DepartmentId == departmentId && !e.IsDeleted)
+            return await WithBasicIncludes(BaseQuery())
+                .Where(e => e.DepartmentId == departmentId)
+                .OrderBy(e => e.LastName)
+                .ThenBy(e => e.FirstName)
+                .ToListAsync();
+        }
+
+        public async Task<IEnumerable<Employee>> GetByOrganizationUnitAsync(Guid organizationUnitId)
+        {
+            return await WithBasicIncludes(BaseQuery())
+                .Where(e => e.OrganizationUnitId == organizationUnitId)
+                .OrderBy(e => e.LastName)
+                .ThenBy(e => e.FirstName)
+                .ToListAsync();
+        }
+
+        public async Task<IEnumerable<Employee>> GetByOrganizationLevelAsync(Guid organizationLevelId)
+        {
+            return await WithBasicIncludes(BaseQuery())
+                .Where(e => e.OrganizationLevelId == organizationLevelId)
                 .OrderBy(e => e.LastName)
                 .ThenBy(e => e.FirstName)
                 .ToListAsync();
@@ -47,10 +162,8 @@ namespace ErpSystem.Data.Repositories
 
         public async Task<IEnumerable<Employee>> GetByPositionAsync(Guid positionId)
         {
-            return await _dbSet
-                .Include(e => e.Department)
-                .Include(e => e.Section)
-                .Where(e => e.PositionId == positionId && !e.IsDeleted)
+            return await WithBasicIncludes(BaseQuery())
+                .Where(e => e.PositionId == positionId)
                 .OrderBy(e => e.LastName)
                 .ThenBy(e => e.FirstName)
                 .ToListAsync();
@@ -58,11 +171,8 @@ namespace ErpSystem.Data.Repositories
 
         public async Task<IEnumerable<Employee>> GetByManagerAsync(Guid managerId)
         {
-            return await _dbSet
-                .Include(e => e.Department)
-                .Include(e => e.Position)
-                .Include(e => e.Section)
-                .Where(e => e.ManagerId == managerId && !e.IsDeleted)
+            return await WithBasicIncludes(BaseQuery())
+                .Where(e => e.ManagerId == managerId)
                 .OrderBy(e => e.LastName)
                 .ThenBy(e => e.FirstName)
                 .ToListAsync();
@@ -70,10 +180,8 @@ namespace ErpSystem.Data.Repositories
 
         public async Task<IEnumerable<Employee>> GetByStatusAsync(StaffStatus status)
         {
-            return await _dbSet
-                .Include(e => e.Department)
-                .Include(e => e.Position)
-                .Where(e => e.StaffStatus == status && !e.IsDeleted)
+            return await WithBasicIncludes(BaseQuery())
+                .Where(e => e.StaffStatus == status)
                 .OrderBy(e => e.LastName)
                 .ThenBy(e => e.FirstName)
                 .ToListAsync();
@@ -81,25 +189,17 @@ namespace ErpSystem.Data.Repositories
 
         public async Task<IEnumerable<Employee>> GetActiveEmployeesAsync()
         {
-            return await _dbSet
-                .Include(e => e.Department)
-                .Include(e => e.Position)
-                .Include(e => e.Section)
-                .Where(e => e.IsActive && !e.IsDeleted)
+            return await WithBasicIncludes(BaseQuery())
+                .Where(e => e.IsActive)
                 .OrderBy(e => e.LastName)
                 .ThenBy(e => e.FirstName)
                 .ToListAsync();
         }
 
-        public async Task<IEnumerable<Employee>> GetEmployeesForMaintenanceAsync()
+        public async Task<IEnumerable<Employee>> GetByContractTypeAsync(ContractType contractType)
         {
-            return await _dbSet
-                .Include(e => e.Department)
-                .Include(e => e.Position)
-                .Where(e => e.IsActive &&
-                           !e.IsDeleted &&
-                           (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation) &&
-                           e.Department.DepartmentType == DepartmentType.Maintenance)
+            return await WithBasicIncludes(BaseQuery())
+                .Where(e => e.ContractType == contractType)
                 .OrderBy(e => e.LastName)
                 .ThenBy(e => e.FirstName)
                 .ToListAsync();
@@ -112,18 +212,16 @@ namespace ErpSystem.Data.Repositories
                 return await GetActiveEmployeesAsync();
             }
 
-            searchTerm = searchTerm.ToLower();
+            var term = searchTerm.Trim();
+            var like = $"%{term}%";
 
-            return await _dbSet
-                .Include(e => e.Department)
-                .Include(e => e.Position)
-                .Include(e => e.Section)
-                .Where(e => !e.IsDeleted && (
-                    e.FirstName.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase) ||
-                    e.LastName.ToLower().Contains(searchTerm) ||
-                    e.EmployeeNumber.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase) ||
-                    e.EmailAddress.ToLower().Contains(searchTerm) ||
-                    (e.FirstName + " " + e.LastName).Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase)))
+            return await WithBasicIncludes(BaseQuery())
+                .Where(e =>
+                    EF.Functions.Like(e.FirstName, like) ||
+                    EF.Functions.Like(e.LastName, like) ||
+                    EF.Functions.Like(e.EmployeeNumber, like) ||
+                    EF.Functions.Like(e.EmailAddress, like) ||
+                    EF.Functions.Like((e.FirstName + " " + e.LastName), like))
                 .OrderBy(e => e.LastName)
                 .ThenBy(e => e.FirstName)
                 .ToListAsync();
@@ -134,28 +232,257 @@ namespace ErpSystem.Data.Repositories
             return await _dbSet.AnyAsync(e => e.EmployeeNumber == employeeNumber && !e.IsDeleted);
         }
 
+        public async Task<bool> EmployeeNumberExistsAsync(string employeeNumber, Guid excludeEmployeeId)
+        {
+            return await _dbSet.AnyAsync(e =>
+                e.EmployeeNumber == employeeNumber &&
+                e.Id != excludeEmployeeId &&
+                !e.IsDeleted);
+        }
+
         public async Task<bool> EmailExistsAsync(string email)
         {
             return await _dbSet.AnyAsync(e => e.EmailAddress == email && !e.IsDeleted);
         }
 
+        public async Task<bool> EmailExistsAsync(string email, Guid excludeEmployeeId)
+        {
+            return await _dbSet.AnyAsync(e =>
+                e.EmailAddress == email &&
+                e.Id != excludeEmployeeId &&
+                !e.IsDeleted);
+        }
+
+        public Task<bool> BadgeNumberExistsAsync(string badgeNumber)
+        {
+            if (string.IsNullOrWhiteSpace(badgeNumber))
+            {
+                return Task.FromResult(false);
+            }
+
+            var value = badgeNumber.Trim();
+            return _dbSet.AnyAsync(e => e.BadgeNumber != null && e.BadgeNumber == value && !e.IsDeleted);
+        }
+
+        public Task<bool> BadgeNumberExistsAsync(string badgeNumber, Guid excludeEmployeeId)
+        {
+            if (string.IsNullOrWhiteSpace(badgeNumber))
+            {
+                return Task.FromResult(false);
+            }
+
+            var value = badgeNumber.Trim();
+            return _dbSet.AnyAsync(e =>
+                e.BadgeNumber != null &&
+                e.BadgeNumber == value &&
+                e.Id != excludeEmployeeId &&
+                !e.IsDeleted);
+        }
+
+        public Task<bool> TaxNumberExistsAsync(string taxNumber)
+        {
+            if (string.IsNullOrWhiteSpace(taxNumber))
+            {
+                return Task.FromResult(false);
+            }
+
+            var value = taxNumber.Trim();
+            return _dbSet.AnyAsync(e => e.TaxNumber != null && e.TaxNumber == value && !e.IsDeleted);
+        }
+
+        public Task<bool> TaxNumberExistsAsync(string taxNumber, Guid excludeEmployeeId)
+        {
+            if (string.IsNullOrWhiteSpace(taxNumber))
+            {
+                return Task.FromResult(false);
+            }
+
+            var value = taxNumber.Trim();
+            return _dbSet.AnyAsync(e =>
+                e.TaxNumber != null &&
+                e.TaxNumber == value &&
+                e.Id != excludeEmployeeId &&
+                !e.IsDeleted);
+        }
+
+        public Task<bool> SocialSecurityNumberExistsAsync(string socialSecurityNumber)
+        {
+            if (string.IsNullOrWhiteSpace(socialSecurityNumber))
+            {
+                return Task.FromResult(false);
+            }
+
+            var value = socialSecurityNumber.Trim();
+            return _dbSet.AnyAsync(e => e.SocialSecurityNumber != null && e.SocialSecurityNumber == value && !e.IsDeleted);
+        }
+
+        public Task<bool> SocialSecurityNumberExistsAsync(string socialSecurityNumber, Guid excludeEmployeeId)
+        {
+            if (string.IsNullOrWhiteSpace(socialSecurityNumber))
+            {
+                return Task.FromResult(false);
+            }
+
+            var value = socialSecurityNumber.Trim();
+            return _dbSet.AnyAsync(e =>
+                e.SocialSecurityNumber != null &&
+                e.SocialSecurityNumber == value &&
+                e.Id != excludeEmployeeId &&
+                !e.IsDeleted);
+        }
+
+        public Task<bool> TinNumberExistsAsync(string tinNumber)
+        {
+            if (string.IsNullOrWhiteSpace(tinNumber))
+            {
+                return Task.FromResult(false);
+            }
+
+            var value = tinNumber.Trim();
+            return _dbSet.AnyAsync(e => e.TINNumber != null && e.TINNumber == value && !e.IsDeleted);
+        }
+
+        public Task<bool> TinNumberExistsAsync(string tinNumber, Guid excludeEmployeeId)
+        {
+            if (string.IsNullOrWhiteSpace(tinNumber))
+            {
+                return Task.FromResult(false);
+            }
+
+            var value = tinNumber.Trim();
+            return _dbSet.AnyAsync(e =>
+                e.TINNumber != null &&
+                e.TINNumber == value &&
+                e.Id != excludeEmployeeId &&
+                !e.IsDeleted);
+        }
+
         public async Task<Employee?> GetByIdWithDetailsAsync(Guid id)
         {
-            return await _dbSet
-                .Include(e => e.Department)
-                .Include(e => e.Position)
-                .Include(e => e.Section)
-                .Include(e => e.Manager)
-                .FirstOrDefaultAsync(e => e.Id == id && !e.IsDeleted);
+            return await WithDetailsIncludes(BaseQuery())
+                .FirstOrDefaultAsync(e => e.Id == id);
+        }
+
+        public async Task<Employee?> GetByIdWithFullProfileAsync(Guid id)
+        {
+            return await WithFullProfileIncludes(BaseQuery())
+                .FirstOrDefaultAsync(e => e.Id == id);
+        }
+
+        public async Task<Employee?> GetByBadgeNumberAsync(string badgeNumber)
+        {
+            if (string.IsNullOrWhiteSpace(badgeNumber))
+            {
+                return null;
+            }
+
+            var value = badgeNumber.Trim();
+            return await WithBasicIncludes(BaseQuery())
+                .FirstOrDefaultAsync(e => e.BadgeNumber != null && e.BadgeNumber == value);
+        }
+
+        public async Task<Employee?> GetByTaxNumberAsync(string taxNumber)
+        {
+            if (string.IsNullOrWhiteSpace(taxNumber))
+            {
+                return null;
+            }
+
+            var value = taxNumber.Trim();
+            return await WithBasicIncludes(BaseQuery())
+                .FirstOrDefaultAsync(e => e.TaxNumber != null && e.TaxNumber == value);
+        }
+
+        public async Task<Employee?> GetBySocialSecurityNumberAsync(string socialSecurityNumber)
+        {
+            if (string.IsNullOrWhiteSpace(socialSecurityNumber))
+            {
+                return null;
+            }
+
+            var value = socialSecurityNumber.Trim();
+            return await WithBasicIncludes(BaseQuery())
+                .FirstOrDefaultAsync(e => e.SocialSecurityNumber != null && e.SocialSecurityNumber == value);
+        }
+
+        public async Task<Employee?> GetByTinNumberAsync(string tinNumber)
+        {
+            if (string.IsNullOrWhiteSpace(tinNumber))
+            {
+                return null;
+            }
+
+            var value = tinNumber.Trim();
+            return await WithBasicIncludes(BaseQuery())
+                .FirstOrDefaultAsync(e => e.TINNumber != null && e.TINNumber == value);
         }
 
         public async Task<IEnumerable<Employee>> GetBySectionAsync(Guid sectionId)
         {
+            return await WithBasicIncludes(BaseQuery())
+                .Where(e => e.SectionId == sectionId)
+                .OrderBy(e => e.LastName)
+                .ThenBy(e => e.FirstName)
+                .ToListAsync();
+        }
+
+        public async Task<IEnumerable<Employee>> GetEmployeesBySkillAsync(Guid skillId, SkillLevel? minLevel = null)
+        {
+            var query = WithBasicIncludes(BaseQuery())
+                .Include(e => e.Skills)
+                    .ThenInclude(es => es.Skill)
+                .Where(e => e.IsActive && e.Skills.Any(es => es.SkillId == skillId));
+
+            if (minLevel.HasValue)
+            {
+                query = query.Where(e => e.Skills
+                    .Any(es => es.SkillId == skillId && es.SkillLevel >= minLevel.Value));
+            }
+
+            return await query
+                .OrderBy(e => e.LastName)
+                .ThenBy(e => e.FirstName)
+                .ToListAsync();
+        }
+
+        public async Task<string> GenerateEmployeeNumberAsync()
+        {
+            var currentYear = DateTime.UtcNow.Year.ToString();
+
+            // EmployeeNumber is expected to be formatted as YYYY#### (zero-padded), so string Max works.
+            var maxEmployeeNumber = await BaseQuery()
+                .Where(e => e.EmployeeNumber.StartsWith(currentYear))
+                .Select(e => e.EmployeeNumber)
+                .DefaultIfEmpty()
+                .MaxAsync();
+
+            if (string.IsNullOrWhiteSpace(maxEmployeeNumber))
+            {
+                return $"{currentYear}0001";
+            }
+
+            var seqPart = maxEmployeeNumber.Length > 4 ? maxEmployeeNumber.Substring(4) : "0";
+            var nextSequence = int.TryParse(seqPart, out var seq) ? seq + 1 : 1;
+            return $"{currentYear}{nextSequence:D4}";
+        }
+
+        public async Task<Employee?> GetEmployeeWithPositionHistoryAsync(Guid employeeId)
+        {
+            return await WithBasicIncludes(BaseQuery())
+                .Include(e => e.PositionHistories)
+                    .ThenInclude(ph => ph.Position)
+                .FirstOrDefaultAsync(e => e.Id == employeeId);
+        }
+
+        public async Task<IEnumerable<Employee>> GetEmployeesForMaintenanceAsync()
+        {
             return await _dbSet
                 .Include(e => e.Department)
                 .Include(e => e.Position)
-                .Include(e => e.Manager)
-                .Where(e => e.SectionId == sectionId && !e.IsDeleted)
+                .Where(e => e.IsActive &&
+                           !e.IsDeleted &&
+                           (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation) &&
+                           e.Department.DepartmentType == DepartmentType.Maintenance)
                 .OrderBy(e => e.LastName)
                 .ThenBy(e => e.FirstName)
                 .ToListAsync();
@@ -180,28 +507,6 @@ namespace ErpSystem.Data.Repositories
                 .ToListAsync();
         }
 
-        public async Task<IEnumerable<Employee>> GetEmployeesBySkillAsync(Guid skillId, SkillLevel? minLevel = null)
-        {
-            var query = _dbSet
-                .Include(e => e.Department)
-                .Include(e => e.Position)
-                .Include(e => e.Skills)
-                    .ThenInclude(es => es.Skill)
-                .Where(e => !e.IsDeleted && e.IsActive &&
-                           e.Skills.Any(es => es.SkillId == skillId));
-
-            if (minLevel.HasValue)
-            {
-                query = query.Where(e => e.Skills
-                    .Any(es => es.SkillId == skillId && es.SkillLevel >= minLevel.Value));
-            }
-
-            return await query
-                .OrderBy(e => e.LastName)
-                .ThenBy(e => e.FirstName)
-                .ToListAsync();
-        }
-
         public async Task<Employee?> GetByApplicationUserIdAsync(Guid applicationUserId)
         {
             // Query ApplicationUser table via the context's IdentityUsers table
@@ -218,38 +523,6 @@ namespace ErpSystem.Data.Repositories
             }
 
             return await GetByIdWithDetailsAsync(user.EmployeeId.Value);
-        }
-
-        public async Task<string> GenerateEmployeeNumberAsync()
-        {
-            var currentYear = DateTime.Now.Year.ToString();
-
-            // Get all employee numbers for the current year to find max sequence
-            var employeeNumbersInYear = await _dbSet
-                .Where(e => e.EmployeeNumber.StartsWith(currentYear) && !e.IsDeleted)
-                .Select(e => e.EmployeeNumber)
-                .ToListAsync();
-
-            int nextSequence = 1;
-            if (employeeNumbersInYear.Any())
-            {
-                // Parse all sequence numbers and find the maximum
-                var maxSequence = employeeNumbersInYear
-                    .Select(empNum =>
-                    {
-                        if (empNum.Length > 4 && int.TryParse(empNum.AsSpan(4), out var seq))
-                        {
-                            return seq;
-                        }
-
-                        return 0;
-                    })
-                    .Max();
-
-                nextSequence = maxSequence + 1;
-            }
-
-            return $"{currentYear}{nextSequence:D4}";
         }
 
         public async Task<IEnumerable<Employee>> GetByStationAsync(Guid stationId)
@@ -288,12 +561,5 @@ namespace ErpSystem.Data.Repositories
                 .ToListAsync();
         }
 
-        public async Task<Employee?> GetEmployeeWithPositionHistoryAsync(Guid employeeId)
-        {
-            return await _dbSet
-                .Include(e => e.PositionHistories)
-                    .ThenInclude(ph => ph.Position)
-                .FirstOrDefaultAsync(e => e.Id == employeeId);
-        }
     }
 }

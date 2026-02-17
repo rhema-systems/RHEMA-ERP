@@ -26,6 +26,7 @@ using static ErpSystem.Core.Services.StorageServiceExtensions;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Data.Repositories.HR;
 using ErpSystem.Core.Services.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 
 namespace ErpSystem.Api.Extensions
 {
@@ -664,6 +665,11 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ILocationLevelService, LocationLevelService>();
             services.AddScoped<ILocationService, LocationService>();
             services.AddScoped<ILocationContactService, LocationContactService>();
+
+            services.AddScoped<ISalaryStructureService, SalaryStructureService>();
+            services.AddScoped<ISalaryGradeService, SalaryStructureService>();
+            services.AddScoped<ISalaryLevelService, SalaryStructureService>();
+            services.AddScoped<ISalaryNotchService, SalaryStructureService>();
 
             services.AddScoped<ILeaveService, LeaveService>();
             

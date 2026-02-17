@@ -374,7 +374,7 @@ public class AssetRequisition : TenantEntity
 
     public int Quantity { get; set; }
     
-    public RequisitionPriority Priority { get; set; }
+    public HRAssetRequisitionPriority Priority { get; set; }
 
     [MaxLength(1000)]
     public string Justification { get; set; } = string.Empty;
@@ -452,7 +452,7 @@ public class AssetTransfer : TenantEntity
 
     public Guid InitiatedById { get; set; }
 
-    public TransferStatus Status { get; set; }
+    public HRAssetTransferStatus Status { get; set; }
 
     public Guid? ApprovedById { get; set; }
     

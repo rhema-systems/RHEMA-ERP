@@ -218,19 +218,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     #region HR Entities
 
     #region Company Setup
-
+    
     public DbSet<Division> Divisions { get; set; }
-
-    // HR entities
     public DbSet<Department> Departments { get; set; }
     public DbSet<Section> Sections { get; set; }
     public DbSet<Unit> Units { get; set; }
     public DbSet<EmployeePosition> EmployeePositions { get; set; }
     public DbSet<BenefitPolicy> BenefitPolicies { get; set; }
+    public DbSet<BenefitPolicyRelation> BenefitPolicyRelations { get; set; }
     public DbSet<EmployeePositionBenefit> EmployeePositionBenefits { get; set; }
     public DbSet<Skill> Skills { get; set; }
     public DbSet<PositionSkillRequirement> PositionSkillRequirements { get; set; }
-    public DbSet<StaffCategory> StaffCategories { get; set; }
+    public DbSet<StaffLevel> StaffLevels { get; set; }
     public DbSet<Shift> Shifts { get; set; }
     public DbSet<WorkStation> WorkStations { get; set; }
     public DbSet<EmployeeContractType> EmployeeContractTypes { get; set; }
@@ -246,29 +245,45 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<Location> Locations { get; set; }
     public DbSet<LocationContact> LocationContacts { get; set; }
 
+    public DbSet<SalaryGrade> SalaryGrades { get; set; }
+    public DbSet<SalaryLevel> SalaryLevels { get; set; }
+    public DbSet<SalaryNotch> SalaryNotches { get; set; }
+
     #endregion
 
-    // Employee
+    #region Employee Management
+    
     public DbSet<Employee> Employees { get; set; }
     public DbSet<EmployeeEmergencyContact> EmployeeEmergencyContacts { get; set; }
     public DbSet<EmployeeDependent> EmployeeDependents { get; set; }
     public DbSet<EmployeeDependentBenefit> EmployeeDependentBenefits { get; set; }
     public DbSet<EmployeeQualification> EmployeeQualifications { get; set; }
     public DbSet<EmployeeIdentificationCard> EmployeeIdentificationCards { get; set; }
+    public DbSet<IdentificationType> IdentificationTypes { get; set; }
     public DbSet<EmployeeWorkHistory> EmployeeWorkHistories { get; set; }
     public DbSet<EmployeeContractDetail> EmployeeContractDetails { get; set; }
     public DbSet<ExpatriateAssignment> ExpatriateAssignments { get; set; }
     public DbSet<EmployeePositionHistory> EmployeePositionHistories { get; set; }
+    public DbSet<EmployeeSalaryAssignment> EmployeeSalaryAssignments { get; set; }
+    public DbSet<EmployeeReferee> EmployeeReferees { get; set; }
+    public DbSet<EmployeeGuarantor> EmployeeGuarantors { get; set; }
     public DbSet<EmployeeSkill> EmployeeSkills { get; set; }
     public DbSet<EmployeeBiometric> EmployeeBiometrics { get; set; }
     public DbSet<EmployeeShiftPreference> EmployeeShiftPreferences { get; set; }
+
+    #endregion Employee Management
 
     // Staff Attendance
     public DbSet<ShiftAssignment> ShiftAssignments { get; set; }
     public DbSet<AttendanceRecord> AttendanceRecords { get; set; }
 
-    // Misc
+    #region HR - Miscellaneous
+
     public DbSet<Country> Countries { get; set; }
+    public DbSet<Qualification> Qualifications { get; set; }
+    public DbSet<ExternalAssociate> ExternalAssociates { get; set; }
+
+    #endregion
 
     // Leave Management
     public DbSet<LeaveType> LeaveTypes { get; set; }
@@ -2457,13 +2472,91 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .HasDatabaseName("IX_LocContact_EmployeeId");
         });
 
+        builder.Entity<SalaryGrade>(entity =>
+        {
+            entity.HasMany(e => e.Levels)
+                .WithOne(e => e.Grade)
+                .HasForeignKey(e => e.SalaryGradeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.TenantId, e.Code })
+                .IsUnique()
+                .HasDatabaseName("IX_SalaryGrade_Tenant_Code");
+
+            entity.HasIndex(e => new { e.TenantId, e.IsActive })
+                .HasDatabaseName("IX_SalaryGrade_Tenant_Active");
+
+            entity.HasIndex(e => new { e.TenantId, e.EffectiveDate })
+                .HasDatabaseName("IX_SalaryGrade_Tenant_EffectiveDate");
+        });
+
+        builder.Entity<SalaryLevel>(entity =>
+        {
+            entity.HasOne(e => e.Grade)
+                .WithMany(e => e.Levels)
+                .HasForeignKey(e => e.SalaryGradeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.Notches)
+                .WithOne(e => e.Level)
+                .HasForeignKey(e => e.SalaryLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => e.SalaryGradeId)
+                .HasDatabaseName("IX_SalaryLevel_GradeId");
+
+            entity.HasIndex(e => new { e.TenantId, e.SalaryGradeId, e.Code })
+                .IsUnique()
+                .HasDatabaseName("IX_SalaryLevel_Tenant_Grade_Code");
+
+            entity.HasIndex(e => new { e.TenantId, e.SalaryGradeId, e.Sequence })
+                .IsUnique()
+                .HasDatabaseName("IX_SalaryLevel_Tenant_Grade_Sequence");
+
+            entity.HasIndex(e => new { e.TenantId, e.IsActive })
+                .HasDatabaseName("IX_SalaryLevel_Tenant_Active");
+        });
+
+        builder.Entity<SalaryNotch>(entity =>
+        {
+            entity.HasOne(e => e.Level)
+                .WithMany(e => e.Notches)
+                .HasForeignKey(e => e.SalaryLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => e.SalaryLevelId)
+                .HasDatabaseName("IX_SalaryNotch_LevelId");
+
+            entity.HasIndex(e => new { e.TenantId, e.SalaryLevelId, e.NotchNumber })
+                .IsUnique()
+                .HasDatabaseName("IX_SalaryNotch_Tenant_Level_NotchNumber");
+
+            entity.HasIndex(e => new { e.TenantId, e.IsActive })
+                .HasDatabaseName("IX_SalaryNotch_Tenant_Active");
+        });
+
         // Configure Employee entity
         builder.Entity<Employee>(entity =>
         {
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeNumber })
+                  .IsUnique()
+                  .HasDatabaseName("IX_Employee_Tenant_EmployeeNumber");
+
+            entity.HasIndex(e => new { e.TenantId, e.EmailAddress })
+                  .IsUnique()
+                  .HasDatabaseName("IX_Employee_Tenant_EmailAddress");
+
             entity.HasIndex(e => e.EmployeeNumber).IsUnique();
             entity.HasIndex(e => e.CorporateEmployeeID);
             entity.HasIndex(e => e.EmailAddress).IsUnique();
+            entity.HasIndex(e => e.OrganizationLevelId);
+            entity.HasIndex(e => e.OrganizationUnitId);
+            entity.HasIndex(e => e.LocationLevelId);
+            entity.HasIndex(e => e.LocationId);
+            entity.HasIndex(e => e.CountryId);
+            entity.HasIndex(e => e.ShiftId);
             entity.HasIndex(e => e.DepartmentId);
+            entity.HasIndex(e => e.SectionId);
             entity.HasIndex(e => e.PositionId);
             entity.HasIndex(e => e.StaffStatus);
             entity.HasIndex(e => e.ManagerId);
@@ -2523,6 +2616,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(ws => ws.Employees)
                 .HasForeignKey(e => e.StationId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(e => e.LocationLevel)
+                .WithMany()
+                .HasForeignKey(e => e.LocationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.OrganizationLevel)
+                .WithMany()
+                .HasForeignKey(e => e.OrganizationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // Configure Department entity
@@ -2608,9 +2711,622 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // Configure Position History entity
         builder.Entity<EmployeePositionHistory>(entity =>
         {
+            entity.Property(h => h.ChangeReason).HasConversion<int>();
+
+            entity.HasIndex(h => h.EmployeeId);
+            entity.HasIndex(h => h.PositionId);
+            entity.HasIndex(h => h.StartDate);
+            entity.HasIndex(h => h.EndDate);
+            entity.HasIndex(h => new { h.EmployeeId, h.StartDate });
+
+            entity.HasOne(h => h.Employee)
+                .WithMany(e => e.PositionHistories)
+                .HasForeignKey(h => h.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(h => h.LocationLevel)
+                .WithMany()
+                .HasForeignKey(h => h.LocationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(h => h.Location)
+                .WithMany()
+                .HasForeignKey(h => h.LocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(h => h.OrganizationLevel)
+                .WithMany()
+                .HasForeignKey(h => h.OrganizationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(h => h.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(h => h.OrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne(h => h.Position)
                 .WithMany(p => p.PositionHistories)
                 .HasForeignKey(h => h.PositionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeEmergencyContact>(entity =>
+        {
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => new { e.EmployeeId, e.IsPrimary });
+            entity.HasIndex(e => e.IsActive);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.EmergencyContacts)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Country)
+                .WithMany()
+                .HasForeignKey(e => e.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeDependent>(entity =>
+        {
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => e.Relationship);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.Dependents)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.EmployeeDependentBenefits)
+                .WithOne(e => e.EmployeeDependent)
+                .HasForeignKey(e => e.EmployeeDependentId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<EmployeeDependentBenefit>(entity =>
+        {
+            entity.HasIndex(e => e.EmployeeDependentId);
+            entity.HasIndex(e => e.PolicyId);
+            entity.HasIndex(e => e.EnrolledDate);
+            entity.HasIndex(e => e.IsActive);
+
+            entity.HasOne(e => e.EmployeeDependent)
+                .WithMany(d => d.EmployeeDependentBenefits)
+                .HasForeignKey(e => e.EmployeeDependentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.BenefitPolicy)
+                .WithMany()
+                .HasForeignKey(e => e.PolicyId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeQualification>(entity =>
+        {
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => e.QualificationId);
+            entity.HasIndex(e => e.CountryId);
+            entity.HasIndex(e => e.IsVerified);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.Qualifications)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Qualification)
+                .WithMany()
+                .HasForeignKey(e => e.QualificationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Country)
+                .WithMany()
+                .HasForeignKey(e => e.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<IdentificationType>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.Name })
+                .IsUnique()
+                .HasDatabaseName("IX_IdentificationType_Tenant_Name");
+
+            entity.HasIndex(e => new { e.TenantId, e.Code })
+                .HasDatabaseName("IX_IdentificationType_Tenant_Code");
+
+            entity.HasIndex(e => e.IsActive);
+
+            entity.HasOne(e => e.IssuingCountry)
+                .WithMany()
+                .HasForeignKey(e => e.IssuingCountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeIdentificationCard>(entity =>
+        {
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => e.IdentificationTypeId);
+            entity.HasIndex(e => e.DocumentNumber);
+            entity.HasIndex(e => e.IsVerified);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.IdentificationCards)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.IdentificationType)
+                .WithMany(t => t.EmployeeIdentificationCards)
+                .HasForeignKey(e => e.IdentificationTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeWorkHistory>(entity =>
+        {
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => e.StartDate);
+            entity.HasIndex(e => e.EndDate);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.WorkHistories)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<EmployeeContractDetail>(entity =>
+        {
+            entity.Property(e => e.ContractType).HasConversion<int>();
+            entity.Property(e => e.PayFrequency).HasConversion<int>();
+            entity.Property(e => e.TaxTreatmentType).HasConversion<int>();
+            entity.Property(e => e.ContractStatus).HasConversion<int>();
+
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => new { e.TenantId, e.ContractNumber })
+                .IsUnique()
+                .HasDatabaseName("IX_EmployeeContractDetail_Tenant_ContractNumber");
+            entity.HasIndex(e => e.IsActive);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.ContractDetails)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ExpatriateAssignment>(entity =>
+        {
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => e.HomeCountryId);
+            entity.HasIndex(e => new { e.EmployeeId, e.StartDate });
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.ExpatriateAssignments)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Country)
+                .WithMany()
+                .HasForeignKey(e => e.HomeCountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeePositionHistory>(entity =>
+        {
+            entity.Property(h => h.ChangeReason).HasConversion<int>();
+
+            entity.HasIndex(h => h.EmployeeId);
+            entity.HasIndex(h => h.PositionId);
+            entity.HasIndex(h => h.StartDate);
+            entity.HasIndex(h => h.EndDate);
+            entity.HasIndex(h => new { h.EmployeeId, h.StartDate });
+
+            entity.HasOne(h => h.Employee)
+                .WithMany(e => e.PositionHistories)
+                .HasForeignKey(h => h.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(h => h.LocationLevel)
+                .WithMany()
+                .HasForeignKey(h => h.LocationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(h => h.Location)
+                .WithMany()
+                .HasForeignKey(h => h.LocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(h => h.OrganizationLevel)
+                .WithMany()
+                .HasForeignKey(h => h.OrganizationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(h => h.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(h => h.OrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(h => h.Position)
+                .WithMany(p => p.PositionHistories)
+                .HasForeignKey(h => h.PositionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeSalaryAssignment>(entity =>
+        {
+            entity.Property(e => e.AssignmentReason)
+                .HasMaxLength(200);
+
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => e.GradeId);
+            entity.HasIndex(e => e.LevelId);
+            entity.HasIndex(e => e.NotchId);
+            entity.HasIndex(e => e.EffectiveDate);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.SalaryAssignments)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Grade)
+                .WithMany()
+                .HasForeignKey(e => e.GradeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Level)
+                .WithMany()
+                .HasForeignKey(e => e.LevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Notch)
+                .WithMany()
+                .HasForeignKey(e => e.NotchId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeReferee>(entity =>
+        {
+            entity.Property(e => e.RefereeType).HasConversion<int>();
+
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => e.RefereeType);
+            entity.HasIndex(e => new { e.EmployeeId, e.IsPrimary });
+            entity.HasIndex(e => e.IsActive);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.Referees)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<EmployeeGuarantor>(entity =>
+        {
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => e.CountryId);
+            entity.HasIndex(e => e.VerifiedByEmployeeId);
+            entity.HasIndex(e => e.IsPrimary);
+            entity.HasIndex(e => e.IsVerified);
+            entity.HasIndex(e => e.IsActive);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.Guarantors)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.VerifiedByEmployee)
+                .WithMany()
+                .HasForeignKey(e => e.VerifiedByEmployeeId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(e => e.Country)
+                .WithMany()
+                .HasForeignKey(e => e.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeSkill>(entity =>
+        {
+            entity.Property(e => e.SkillLevel).HasConversion<int>();
+
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => e.SkillId);
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeId, e.SkillId })
+                .IsUnique()
+                .HasDatabaseName("IX_EmployeeSkill_Tenant_Employee_Skill");
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.Skills)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Skill)
+                .WithMany(s => s.EmployeeSkills)
+                .HasForeignKey(e => e.SkillId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AttendanceRecord>(entity =>
+        {
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => e.Date);
+            entity.HasIndex(e => new { e.EmployeeId, e.Date }).IsUnique(false);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.AttendanceRecords)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<EmployeeBiometric>(entity =>
+        {
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => e.IsActive);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.Biometrics)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ShiftAssignment>(entity =>
+        {
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => e.ShiftId);
+            entity.HasIndex(e => new { e.EmployeeId, e.StartDate });
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.ShiftAssignments)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Shift)
+                .WithMany(s => s.ShiftAssignments)
+                .HasForeignKey(e => e.ShiftId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeShiftPreference>(entity =>
+        {
+            entity.HasIndex(e => e.EmployeeId);
+            entity.HasIndex(e => e.ShiftId);
+            entity.HasIndex(e => new { e.EmployeeId, e.ShiftId });
+
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.ShiftPreferences)
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Shift)
+                .WithMany()
+                .HasForeignKey(e => e.ShiftId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<StaffLevel>(entity =>
+        {
+            entity.Property(sl => sl.Name)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(sl => sl.Code)
+                .HasMaxLength(50);
+
+            entity.Property(sl => sl.Description)
+                .HasMaxLength(1000);
+
+            entity.Property(sl => sl.Rank)
+                .HasDefaultValue(1);
+
+            entity.Property(sl => sl.IsActive)
+                .HasDefaultValue(true);
+
+            // Indexes (avoid unique constraints since Code defaults to empty string)
+            entity.HasIndex(sl => new { sl.TenantId, sl.Name })
+                .HasDatabaseName("IX_StaffLevel_Tenant_Name");
+
+            entity.HasIndex(sl => new { sl.TenantId, sl.Code })
+                .HasDatabaseName("IX_StaffLevel_Tenant_Code");
+
+            entity.HasIndex(sl => new { sl.TenantId, sl.Rank })
+                .HasDatabaseName("IX_StaffLevel_Tenant_Rank");
+
+            entity.HasIndex(sl => new { sl.TenantId, sl.IsActive })
+                .HasDatabaseName("IX_StaffLevel_Tenant_Active");
+
+            // Relationship: StaffLevel (1) -> EmployeePosition (many)
+            entity.HasMany(sl => sl.EmployeePositions)
+                .WithOne(ep => ep.StaffLevel)
+                .HasForeignKey(ep => ep.StaffLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeePosition>(entity =>
+        {
+            entity.Property(ep => ep.Title)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(ep => ep.Code)
+                .HasMaxLength(20);
+
+            entity.Property(ep => ep.Description)
+                .HasMaxLength(1000);
+
+            entity.Property(ep => ep.IsActive)
+                .HasDefaultValue(true);
+
+            // Indexes (avoid unique constraints since Code defaults to empty string)
+            entity.HasIndex(ep => new { ep.TenantId, ep.Title })
+                .HasDatabaseName("IX_EmployeePosition_Tenant_Title");
+
+            entity.HasIndex(ep => new { ep.TenantId, ep.Code })
+                .HasDatabaseName("IX_EmployeePosition_Tenant_Code");
+
+            entity.HasIndex(ep => new { ep.TenantId, ep.OrganizationUnitId })
+                .HasDatabaseName("IX_EmployeePosition_Tenant_OrgUnit");
+
+            entity.HasIndex(ep => new { ep.TenantId, ep.IsActive })
+                .HasDatabaseName("IX_EmployeePosition_Tenant_Active");
+
+            entity.HasIndex(ep => ep.StaffLevelId)
+                .HasDatabaseName("IX_EmployeePosition_StaffLevelId");
+
+            entity.HasIndex(ep => ep.ReportsToPositionId)
+                .HasDatabaseName("IX_EmployeePosition_ReportsToPositionId");
+
+            // Relationships
+            entity.HasOne(ep => ep.OrganizationUnit)
+                .WithMany(ou => ou.Positions)
+                .HasForeignKey(ep => ep.OrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(ep => ep.ReportsToPosition)
+                .WithMany()
+                .HasForeignKey(ep => ep.ReportsToPositionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Skill>(entity =>
+        {
+            entity.Property(s => s.Name)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(s => s.Description)
+                .HasMaxLength(1000);
+
+            entity.Property(s => s.Category)
+                .HasMaxLength(100);
+
+            entity.Property(s => s.IsActive)
+                .HasDefaultValue(true);
+
+            entity.Property(s => s.RequiresCertification)
+                .HasDefaultValue(false);
+
+            entity.HasIndex(s => new { s.TenantId, s.Name })
+                .IsUnique()
+                .HasDatabaseName("IX_Skill_Tenant_Name");
+
+            entity.HasIndex(s => new { s.TenantId, s.Category })
+                .HasDatabaseName("IX_Skill_Tenant_Category");
+
+            entity.HasIndex(s => new { s.TenantId, s.IsActive })
+                .HasDatabaseName("IX_Skill_Tenant_Active");
+        });
+
+        builder.Entity<PositionSkillRequirement>(entity =>
+        {
+            entity.Property(psr => psr.RequiredLevel)
+                .HasConversion<int>();
+
+            entity.Property(psr => psr.IsRequired)
+                .HasDefaultValue(true);
+
+            entity.Property(psr => psr.Priority)
+                .HasDefaultValue(1);
+
+            entity.HasIndex(psr => new { psr.TenantId, psr.PositionId, psr.SkillId })
+                .IsUnique()
+                .HasDatabaseName("IX_PositionSkillRequirement_Tenant_Position_Skill");
+
+            entity.HasIndex(psr => new { psr.TenantId, psr.PositionId })
+                .HasDatabaseName("IX_PositionSkillRequirement_Tenant_PositionId");
+
+            entity.HasIndex(psr => new { psr.TenantId, psr.SkillId })
+                .HasDatabaseName("IX_PositionSkillRequirement_Tenant_SkillId");
+
+            entity.HasOne(psr => psr.Position)
+                .WithMany(p => p.SkillRequirements)
+                .HasForeignKey(psr => psr.PositionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(psr => psr.Skill)
+                .WithMany(s => s.PositionRequirements)
+                .HasForeignKey(psr => psr.SkillId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<BenefitPolicy>(entity =>
+        {
+            entity.Property(bp => bp.PolicyName)
+                .IsRequired()
+                .HasMaxLength(150);
+
+            entity.Property(bp => bp.PolicyCode)
+                .HasMaxLength(50);
+
+            entity.Property(bp => bp.Description)
+                .HasMaxLength(1000);
+
+            entity.Property(bp => bp.PolicyType)
+                .HasConversion<int>()
+                .HasDefaultValue(BenefitPolicyType.Medical);
+
+            entity.Property(bp => bp.Recipient)
+                .HasConversion<int>()
+                .HasDefaultValue(BenefitRecipient.Staff);
+
+            entity.Property(bp => bp.LimitPeriod)
+                .HasConversion<int>()
+                .HasDefaultValue(BenefitLimitPeriod.Annual);
+
+            entity.Property(bp => bp.IsActive)
+                .HasDefaultValue(true);
+
+            entity.HasIndex(bp => new { bp.TenantId, bp.PolicyName })
+                .HasDatabaseName("IX_BenefitPolicy_Tenant_Name");
+
+            entity.HasIndex(bp => new { bp.TenantId, bp.PolicyCode })
+                .IsUnique()
+                .HasDatabaseName("IX_BenefitPolicy_Tenant_Code");
+
+            entity.HasIndex(bp => new { bp.TenantId, bp.PolicyType })
+                .HasDatabaseName("IX_BenefitPolicy_Tenant_Type");
+
+            entity.HasIndex(bp => new { bp.TenantId, bp.IsActive })
+                .HasDatabaseName("IX_BenefitPolicy_Tenant_Active");
+
+            entity.HasIndex(bp => new { bp.TenantId, bp.EffectiveFrom })
+                .HasDatabaseName("IX_BenefitPolicy_Tenant_EffectiveFrom");
+
+            entity.HasMany(bp => bp.BenefitPolicyRelations)
+                .WithOne(r => r.BenefitPolicy)
+                .HasForeignKey(r => r.BenefitPolicyId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(bp => bp.PositionBenefits)
+                .WithOne(pb => pb.BenefitPolicy)
+                .HasForeignKey(pb => pb.PolicyId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<BenefitPolicyRelation>(entity =>
+        {
+            entity.Property(r => r.RelationType)
+                .HasConversion<int>();
+
+            entity.Property(r => r.IsActive)
+                .HasDefaultValue(true);
+
+            entity.HasIndex(r => new { r.TenantId, r.BenefitPolicyId })
+                .HasDatabaseName("IX_BenefitPolicyRelation_Tenant_PolicyId");
+
+            entity.HasIndex(r => new { r.TenantId, r.BenefitPolicyId, r.RelationType })
+                .IsUnique()
+                .HasDatabaseName("IX_BenefitPolicyRelation_Tenant_Policy_RelationType");
+        });
+
+        builder.Entity<EmployeePositionBenefit>(entity =>
+        {
+            entity.HasIndex(pb => new { pb.TenantId, pb.PositionId, pb.PolicyId })
+                .IsUnique()
+                .HasDatabaseName("IX_EmployeePositionBenefit_Tenant_Position_Policy");
+
+            entity.HasOne(pb => pb.Position)
+                .WithMany(p => p.PositionBenefits)
+                .HasForeignKey(pb => pb.PositionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(pb => pb.BenefitPolicy)
+                .WithMany(bp => bp.PositionBenefits)
+                .HasForeignKey(pb => pb.PolicyId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
