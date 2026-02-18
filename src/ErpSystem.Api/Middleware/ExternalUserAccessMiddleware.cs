@@ -58,6 +58,13 @@ public sealed class ExternalUserAccessMiddleware : IMiddleware
             return;
         }
 
+        // Allow admin-privileged users through even if their auth provider is Local
+        if (user.IsInRole("SuperAdmin") || user.IsInRole("TenantAdmin"))
+        {
+            await next(context);
+            return;
+        }
+
         var path = context.Request.Path.Value ?? string.Empty;
         if (AllowedPathPrefixes.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
         {

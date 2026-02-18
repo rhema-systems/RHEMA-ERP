@@ -138,6 +138,7 @@ builder.Services.AddErpSystemCors(builder.Configuration);
 builder.Services.AddErpSystemRateLimiting();
 builder.Services.AddErpSystemFileUpload(builder.Configuration);
 builder.Services.AddErpSystemSignalR();
+builder.Services.AddScoped<ErpSystem.Core.Interfaces.IDistributedLockService, ErpSystem.Api.Services.DistributedLockService>();
 builder.Services.AddDevelopmentServices(builder.Environment);
 
 // Add Quality Certificate Service
@@ -276,19 +277,70 @@ async Task InitializeDatabaseAsync(WebApplication app)
     {
         Console.WriteLine("   → Testing database connection...");
 
-        // Test connection first with a short timeout
-        using var testCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        // Test connection first with a longer timeout
+        using var testCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var canConnect = await context.Database.CanConnectAsync(testCts.Token);
 
         if (!canConnect)
         {
-            Console.WriteLine("   ❌ Cannot connect to database");
-            logger.LogError("Cannot connect to database");
+            Console.WriteLine("   ❌ Cannot connect to database (Timeout 30s) - Initialization aborted");
+            logger.LogError("Cannot connect to database - Initialization aborted");
             return;
         }
 
         Console.WriteLine("   ✅ Database connection successful");
         Console.WriteLine("   → Running migrations...");
+
+        // ── TEMPORARY HOTFIX: Mark already-applied migrations & add missing columns ──
+        // The FixRuntimeSchemaIssues migration was deleted (it tried to drop non-existent FKs).
+        // The FixBusinessPartnerSchema columns already exist from an earlier SQL hotfix.
+        // Additional customer-specific columns are also missing from the database.
+        try
+        {
+            // 1. Mark migrations as applied
+            await context.Database.ExecuteSqlRawAsync(@"
+                IF NOT EXISTS (SELECT 1 FROM [__EFMigrationsHistory] WHERE [MigrationId] = '20260212203425_FixRuntimeSchemaIssues')
+                    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion]) VALUES ('20260212203425_FixRuntimeSchemaIssues', '8.0.0');
+                IF NOT EXISTS (SELECT 1 FROM [__EFMigrationsHistory] WHERE [MigrationId] = '20260215231931_FixBusinessPartnerSchema')
+                    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion]) VALUES ('20260215231931_FixBusinessPartnerSchema', '8.0.0');
+            ");
+
+            // 2. Add ALL missing BusinessPartner customer-specific columns
+            await context.Database.ExecuteSqlRawAsync(@"
+                IF COL_LENGTH('BusinessPartners','CustomerAccountNumber') IS NULL ALTER TABLE [BusinessPartners] ADD [CustomerAccountNumber] nvarchar(50) NULL;
+                IF COL_LENGTH('BusinessPartners','CustomerType') IS NULL ALTER TABLE [BusinessPartners] ADD [CustomerType] nvarchar(50) NULL;
+                IF COL_LENGTH('BusinessPartners','CreditLimit') IS NULL ALTER TABLE [BusinessPartners] ADD [CreditLimit] decimal(18,2) NULL;
+                IF COL_LENGTH('BusinessPartners','OutstandingBalance') IS NULL ALTER TABLE [BusinessPartners] ADD [OutstandingBalance] decimal(18,2) NULL;
+                IF COL_LENGTH('BusinessPartners','PaymentTerms') IS NULL ALTER TABLE [BusinessPartners] ADD [PaymentTerms] nvarchar(50) NULL;
+                IF COL_LENGTH('BusinessPartners','Currency') IS NULL ALTER TABLE [BusinessPartners] ADD [Currency] nvarchar(50) NULL;
+                IF COL_LENGTH('BusinessPartners','DefaultDiscount') IS NULL ALTER TABLE [BusinessPartners] ADD [DefaultDiscount] decimal(5,2) NULL;
+                IF COL_LENGTH('BusinessPartners','PriceList') IS NULL ALTER TABLE [BusinessPartners] ADD [PriceList] nvarchar(50) NULL;
+                IF COL_LENGTH('BusinessPartners','SalesRepresentativeId') IS NULL ALTER TABLE [BusinessPartners] ADD [SalesRepresentativeId] uniqueidentifier NULL;
+                IF COL_LENGTH('BusinessPartners','SalesTerritory') IS NULL ALTER TABLE [BusinessPartners] ADD [SalesTerritory] nvarchar(100) NULL;
+                IF COL_LENGTH('BusinessPartners','IsTaxExempt') IS NULL ALTER TABLE [BusinessPartners] ADD [IsTaxExempt] bit NOT NULL DEFAULT 0;
+                IF COL_LENGTH('BusinessPartners','TaxExemptionNumber') IS NULL ALTER TABLE [BusinessPartners] ADD [TaxExemptionNumber] nvarchar(100) NULL;
+                IF COL_LENGTH('BusinessPartners','TaxExemptionExpiry') IS NULL ALTER TABLE [BusinessPartners] ADD [TaxExemptionExpiry] datetime2 NULL;
+                IF COL_LENGTH('BusinessPartners','PreferredShippingMethod') IS NULL ALTER TABLE [BusinessPartners] ADD [PreferredShippingMethod] nvarchar(100) NULL;
+                IF COL_LENGTH('BusinessPartners','DeliveryInstructions') IS NULL ALTER TABLE [BusinessPartners] ADD [DeliveryInstructions] nvarchar(500) NULL;
+                IF COL_LENGTH('BusinessPartners','CustomerSince') IS NULL ALTER TABLE [BusinessPartners] ADD [CustomerSince] datetime2 NULL;
+                IF COL_LENGTH('BusinessPartners','LastPurchaseDate') IS NULL ALTER TABLE [BusinessPartners] ADD [LastPurchaseDate] datetime2 NULL;
+                IF COL_LENGTH('BusinessPartners','TotalLifetimePurchases') IS NULL ALTER TABLE [BusinessPartners] ADD [TotalLifetimePurchases] decimal(18,2) NULL;
+                IF COL_LENGTH('BusinessPartners','AverageOrderValue') IS NULL ALTER TABLE [BusinessPartners] ADD [AverageOrderValue] decimal(18,2) NULL;
+                IF COL_LENGTH('BusinessPartners','LoyaltyTier') IS NULL ALTER TABLE [BusinessPartners] ADD [LoyaltyTier] nvarchar(50) NULL;
+                IF COL_LENGTH('BusinessPartners','LoyaltyPoints') IS NULL ALTER TABLE [BusinessPartners] ADD [LoyaltyPoints] int NULL;
+                IF COL_LENGTH('BusinessPartners','IsOnCreditHold') IS NULL ALTER TABLE [BusinessPartners] ADD [IsOnCreditHold] bit NOT NULL DEFAULT 0;
+                IF COL_LENGTH('BusinessPartners','CreditHoldReason') IS NULL ALTER TABLE [BusinessPartners] ADD [CreditHoldReason] nvarchar(500) NULL;
+                IF COL_LENGTH('BusinessPartners','CreditHoldDate') IS NULL ALTER TABLE [BusinessPartners] ADD [CreditHoldDate] datetime2 NULL;
+                IF COL_LENGTH('BusinessPartners','ParentId') IS NULL ALTER TABLE [BusinessPartners] ADD [ParentId] uniqueidentifier NULL;
+                IF COL_LENGTH('BusinessPartners','UserId') IS NULL ALTER TABLE [BusinessPartners] ADD [UserId] uniqueidentifier NULL;
+            ");
+            Console.WriteLine("   ✅ Migration history records patched & missing columns added");
+        }
+        catch (Exception patchEx)
+        {
+            Console.WriteLine($"   ⚠️ Schema hotfix warning: {patchEx.Message}");
+        }
+        // ── END HOTFIX ──
 
         // Add timeout to prevent hanging
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
