@@ -295,3 +295,9 @@ Stop-Dev.ps1
 
 # Local notes (ignore if personal-only)
 DEV-SERVERS.md
+
+# AI assistant local settings
+.claude/settings.local.json
+
+# API HTTP request logs
+src/ErpSystem.Api/http-logs/
