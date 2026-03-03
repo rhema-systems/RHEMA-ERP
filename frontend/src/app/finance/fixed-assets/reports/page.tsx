@@ -142,13 +142,13 @@ export default function FixedAssetReportsPage() {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {data.items.map((item, idx) => (
+                        {(data?.items || []).map((item, idx) => (
                             <TableRow key={idx}>
                                 <TableCell className="font-medium">{item.assetCode}</TableCell>
                                 <TableCell>{item.name}</TableCell>
                                 <TableCell>{item.categoryName}</TableCell>
-                                <TableCell className="text-right">{item.cost.toLocaleString()}</TableCell>
-                                <TableCell className="text-right">{item.netBookValue.toLocaleString()}</TableCell>
+                                <TableCell className="text-right">{item.cost?.toLocaleString()}</TableCell>
+                                <TableCell className="text-right">{item.netBookValue?.toLocaleString()}</TableCell>
                                 <TableCell>
                                     <Badge variant={item.status === 'Active' ? 'default' : 'outline'}>
                                         {item.status}
@@ -176,15 +176,15 @@ export default function FixedAssetReportsPage() {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {items.map((item, idx) => (
+                        {(items || []).map((item, idx) => (
                             <TableRow key={idx}>
                                 <TableCell className="font-medium">{item.assetCode}</TableCell>
                                 <TableCell>{item.name}</TableCell>
                                 <TableCell>{item.disposalType}</TableCell>
-                                <TableCell>{format(new Date(item.disposalDate), 'dd MMM yyyy')}</TableCell>
-                                <TableCell className="text-right">{item.saleProceeds.toLocaleString()}</TableCell>
+                                <TableCell>{item.disposalDate ? format(new Date(item.disposalDate), 'dd MMM yyyy') : ''}</TableCell>
+                                <TableCell className="text-right">{item.saleProceeds?.toLocaleString()}</TableCell>
                                 <TableCell className={`text-right font-semibold ${item.gainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                    {item.gainLoss >= 0 ? '+' : ''}{item.gainLoss.toLocaleString()}
+                                    {item.gainLoss >= 0 ? '+' : ''}{item.gainLoss?.toLocaleString()}
                                 </TableCell>
                             </TableRow>
                         ))}
@@ -207,13 +207,13 @@ export default function FixedAssetReportsPage() {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {items.map((item, idx) => (
+                        {(items || []).map((item, idx) => (
                             <TableRow key={idx}>
                                 <TableCell className="font-medium">{item.assetCode}</TableCell>
                                 <TableCell>{item.name}</TableCell>
                                 <TableCell>{item.fromLocation || item.fromDepartment || 'N/A'}</TableCell>
                                 <TableCell>{item.toLocation || item.toDepartment || 'N/A'}</TableCell>
-                                <TableCell>{format(new Date(item.transferDate), 'dd MMM yyyy')}</TableCell>
+                                <TableCell>{item.transferDate ? format(new Date(item.transferDate), 'dd MMM yyyy') : ''}</TableCell>
                             </TableRow>
                         ))}
                     </TableBody>

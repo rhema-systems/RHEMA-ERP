@@ -23,14 +23,17 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
         private readonly ILogger<VendorPaymentService> _logger;
+        private readonly ISubledgerPostingService _subledgerPostingService;
 
         public VendorPaymentService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
+            ISubledgerPostingService subledgerPostingService,
             ILogger<VendorPaymentService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
+            _subledgerPostingService = subledgerPostingService;
             _logger = logger;
         }
 
@@ -187,7 +190,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             _logger.LogInformation("Created vendor payment {PaymentNumber} for supplier {SupplierId}, amount {Amount}",
                 paymentNumber, supplier.Id, dto.TotalAmount);
 
-            return MapToDto(payment!);
+            // Post to GL
+            await _subledgerPostingService.PostApPaymentAsync(payment!.Id, cancellationToken);
+
+            return MapToDto(payment);
         }
 
         // ═════════════════════════════════════════════════════════════════
@@ -790,6 +796,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                     payment.UpdatedAt = now;
                     payment.UpdatedBy = UserName;
                     await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                    // Post to GL
+                    await _subledgerPostingService.PostApPaymentAsync(payment.Id, cancellationToken);
 
                     item.ItemStatus = "Processed";
                     processedCount++;

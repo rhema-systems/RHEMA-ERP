@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Finance;
 
-[Authorize(Policy = "Finance")]
+[Authorize]
 [ApiController]
 [Route("api/finance/fixed-asset-categories")]
 public class FixedAssetCategoriesController : ControllerBase

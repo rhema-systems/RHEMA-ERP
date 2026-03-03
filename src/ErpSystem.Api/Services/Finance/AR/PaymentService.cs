@@ -19,15 +19,18 @@ namespace ErpSystem.Api.Services.Finance.AR
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
+        private readonly ISubledgerPostingService _subledgerPostingService;
         private readonly ILogger<PaymentService> _logger;
 
         public PaymentService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
+            ISubledgerPostingService subledgerPostingService,
             ILogger<PaymentService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
+            _subledgerPostingService = subledgerPostingService;
             _logger = logger;
         }
 
@@ -162,6 +165,9 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             await _unitOfWork.Repository<CustomerPayment>().AddAsync(payment);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            // Post to GL
+            await _subledgerPostingService.PostArPaymentAsync(payment.Id, cancellationToken);
 
             _logger.LogInformation("Created payment {PaymentNumber} for customer {CustomerId}, Amount: {Amount}",
                 paymentNumber, customer.Id, dto.TotalAmount);

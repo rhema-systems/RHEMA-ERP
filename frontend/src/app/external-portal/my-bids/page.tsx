@@ -26,7 +26,7 @@ export default function MyBidsPage() {
 
   useEffect(() => {
     loadBids();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [page, statusFilter, searchTerm]);
 
   const loadBids = async () => {

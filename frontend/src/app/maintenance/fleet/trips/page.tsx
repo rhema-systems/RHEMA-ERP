@@ -222,7 +222,7 @@ function FleetTripsPageContent() {
         toast({ title: 'Failed to load inspection template', description: e?.message || String(e), variant: 'destructive' });
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [completeInspectionOpen, selectedInspection?.inspectionTemplateId]);
 
   const [dispatchOpen, setDispatchOpen] = React.useState(false);
@@ -302,7 +302,7 @@ function FleetTripsPageContent() {
 
   React.useEffect(() => {
     loadLookups();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   React.useEffect(() => {

@@ -4,6 +4,8 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Sales;
+using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Finance
@@ -98,6 +100,28 @@ namespace ErpSystem.Core.Entities.Finance
 
         // For product-based line items
         public Guid? ProductId { get; set; }
+
+        public Guid? InventoryItemId { get; set; }
+        public virtual InventoryItem? InventoryItem { get; set; }
+
+        // Inventory source/destination tracking
+        public Guid? WarehouseId { get; set; }
+        public virtual Warehouse? Warehouse { get; set; }
+        public Guid? LocationId { get; set; }
+        public virtual WarehouseLocation? Location { get; set; }
+
+        // Inventory item tracking details (required based on InventoryItem settings)
+        [MaxLength(100)]
+        public string? SerialNumber { get; set; }
+        [MaxLength(100)]
+        public string? LotNumber { get; set; }
+        public DateTime? ExpirationDate { get; set; }
+
+        // Cost tracking (populated at invoice send for COGS)
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal? UnitCost { get; set; }  // WAC or FIFO cost at time of issue
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal? CostTotal { get; set; } // Quantity × UnitCost
 
         // For GL account-based line items
         public Guid? GLAccountId { get; set; }

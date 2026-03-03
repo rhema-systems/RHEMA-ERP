@@ -46,6 +46,11 @@ import {
   ArrowLeftRight,
   CheckCircle2,
   Wand2,
+  ClipboardList,
+  Truck,
+  BarChart2,
+  Scale,
+  Tag,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -157,6 +162,17 @@ const navigationItems: NavItem[] = [
         ],
       },
       {
+        title: 'Accounts Payable',
+        href: '/finance/ap',
+        icon: Building2,
+        children: [
+          { title: 'Dashboard', href: '/finance/ap/dashboard', icon: LayoutDashboard },
+          { title: 'Vendor Invoices', href: '/finance/ap/invoices', icon: FileText },
+          { title: 'Vendor Payments', href: '/finance/ap/payments', icon: Wallet },
+          { title: 'Reports', href: '/finance/ap/reports', icon: BarChart3 },
+        ],
+      },
+      {
         title: 'Cash Management',
         href: '/finance/cash',
         icon: Wallet,
@@ -216,10 +232,17 @@ const navigationItems: NavItem[] = [
     href: '/inventory',
     icon: Package,
     children: [
-      { title: 'Products', href: '/inventory/products', icon: Package },
-      { title: 'Stock Management', href: '/inventory/stock', icon: Package },
-      { title: 'Warehouses', href: '/inventory/warehouses', icon: Building2 },
-      { title: 'Stock Movements', href: '/inventory/movements', icon: Package },
+      { title: 'Items', href: '/inventory/items', icon: Package },
+      { title: 'Warehouse Items', href: '/inventory/warehouse-items', icon: Building2 },
+      { title: 'Stock Movements', href: '/inventory/stock-movements', icon: ArrowLeftRight },
+      { title: 'Transfers', href: '/inventory/transfers', icon: Truck },
+      { title: 'Adjustments', href: '/inventory/adjustments', icon: ClipboardList },
+      { title: 'Physical Counts', href: '/inventory/physical-counts', icon: ClipboardCheck },
+      { title: 'Requisitions', href: '/inventory/requisitions', icon: FileText },
+      { title: 'Item Suppliers', href: '/inventory/item-suppliers', icon: Users },
+      { title: 'Price Lists', href: '/inventory/price-lists', icon: Tag },
+      { title: 'Bin Stock', href: '/inventory/bin-stock', icon: Database },
+      { title: 'Valuation', href: '/inventory/valuation', icon: BarChart2 },
     ],
   },
   {
@@ -399,7 +422,9 @@ const navigationItems: NavItem[] = [
         icon: Package,
         children: [
           { title: 'Product Categories', href: '/administration/inventory/categories', icon: Package },
-          { title: 'Units of Measure', href: '/administration/inventory/units', icon: Package },
+          { title: 'Units of Measure', href: '/administration/inventory/units-of-measure', icon: Scale },
+          { title: 'UoM Schedules', href: '/administration/inventory/uom-schedules', icon: Calendar },
+          { title: 'Warehouses', href: '/administration/inventory/warehouses', icon: Building2 },
           { title: 'Storage Locations', href: '/administration/inventory/locations', icon: Building2 },
           { title: 'Stock Levels', href: '/administration/inventory/stock-levels', icon: Package },
         ],

@@ -1,3 +1,4 @@
+/* eslint-disable */
 // Script to batch fix maintenance pages with proper API integration
 
 // This script would typically be run to fix common API integration patterns

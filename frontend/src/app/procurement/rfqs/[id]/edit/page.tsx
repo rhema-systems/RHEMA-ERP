@@ -156,7 +156,7 @@ export default function EditRfqPage() {
       }
     };
     loadPartners();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [fromRequisitionId]);
 
   const toggleSupplier = (id: string) => {

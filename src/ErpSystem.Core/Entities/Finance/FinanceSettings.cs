@@ -89,5 +89,13 @@ namespace ErpSystem.Core.Entities.Finance
         /// </summary>
         public Guid? ControlAccountTaxId { get; set; }
         public virtual Account? ControlAccountTax { get; set; }
+
+        public Guid? ControlAccountCOGSId { get; set; }
+        public virtual Account? ControlAccountCOGS { get; set; }
+
+        public Guid? ControlAccountGRVAccrualId { get; set; }
+        public virtual Account? ControlAccountGRVAccrual { get; set; }
+
+        public Guid? DefaultBankAccountId { get; set; }
     }
 }

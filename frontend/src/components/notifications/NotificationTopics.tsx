@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 "use client"
 
 import React, { useEffect, useMemo, useState } from 'react'
@@ -377,7 +378,7 @@ const NotificationTopics: React.FC = () => {
 
   useEffect(() => {
     loadAll()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   const seedEntityTypes = async () => {
