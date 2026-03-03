@@ -225,7 +225,7 @@ export function useSessionTimeout() {
   useEffect(() => {
     if (!sessionState.showWarning) return;
 
-    let countdownInterval: NodeJS.Timeout;
+    const countdownInterval;
     let remainingTime = WARNING_TIME;
 
     const updateCountdown = () => {

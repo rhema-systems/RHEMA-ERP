@@ -260,8 +260,8 @@ catch (Exception ex)
     Console.WriteLine($"   Stack trace: {ex.StackTrace}");
 }
 
-// Skip seeding for now
-// await SeedDatabaseAsync(app);
+// Seed database (finance, HR, maintenance, etc.)
+await SeedDatabaseAsync(app);
 
 // Workflow automation trigger - comprehensive testing active
 // Version: 2.0.0 - Full CI/CD Pipeline Integration

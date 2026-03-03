@@ -217,6 +217,21 @@ public interface IInventoryValuationService
         string? lotNumber = null,
         string? serialNumber = null,
         DateTime? expirationDate = null);
+
+    /// <summary>
+    /// Processes an inventory issue based on the item's valuation method
+    /// </summary>
+    Task<decimal> ProcessIssueAsync(
+        Guid inventoryItemId,
+        Guid warehouseId,
+        Guid? locationId,
+        decimal quantity,
+        ErpSystem.Core.Entities.Inventory.InventoryMovementType movementType,
+        ErpSystem.Core.Enums.ReferenceType referenceType,
+        string? referenceNumber,
+        Guid? referenceId,
+        string? lotNumber = null,
+        string? serialNumber = null);
 }
 
 /// <summary>

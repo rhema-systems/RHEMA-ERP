@@ -57,6 +57,13 @@ public class Customer : BusinessEntity
     [MaxLength(50)]
     public string? PriceGroup { get; set; }
 
+    // Finance/GL Integration
+    public Guid? DefaultApAccountId { get; set; }
+    public Guid? DefaultArAccountId { get; set; }
+    public Guid? DefaultExpenseAccountId { get; set; }
+    public Guid? PaymentTermId { get; set; }
+    public virtual ErpSystem.Core.Entities.Finance.PaymentTerm? PaymentTerm { get; set; }
+
     /// <summary>
     /// Default currency code for this customer (e.g., "USD", "GHS").
     /// All transactions will default to this currency.

@@ -60,8 +60,10 @@ export default function AccountGeneratorPage() {
             const results = await accountCombinationService.generateCombinations(request);
 
             // Mark valid non-duplicates as selected by default
+            // tempId is not set by the backend, so use accountNumber as the unique identifier
             const resultsWithSelection = results.map(r => ({
                 ...r,
+                tempId: r.tempId || r.accountNumber,
                 isSelected: r.status === 'Valid'
             }));
 

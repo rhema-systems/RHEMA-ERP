@@ -63,43 +63,22 @@ export const SegmentValueSelector: React.FC<SegmentValueSelectorProps> = ({ onSe
     };
 
     const handleValueToggle = (segmentId: string, valueId: string) => {
-        setSelections(prev => {
-            const currentValues = prev[segmentId] || [];
-            let newValues: string[];
-
-            if (currentValues.includes(valueId)) {
-                newValues = currentValues.filter(id => id !== valueId);
-            } else {
-                newValues = [...currentValues, valueId];
-            }
-
-            const newSelections = { ...prev, [segmentId]: newValues };
-
-            // Notify parent
-            notifyParent(newSelections);
-
-            return newSelections;
-        });
+        const currentValues = selections[segmentId] || [];
+        const newValues = currentValues.includes(valueId)
+            ? currentValues.filter(id => id !== valueId)
+            : [...currentValues, valueId];
+        const newSelections = { ...selections, [segmentId]: newValues };
+        setSelections(newSelections);
+        notifyParent(newSelections);
     };
 
     const handleSelectAll = (segmentId: string, allValues: SegmentLookupValue[]) => {
-        setSelections(prev => {
-            const currentValues = prev[segmentId] || [];
-            const allValueIds = allValues.map(v => v.id);
-
-            let newValues: string[];
-            if (currentValues.length === allValues.length) {
-                // Deselect all
-                newValues = [];
-            } else {
-                // Select all
-                newValues = allValueIds;
-            }
-
-            const newSelections = { ...prev, [segmentId]: newValues };
-            notifyParent(newSelections);
-            return newSelections;
-        });
+        const currentValues = selections[segmentId] || [];
+        const allValueIds = allValues.map(v => v.id);
+        const newValues = currentValues.length === allValues.length ? [] : allValueIds;
+        const newSelections = { ...selections, [segmentId]: newValues };
+        setSelections(newSelections);
+        notifyParent(newSelections);
     };
 
     const notifyParent = (currentSelections: Record<string, string[]>) => {

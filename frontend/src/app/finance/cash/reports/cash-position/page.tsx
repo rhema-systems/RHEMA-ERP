@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, DollarSign, PieChart, Wallet, CreditCard, Building2, TrendingUp, Download } from 'lucide-react';
+import { ArrowLeft, DollarSign, PieChart, Wallet, CreditCard, Building2, TrendingUp, Download, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 
 import { Button } from '@/components/ui/button';

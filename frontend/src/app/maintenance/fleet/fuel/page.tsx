@@ -76,7 +76,7 @@ export default function FleetFuelPage() {
 
   React.useEffect(() => {
     loadVehicles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   React.useEffect(() => {

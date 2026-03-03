@@ -299,6 +299,9 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
                 <SelectItem value="StraightLine">Straight Line</SelectItem>
                 <SelectItem value="DecliningBalance">Declining Balance</SelectItem>
                 <SelectItem value="DoubleDecliningBalance">Double Declining Balance</SelectItem>
+                <SelectItem value="SumOfYearsDigits">Sum of Years Digits</SelectItem>
+                <SelectItem value="UnitsOfProduction">Units of Production</SelectItem>
+                <SelectItem value="None">None</SelectItem>
               </SelectContent>
             </Select>
           </div>

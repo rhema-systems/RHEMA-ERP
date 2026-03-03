@@ -67,6 +67,9 @@ public class CustomerPayment : BusinessEntity
     public bool IsCreditNote { get; set; } = false;
     public Guid? CreditNoteId { get; set; }
 
+    // GL Posting
+    public Guid? JournalEntryId { get; set; }
+
     // Multi-tenant
 
 

@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Entities.Finance;
 
 namespace ErpSystem.Core.Entities.Procurement;
 
@@ -186,10 +187,26 @@ public class BusinessPartner : TenantEntity
     public decimal? OutstandingBalance { get; set; }
 
     /// <summary>
-    /// Payment terms for the customer (e.g., Net 30, Net 60, COD)
+    /// Legacy payment terms descriptor
     /// </summary>
     [MaxLength(50)]
     public string? PaymentTerms { get; set; }
+
+    /// <summary>
+    /// Foreign Key to standardized Payment Term configuration
+    /// </summary>
+    public Guid? PaymentTermId { get; set; }
+    public virtual PaymentTerm? PaymentTerm { get; set; }
+
+    // GL Defaults
+    public Guid? DefaultApAccountId { get; set; }
+    public virtual Account? DefaultApAccount { get; set; }
+
+    public Guid? DefaultArAccountId { get; set; }
+    public virtual Account? DefaultArAccount { get; set; }
+
+    public Guid? DefaultExpenseAccountId { get; set; }
+    public virtual Account? DefaultExpenseAccount { get; set; }
 
     /// <summary>
     /// Currency code for the customer (e.g., USD, EUR, GBP)

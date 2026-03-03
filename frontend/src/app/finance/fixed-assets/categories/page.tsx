@@ -172,11 +172,22 @@ export default function FixedAssetCategoriesPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="defaultMethod">Default Depreciation Method</Label>
-                  <Input
-                    id="defaultMethod"
+                  <Select
                     value={formData.defaultMethod}
-                    onChange={(e) => setFormData({ ...formData, defaultMethod: e.target.value as DepreciationMethod })}
-                  />
+                    onValueChange={(value) => setFormData({ ...formData, defaultMethod: value as DepreciationMethod })}
+                  >
+                    <SelectTrigger id="defaultMethod">
+                      <SelectValue placeholder="Select depreciation method" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="StraightLine">Straight Line</SelectItem>
+                      <SelectItem value="DecliningBalance">Declining Balance</SelectItem>
+                      <SelectItem value="DoubleDecliningBalance">Double Declining Balance</SelectItem>
+                      <SelectItem value="SumOfYearsDigits">Sum of Years Digits</SelectItem>
+                      <SelectItem value="UnitsOfProduction">Units of Production</SelectItem>
+                      <SelectItem value="None">None</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="defaultLife">Default Useful Life (months)</Label>

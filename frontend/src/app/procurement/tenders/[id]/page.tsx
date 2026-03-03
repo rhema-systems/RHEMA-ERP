@@ -62,7 +62,7 @@ export default function TenderDetailPage() {
     if (tenderId) {
       loadTenderDetails();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [tenderId]);
 
   const getStatusBadge = (status: string) => {

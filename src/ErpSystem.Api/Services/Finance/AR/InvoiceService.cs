@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Inventory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
@@ -21,17 +22,23 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
         private readonly ITaxCalculationEngine _taxEngine;
+        private readonly ISubledgerPostingService _subledgerPostingService;
+        private readonly IInventoryValuationService _inventoryValuationService;
         private readonly ILogger<InvoiceService> _logger;
 
         public InvoiceService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
             ITaxCalculationEngine taxEngine,
+            ISubledgerPostingService subledgerPostingService,
+            IInventoryValuationService inventoryValuationService,
             ILogger<InvoiceService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
             _taxEngine = taxEngine;
+            _subledgerPostingService = subledgerPostingService;
+            _inventoryValuationService = inventoryValuationService;
             _logger = logger;
         }
 
@@ -425,18 +432,44 @@ namespace ErpSystem.Api.Services.Finance.AR
             var invoice = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
                 .Include(i => i.Customer)
+                .Include(i => i.LineItems)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (invoice == null)
                 throw new KeyNotFoundException($"Invoice with Id '{id}' not found.");
 
             if (invoice.Status != InvoiceStatus.Draft)
-                throw new InvalidOperationException("Only draft invoices can be sent.");
+                throw new InvalidOperationException("Only draft invoices can be sent.");                 
 
             var now = DateTime.UtcNow;
             invoice.Status = InvoiceStatus.Sent;
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
+
+            // Process Inventory Issues for Inventory-type line items
+            foreach (var line in invoice.LineItems.Where(l => l.LineItemType == LineItemType.Inventory))
+            {
+                if (line.InventoryItemId.HasValue && line.WarehouseId.HasValue)
+                {
+                    var totalCost = await _inventoryValuationService.ProcessIssueAsync(
+                        line.InventoryItemId.Value,
+                        line.WarehouseId.Value,
+                        line.LocationId,
+                        line.Quantity,
+                        ErpSystem.Core.Entities.Inventory.InventoryMovementType.SalesIssue,
+                        ReferenceType.SalesInvoice,
+                        invoice.InvoiceNumber,
+                        invoice.Id,
+                        line.LotNumber,
+                        line.SerialNumber
+                    );
+
+                    line.CostTotal = totalCost;
+                    line.UnitCost = line.Quantity > 0 ? totalCost / line.Quantity : 0;
+                    
+                    await _unitOfWork.Repository<InvoiceLineItem>().UpdateAsync(line);
+                }
+            }
 
             // Update customer's outstanding balance
             if (invoice.Customer != null)
@@ -451,6 +484,9 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             await _unitOfWork.Repository<Invoice>().UpdateAsync(invoice);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            // Post to GL
+            await _subledgerPostingService.PostArInvoiceAsync(invoice.Id, cancellationToken);
 
             _logger.LogInformation("Sent invoice {InvoiceNumber}", invoice.InvoiceNumber);
 

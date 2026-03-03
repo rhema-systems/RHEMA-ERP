@@ -85,7 +85,15 @@ namespace ErpSystem.Web.Services
 
                 // Always ensure baseline EHC notification topics exist (templated in-app/email notifications)
                 _logger.LogInformation("Ensuring EHC notification topics are seeded...");
-                await EnsureEhcNotificationTopicsSeededAsync();
+                try
+                {
+                    await EnsureEhcNotificationTopicsSeededAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "EHC notification topic seeding failed (table may not exist yet). Continuing...");
+                    _context.ChangeTracker.Clear();
+                }
 
                 // Always seed/update test users in development to ensure correct passwords
                 if (_environment.IsDevelopment())
@@ -103,7 +111,15 @@ namespace ErpSystem.Web.Services
                     
                     // Seed quality control checklists
                     _logger.LogInformation("Ensuring QC checklists are seeded...");
-                    await SeedQualityControlChecklistsAsync();
+                    try
+                    {
+                        await SeedQualityControlChecklistsAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "QC checklist seeding failed (schema mismatch). Continuing...");
+                        _context.ChangeTracker.Clear();
+                    }
                     
                     // Seed finance data (currencies, accounts, fiscal years, settings)
                     _logger.LogInformation("Ensuring finance data is seeded...");

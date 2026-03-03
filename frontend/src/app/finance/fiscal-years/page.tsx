@@ -44,8 +44,8 @@ export default function FiscalYearsPage() {
             if (openYear) {
                 toggleYear(openYear.id);
             }
-        } catch (error) {
-            console.error('Failed to load fiscal years:', error);
+        } catch (error: any) {
+            console.error('Failed to load fiscal years:', error?.message || error);
             toast({
                 title: 'Error',
                 description: 'Failed to load fiscal years.',
@@ -77,8 +77,8 @@ export default function FiscalYearsPage() {
             setLoadingPeriods(prev => ({ ...prev, [yearId]: true }));
             const periods = await financeDataService.getFiscalPeriods(yearId);
             setPeriodsByYear(prev => ({ ...prev, [yearId]: periods }));
-        } catch (error) {
-            console.error('Failed to load periods:', error);
+        } catch (error: any) {
+            console.error('Failed to load periods:', error?.message || error);
             toast({
                 title: 'Error',
                 description: 'Failed to load periods for the year.',
@@ -136,11 +136,11 @@ export default function FiscalYearsPage() {
             setIsCreateDialogOpen(false);
             resetForm();
             loadData();
-        } catch (error) {
-            console.error('Failed to create fiscal year:', error);
+        } catch (error: any) {
+            console.error('Failed to create fiscal year:', error?.message || error);
             toast({
                 title: 'Error',
-                description: 'Failed to create fiscal year. Ensure dates do not overlap.',
+                description: error?.message || 'Failed to create fiscal year. Ensure dates do not overlap.',
                 variant: 'destructive',
             });
         }
@@ -154,11 +154,11 @@ export default function FiscalYearsPage() {
                 description: 'Fiscal year closed successfully.',
             });
             loadData();
-        } catch (error) {
-            console.error('Failed to close fiscal year:', error);
+        } catch (error: any) {
+            console.error('Failed to close fiscal year:', error?.message || error);
             toast({
                 title: 'Error',
-                description: 'Failed to close fiscal year.',
+                description: error?.message || 'Failed to close fiscal year.',
                 variant: 'destructive',
             });
         }
@@ -172,10 +172,9 @@ export default function FiscalYearsPage() {
                 description: 'Fiscal year deleted successfully.',
             });
             loadData();
-        } catch (error: any) { // Type as any to access custom message if available
-            console.error('Failed to delete fiscal year:', error);
-            // Check if it's the specific "has transactions" error or "closed" error
-            const errorMessage = error.response?.data?.message || 'Failed to delete fiscal year. Ensure it is not closed and has no transactions.';
+        } catch (error: any) {
+            console.error('Failed to delete fiscal year:', error?.message || error);
+            const errorMessage = error?.message || 'Failed to delete fiscal year. Ensure it is not closed and has no transactions.';
             toast({
                 title: 'Error',
                 description: errorMessage,

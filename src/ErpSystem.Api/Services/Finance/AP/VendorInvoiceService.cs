@@ -23,14 +23,20 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
         private readonly ILogger<VendorInvoiceService> _logger;
+        private readonly ISubledgerPostingService _subledgerPostingService;
+        private readonly ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService _inventoryValuationService;
 
         public VendorInvoiceService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
+            ISubledgerPostingService subledgerPostingService,
+            ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService inventoryValuationService,
             ILogger<VendorInvoiceService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
+            _subledgerPostingService = subledgerPostingService;
+            _inventoryValuationService = inventoryValuationService;
             _logger = logger;
         }
 
@@ -432,7 +438,13 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         public async Task<VendorInvoiceDto> ApproveAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default)
         {
-            var invoice = await GetEntityOrThrowAsync(id, cancellationToken);
+            var invoice = await _unitOfWork.Repository<VendorInvoice>()
+                .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
+                .Include(i => i.LineItems)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (invoice == null)
+                throw new KeyNotFoundException($"Vendor invoice with Id '{id}' not found.");
 
             if (invoice.Status != VendorInvoiceStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending invoices can be approved.");
@@ -446,11 +458,36 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
 
+            // Process Inventory Receivals for Inventory lines
+            foreach (var line in invoice.LineItems.Where(l => l.LineItemType == "Inventory"))
+            {
+                if (line.InventoryItemId.HasValue && line.WarehouseId.HasValue)
+                {
+                    await _inventoryValuationService.ProcessReceiptAsync(
+                        line.InventoryItemId.Value,
+                        line.WarehouseId.Value,
+                        line.LocationId,
+                        line.Quantity,
+                        line.UnitPrice,
+                        ErpSystem.Core.Enums.ReferenceType.VendorInvoice,
+                        invoice.InvoiceNumber,
+                        invoice.Id,
+                        line.LotNumber,
+                        line.SerialNumber,
+                        line.ExpirationDate
+                    );
+                }
+            }
+
             await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            _logger.LogInformation("Approved vendor invoice {InvoiceNumber}", invoice.InvoiceNumber);
-            return MapToDto(invoice);
+            // Post to GL
+            await _subledgerPostingService.PostApInvoiceAsync(invoice.Id, cancellationToken);
+
+            _logger.LogInformation("Approved vendor invoice {InvoiceNumber} and posted to GL", invoice.InvoiceNumber);
+
+            return await GetByIdAsync(invoice.Id, cancellationToken) ?? MapToDto(invoice);
         }
 
         public async Task<VendorInvoiceDto> RejectAsync(Guid id, string comments, CancellationToken cancellationToken = default)

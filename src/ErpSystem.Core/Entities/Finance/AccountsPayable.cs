@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Inventory;
 
 namespace ErpSystem.Core.Entities.Finance;
 
@@ -170,6 +171,9 @@ public class VendorInvoice : TenantEntity
 
     public int PaymentTermsDays { get; set; } = 30;
 
+    public Guid? PaymentTermId { get; set; }
+    public virtual PaymentTerm? PaymentTerm { get; set; }
+
     // ── Early-Payment Discount ──────────────────────────────────────────
 
     [Column(TypeName = "decimal(5,2)")]
@@ -268,6 +272,25 @@ public class VendorInvoiceLineItem : TenantEntity
 
     public Guid? PurchaseOrderItemId { get; set; }
     public virtual PurchaseOrderItem? PurchaseOrderItem { get; set; }
+
+    public Guid? InventoryItemId { get; set; }
+    public virtual InventoryItem? InventoryItem { get; set; }
+
+    // ── Inventory destination tracking ──────────────────────────────────
+    public Guid? WarehouseId { get; set; }
+    public virtual Warehouse? Warehouse { get; set; }
+    
+    public Guid? LocationId { get; set; }
+    public virtual WarehouseLocation? Location { get; set; }
+
+    // ── Inventory item tracking details ─────────────────────────────────
+    [MaxLength(100)]
+    public string? SerialNumber { get; set; }
+    
+    [MaxLength(100)]
+    public string? LotNumber { get; set; }
+    
+    public DateTime? ExpirationDate { get; set; }
 
     // ── Description & Amounts ───────────────────────────────────────────
 
