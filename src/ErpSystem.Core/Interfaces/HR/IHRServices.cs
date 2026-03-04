@@ -100,6 +100,7 @@ public interface IEmployeeService
     Task<EmployeeEmergencyContactDto> SetPrimaryEmergencyContactAsync(Guid emergencyContactId, CancellationToken cancellationToken = default);
     Task<EmployeeEmergencyContactDto> ActivateEmergencyContactAsync(Guid emergencyContactId, CancellationToken cancellationToken = default);
     Task<EmployeeEmergencyContactDto> DeactivateEmergencyContactAsync(Guid emergencyContactId, CancellationToken cancellationToken = default);
+    Task<EmployeeEmergencyContactDto?> GetEmergencyContactByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Dependents
     Task<IEnumerable<EmployeeDependentReadDto>> GetDependentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
@@ -115,6 +116,7 @@ public interface IEmployeeService
     Task<bool> RemoveDependentBenefitAsync(Guid dependentBenefitId, CancellationToken cancellationToken = default);
     Task<EmployeeDependentBenefitDto> ActivateDependentBenefitAsync(Guid dependentBenefitId, CancellationToken cancellationToken = default);
     Task<EmployeeDependentBenefitDto> DeactivateDependentBenefitAsync(Guid dependentBenefitId, CancellationToken cancellationToken = default);
+    Task<EmployeeDependentBenefitDto?> GetDependentBenefitByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Qualifications
     Task<IEnumerable<EmployeeQualificationDto>> GetQualificationsAsync(Guid employeeId, CancellationToken cancellationToken = default);
@@ -123,6 +125,7 @@ public interface IEmployeeService
     Task<bool> RemoveQualificationAsync(Guid qualificationId, CancellationToken cancellationToken = default);
     Task<EmployeeQualificationDto> VerifyQualificationAsync(Guid qualificationId, CancellationToken cancellationToken = default);
     Task<EmployeeQualificationDto> UnverifyQualificationAsync(Guid qualificationId, CancellationToken cancellationToken = default);
+    Task<EmployeeQualificationDto?> GetQualificationByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Skills & certifications
     Task<IEnumerable<EmployeeSkillDto>> GetSkillsAsync(Guid employeeId, CancellationToken cancellationToken = default);
@@ -131,6 +134,7 @@ public interface IEmployeeService
     Task<bool> RemoveSkillAsync(Guid employeeSkillId, CancellationToken cancellationToken = default);
     Task<EmployeeSkillDto> VerifySkillAsync(Guid employeeSkillId, CancellationToken cancellationToken = default);
     Task<EmployeeSkillDto> UnverifySkillAsync(Guid employeeSkillId, CancellationToken cancellationToken = default);
+    Task<EmployeeSkillDto?> GetSkillByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Identification cards
     Task<IEnumerable<EmployeeIdentificationCardListDto>> GetIdentificationCardsAsync(Guid employeeId, CancellationToken cancellationToken = default);
@@ -157,6 +161,7 @@ public interface IEmployeeService
     Task<EmployeeContractDetailDto> ActivateContractAsync(Guid contractId, CancellationToken cancellationToken = default);
     Task<EmployeeContractDetailDto> DeactivateContractAsync(Guid contractId, CancellationToken cancellationToken = default);
     Task<EmployeeContractDetailDto> TerminateContractAsync(Guid contractId, DateOnly terminationDate, string reason, CancellationToken cancellationToken = default);
+    Task<EmployeeContractDetailDto?> GetContractByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Expatriate assignments
     Task<IEnumerable<ExpatriateAssignmentListDto>> GetExpatriateAssignmentsAsync(Guid employeeId, CancellationToken cancellationToken = default);

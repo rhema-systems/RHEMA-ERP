@@ -669,6 +669,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var existing = await _service.GetEmergencyContactByIdAsync(emergencyContactId, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.UpdateEmergencyContactAsync(dto, cancellationToken);
             return Ok(updated);
         }
@@ -698,6 +701,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var contact = await _service.GetEmergencyContactByIdAsync(emergencyContactId, cancellationToken);
+            if (contact == null || contact.EmployeeId != employeeId) return NotFound();
+
             var ok = await _service.RemoveEmergencyContactAsync(emergencyContactId, cancellationToken);
             return ok ? NoContent() : NotFound();
         }
@@ -727,6 +733,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var contact = await _service.GetEmergencyContactByIdAsync(emergencyContactId, cancellationToken);
+            if (contact == null || contact.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.SetPrimaryEmergencyContactAsync(emergencyContactId, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -755,6 +764,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var contact = await _service.GetEmergencyContactByIdAsync(emergencyContactId, cancellationToken);
+            if (contact == null || contact.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.ActivateEmergencyContactAsync(emergencyContactId, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -783,6 +795,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var contact = await _service.GetEmergencyContactByIdAsync(emergencyContactId, cancellationToken);
+            if (contact == null || contact.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.DeactivateEmergencyContactAsync(emergencyContactId, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -874,6 +889,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var dependent = await _service.GetDependentAsync(dependentId, cancellationToken);
+            if (dependent == null || dependent.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.UpdateDependentAsync(dto, cancellationToken);
             return Ok(updated);
         }
@@ -995,6 +1013,11 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var benefit = await _service.GetDependentBenefitByIdAsync(dependentBenefitId, cancellationToken);
+            if (benefit == null || benefit.EmployeeDependentId != employeeDependentId) return NotFound();
+            var dep = await _service.GetDependentAsync(employeeDependentId, cancellationToken);
+            if (dep == null || dep.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.UpdateDependentBenefitAsync(dto, cancellationToken);
             return Ok(updated);
         }
@@ -1026,6 +1049,11 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var benefit = await _service.GetDependentBenefitByIdAsync(dependentBenefitId, cancellationToken);
+            if (benefit == null || benefit.EmployeeDependentId != employeeDependentId) return NotFound();
+            var dep = await _service.GetDependentAsync(employeeDependentId, cancellationToken);
+            if (dep == null || dep.EmployeeId != employeeId) return NotFound();
+
             var ok = await _service.RemoveDependentBenefitAsync(dependentBenefitId, cancellationToken);
             return ok ? NoContent() : NotFound();
         }
@@ -1057,6 +1085,11 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var benefit = await _service.GetDependentBenefitByIdAsync(dependentBenefitId, cancellationToken);
+            if (benefit == null || benefit.EmployeeDependentId != employeeDependentId) return NotFound();
+            var dep = await _service.GetDependentAsync(employeeDependentId, cancellationToken);
+            if (dep == null || dep.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.ActivateDependentBenefitAsync(dependentBenefitId, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -1087,6 +1120,11 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var benefit = await _service.GetDependentBenefitByIdAsync(dependentBenefitId, cancellationToken);
+            if (benefit == null || benefit.EmployeeDependentId != employeeDependentId) return NotFound();
+            var dep = await _service.GetDependentAsync(employeeDependentId, cancellationToken);
+            if (dep == null || dep.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.DeactivateDependentBenefitAsync(dependentBenefitId, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -1166,6 +1204,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var qualification = await _service.GetQualificationByIdAsync(qualificationId, cancellationToken);
+            if (qualification == null || qualification.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.UpdateQualificationAsync(dto, cancellationToken);
             return Ok(updated);
         }
@@ -1195,6 +1236,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var qualification = await _service.GetQualificationByIdAsync(qualificationId, cancellationToken);
+            if (qualification == null || qualification.EmployeeId != employeeId) return NotFound();
+
             var ok = await _service.RemoveQualificationAsync(qualificationId, cancellationToken);
             return ok ? NoContent() : NotFound();
         }
@@ -1224,6 +1268,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var qualification = await _service.GetQualificationByIdAsync(qualificationId, cancellationToken);
+            if (qualification == null || qualification.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.VerifyQualificationAsync(qualificationId, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -1252,6 +1299,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var qualification = await _service.GetQualificationByIdAsync(qualificationId, cancellationToken);
+            if (qualification == null || qualification.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.UnverifyQualificationAsync(qualificationId, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -1331,6 +1381,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var skill = await _service.GetSkillByIdAsync(employeeSkillId, cancellationToken);
+            if (skill == null || skill.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.UpdateSkillAsync(dto, cancellationToken);
             return Ok(updated);
         }
@@ -1360,6 +1413,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var skill = await _service.GetSkillByIdAsync(employeeSkillId, cancellationToken);
+            if (skill == null || skill.EmployeeId != employeeId) return NotFound();
+
             var ok = await _service.RemoveSkillAsync(employeeSkillId, cancellationToken);
             return ok ? NoContent() : NotFound();
         }
@@ -1389,6 +1445,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var skill = await _service.GetSkillByIdAsync(employeeSkillId, cancellationToken);
+            if (skill == null || skill.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.VerifySkillAsync(employeeSkillId, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -1417,6 +1476,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var skill = await _service.GetSkillByIdAsync(employeeSkillId, cancellationToken);
+            if (skill == null || skill.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.UnverifySkillAsync(employeeSkillId, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -1518,6 +1580,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var card = await _service.GetIdentificationCardByIdAsync(id, cancellationToken);
+            if (card == null || card.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.UpdateIdentificationCardAsync(dto, cancellationToken);
             return Ok(updated);
         }
@@ -1547,6 +1612,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var card = await _service.GetIdentificationCardByIdAsync(id, cancellationToken);
+            if (card == null || card.EmployeeId != employeeId) return NotFound();
+
             var ok = await _service.RemoveIdentificationCardAsync(id, cancellationToken);
             return ok ? NoContent() : NotFound();
         }
@@ -1579,6 +1647,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var card = await _service.GetIdentificationCardByIdAsync(id, cancellationToken);
+            if (card == null || card.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.VerifyIdentificationCardAsync(id, request.VerifiedDate, cancellationToken);
             return Ok(updated);
         }
@@ -1608,6 +1679,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var card = await _service.GetIdentificationCardByIdAsync(id, cancellationToken);
+            if (card == null || card.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.UnverifyIdentificationCardAsync(id, cancellationToken);
             return Ok(updated);
         }
@@ -1710,6 +1784,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var history = await _service.GetWorkHistoryByIdAsync(id, cancellationToken);
+            if (history == null || history.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.UpdateWorkHistoryAsync(dto, cancellationToken);
             return Ok(updated);
         }
@@ -1739,6 +1816,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var history = await _service.GetWorkHistoryByIdAsync(id, cancellationToken);
+            if (history == null || history.EmployeeId != employeeId) return NotFound();
+
             var ok = await _service.RemoveWorkHistoryAsync(id, cancellationToken);
             return ok ? NoContent() : NotFound();
         }
@@ -1839,6 +1919,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var contract = await _service.GetContractByIdAsync(contractId, cancellationToken);
+            if (contract == null || contract.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.UpdateContractAsync(dto, cancellationToken);
             return Ok(updated);
         }
@@ -1868,6 +1951,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var contract = await _service.GetContractByIdAsync(contractId, cancellationToken);
+            if (contract == null || contract.EmployeeId != employeeId) return NotFound();
+
             var ok = await _service.RemoveContractAsync(contractId, cancellationToken);
             return ok ? NoContent() : NotFound();
         }
@@ -1897,6 +1983,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var contract = await _service.GetContractByIdAsync(contractId, cancellationToken);
+            if (contract == null || contract.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.ActivateContractAsync(contractId, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -1925,6 +2014,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var contract = await _service.GetContractByIdAsync(contractId, cancellationToken);
+            if (contract == null || contract.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.DeactivateContractAsync(contractId, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -1957,6 +2049,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var contract = await _service.GetContractByIdAsync(contractId, cancellationToken);
+            if (contract == null || contract.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.TerminateContractAsync(contractId, request.TerminationDate, request.Reason, cancellationToken);
             return Ok(updated);
         }
@@ -2059,6 +2154,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var assignment = await _service.GetExpatriateAssignmentByIdAsync(id, cancellationToken);
+            if (assignment == null || assignment.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.UpdateExpatriateAssignmentAsync(dto, cancellationToken);
             return Ok(updated);
         }
@@ -2088,6 +2186,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var assignment = await _service.GetExpatriateAssignmentByIdAsync(id, cancellationToken);
+            if (assignment == null || assignment.EmployeeId != employeeId) return NotFound();
+
             var ok = await _service.RemoveExpatriateAssignmentAsync(id, cancellationToken);
             return ok ? NoContent() : NotFound();
         }
@@ -2190,6 +2291,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var history = await _service.GetPositionHistoryByIdAsync(id, cancellationToken);
+            if (history == null || history.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.UpdatePositionHistoryAsync(dto, cancellationToken);
             return Ok(updated);
         }
@@ -2219,6 +2323,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var history = await _service.GetPositionHistoryByIdAsync(id, cancellationToken);
+            if (history == null || history.EmployeeId != employeeId) return NotFound();
+
             var ok = await _service.RemovePositionHistoryAsync(id, cancellationToken);
             return ok ? NoContent() : NotFound();
         }
@@ -2321,6 +2428,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var salary = await _service.GetSalaryAssignmentByIdAsync(id, cancellationToken);
+            if (salary == null || salary.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.UpdateSalaryAssignmentAsync(dto, cancellationToken);
             return Ok(updated);
         }
@@ -2350,6 +2460,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var salary = await _service.GetSalaryAssignmentByIdAsync(id, cancellationToken);
+            if (salary == null || salary.EmployeeId != employeeId) return NotFound();
+
             var ok = await _service.RemoveSalaryAssignmentAsync(id, cancellationToken);
             return ok ? NoContent() : NotFound();
         }
@@ -2452,6 +2565,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var referee = await _service.GetRefereeByIdAsync(id, cancellationToken);
+            if (referee == null || referee.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.UpdateRefereeAsync(dto, cancellationToken);
             return Ok(updated);
         }
@@ -2481,6 +2597,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var referee = await _service.GetRefereeByIdAsync(id, cancellationToken);
+            if (referee == null || referee.EmployeeId != employeeId) return NotFound();
+
             var ok = await _service.RemoveRefereeAsync(id, cancellationToken);
             return ok ? NoContent() : NotFound();
         }
@@ -2510,6 +2629,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var referee = await _service.GetRefereeByIdAsync(id, cancellationToken);
+            if (referee == null || referee.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.SetPrimaryRefereeAsync(id, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -2538,6 +2660,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var referee = await _service.GetRefereeByIdAsync(id, cancellationToken);
+            if (referee == null || referee.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.ActivateRefereeAsync(id, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -2566,6 +2691,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var referee = await _service.GetRefereeByIdAsync(id, cancellationToken);
+            if (referee == null || referee.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.DeactivateRefereeAsync(id, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -2667,6 +2795,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var guarantor = await _service.GetGuarantorByIdAsync(id, cancellationToken);
+            if (guarantor == null || guarantor.EmployeeId != employeeId) return NotFound();
+
             var updated = await _service.UpdateGuarantorAsync(dto, cancellationToken);
             return Ok(updated);
         }
@@ -2696,6 +2827,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var guarantor = await _service.GetGuarantorByIdAsync(id, cancellationToken);
+            if (guarantor == null || guarantor.EmployeeId != employeeId) return NotFound();
+
             var ok = await _service.RemoveGuarantorAsync(id, cancellationToken);
             return ok ? NoContent() : NotFound();
         }
@@ -2725,6 +2859,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var guarantor = await _service.GetGuarantorByIdAsync(id, cancellationToken);
+            if (guarantor == null || guarantor.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.SetPrimaryGuarantorAsync(id, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -2757,6 +2894,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var guarantor = await _service.GetGuarantorByIdAsync(id, cancellationToken);
+            if (guarantor == null || guarantor.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.VerifyGuarantorAsync(id, request.VerifiedByEmployeeId, request.VerifiedDate, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -2785,6 +2925,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var guarantor = await _service.GetGuarantorByIdAsync(id, cancellationToken);
+            if (guarantor == null || guarantor.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.UnverifyGuarantorAsync(id, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -2813,6 +2956,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var guarantor = await _service.GetGuarantorByIdAsync(id, cancellationToken);
+            if (guarantor == null || guarantor.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.ActivateGuarantorAsync(id, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -2841,6 +2987,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var guarantor = await _service.GetGuarantorByIdAsync(id, cancellationToken);
+            if (guarantor == null || guarantor.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.DeactivateGuarantorAsync(id, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)

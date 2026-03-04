@@ -704,6 +704,13 @@ public class EmployeeService : IEmployeeService
         return entity.ToDto();
     }
 
+    public async Task<EmployeeEmergencyContactDto?> GetEmergencyContactByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeEmergencyContact>();
+        var entity = await repo.GetByIdAsync(id);
+        return entity?.ToDto();
+    }
+
     public async Task<IEnumerable<EmployeeDependentReadDto>> GetDependentsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var repo = _unitOfWork.Repository<EmployeeDependent>();
@@ -847,6 +854,15 @@ public class EmployeeService : IEmployeeService
         return (reloaded ?? entity).ToDto();
     }
 
+    public async Task<EmployeeDependentBenefitDto?> GetDependentBenefitByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeDependentBenefit>();
+        var entity = await repo.GetQueryable()
+            .Include(b => b.BenefitPolicy)
+            .FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
+        return entity?.ToDto();
+    }
+
     public async Task<IEnumerable<EmployeeQualificationDto>> GetQualificationsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var repo = _unitOfWork.Repository<EmployeeQualification>();
@@ -942,6 +958,16 @@ public class EmployeeService : IEmployeeService
         return (reloaded ?? entity).ToDto();
     }
 
+    public async Task<EmployeeQualificationDto?> GetQualificationByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeQualification>();
+        var entity = await repo.GetQueryable()
+            .Include(x => x.Qualification)
+            .Include(x => x.Country)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        return entity?.ToDto();
+    }
+
     public async Task<IEnumerable<EmployeeSkillDto>> GetSkillsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var repo = _unitOfWork.Repository<EmployeeSkill>();
@@ -1030,6 +1056,15 @@ public class EmployeeService : IEmployeeService
 
         var reloaded = await repo.GetQueryable().Include(s => s.Skill).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDto();
+    }
+
+    public async Task<EmployeeSkillDto?> GetSkillByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeSkill>();
+        var entity = await repo.GetQueryable()
+            .Include(s => s.Skill)
+            .FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
+        return entity?.ToDto();
     }
 
     public async Task<IEnumerable<EmployeeIdentificationCardListDto>> GetIdentificationCardsAsync(Guid employeeId, CancellationToken cancellationToken = default)
@@ -1293,6 +1328,13 @@ public class EmployeeService : IEmployeeService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return true;
+    }
+
+    public async Task<EmployeeContractDetailDto?> GetContractByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeContractDetail>();
+        var entity = await repo.GetByIdAsync(id);
+        return entity?.ToDto();
     }
 
     public async Task<EmployeeContractDetailDto> ActivateContractAsync(Guid contractId, CancellationToken cancellationToken = default)
