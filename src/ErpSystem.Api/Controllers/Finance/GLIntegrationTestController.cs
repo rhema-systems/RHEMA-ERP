@@ -1,3 +1,4 @@
+#if DEBUG
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Data;
@@ -12,9 +13,12 @@ using System.Text.Json;
 
 namespace ErpSystem.Api.Controllers.Finance;
 
+/// <summary>
+/// GL Integration test controller — only available in DEBUG builds.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[AllowAnonymous] // FOR TESTING ONLY
+[Authorize(Roles = "SuperAdmin")]
 public class GLIntegrationTestController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
@@ -203,3 +207,4 @@ public class GLIntegrationTestController : ControllerBase
         }
     }
 }
+#endif
