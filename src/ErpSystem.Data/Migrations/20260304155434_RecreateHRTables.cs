@@ -192,29 +192,25 @@ namespace ErpSystem.Data.Migrations
                 name: "LocationId",
                 table: "Employees",
                 type: "uniqueidentifier",
-                nullable: false,
-                defaultValue: new Guid("00000000-0000-0000-0000-000000000000"));
+                nullable: true);
 
             migrationBuilder.AddColumn<Guid>(
                 name: "LocationLevelId",
                 table: "Employees",
                 type: "uniqueidentifier",
-                nullable: false,
-                defaultValue: new Guid("00000000-0000-0000-0000-000000000000"));
+                nullable: true);
 
             migrationBuilder.AddColumn<Guid>(
                 name: "OrganizationLevelId",
                 table: "Employees",
                 type: "uniqueidentifier",
-                nullable: false,
-                defaultValue: new Guid("00000000-0000-0000-0000-000000000000"));
+                nullable: true);
 
             migrationBuilder.AddColumn<Guid>(
                 name: "OrganizationUnitId",
                 table: "Employees",
                 type: "uniqueidentifier",
-                nullable: false,
-                defaultValue: new Guid("00000000-0000-0000-0000-000000000000"));
+                nullable: true);
 
             migrationBuilder.AddColumn<bool>(
                 name: "Overtime",
@@ -354,15 +350,13 @@ namespace ErpSystem.Data.Migrations
                 name: "OrganizationLevelId",
                 table: "EmployeePositions",
                 type: "uniqueidentifier",
-                nullable: false,
-                defaultValue: new Guid("00000000-0000-0000-0000-000000000000"));
+                nullable: true);
 
             migrationBuilder.AddColumn<Guid>(
                 name: "OrganizationUnitId",
                 table: "EmployeePositions",
                 type: "uniqueidentifier",
-                nullable: false,
-                defaultValue: new Guid("00000000-0000-0000-0000-000000000000"));
+                nullable: true);
 
             migrationBuilder.AddColumn<Guid>(
                 name: "ReportsToPositionId",
@@ -2937,455 +2931,455 @@ namespace ErpSystem.Data.Migrations
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000001"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(6933));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4495));
 
             migrationBuilder.UpdateData(
                 table: "AspNetRoles",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000002"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(6998));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4552));
 
             migrationBuilder.UpdateData(
                 table: "AspNetRoles",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000003"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7002));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4553));
 
             migrationBuilder.UpdateData(
                 table: "AspNetRoles",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000004"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7004));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4555));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000001"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7275));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4824));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000002"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7282));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4833));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000003"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7288));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4839));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000004"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7293));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4845));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000005"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7300));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4853));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000006"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7305));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4868));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000007"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7310));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4874));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000008"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7315));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4879));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000009"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7340));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4900));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000010"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7347));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4906));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000011"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7357));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4919));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000012"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7363));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4925));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000013"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7371));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4935));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000014"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7376));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4941));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000015"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7386));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4947));
 
             migrationBuilder.UpdateData(
                 table: "Permissions",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000016"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7391));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4952));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000001"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7437));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4996));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000002"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7440));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4997));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000003"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7441));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4998));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000004"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7441));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4999));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000005"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7442));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5000));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000006"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7443));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5001));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000007"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7443));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5001));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000008"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7444));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5002));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000009"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7445));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5003));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000010"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7446));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5004));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000011"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7446));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5005));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000012"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7447));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5005));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000013"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7447));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5006));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000014"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7448));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5007));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000015"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7448));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5007));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000016"), new Guid("00000000-0000-0000-0000-000000000001") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7449));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5008));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000001"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7522));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5072));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000002"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7524));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5073));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000003"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7524));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5074));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000004"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7525));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5075));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000005"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7526));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5075));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000006"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7526));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5076));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000007"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7527));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5076));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000008"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7527));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5077));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000009"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7528));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5078));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000010"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7528));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5078));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000011"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7529));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5079));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000012"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7529));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5079));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000014"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7530));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5080));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000015"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7531));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5081));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000016"), new Guid("00000000-0000-0000-0000-000000000002") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7531));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5081));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000001"), new Guid("00000000-0000-0000-0000-000000000003") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7614));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5156));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000003"), new Guid("00000000-0000-0000-0000-000000000003") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7615));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5157));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000005"), new Guid("00000000-0000-0000-0000-000000000003") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7616));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5158));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000009"), new Guid("00000000-0000-0000-0000-000000000003") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7616));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5158));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000010"), new Guid("00000000-0000-0000-0000-000000000003") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7617));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5159));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000011"), new Guid("00000000-0000-0000-0000-000000000003") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7617));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5160));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000012"), new Guid("00000000-0000-0000-0000-000000000003") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7618));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5160));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000013"), new Guid("00000000-0000-0000-0000-000000000003") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7618));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5161));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000014"), new Guid("00000000-0000-0000-0000-000000000003") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7619));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5162));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000016"), new Guid("00000000-0000-0000-0000-000000000003") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7619));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5162));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000001"), new Guid("00000000-0000-0000-0000-000000000004") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7632));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5170));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000009"), new Guid("00000000-0000-0000-0000-000000000004") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7633));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5171));
 
             migrationBuilder.UpdateData(
                 table: "RolePermissions",
                 keyColumns: new[] { "PermissionId", "RoleId" },
                 keyValues: new object[] { new Guid("00000000-0000-0000-0000-000000000010"), new Guid("00000000-0000-0000-0000-000000000004") },
                 column: "GrantedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7634));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5172));
 
             migrationBuilder.UpdateData(
                 table: "Tenants",
                 keyColumn: "Id",
                 keyValue: new Guid("00000000-0000-0000-0000-000000000001"),
                 column: "CreatedAt",
-                value: new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(6676));
+                value: new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4207));
 
             migrationBuilder.CreateIndex(
                 name: "IX_WorkStations_ContactPersonId",
@@ -4677,8 +4671,7 @@ namespace ErpSystem.Data.Migrations
                 table: "EmployeePositions",
                 column: "OrganizationLevelId",
                 principalTable: "OrganizationLevels",
-                principalColumn: "Id",
-                onDelete: ReferentialAction.Cascade);
+                principalColumn: "Id");
 
             migrationBuilder.AddForeignKey(
                 name: "FK_EmployeePositions_OrganizationUnits_OrganizationUnitId",

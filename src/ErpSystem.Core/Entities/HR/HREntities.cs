@@ -105,18 +105,18 @@ public class Employee : TenantEntity
 
     public Guid? UnitId { get; set; }
 
-    public Guid OrganizationLevelId { get; set; }
+    public Guid? OrganizationLevelId { get; set; }
 
-    public Guid OrganizationUnitId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
 
     [Required]
     public Guid PositionId { get; set; }
 
     public StaffStatus StaffStatus { get; set; } = StaffStatus.Active;
 
-    public Guid LocationLevelId { get; set; }
+    public Guid? LocationLevelId { get; set; }
 
-    public Guid LocationId { get; set; }
+    public Guid? LocationId { get; set; }
 
     public Guid? StationId { get; set; }
 
@@ -276,10 +276,10 @@ public class Employee : TenantEntity
     public virtual Shift? Shift { get; set; }
     public virtual WorkStation? Station { get; set; }
     public virtual Employee? Manager { get; set; }
-    public virtual LocationLevel LocationLevel { get; set; } = null!;
+    public virtual LocationLevel? LocationLevel { get; set; }
     public virtual Location? Location { get; set; }
-    public virtual OrganizationLevel OrganizationLevel { get; set; } = null!;
-    public virtual OrganizationUnit OrganizationUnit { get; set; } = null!;
+    public virtual OrganizationLevel? OrganizationLevel { get; set; }
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
 
     // Related Collections
     public virtual ICollection<EmployeeEmergencyContact> EmergencyContacts { get; set; } = new List<EmployeeEmergencyContact>();
@@ -448,14 +448,12 @@ public class EmployeePosition : TenantEntity
     /// <summary>
     /// Organization level this position belongs to
     /// </summary>
-    [Required]
-    public Guid OrganizationLevelId { get; set; }
+    public Guid? OrganizationLevelId { get; set; }
 
     /// <summary>
     /// Organization unit this position belongs to
     /// </summary>
-    [Required]
-    public Guid OrganizationUnitId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
 
     public Guid? StaffLevelId { get; set; }
 
@@ -504,10 +502,10 @@ public class EmployeePosition : TenantEntity
     public virtual EmployeePosition? ReportsToPosition { get; set; }
 
     [ForeignKey(nameof(OrganizationLevelId))]
-    public virtual OrganizationLevel OrganizationLevel { get; set; } = null!;
+    public virtual OrganizationLevel? OrganizationLevel { get; set; }
 
     [ForeignKey(nameof(OrganizationUnitId))]
-    public virtual OrganizationUnit OrganizationUnit { get; set; } = null!;
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
 
     [ForeignKey(nameof(StaffLevelId))]
     public virtual StaffLevel? StaffLevel { get; set; }
@@ -1653,7 +1651,6 @@ public class IdentificationType : TenantEntity
 }
 
 #endregion
-
 
 #region External Associates
 

@@ -49,9 +49,9 @@ public class EmployeeDto
 /// </summary>
 public class EmployeeDetailDto : EmployeeDto
 {
-    public Guid OrganizationLevelId { get; set; }
-    public Guid OrganizationUnitId { get; set; }
-    public Guid LocationLevelId { get; set; }
+    public Guid? OrganizationLevelId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public Guid? LocationLevelId { get; set; }
     public Guid? LocationId { get; set; }
     public Guid PositionId { get; set; }
     public Guid? ManagerId { get; set; }
@@ -1623,10 +1623,10 @@ public class EmployeePositionDto
     public string Title { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public Guid OrganizationLevelId { get; set; }
-    public string OrganizationLevelName { get; set; } = string.Empty;
-    public Guid OrganizationUnitId { get; set; }
-    public string OrganizationUnitName { get; set; } = string.Empty;
+    public Guid? OrganizationLevelId { get; set; }
+    public string? OrganizationLevelName { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
     public Guid DepartmentId { get; set; }
     public string DepartmentName { get; set; } = string.Empty;
     public Guid? StaffLevelId { get; set; }

@@ -106,6 +106,7 @@ public interface IEmployeeService
     Task<EmployeeDependentReadDto> AddDependentAsync(EmployeeDependentCreateDto dto, CancellationToken cancellationToken = default);
     Task<EmployeeDependentReadDto> UpdateDependentAsync(EmployeeDependentUpdateDto dto, CancellationToken cancellationToken = default);
     Task<bool> RemoveDependentAsync(Guid dependentId, CancellationToken cancellationToken = default);
+    Task<EmployeeDependentReadDto?> GetDependentAsync(Guid dependentId, CancellationToken cancellationToken = default);
 
     // Dependent benefits
     Task<IEnumerable<EmployeeDependentBenefitDto>> GetDependentBenefitsAsync(Guid employeeDependentId, CancellationToken cancellationToken = default);

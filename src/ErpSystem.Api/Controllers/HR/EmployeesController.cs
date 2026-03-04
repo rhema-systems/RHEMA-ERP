@@ -903,6 +903,11 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            // Ownership check: ensure dependent belongs to the specified employee
+            var dependent = await _service.GetDependentAsync(dependentId, cancellationToken);
+            if (dependent == null || dependent.EmployeeId != employeeId)
+                return NotFound();
+
             var ok = await _service.RemoveDependentAsync(dependentId, cancellationToken);
             return ok ? NoContent() : NotFound();
         }

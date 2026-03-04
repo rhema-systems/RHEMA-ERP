@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ErpSystem.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260217141718_RecreateHRTables")]
+    [Migration("20260304155434_RecreateHRTables")]
     partial class RecreateHRTables
     {
         /// <inheritdoc />
@@ -75,7 +75,7 @@ namespace ErpSystem.Data.Migrations
                         new
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000001"),
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(6933),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4495),
                             IsSystemRole = true,
                             Name = "SuperAdmin",
                             NormalizedName = "SUPERADMIN"
@@ -83,7 +83,7 @@ namespace ErpSystem.Data.Migrations
                         new
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000002"),
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(6998),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4552),
                             IsSystemRole = true,
                             Name = "TenantAdmin",
                             NormalizedName = "TENANTADMIN"
@@ -91,7 +91,7 @@ namespace ErpSystem.Data.Migrations
                         new
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000003"),
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7002),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4553),
                             IsSystemRole = true,
                             Name = "Manager",
                             NormalizedName = "MANAGER"
@@ -99,7 +99,7 @@ namespace ErpSystem.Data.Migrations
                         new
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000004"),
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7004),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4555),
                             IsSystemRole = true,
                             Name = "Employee",
                             NormalizedName = "EMPLOYEE"
@@ -2421,10 +2421,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime?>("LastSyncDate")
                         .HasColumnType("datetime2");
 
-                    b.Property<Guid>("LocationId")
+                    b.Property<Guid?>("LocationId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("LocationLevelId")
+                    b.Property<Guid?>("LocationLevelId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("ManagerId")
@@ -2451,10 +2451,10 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
-                    b.Property<Guid>("OrganizationLevelId")
+                    b.Property<Guid?>("OrganizationLevelId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("OrganizationUnitId")
+                    b.Property<Guid?>("OrganizationUnitId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("Overtime")
@@ -3493,10 +3493,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int?>("NumberOfGuarantors")
                         .HasColumnType("int");
 
-                    b.Property<Guid>("OrganizationLevelId")
+                    b.Property<Guid?>("OrganizationLevelId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("OrganizationUnitId")
+                    b.Property<Guid?>("OrganizationUnitId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("ReportsToPositionId")
@@ -22335,7 +22335,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000001"),
                             Category = "User Management",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7275),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4824),
                             Description = "View user accounts and details",
                             DisplayName = "View Users",
                             IsDeleted = false,
@@ -22346,7 +22346,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000002"),
                             Category = "User Management",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7282),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4833),
                             Description = "Create new user accounts",
                             DisplayName = "Create Users",
                             IsDeleted = false,
@@ -22357,7 +22357,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000003"),
                             Category = "User Management",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7288),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4839),
                             Description = "Edit existing user accounts",
                             DisplayName = "Update Users",
                             IsDeleted = false,
@@ -22368,7 +22368,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000004"),
                             Category = "User Management",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7293),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4845),
                             Description = "Delete user accounts",
                             DisplayName = "Delete Users",
                             IsDeleted = false,
@@ -22379,7 +22379,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000005"),
                             Category = "Role Management",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7300),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4853),
                             Description = "View role definitions",
                             DisplayName = "View Roles",
                             IsDeleted = false,
@@ -22390,7 +22390,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000006"),
                             Category = "Role Management",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7305),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4868),
                             Description = "Create new roles",
                             DisplayName = "Create Roles",
                             IsDeleted = false,
@@ -22401,7 +22401,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000007"),
                             Category = "Role Management",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7310),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4874),
                             Description = "Edit existing roles",
                             DisplayName = "Update Roles",
                             IsDeleted = false,
@@ -22412,7 +22412,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000008"),
                             Category = "Role Management",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7315),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4879),
                             Description = "Delete roles",
                             DisplayName = "Delete Roles",
                             IsDeleted = false,
@@ -22423,7 +22423,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000009"),
                             Category = "Dashboard & Reports",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7340),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4900),
                             Description = "Access main dashboard",
                             DisplayName = "View Dashboard",
                             IsDeleted = false,
@@ -22434,7 +22434,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000010"),
                             Category = "Dashboard & Reports",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7347),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4906),
                             Description = "Access reporting features",
                             DisplayName = "View Reports",
                             IsDeleted = false,
@@ -22445,7 +22445,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000011"),
                             Category = "Dashboard & Reports",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7357),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4919),
                             Description = "Generate custom reports",
                             DisplayName = "Create Reports",
                             IsDeleted = false,
@@ -22456,7 +22456,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000012"),
                             Category = "Dashboard & Reports",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7363),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4925),
                             Description = "Access analytics data",
                             DisplayName = "View Analytics",
                             IsDeleted = false,
@@ -22467,7 +22467,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000013"),
                             Category = "System Administration",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7371),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4935),
                             Description = "Access admin interface",
                             DisplayName = "View Admin",
                             IsDeleted = false,
@@ -22478,7 +22478,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000014"),
                             Category = "System Administration",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7376),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4941),
                             Description = "View system settings",
                             DisplayName = "View Settings",
                             IsDeleted = false,
@@ -22489,7 +22489,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000015"),
                             Category = "System Administration",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7386),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4947),
                             Description = "Modify system settings",
                             DisplayName = "Update Settings",
                             IsDeleted = false,
@@ -22500,7 +22500,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("00000000-0000-0000-0000-000000000016"),
                             Category = "System Administration",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7391),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4952),
                             Description = "Access audit trail",
                             DisplayName = "View Audit Logs",
                             IsDeleted = false,
@@ -32499,308 +32499,308 @@ namespace ErpSystem.Data.Migrations
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000001"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7437),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4996),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000002"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7440),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4997),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000003"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7441),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4998),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000004"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7441),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4999),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000005"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7442),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5000),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000006"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7443),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5001),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000007"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7443),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5001),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000008"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7444),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5002),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000009"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7445),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5003),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000010"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7446),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5004),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000011"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7446),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5005),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000012"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7447),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5005),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000013"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7447),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5006),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000014"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7448),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5007),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000015"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7448),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5007),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000001"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000016"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7449),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5008),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000001"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7522),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5072),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000002"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7524),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5073),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000003"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7524),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5074),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000004"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7525),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5075),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000005"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7526),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5075),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000006"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7526),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5076),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000007"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7527),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5076),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000008"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7527),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5077),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000009"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7528),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5078),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000010"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7528),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5078),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000011"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7529),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5079),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000012"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7529),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5079),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000014"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7530),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5080),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000015"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7531),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5081),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000002"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000016"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7531),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5081),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000001"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7614),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5156),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000003"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7615),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5157),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000005"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7616),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5158),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000009"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7616),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5158),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000010"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7617),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5159),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000011"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7617),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5160),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000012"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7618),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5160),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000013"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7618),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5161),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000014"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7619),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5162),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000003"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000016"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7619),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5162),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000004"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000001"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7632),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5170),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000004"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000009"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7633),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5171),
                             GrantedBy = "System"
                         },
                         new
                         {
                             RoleId = new Guid("00000000-0000-0000-0000-000000000004"),
                             PermissionId = new Guid("00000000-0000-0000-0000-000000000010"),
-                            GrantedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(7634),
+                            GrantedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(5172),
                             GrantedBy = "System"
                         });
                 });
@@ -33832,7 +33832,7 @@ namespace ErpSystem.Data.Migrations
                             Id = new Guid("00000000-0000-0000-0000-000000000001"),
                             AllowSelfRegistration = false,
                             Code = "DEFAULT",
-                            CreatedAt = new DateTime(2026, 2, 17, 14, 17, 16, 379, DateTimeKind.Utc).AddTicks(6676),
+                            CreatedAt = new DateTime(2026, 3, 4, 15, 54, 32, 217, DateTimeKind.Utc).AddTicks(4207),
                             DefaultPriority = 10,
                             Description = "Default system tenant",
                             EnableAutoSelection = false,
@@ -35919,14 +35919,12 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.HR.Location", "Location")
                         .WithMany("Employees")
                         .HasForeignKey("LocationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.HR.LocationLevel", "LocationLevel")
                         .WithMany()
                         .HasForeignKey("LocationLevelId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Manager")
                         .WithMany("DirectReports")
@@ -35936,14 +35934,12 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.HR.OrganizationLevel", "OrganizationLevel")
                         .WithMany()
                         .HasForeignKey("OrganizationLevelId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.HR.OrganizationUnit", "OrganizationUnit")
                         .WithMany("Employees")
                         .HasForeignKey("OrganizationUnitId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.HR.EmployeePosition", "Position")
                         .WithMany("Employees")
@@ -36197,15 +36193,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasOne("ErpSystem.Core.Entities.HR.OrganizationLevel", "OrganizationLevel")
                         .WithMany()
-                        .HasForeignKey("OrganizationLevelId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .HasForeignKey("OrganizationLevelId");
 
                     b.HasOne("ErpSystem.Core.Entities.HR.OrganizationUnit", "OrganizationUnit")
                         .WithMany("Positions")
                         .HasForeignKey("OrganizationUnitId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.HR.EmployeePosition", "ReportsToPosition")
                         .WithMany()

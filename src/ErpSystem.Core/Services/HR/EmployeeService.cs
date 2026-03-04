@@ -168,9 +168,9 @@ public class EmployeeService : IEmployeeService
         var initial = new EmployeePositionHistory
         {
             EmployeeId = employee.Id,
-            LocationLevelId = employee.LocationLevelId,
+            LocationLevelId = employee.LocationLevelId ?? Guid.Empty,
             LocationId = employee.LocationId,
-            OrganizationLevelId = employee.OrganizationLevelId,
+            OrganizationLevelId = employee.OrganizationLevelId ?? Guid.Empty,
             OrganizationUnitId = employee.OrganizationUnitId,
             PositionId = employee.PositionId,
             StartDate = startDate,
@@ -298,9 +298,9 @@ public class EmployeeService : IEmployeeService
                 {
                     EmployeeId = employeeId,
                     PositionId = dto.PositionId.Value,
-                    LocationLevelId = newLocationLevelId ?? employee.LocationLevelId,
+                    LocationLevelId = newLocationLevelId ?? employee.LocationLevelId ?? Guid.Empty,
                     LocationId = dto.LocationId ?? employee.LocationId,
-                    OrganizationLevelId = newOrgLevelId ?? employee.OrganizationLevelId,
+                    OrganizationLevelId = newOrgLevelId ?? employee.OrganizationLevelId ?? Guid.Empty,
                     OrganizationUnitId = dto.OrganizationUnitId ?? employee.OrganizationUnitId,
                     StartDate = today,
                     EndDate = null,
@@ -750,6 +750,13 @@ public class EmployeeService : IEmployeeService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return true;
+    }
+
+    public async Task<EmployeeDependentReadDto?> GetDependentAsync(Guid dependentId, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeDependent>();
+        var entity = await repo.GetByIdAsync(dependentId);
+        return entity?.ToReadDto();
     }
 
     public async Task<IEnumerable<EmployeeDependentBenefitDto>> GetDependentBenefitsAsync(Guid employeeDependentId, CancellationToken cancellationToken = default)
