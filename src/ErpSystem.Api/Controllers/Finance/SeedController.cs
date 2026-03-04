@@ -81,7 +81,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="400">DEFAULT tenant not found, or no segment structure exists for the DEFAULT tenant</response>
         /// <response code="500">Internal server error during seed operation (e.g., database connectivity or constraint violation)</response>
         [HttpPost("department-lookup")]
-        [AllowAnonymous] // For testing only - remove in production
+        // [AllowAnonymous] Removed for production security - requires authorization
         public async Task<IActionResult> SeedDepartmentLookup()
         {
             try

@@ -14,7 +14,7 @@ namespace ErpSystem.Api.Controllers.Finance
     /// </remarks>
     [Authorize]
     [ApiController]
-    [Route("api/finance/currencies")]
+    [Route("api/finance/currency")]
     public class CurrencyController : ControllerBase
     {
         private readonly ICurrencyService _currencyService;
