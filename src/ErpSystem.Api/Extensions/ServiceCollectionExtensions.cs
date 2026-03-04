@@ -174,6 +174,8 @@ namespace ErpSystem.Api.Extensions
             // Procurement repositories
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderItemRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderItemRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderLandedCostPlanRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderLandedCostPlanRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderLandedCostPlanItemRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderLandedCostPlanItemRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierRepository, ErpSystem.Data.Repositories.Procurement.SupplierRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseRequisitionRepository, ErpSystem.Data.Repositories.Procurement.PurchaseRequisitionRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseRequisitionItemRepository, ErpSystem.Data.Repositories.Procurement.PurchaseRequisitionItemRepository>();
@@ -359,6 +361,14 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Api.Services.Sms.ISmsSender>(sp => sp.GetRequiredService<ErpSystem.Api.Services.Sms.CompositeSmsSender>());
             services.AddScoped<ErpSystem.Api.Services.Sms.ITenantSmsSender, ErpSystem.Api.Services.Sms.TenantSmsSender>();
 
+            // Microsoft 365 inbound email (Graph) - used for email-to-ticket
+            services.AddOptions<ErpSystem.Web.Configuration.Microsoft365InboundEmailOptions>()
+                .BindConfiguration(ErpSystem.Web.Configuration.Microsoft365InboundEmailOptions.SectionName);
+            services.AddHttpClient("MicrosoftGraph", client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(30);
+            });
+
             // Unified notification service - comprehensive notification handling for all ERP modules
             services.AddScoped<ErpSystem.Core.Interfaces.INotificationService, ErpSystem.Api.Services.UnifiedNotificationService>();
             services.AddScoped<ErpSystem.Api.Services.Otp.IOtpService, ErpSystem.Api.Services.Otp.OtpService>();
@@ -376,6 +386,7 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.InventoryRequisitionWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.TenderWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.BusinessPartnerWorkflowStatusAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.ServiceRequestWorkflowStatusAdapter>();
             services.AddScoped<ITenantService, TenantService>();
             services.AddScoped<IUserTenantService, UserTenantService>();
             services.AddScoped<ILdapAuthenticationService, LdapAuthenticationService>();
@@ -478,6 +489,7 @@ namespace ErpSystem.Api.Extensions
 
             // Enquiry, Helpdesk & Complaints (EHC) services
             services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IEhcTicketService, ErpSystem.Core.Services.Ehc.EhcTicketService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IEhcProblemService, ErpSystem.Core.Services.Ehc.EhcProblemService>();
 
             // Enhanced maintenance workflow integration - NOW ENABLED
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IEnhancedMaintenanceWorkflowService, ErpSystem.Core.Services.Maintenance.EnhancedMaintenanceWorkflowService>();
@@ -528,6 +540,7 @@ namespace ErpSystem.Api.Extensions
 
             // Enhanced Inventory services
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IGoodsReceiptNoteService, ErpSystem.Core.Services.Inventory.GoodsReceiptNoteService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.ILandedCostService, ErpSystem.Core.Services.Inventory.LandedCostService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryTransferService, ErpSystem.Core.Services.Inventory.InventoryTransferService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IItemSupplierService, ErpSystem.Core.Services.Inventory.ItemSupplierService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IPhysicalCountService, ErpSystem.Core.Services.Inventory.PhysicalCountService>();
@@ -694,7 +707,9 @@ namespace ErpSystem.Api.Extensions
             // Fleet (Maintenance)
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetVehicleService, ErpSystem.Core.Services.Maintenance.Fleet.FleetVehicleService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetTripService, ErpSystem.Core.Services.Maintenance.Fleet.FleetTripService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetTripDestinationService, ErpSystem.Core.Services.Maintenance.Fleet.FleetTripDestinationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetComplianceService, ErpSystem.Core.Services.Maintenance.Fleet.FleetComplianceService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetComplianceTemplateService, ErpSystem.Core.Services.Maintenance.Fleet.FleetComplianceTemplateService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetFuelService, ErpSystem.Core.Services.Maintenance.Fleet.FleetFuelService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetAssignmentService, ErpSystem.Core.Services.Maintenance.Fleet.FleetAssignmentService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetInspectionService, ErpSystem.Core.Services.Maintenance.Fleet.FleetInspectionService>();
@@ -744,6 +759,9 @@ namespace ErpSystem.Api.Extensions
 
             // EHC SLA monitoring / escalation (tickets)
             services.AddHostedService<ErpSystem.Api.Services.Ehc.EhcSlaMonitoringBackgroundService>();
+
+            // EHC Microsoft 365 inbound email polling (email-to-ticket)
+            services.AddHostedService<ErpSystem.Api.Services.Ehc.EhcMicrosoft365InboundEmailBackgroundService>();
 
             // Notification template and escalation services
             services.AddScoped<ErpSystem.Core.Services.Maintenance.IMaintenanceNotificationTemplateService,
@@ -797,7 +815,11 @@ namespace ErpSystem.Api.Extensions
                 .AddPolicy("MaintenanceWrite", policy =>
                     policy.RequireRole("Manager", "TenantAdmin", "SuperAdmin"))
                 .AddPolicy("MaintenanceApprove", policy =>
-                    policy.RequireRole("Manager", "TenantAdmin", "SuperAdmin"));
+                    policy.RequireRole("Manager", "TenantAdmin", "SuperAdmin"))
+                // Fleet inspections are typically performed by drivers/employees, so allow Employee role to write inspections
+                // without granting broader MaintenanceWrite permissions.
+                .AddPolicy("FleetInspectionWrite", policy =>
+                    policy.RequireRole("Employee", "Manager", "TenantAdmin", "SuperAdmin"));
 
             return services;
         }
@@ -1125,6 +1147,9 @@ namespace ErpSystem.Api.Extensions
 
             // Add storage services
             services.AddStorageServices();
+
+            // Phase 2 baseline: virus scan hook (no-op by default; can be replaced with a real provider)
+            services.AddSingleton<IFileVirusScanService, ErpSystem.Api.Services.NoOpFileVirusScanService>();
 
             // Configure multipart body length limit for file uploads
             services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>

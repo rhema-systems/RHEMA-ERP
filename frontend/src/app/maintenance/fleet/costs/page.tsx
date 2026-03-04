@@ -1,7 +1,8 @@
 'use client';
+'use client';
 
 import * as React from 'react';
-import { fleetService, FleetCostEntryDto, FleetVehicleListDto } from '@/services/fleetService';
+import { fleetService, FleetCostEntryDto, FleetTripDto } from '@/services/fleetService';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
@@ -11,10 +12,15 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { formatFleetDateTime } from '@/lib/date-format';
+import { useSearchParams } from 'next/navigation';
 
 export default function FleetCostsPage() {
-  const [vehicles, setVehicles] = React.useState<FleetVehicleListDto[]>([]);
-  const [vehicleId, setVehicleId] = React.useState<string>('none');
+  const searchParams = useSearchParams();
+  const vehicleAssetIdFilter = searchParams.get('vehicleAssetId') ?? undefined;
+  const initialTripId = searchParams.get('fleetTripId') ?? undefined;
+
+  const [trips, setTrips] = React.useState<FleetTripDto[]>([]);
+  const [tripId, setTripId] = React.useState<string>(initialTripId ?? 'none');
   const [items, setItems] = React.useState<FleetCostEntryDto[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -31,24 +37,30 @@ export default function FleetCostsPage() {
     notes: '',
   });
 
-  const loadVehicles = React.useCallback(async () => {
+  const loadTrips = React.useCallback(async () => {
     try {
-      const res = await fleetService.getVehicles({ page: 1, pageSize: 100 });
-      setVehicles(res.items ?? []);
+      const res = await fleetService.getTrips({ page: 1, pageSize: 100, vehicleAssetId: vehicleAssetIdFilter });
+      const nextTrips = res.items ?? [];
+      setTrips(nextTrips);
+
+      // If the current tripId is not valid anymore, default to the most recent trip.
+      if (tripId !== 'none' && !nextTrips.some((t) => t.id === tripId)) {
+        setTripId(nextTrips[0]?.id ?? 'none');
+      }
     } catch (e) {
       console.error(e);
     }
-  }, []);
+  }, [tripId, vehicleAssetIdFilter]);
 
   const load = React.useCallback(async () => {
-    if (vehicleId === 'none') {
+    if (tripId === 'none') {
       setItems([]);
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const res = await fleetService.getCosts(vehicleId, 1, 100);
+      const res = await fleetService.getTripCosts(tripId, 1, 100);
       setItems(res.items ?? []);
     } catch (e: any) {
       setError(e?.message || 'Failed to load costs');
@@ -56,23 +68,23 @@ export default function FleetCostsPage() {
     } finally {
       setLoading(false);
     }
-  }, [vehicleId]);
+  }, [tripId]);
 
   React.useEffect(() => {
-    loadVehicles();
-  }, [loadVehicles]);
+    loadTrips();
+  }, [loadTrips]);
 
   React.useEffect(() => {
     load();
   }, [load]);
 
   const create = async () => {
-    if (vehicleId === 'none') return;
+    if (tripId === 'none') return;
     const amount = Number(form.amount);
     if (!Number.isFinite(amount) || amount <= 0) return;
     try {
       await fleetService.createCost({
-        vehicleAssetId: vehicleId,
+        fleetTripId: tripId,
         costType: form.costType,
         amount,
         currencyCode: form.currencyCode || undefined,
@@ -91,27 +103,29 @@ export default function FleetCostsPage() {
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Fleet Costs</h1>
-          <p className="text-muted-foreground">Cost ledger (fuel, external repairs, manual entries) per vehicle</p>
+          <p className="text-muted-foreground">Cost ledger (fuel, external repairs, manual entries) per trip</p>
         </div>
 
         <div className="flex flex-col gap-3 md:flex-row">
           <div className="w-full md:w-[360px]">
-            <Label>Vehicle</Label>
-            <Select value={vehicleId} onValueChange={setVehicleId}>
+            <Label>Trip</Label>
+            <Select value={tripId} onValueChange={setTripId}>
               <SelectTrigger>
-                <SelectValue placeholder="Select vehicle" />
+                <SelectValue placeholder="Select trip" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">Select vehicle</SelectItem>
-                {vehicles.map((v) => (
-                  <SelectItem key={v.id} value={v.id}>
-                    {v.name} {v.licensePlate ? `(${v.licensePlate})` : ''}
+                <SelectItem value="none">Select trip</SelectItem>
+                {trips.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.vehicleName}
+                    {t.origin || t.destination ? ` • ${t.origin ?? '—'} → ${t.destination ?? '—'}` : ''}
+                    {t.plannedStartAt ? ` • ${formatFleetDateTime(t.plannedStartAt)}` : ''}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
-          <Button onClick={() => setOpen(true)} disabled={vehicleId === 'none'}>
+          <Button onClick={() => setOpen(true)} disabled={tripId === 'none'}>
             Add Cost
           </Button>
         </div>
@@ -131,8 +145,8 @@ export default function FleetCostsPage() {
           <CardTitle>Cost Entries</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {vehicleId === 'none' ? (
-            <div className="text-sm text-muted-foreground">Select a vehicle to view costs.</div>
+          {tripId === 'none' ? (
+            <div className="text-sm text-muted-foreground">Select a trip to view costs.</div>
           ) : loading ? (
             <div className="text-sm text-muted-foreground">Loading…</div>
           ) : items.length === 0 ? (

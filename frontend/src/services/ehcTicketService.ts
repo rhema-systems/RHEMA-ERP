@@ -12,6 +12,20 @@ export type EhcTicketStatus =
   | 'Resolved'
   | 'Closed'
   | 'Reopened';
+export type EhcTicketLinkType = 'Related' | 'ParentOf' | 'DuplicateOf';
+
+export interface EhcExternalTicketLink {
+  id: string;
+  linkType: EhcTicketLinkType;
+  relationshipLabel: string;
+  linkedTicketId: string;
+  linkedTicketNumber: string;
+  linkedSubject?: string | null;
+  linkedStatus: EhcTicketStatus;
+  linkedPriority: EhcTicketPriority;
+  linkedCreatedAt: string;
+  createdAt: string;
+}
 
 export interface EhcTicketListItem {
   id: string;
@@ -24,6 +38,13 @@ export interface EhcTicketListItem {
   categoryName?: string;
   createdAt: string;
   updatedAt?: string;
+  firstResponseDueAt?: string | null;
+  resolutionDueAt?: string | null;
+  firstRespondedAt?: string | null;
+  resolvedAt?: string | null;
+  closedAt?: string | null;
+  feedbackRating?: number | null;
+  feedbackSubmittedAt?: string | null;
   assignedDepartmentName?: string | null;
   assignedToName?: string | null;
   requesterName?: string | null;
@@ -128,6 +149,11 @@ export interface EhcTicketDetail {
   attachments?: EhcTicketAttachment[];
   statusHistory?: EhcTicketStatusHistory[];
   auditTrail?: EhcTicketAuditEvent[];
+
+  // Feedback (CSAT)
+  feedbackRating?: number | null;
+  feedbackComment?: string | null;
+  feedbackSubmittedAt?: string | null;
 }
 
 type ApiEnvelope<T> = { success: boolean; data: T; message?: string };
@@ -152,11 +178,24 @@ export interface EhcMyTicketsFilters {
   createdTo?: string | null; // yyyy-mm-dd
 }
 
+export interface EhcTicketPriorityLevel {
+  priority: EhcTicketPriority;
+  displayName: string;
+  description?: string | null;
+  isActive: boolean;
+  sortOrder: number;
+}
+
 export const ehcTicketService = {
   async listCategories(): Promise<EhcTicketCategoryTree[]> {
     const res = await apiService.request<ApiEnvelope<EhcTicketCategoryTree[]>>('/ehc/external/metadata/categories', {
       method: 'GET',
     });
+    return res.data ?? [];
+  },
+
+  async listPriorityLevels(): Promise<EhcTicketPriorityLevel[]> {
+    const res = await apiService.request<ApiEnvelope<EhcTicketPriorityLevel[]>>('/ehc/external/metadata/priorities', { method: 'GET' });
     return res.data ?? [];
   },
 
@@ -180,6 +219,11 @@ export const ehcTicketService = {
       method: 'GET',
     });
     return res.data;
+  },
+
+  async listMyTicketLinks(ticketId: string): Promise<EhcExternalTicketLink[]> {
+    const res = await apiService.request<ApiEnvelope<EhcExternalTicketLink[]>>(`/ehc/external/tickets/${ticketId}/links`, { method: 'GET' });
+    return (res.data ?? []) as any;
   },
 
   async createTicket(request: CreateEhcTicketRequest) {
@@ -211,6 +255,14 @@ export const ehcTicketService = {
         contentType: attachment.contentType ?? null,
         fileSize: attachment.fileSize,
       }),
+    });
+    return res.data;
+  },
+
+  async submitFeedback(ticketId: string, payload: { rating: number; comment?: string | null }): Promise<EhcTicketDetail> {
+    const res = await apiService.request<ApiEnvelope<EhcTicketDetail>>(`/ehc/external/tickets/${ticketId}/feedback`, {
+      method: 'POST',
+      body: JSON.stringify(payload ?? {}),
     });
     return res.data;
   },

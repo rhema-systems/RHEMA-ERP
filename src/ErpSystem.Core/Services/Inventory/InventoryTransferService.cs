@@ -34,6 +34,7 @@ public class InventoryTransferService : IInventoryTransferService
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ILogger<InventoryTransferService> _logger;
+    private readonly Dictionary<Guid, bool> _consignmentWarehouseFlagCache = new();
 
     public InventoryTransferService(
         IInventoryTransferRepository transferRepository,
@@ -371,15 +372,36 @@ public class InventoryTransferService : IInventoryTransferService
             if (quantityToShip > remainingToShip)
                 throw new InvalidOperationException($"Cannot ship {quantityToShip} - only {remainingToShip} remaining for item {item.InventoryItemId}");
 
-            var sourceQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(transfer.SourceWarehouseId, item.InventoryItemId);
+            WarehouseLocation? sourceLocation = null;
+            if (item.SourceLocationId.HasValue && item.SourceLocationId.Value != Guid.Empty)
+            {
+                sourceLocation = await EnsureLocationBelongsToWarehouseAsync(item.SourceLocationId.Value, transfer.SourceWarehouseId, "SourceLocationId");
+            }
+
+            WarehouseLocation? destinationLocation = null;
+            if (item.DestinationLocationId.HasValue && item.DestinationLocationId.Value != Guid.Empty)
+            {
+                destinationLocation = await EnsureLocationBelongsToWarehouseAsync(item.DestinationLocationId.Value, transfer.DestinationWarehouseId, "DestinationLocationId");
+            }
+
+            var effectiveSourceWarehouseId = sourceLocation?.InventoryWarehouseId ?? transfer.SourceWarehouseId;
+            var effectiveDestinationWarehouseId = destinationLocation?.InventoryWarehouseId ?? transfer.DestinationWarehouseId;
+
+            var sourceIsConsignment = await IsConsignmentWarehouseAsync(effectiveSourceWarehouseId);
+            var destIsConsignment = await IsConsignmentWarehouseAsync(effectiveDestinationWarehouseId);
+            if (sourceIsConsignment != destIsConsignment)
+            {
+                throw new InvalidOperationException("Transfers between owned and consignment inventory are not supported. Use a dedicated settlement/ownership conversion process.");
+            }
+
+            var sourceQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(effectiveSourceWarehouseId, item.InventoryItemId);
             if (sourceQty == null || sourceQty.AvailableStock < quantityToShip)
                 throw new InvalidOperationException($"Insufficient stock for item {item.InventoryItemId}");
 
             // Bin-level tracking: if a source location is specified, it must have sufficient stock.
             // This is required for inter-bin transfers and optional for inter-warehouse transfers.
-            if (item.SourceLocationId.HasValue && item.SourceLocationId.Value != Guid.Empty)
+            if (sourceLocation != null)
             {
-                await EnsureLocationBelongsToWarehouseAsync(item.SourceLocationId.Value, transfer.SourceWarehouseId, "SourceLocationId");
                 await AdjustInventoryLocationQuantityAsync(item.SourceLocationId.Value, item.InventoryItemId, -quantityToShip);
             }
             else if (transfer.SourceWarehouseId == transfer.DestinationWarehouseId)
@@ -407,7 +429,7 @@ public class InventoryTransferService : IInventoryTransferService
                 ReferenceType = ReferenceType.Transfer,
                 ReferenceNumber = transfer.TransferNumber,
                 ReferenceId = transfer.Id,
-                WarehouseId = transfer.SourceWarehouseId,
+                WarehouseId = effectiveSourceWarehouseId,
                 LocationId = item.SourceLocationId,
                 Notes = $"Transfer to {transfer.DestinationWarehouse?.Name}",
                 ProcessedById = userId,
@@ -673,13 +695,35 @@ public class InventoryTransferService : IInventoryTransferService
 
             var receivedQty = receivedItems?.FirstOrDefault(r => r.Id == item.Id)?.ReceivedQuantity ?? item.ShippedQuantity;
 
+            WarehouseLocation? sourceLocation = null;
+            if (item.SourceLocationId.HasValue && item.SourceLocationId.Value != Guid.Empty)
+            {
+                sourceLocation = await EnsureLocationBelongsToWarehouseAsync(item.SourceLocationId.Value, transfer.SourceWarehouseId, "SourceLocationId");
+            }
+
+            WarehouseLocation? destinationLocation = null;
+            if (item.DestinationLocationId.HasValue && item.DestinationLocationId.Value != Guid.Empty)
+            {
+                destinationLocation = await EnsureLocationBelongsToWarehouseAsync(item.DestinationLocationId.Value, transfer.DestinationWarehouseId, "DestinationLocationId");
+            }
+
+            var effectiveSourceWarehouseId = sourceLocation?.InventoryWarehouseId ?? transfer.SourceWarehouseId;
+            var effectiveDestinationWarehouseId = destinationLocation?.InventoryWarehouseId ?? transfer.DestinationWarehouseId;
+
+            var sourceIsConsignment = await IsConsignmentWarehouseAsync(effectiveSourceWarehouseId);
+            var destIsConsignment = await IsConsignmentWarehouseAsync(effectiveDestinationWarehouseId);
+            if (sourceIsConsignment != destIsConsignment)
+            {
+                throw new InvalidOperationException("Transfers between owned and consignment inventory are not supported. Use a dedicated settlement/ownership conversion process.");
+            }
+
             // Add to destination warehouse
-            var destQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(transfer.DestinationWarehouseId, item.InventoryItemId);
+            var destQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(effectiveDestinationWarehouseId, item.InventoryItemId);
             if (destQty == null)
             {
                 destQty = new WarehouseQuantity
                 {
-                    WarehouseId = transfer.DestinationWarehouseId,
+                    WarehouseId = effectiveDestinationWarehouseId,
                     InventoryItemId = item.InventoryItemId,
                     CurrentStock = 0,
                     AvailableStock = 0,
@@ -695,9 +739,8 @@ public class InventoryTransferService : IInventoryTransferService
 
             // Bin-level tracking: if a destination location is specified, add stock there.
             // This is required for inter-bin transfers and optional for inter-warehouse transfers.
-            if (item.DestinationLocationId.HasValue && item.DestinationLocationId.Value != Guid.Empty)
+            if (destinationLocation != null)
             {
-                await EnsureLocationBelongsToWarehouseAsync(item.DestinationLocationId.Value, transfer.DestinationWarehouseId, "DestinationLocationId");
                 await AdjustInventoryLocationQuantityAsync(item.DestinationLocationId.Value, item.InventoryItemId, receivedQty);
             }
             else if (transfer.SourceWarehouseId == transfer.DestinationWarehouseId)
@@ -706,7 +749,7 @@ public class InventoryTransferService : IInventoryTransferService
             }
 
             // Clear allocated from source
-            var sourceQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(transfer.SourceWarehouseId, item.InventoryItemId);
+            var sourceQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(effectiveSourceWarehouseId, item.InventoryItemId);
             if (sourceQty != null)
             {
                 sourceQty.AllocatedStock -= item.ShippedQuantity;
@@ -728,7 +771,7 @@ public class InventoryTransferService : IInventoryTransferService
                 ReferenceType = ReferenceType.Transfer,
                 ReferenceNumber = transfer.TransferNumber,
                 ReferenceId = transfer.Id,
-                WarehouseId = transfer.DestinationWarehouseId,
+                WarehouseId = effectiveDestinationWarehouseId,
                 LocationId = item.DestinationLocationId,
                 Notes = $"Transfer from {transfer.SourceWarehouse?.Name}",
                 ProcessedById = userId,
@@ -780,7 +823,15 @@ public class InventoryTransferService : IInventoryTransferService
             if (item.ShippedQuantity <= 0)
                 continue;
 
-            var sourceQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(transfer.SourceWarehouseId, item.InventoryItemId);
+            WarehouseLocation? sourceLocation = null;
+            if (item.SourceLocationId.HasValue && item.SourceLocationId.Value != Guid.Empty)
+            {
+                sourceLocation = await EnsureLocationBelongsToWarehouseAsync(item.SourceLocationId.Value, transfer.SourceWarehouseId, "SourceLocationId");
+            }
+
+            var effectiveSourceWarehouseId = sourceLocation?.InventoryWarehouseId ?? transfer.SourceWarehouseId;
+
+            var sourceQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(effectiveSourceWarehouseId, item.InventoryItemId);
             if (sourceQty != null)
             {
                 // Reinstate the stock to source warehouse
@@ -808,7 +859,7 @@ public class InventoryTransferService : IInventoryTransferService
                 ReferenceType = ReferenceType.Transfer,
                 ReferenceNumber = transfer.TransferNumber,
                 ReferenceId = transfer.Id,
-                WarehouseId = transfer.SourceWarehouseId,
+                WarehouseId = effectiveSourceWarehouseId,
                 LocationId = item.SourceLocationId,
                 Notes = $"Shipment reversal: {reason}",
                 ProcessedById = userId,
@@ -856,7 +907,7 @@ public class InventoryTransferService : IInventoryTransferService
         }
     }
 
-    private async Task EnsureLocationBelongsToWarehouseAsync(Guid locationId, Guid warehouseId, string fieldName)
+    private async Task<WarehouseLocation> EnsureLocationBelongsToWarehouseAsync(Guid locationId, Guid warehouseId, string fieldName)
     {
         if (locationId == Guid.Empty)
         {
@@ -873,6 +924,26 @@ public class InventoryTransferService : IInventoryTransferService
         {
             throw new InvalidOperationException($"{fieldName} must belong to the selected warehouse.");
         }
+
+        return location;
+    }
+
+    private async Task<bool> IsConsignmentWarehouseAsync(Guid warehouseId)
+    {
+        if (warehouseId == Guid.Empty)
+        {
+            return false;
+        }
+
+        if (_consignmentWarehouseFlagCache.TryGetValue(warehouseId, out var cached))
+        {
+            return cached;
+        }
+
+        var warehouse = await _warehouseRepository.GetByIdAsync(warehouseId);
+        var isConsignment = warehouse?.IsConsignmentWarehouse == true;
+        _consignmentWarehouseFlagCache[warehouseId] = isConsignment;
+        return isConsignment;
     }
 
     private async Task AdjustInventoryLocationQuantityAsync(Guid locationId, Guid inventoryItemId, decimal deltaQuantity)
@@ -1046,8 +1117,30 @@ public class InventoryTransferService : IInventoryTransferService
         var item = await _itemRepository.GetByIdAsync(dto.InventoryItemId)
             ?? throw new ArgumentException($"Inventory item {dto.InventoryItemId} not found");
 
-        // Check source warehouse has sufficient stock
-        var sourceQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(transfer.SourceWarehouseId, dto.InventoryItemId);
+        WarehouseLocation? sourceLocation = null;
+        if (dto.SourceLocationId.HasValue && dto.SourceLocationId.Value != Guid.Empty)
+        {
+            sourceLocation = await EnsureLocationBelongsToWarehouseAsync(dto.SourceLocationId.Value, transfer.SourceWarehouseId, "SourceLocationId");
+        }
+
+        WarehouseLocation? destinationLocation = null;
+        if (dto.DestinationLocationId.HasValue && dto.DestinationLocationId.Value != Guid.Empty)
+        {
+            destinationLocation = await EnsureLocationBelongsToWarehouseAsync(dto.DestinationLocationId.Value, transfer.DestinationWarehouseId, "DestinationLocationId");
+        }
+
+        var effectiveSourceWarehouseId = sourceLocation?.InventoryWarehouseId ?? transfer.SourceWarehouseId;
+        var effectiveDestinationWarehouseId = destinationLocation?.InventoryWarehouseId ?? transfer.DestinationWarehouseId;
+
+        var sourceIsConsignment = await IsConsignmentWarehouseAsync(effectiveSourceWarehouseId);
+        var destIsConsignment = await IsConsignmentWarehouseAsync(effectiveDestinationWarehouseId);
+        if (sourceIsConsignment != destIsConsignment)
+        {
+            throw new InvalidOperationException("Transfers between owned and consignment inventory are not supported. Use a dedicated settlement/ownership conversion process.");
+        }
+
+        // Check source warehouse has sufficient stock (ownership warehouse if source bin is a consignment bin)
+        var sourceQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(effectiveSourceWarehouseId, dto.InventoryItemId);
         if (sourceQty == null || sourceQty.AvailableStock < dto.RequestedQuantity)
             throw new InvalidOperationException($"Insufficient stock for {item.ItemCode} in source warehouse. Available: {sourceQty?.AvailableStock ?? 0}");
 
@@ -1057,15 +1150,7 @@ public class InventoryTransferService : IInventoryTransferService
             EnsureInterBinLocations(dto.SourceLocationId, dto.DestinationLocationId);
         }
 
-        if (dto.SourceLocationId.HasValue && dto.SourceLocationId.Value != Guid.Empty)
-        {
-            await EnsureLocationBelongsToWarehouseAsync(dto.SourceLocationId.Value, transfer.SourceWarehouseId, "SourceLocationId");
-        }
-
-        if (dto.DestinationLocationId.HasValue && dto.DestinationLocationId.Value != Guid.Empty)
-        {
-            await EnsureLocationBelongsToWarehouseAsync(dto.DestinationLocationId.Value, transfer.DestinationWarehouseId, "DestinationLocationId");
-        }
+        // Location validation is handled above when resolving effective ownership warehouses.
 
         // Use AverageCost if available, otherwise fall back to StandardCost or LastPurchaseCost
         var unitCost = item.AverageCost > 0 ? item.AverageCost
@@ -1134,8 +1219,30 @@ public class InventoryTransferService : IInventoryTransferService
         var item = await _itemRepository.GetByIdAsync(transferItem.InventoryItemId)
             ?? throw new ArgumentException($"Inventory item not found");
 
+        WarehouseLocation? sourceLocation = null;
+        if (dto.SourceLocationId.HasValue && dto.SourceLocationId.Value != Guid.Empty)
+        {
+            sourceLocation = await EnsureLocationBelongsToWarehouseAsync(dto.SourceLocationId.Value, transfer.SourceWarehouseId, "SourceLocationId");
+        }
+
+        WarehouseLocation? destinationLocation = null;
+        if (dto.DestinationLocationId.HasValue && dto.DestinationLocationId.Value != Guid.Empty)
+        {
+            destinationLocation = await EnsureLocationBelongsToWarehouseAsync(dto.DestinationLocationId.Value, transfer.DestinationWarehouseId, "DestinationLocationId");
+        }
+
+        var effectiveSourceWarehouseId = sourceLocation?.InventoryWarehouseId ?? transfer.SourceWarehouseId;
+        var effectiveDestinationWarehouseId = destinationLocation?.InventoryWarehouseId ?? transfer.DestinationWarehouseId;
+
+        var sourceIsConsignment = await IsConsignmentWarehouseAsync(effectiveSourceWarehouseId);
+        var destIsConsignment = await IsConsignmentWarehouseAsync(effectiveDestinationWarehouseId);
+        if (sourceIsConsignment != destIsConsignment)
+        {
+            throw new InvalidOperationException("Transfers between owned and consignment inventory are not supported. Use a dedicated settlement/ownership conversion process.");
+        }
+
         // Check source warehouse has sufficient stock for the new quantity
-        var sourceQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(transfer.SourceWarehouseId, transferItem.InventoryItemId);
+        var sourceQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(effectiveSourceWarehouseId, transferItem.InventoryItemId);
         if (sourceQty == null || sourceQty.AvailableStock < dto.RequestedQuantity)
             throw new InvalidOperationException($"Insufficient stock for {item.ItemCode} in source warehouse. Available: {sourceQty?.AvailableStock ?? 0}");
 
@@ -1145,15 +1252,7 @@ public class InventoryTransferService : IInventoryTransferService
             EnsureInterBinLocations(dto.SourceLocationId, dto.DestinationLocationId);
         }
 
-        if (dto.SourceLocationId.HasValue && dto.SourceLocationId.Value != Guid.Empty)
-        {
-            await EnsureLocationBelongsToWarehouseAsync(dto.SourceLocationId.Value, transfer.SourceWarehouseId, "SourceLocationId");
-        }
-
-        if (dto.DestinationLocationId.HasValue && dto.DestinationLocationId.Value != Guid.Empty)
-        {
-            await EnsureLocationBelongsToWarehouseAsync(dto.DestinationLocationId.Value, transfer.DestinationWarehouseId, "DestinationLocationId");
-        }
+        // Location validation is handled above when resolving effective ownership warehouses.
 
         // Update transfer totals
         var qtyDiff = dto.RequestedQuantity - transferItem.RequestedQuantity;

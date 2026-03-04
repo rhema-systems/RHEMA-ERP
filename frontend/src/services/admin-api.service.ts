@@ -953,6 +953,48 @@ class AdminApiService {
       throw error;
     }
   }
+
+  // LDAP: List/Search users (Active Directory)
+  async listLdapUsers(ldapSettings: {
+    ldapServer?: string;
+    ldapPort?: number;
+    ldapBaseDn?: string;
+    ldapBindDn?: string;
+    ldapBindPassword?: string;
+    query?: string;
+    limit?: number;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    users: Array<{
+      username: string;
+      userPrincipalName: string;
+      distinguishedName: string;
+      displayName: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+    }>;
+  }> {
+    console.log('Listing LDAP users:', ldapSettings.ldapServer, 'base:', ldapSettings.ldapBaseDn);
+    try {
+      return await apiService.request('/tenant/ldap/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          ldapServer: ldapSettings.ldapServer,
+          ldapPort: ldapSettings.ldapPort,
+          ldapBaseDn: ldapSettings.ldapBaseDn,
+          ldapBindDn: ldapSettings.ldapBindDn,
+          ldapBindPassword: ldapSettings.ldapBindPassword,
+          query: ldapSettings.query,
+          limit: ldapSettings.limit
+        }),
+      });
+    } catch (error) {
+      console.error('Failed to list LDAP users:', error);
+      throw error;
+    }
+  }
 }
 
 export const adminApiService = new AdminApiService();

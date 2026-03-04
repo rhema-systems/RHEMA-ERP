@@ -55,8 +55,8 @@ public sealed class FleetDashboardService : IFleetDashboardService
         if (vehicleAssetId.HasValue && vehicleAssetId.Value != Guid.Empty)
             complianceQ = complianceQ.Where(c => c.VehicleAssetId == vehicleAssetId.Value);
 
-        var dueSoon = await complianceQ.CountAsync(c => c.ExpiryDate.Date >= today && c.ExpiryDate.Date <= dueSoonCutoff);
-        var overdue = await complianceQ.CountAsync(c => c.ExpiryDate.Date < today);
+        var dueSoon = await complianceQ.CountAsync(c => c.ExpiryDate.HasValue && c.ExpiryDate.Value.Date >= today && c.ExpiryDate.Value.Date <= dueSoonCutoff);
+        var overdue = await complianceQ.CountAsync(c => c.ExpiryDate.HasValue && c.ExpiryDate.Value.Date < today);
 
         var fuelQ = _unitOfWork.Repository<FleetFuelTransaction>()
             .GetQueryable(f => f.TenantId == tenantId && !f.IsDeleted);

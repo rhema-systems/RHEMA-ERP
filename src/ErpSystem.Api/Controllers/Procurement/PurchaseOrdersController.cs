@@ -29,6 +29,7 @@ public class PurchaseOrdersController : ControllerBase
     private readonly Dictionary<(Guid InventoryItemId, Guid WarehouseId), WarehouseQuantity> _warehouseQuantityCache = new();
     private readonly HashSet<(Guid InventoryItemId, Guid WarehouseId)> _newWarehouseQuantityKeys = new();
     private readonly Dictionary<Guid, InventoryItem> _inventoryItemCache = new();
+    private readonly Dictionary<Guid, bool> _warehouseConsignmentFlagCache = new();
 
     private readonly IPurchaseOrderRepository _purchaseOrderRepository;
     private readonly IPurchaseOrderItemRepository _purchaseOrderItemRepository;
@@ -930,7 +931,7 @@ public class PurchaseOrdersController : ControllerBase
                             return BadRequest($"Invalid LocationId ({effectiveLocationId}). Please select a valid warehouse location.");
                         }
 
-                        effectiveWarehouseId = location.WarehouseId;
+                        effectiveWarehouseId = location.InventoryWarehouseId;
                     }
 
                     // Enforce a put-away location for any non-zero receipt lines (so we can report accurately).
@@ -960,6 +961,18 @@ public class PurchaseOrdersController : ControllerBase
                         if (wh?.IsConsignmentWarehouse != true)
                         {
                             return BadRequest("Selected warehouse is not marked as a consignment warehouse.");
+                        }
+                    }
+                    else
+                    {
+                        // Prevent accidentally receiving owned stock into consignment inventory bins/warehouses.
+                        if (effectiveWarehouseId.HasValue && effectiveWarehouseId.Value != Guid.Empty)
+                        {
+                            var isConsignment = await IsConsignmentWarehouseAsync(effectiveWarehouseId.Value);
+                            if (isConsignment)
+                            {
+                                return BadRequest("This receipt line resolves to a consignment warehouse/bin. Use a Consignment purchase order type to receive consignment stock.");
+                            }
                         }
                     }
 
@@ -1615,6 +1628,7 @@ public class PurchaseOrdersController : ControllerBase
         }
 
         var tenantId = _currentUserService.TenantId;
+        var isConsignmentWarehouse = await IsConsignmentWarehouseAsync(warehouseId);
 
         // ---- Warehouse totals ----
         var wqKey = (inventoryItemId, warehouseId);
@@ -1676,6 +1690,12 @@ public class PurchaseOrdersController : ControllerBase
             await _unitOfWork.Repository<WarehouseQuantity>().UpdateAsync(warehouseQty);
         }
 
+        // Consignment stock is not part of owned/main inventory totals.
+        if (isConsignmentWarehouse)
+        {
+            return;
+        }
+
         // ---- Item totals ----
         if (!_inventoryItemCache.TryGetValue(inventoryItemId, out var invItem))
         {
@@ -1717,6 +1737,24 @@ public class PurchaseOrdersController : ControllerBase
         invItem.UpdatedAt = DateTime.UtcNow;
         invItem.LastModifiedById = _currentUserService.UserId;
         await _unitOfWork.Repository<InventoryItem>().UpdateAsync(invItem);
+    }
+
+    private async Task<bool> IsConsignmentWarehouseAsync(Guid warehouseId)
+    {
+        if (warehouseId == Guid.Empty)
+        {
+            return false;
+        }
+
+        if (_warehouseConsignmentFlagCache.TryGetValue(warehouseId, out var cached))
+        {
+            return cached;
+        }
+
+        var wh = await _warehouseRepository.GetByIdAsync(warehouseId);
+        var isConsignment = wh?.IsConsignmentWarehouse == true;
+        _warehouseConsignmentFlagCache[warehouseId] = isConsignment;
+        return isConsignment;
     }
 
     private async Task AdjustInventoryLocationQuantityAsync(Guid locationId, Guid inventoryItemId, decimal deltaQuantity, decimal averageCost)

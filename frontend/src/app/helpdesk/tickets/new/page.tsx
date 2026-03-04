@@ -3,17 +3,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Paperclip, Ticket } from 'lucide-react';
+import { ArrowLeft, BookOpen, Paperclip, Ticket } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { ehcInternalTicketService, type EhcAdminCategory, type EhcRelatedEntityLookupItem } from '@/services/ehcInternalTicketService';
-import type { CreateEhcTicketRequest, EhcTicketSource, EhcTicketType } from '@/services/ehcTicketService';
+import { ehcInternalTicketService, type EhcAdminCategory, type EhcRelatedEntityLookupItem, type EhcKbArticleDetail, type EhcKbArticleListItem } from '@/services/ehcInternalTicketService';
+import type { CreateEhcTicketRequest, EhcTicketPriority, EhcTicketSource, EhcTicketType } from '@/services/ehcTicketService';
 import { fileUploadService } from '@/services/fileUploadService';
 
 const channelOptions: Array<{ label: string; value: EhcTicketSource }> = [
@@ -89,6 +89,8 @@ export default function NewInternalHelpdeskTicketPage() {
   const [relatedLookupResults, setRelatedLookupResults] = useState<EhcRelatedEntityLookupItem[]>([]);
   const [relatedLookupLoading, setRelatedLookupLoading] = useState(false);
   const [relatedLookupError, setRelatedLookupError] = useState<string | null>(null);
+  const [kbArticleOpen, setKbArticleOpen] = useState(false);
+  const [kbArticleId, setKbArticleId] = useState<string | null>(null);
 
   const [form, setForm] = useState<CreateEhcTicketRequest>({
     ticketType: 'Helpdesk',
@@ -111,6 +113,17 @@ export default function NewInternalHelpdeskTicketPage() {
     queryKey: ['ehc', 'internal', 'departments'],
     queryFn: () => ehcInternalTicketService.listDepartments(),
   });
+
+  const { data: priorityLevels } = useQuery({
+    queryKey: ['ehc', 'internal', 'priorities'],
+    queryFn: () => ehcInternalTicketService.listPriorityLevels(),
+  });
+
+  const activePriorityLevels = useMemo(() => {
+    return (priorityLevels ?? [])
+      .filter((p) => p.isActive)
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  }, [priorityLevels]);
 
   const { data: myDepartment } = useQuery({
     queryKey: ['ehc', 'internal', 'my-department'],
@@ -154,7 +167,38 @@ export default function NewInternalHelpdeskTicketPage() {
     });
   }, [myDepartment?.id]);
 
+  useEffect(() => {
+    if (!activePriorityLevels.length) return;
+    setForm((f) => {
+      const exists = activePriorityLevels.some((p) => p.priority === (f.priority as any));
+      if (exists) return f;
+      return { ...f, priority: activePriorityLevels[0].priority as EhcTicketPriority };
+    });
+  }, [activePriorityLevels]);
+
   const canSubmit = Boolean(form.assignedDepartmentId) && Boolean(form.categoryId) && form.description.trim().length > 0;
+
+  const kbQuery = useMemo(() => {
+    const s = `${form.subject || ''} ${form.description || ''}`.trim().replace(/\s+/g, ' ');
+    if (s.length < 3) return '';
+    return s.slice(0, 120);
+  }, [form.subject, form.description]);
+
+  const { data: kbSuggestions, isLoading: kbLoading } = useQuery({
+    queryKey: ['ehc', 'kb', 'suggest', kbQuery],
+    queryFn: () => ehcInternalTicketService.kbSearchArticles(kbQuery, null, 5),
+    enabled: kbQuery.length >= 3,
+  });
+
+  const { data: kbArticle } = useQuery({
+    queryKey: ['ehc', 'kb', 'article', kbArticleId],
+    queryFn: () => (kbArticleId ? ehcInternalTicketService.kbGetArticle(kbArticleId) : Promise.resolve(null)),
+    enabled: Boolean(kbArticleId),
+  });
+
+  const trackKbView = useMutation({
+    mutationFn: async (id: string) => ehcInternalTicketService.kbTrackView(id),
+  });
 
   const create = useMutation({
     mutationFn: async () => {
@@ -268,10 +312,20 @@ export default function NewInternalHelpdeskTicketPage() {
                     value={form.priority}
                     onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as any }))}
                   >
-                    <option value="Low">Low</option>
-                    <option value="Medium">Medium</option>
-                    <option value="High">High</option>
-                    <option value="Critical">Critical</option>
+                    {activePriorityLevels.length ? (
+                      activePriorityLevels.map((p) => (
+                        <option key={p.priority} value={p.priority}>
+                          {p.displayName}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="Low">Low</option>
+                        <option value="Medium">Medium</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                      </>
+                    )}
                   </select>
                 </div>
 
@@ -426,9 +480,74 @@ export default function NewInternalHelpdeskTicketPage() {
                 </Button>
               </div>
             </div>
+
+            <div className="xl:col-span-4 space-y-4">
+              <div className="rounded-lg border bg-white p-4">
+                <div className="flex items-center gap-2 font-medium text-slate-900">
+                  <BookOpen className="h-4 w-4" />
+                  Suggested articles
+                </div>
+                <div className="text-xs text-slate-500 mt-1">Based on your subject/description.</div>
+
+                <div className="mt-3 space-y-2">
+                  {kbQuery.length < 3 ? (
+                    <div className="text-sm text-slate-500">Start typing a subject/description to see suggestions.</div>
+                  ) : kbLoading ? (
+                    <div className="text-sm text-slate-500">Loading…</div>
+                  ) : (kbSuggestions ?? []).length ? (
+                    (kbSuggestions as EhcKbArticleListItem[]).map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        className="w-full text-left rounded-md border p-3 hover:bg-slate-50"
+                        onClick={() => {
+                          setKbArticleId(a.id);
+                          setKbArticleOpen(true);
+                          trackKbView.mutate(a.id);
+                        }}
+                      >
+                        <div className="font-medium text-slate-900 line-clamp-2">{a.title}</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          {a.code}
+                          {a.categoryName ? ` • ${a.categoryName}` : ''}
+                          {a.tagsCsv ? ` • ${a.tagsCsv}` : ''}
+                        </div>
+                        {a.summary ? <div className="text-sm text-slate-700 mt-1 line-clamp-2">{a.summary}</div> : null}
+                      </button>
+                    ))
+                  ) : (
+                    <div className="text-sm text-slate-500">No suggestions found.</div>
+                  )}
+                </div>
+
+                <div className="text-xs text-slate-500 mt-3">
+                  Manage articles in Admin → Helpdesk → Knowledge Base.
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-slate-50 p-4 text-sm text-slate-700">
+                <div className="font-medium text-slate-900">Attachments</div>
+                <div className="text-xs text-slate-500 mt-1">
+                  File type and size policies apply per tenant/category (configured by admins).
+                </div>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={kbArticleOpen} onOpenChange={setKbArticleOpen}>
+        <DialogContent className="sm:max-w-[900px] max-h-[85vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>{(kbArticle as EhcKbArticleDetail | null)?.title ?? 'Article'}</DialogTitle>
+            <DialogDescription>
+              {(kbArticle as any)?.code ? `${(kbArticle as any).code}${(kbArticle as any)?.categoryName ? ` • ${(kbArticle as any).categoryName}` : ''}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="prose prose-slate max-w-none whitespace-pre-wrap">{(kbArticle as EhcKbArticleDetail | null)?.body ?? ''}</div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={relatedLookupOpen} onOpenChange={setRelatedLookupOpen}>
         <DialogContent className="max-w-3xl">

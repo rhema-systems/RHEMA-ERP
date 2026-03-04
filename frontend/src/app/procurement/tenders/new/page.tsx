@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,6 +9,7 @@ import { Progress } from '@/components/ui/progress';
 import { ArrowLeft, ArrowRight, Save, FileText, Package, Upload, DollarSign, Users, CheckCircle2, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
 import { tenderService, type CreateTenderDto, type CreateTenderItemDto, type TenderDocumentDto, type CreateTenderLotDto, type TenderLotDto } from '@/services/tenderService';
+import { purchasingService, type PurchaseRequisitionDetailDto } from '@/services/purchasingService';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
 // Import step components (we'll create these)
@@ -204,12 +206,16 @@ const validateStep6 = (formData: TenderFormData): string[] => {
 function NewTenderPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const fromRequisitionId = searchParams.get('fromRequisitionId');
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [tenderId, setTenderId] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [tenderDocuments, setTenderDocuments] = useState<TenderDocumentDto[]>([]);
+  const [sourceRequisition, setSourceRequisition] = useState<PurchaseRequisitionDetailDto | null>(null);
+  const [prefilledFromRequisition, setPrefilledFromRequisition] = useState(false);
+  const [autoCreatedLotsFromRequisition, setAutoCreatedLotsFromRequisition] = useState(false);
 
   // Load tenderId from URL query parameter if it exists
   useEffect(() => {
@@ -219,6 +225,148 @@ function NewTenderPageContent() {
       setTenderId(tenderIdFromUrl);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    const prefillFromRequisition = async () => {
+      if (!fromRequisitionId || prefilledFromRequisition || tenderId) return;
+
+      try {
+        const pr = await purchasingService.getPurchaseRequisitionById(fromRequisitionId);
+        setSourceRequisition(pr);
+
+        const mappedLotItems: TenderLotItemFormData[] = (pr.items || []).map((i, idx) => ({
+          lineNumber: idx + 1,
+          itemCode: i.itemCode || undefined,
+          description: i.itemDescription || i.itemName || '',
+          quantity: Number(i.quantity ?? 0),
+          unitOfMeasure: i.unitOfMeasure || undefined,
+          specifications: i.specifications || undefined,
+          requiredDeliveryDate: i.requiredDate || '',
+          deliveryLocation: '',
+        }));
+
+        const suggestedLot: TenderLotFormData = {
+          lotNumber: 1,
+          lotCode: 'LOT-001',
+          title: `Lot 1 (${pr.requisitionNumber})`,
+          description: `Auto-created from Purchase Requisition ${pr.requisitionNumber}`,
+          estimatedValue: pr.totalAmount ?? undefined,
+          currency: 'USD',
+          requiredDeliveryDate: pr.requiredDate || '',
+          deliveryLocation: '',
+          specifications: '',
+          notes: '',
+          displayOrder: 0,
+          items: mappedLotItems,
+        };
+
+        setFormData((prev) => ({
+          ...prev,
+          title: prev.title?.trim() ? prev.title : `Tender for ${pr.requisitionNumber}`,
+          description: prev.description?.trim() ? prev.description : (pr.justification || pr.notes || ''),
+          estimatedValue: prev.estimatedValue ?? pr.totalAmount ?? null,
+          lots: (prev.lots && prev.lots.length > 0)
+            ? prev.lots
+            : [{ ...suggestedLot, currency: prev.currency || suggestedLot.currency }],
+          items: [],
+          notes: prev.notes?.trim() ? prev.notes : `Source PR: ${pr.requisitionNumber}`,
+        }));
+
+        setPrefilledFromRequisition(true);
+        setAutoCreatedLotsFromRequisition(false);
+      } catch (error: any) {
+        console.error('Error prefilling tender from requisition:', error);
+        toast.error(error.message || 'Failed to load purchase requisition for Tender');
+      }
+    };
+
+    prefillFromRequisition();
+  }, [fromRequisitionId, prefilledFromRequisition, tenderId]);
+
+  const autoCreateLotsAndItemsFromFormData = async (createdTenderId: string): Promise<boolean> => {
+    if (!fromRequisitionId) return true;
+    if (autoCreatedLotsFromRequisition) return true;
+    if (!formData.lots || formData.lots.length === 0) return true;
+    if (formData.lots.every((l) => !!l.id)) {
+      setAutoCreatedLotsFromRequisition(true);
+      return true;
+    }
+
+    try {
+      const createdLots: TenderLotFormData[] = [];
+
+      for (const lot of formData.lots) {
+        if (lot.id) {
+          createdLots.push(lot);
+          continue;
+        }
+
+        const lotDto: CreateTenderLotDto = {
+          lotNumber: lot.lotNumber || 1,
+          lotCode: lot.lotCode?.trim() ? lot.lotCode : 'LOT-001',
+          title: lot.title,
+          description: lot.description,
+          estimatedValue: lot.estimatedValue,
+          currency: lot.currency || formData.currency,
+          requiredDeliveryDate: lot.requiredDeliveryDate || undefined,
+          deliveryLocation: lot.deliveryLocation,
+          specifications: lot.specifications,
+          notes: lot.notes,
+          displayOrder: lot.displayOrder,
+        };
+
+        const savedLot = await tenderService.addTenderLot(createdTenderId, lotDto);
+
+        const savedItems: TenderLotItemFormData[] = [];
+        for (const item of lot.items || []) {
+          const itemDto: CreateTenderItemDto = {
+            lineNumber: item.lineNumber,
+            lotId: savedLot.id,
+            itemCode: item.itemCode,
+            description: item.description,
+            quantity: item.quantity,
+            unitOfMeasure: item.unitOfMeasure,
+            specifications: item.specifications,
+            requiredDeliveryDate: item.requiredDeliveryDate ? item.requiredDeliveryDate : null,
+            deliveryLocation: item.deliveryLocation,
+          };
+
+          const savedItem = await tenderService.addTenderItem(createdTenderId, itemDto);
+          savedItems.push({
+            id: savedItem.id,
+            lineNumber: savedItem.lineNumber,
+            itemCode: savedItem.itemCode || undefined,
+            description: savedItem.description,
+            quantity: savedItem.quantity,
+            unitOfMeasure: savedItem.unitOfMeasure || undefined,
+            specifications: savedItem.specifications || undefined,
+            requiredDeliveryDate: savedItem.requiredDeliveryDate || '',
+            deliveryLocation: savedItem.deliveryLocation || '',
+          });
+        }
+
+        createdLots.push({
+          ...lot,
+          id: savedLot.id,
+          lotNumber: savedLot.lotNumber ?? lot.lotNumber,
+          lotCode: savedLot.lotCode ?? lot.lotCode,
+          title: savedLot.title ?? lot.title,
+          description: savedLot.description ?? lot.description,
+          currency: savedLot.currency ?? lot.currency,
+          items: savedItems,
+        });
+      }
+
+      updateFormData({ lots: createdLots, items: [] });
+      setAutoCreatedLotsFromRequisition(true);
+      toast.success('LOT and items auto-created from PR');
+      return true;
+    } catch (error: any) {
+      console.error('Error auto-creating lot/items from PR:', error);
+      toast.error(error?.message || 'Failed to auto-create LOT/items from PR. You can still add them manually.');
+      return false;
+    }
+  };
 
   // Fetch tender documents when entering review step
   useEffect(() => {
@@ -334,7 +482,7 @@ function NewTenderPageContent() {
             ? JSON.stringify(formData.documentRequirements)
             : undefined,
           requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
-          items: formData.items,
+          items: fromRequisitionId ? [] : formData.items,
         };
 
         const result = await tenderService.createTender(createDto);
@@ -363,6 +511,10 @@ function NewTenderPageContent() {
           }
         }
 
+        const autoOk = await autoCreateLotsAndItemsFromFormData(result.id);
+        if (fromRequisitionId && !autoOk) {
+          return;
+        }
         toast.success('Draft saved automatically');
       } catch (error: any) {
         console.error('Error auto-saving tender:', error);
@@ -489,11 +641,16 @@ function NewTenderPageContent() {
             ? JSON.stringify(formData.documentRequirements)
             : undefined,
           requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
-          items: formData.items,
+          items: fromRequisitionId ? [] : formData.items,
         };
 
         const result = await tenderService.createTender(createDto);
         setTenderId(result.id);
+        const autoOk = await autoCreateLotsAndItemsFromFormData(result.id);
+        if (fromRequisitionId && !autoOk) {
+          toast.error('Draft saved, but failed to auto-create LOT/items from PR. Please try again.');
+          return;
+        }
 
         // Upload acceptance declaration file if provided
         if (formData.acceptanceDeclarationFile && formData.requiresAcceptanceDeclaration) {
@@ -594,13 +751,18 @@ function NewTenderPageContent() {
             ? JSON.stringify(formData.documentRequirements)
             : undefined,
           requiresAcceptanceDeclaration: formData.requiresAcceptanceDeclaration,
-          items: formData.items,
+          items: fromRequisitionId ? [] : formData.items,
         };
 
         console.log('🔵 createDto:', createDto);
         const result = await tenderService.createTender(createDto);
         console.log('🔵 Tender created:', result);
         finalTenderId = result.id;
+        const autoOk = await autoCreateLotsAndItemsFromFormData(finalTenderId);
+        if (fromRequisitionId && !autoOk) {
+          toast.error('Tender created, but failed to auto-create LOT/items from PR. Please try again.');
+          return;
+        }
 
         // Upload acceptance declaration file if provided
         if (formData.acceptanceDeclarationFile && formData.requiresAcceptanceDeclaration) {
@@ -678,6 +840,14 @@ function NewTenderPageContent() {
             <p className="text-muted-foreground">
               Step {currentStep} of {STEPS.length}: {STEPS[currentStep - 1].name}
             </p>
+            {sourceRequisition && (
+              <p className="text-sm text-muted-foreground mt-1">
+                From PR:{' '}
+                <Link className="underline" href={`/procurement/purchase-requisitions/${sourceRequisition.id}`}>
+                  {sourceRequisition.requisitionNumber}
+                </Link>
+              </p>
+            )}
           </div>
         </div>
         <Button onClick={handleSaveDraft} variant="outline" disabled={savingDraft || !formData.title}>

@@ -53,7 +53,15 @@ async function ensureOk(response: Response): Promise<Response> {
   throw new Error(message);
 }
 
-export type MaintenanceAttachmentEntityType = 'WorkOrder' | 'Asset' | 'Inspection' | 'FleetCompliance' | 'FleetIncident';
+export type MaintenanceAttachmentEntityType =
+  | 'WorkOrder'
+  | 'Asset'
+  | 'Inspection'
+  | 'FleetCompliance'
+  | 'FleetIncident'
+  | 'FleetTrip'
+  | 'FleetFuelTransaction'
+  | 'FleetCostEntry';
 
 export const maintenanceAttachmentsService = {
   async list(entityType: MaintenanceAttachmentEntityType, entityId: string, opts?: { category?: string; attachmentType?: string }) {
@@ -99,4 +107,3 @@ export const maintenanceAttachmentsService = {
     return await res.blob();
   },
 };
-

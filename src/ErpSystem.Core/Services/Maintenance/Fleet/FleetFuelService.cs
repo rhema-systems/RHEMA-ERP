@@ -107,14 +107,17 @@ public class FleetFuelService : IFleetFuelService
         if (!string.Equals(vehicle.AssetCategory?.AssetType, "Vehicle", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Selected asset is not a vehicle.");
 
-        if (dto.FleetTripId.HasValue && dto.FleetTripId.Value != Guid.Empty)
-        {
-            var trip = await _unitOfWork.Repository<FleetTrip>()
-                .FirstOrDefaultAsync(t => t.Id == dto.FleetTripId.Value && t.TenantId == tenantId);
+        if (!dto.FleetTripId.HasValue || dto.FleetTripId.Value == Guid.Empty)
+            throw new ArgumentException("FleetTripId is required. Fuel must be captured from a trip.");
 
-            if (trip == null)
-                throw new ArgumentException("Fleet trip not found.");
-        }
+        var trip = await _unitOfWork.Repository<FleetTrip>()
+            .FirstOrDefaultAsync(t => t.Id == dto.FleetTripId.Value && t.TenantId == tenantId);
+
+        if (trip == null)
+            throw new ArgumentException("Fleet trip not found.");
+
+        if (trip.VehicleAssetId != dto.VehicleAssetId)
+            throw new ArgumentException("VehicleAssetId does not match the selected FleetTripId.");
 
         var total = dto.UnitCost.HasValue ? Math.Round(dto.Quantity * dto.UnitCost.Value, 2, MidpointRounding.AwayFromZero) : (decimal?)null;
 
@@ -187,14 +190,17 @@ public class FleetFuelService : IFleetFuelService
         if (!string.Equals(vehicle.AssetCategory?.AssetType, "Vehicle", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Selected asset is not a vehicle.");
 
-        if (dto.FleetTripId.HasValue && dto.FleetTripId.Value != Guid.Empty)
-        {
-            var trip = await _unitOfWork.Repository<FleetTrip>()
-                .FirstOrDefaultAsync(t => t.Id == dto.FleetTripId.Value && t.TenantId == tenantId);
+        if (!dto.FleetTripId.HasValue || dto.FleetTripId.Value == Guid.Empty)
+            throw new ArgumentException("FleetTripId is required. Fuel must be captured from a trip.");
 
-            if (trip == null)
-                throw new ArgumentException("Fleet trip not found.");
-        }
+        var trip = await _unitOfWork.Repository<FleetTrip>()
+            .FirstOrDefaultAsync(t => t.Id == dto.FleetTripId.Value && t.TenantId == tenantId);
+
+        if (trip == null)
+            throw new ArgumentException("Fleet trip not found.");
+
+        if (trip.VehicleAssetId != dto.VehicleAssetId)
+            throw new ArgumentException("VehicleAssetId does not match the selected FleetTripId.");
 
         var total = dto.UnitCost.HasValue ? Math.Round(dto.Quantity * dto.UnitCost.Value, 2, MidpointRounding.AwayFromZero) : (decimal?)null;
 

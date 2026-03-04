@@ -14,6 +14,7 @@ public sealed class FleetTripConfiguration : IEntityTypeConfiguration<FleetTrip>
         builder.HasIndex(x => new { x.TenantId, x.Status });
         builder.HasIndex(x => new { x.TenantId, x.RequestedByUserId });
         builder.HasIndex(x => new { x.TenantId, x.DriverEmployeeId });
+        builder.HasIndex(x => new { x.TenantId, x.FleetTripDestinationId });
 
         builder.HasOne(x => x.VehicleAsset)
             .WithMany()
@@ -23,6 +24,11 @@ public sealed class FleetTripConfiguration : IEntityTypeConfiguration<FleetTrip>
         builder.HasOne(x => x.DriverEmployee)
             .WithMany()
             .HasForeignKey(x => x.DriverEmployeeId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(x => x.FleetTripDestination)
+            .WithMany()
+            .HasForeignKey(x => x.FleetTripDestinationId)
             .OnDelete(DeleteBehavior.SetNull);
     }
 }

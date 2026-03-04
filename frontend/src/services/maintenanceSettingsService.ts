@@ -13,6 +13,7 @@ export interface MaintenanceSettingsDto {
   tenantId: string;
   fleetComplianceDueSoonDays: number;
   blockFleetDispatchWhenComplianceDueSoon: boolean;
+  requirePredefinedFleetTripDestinationOnDispatch: boolean;
   createdAt: string;
   createdById?: string;
   updatedAt?: string;
@@ -21,6 +22,7 @@ export interface MaintenanceSettingsDto {
 export interface UpdateMaintenanceSettingsDto {
   fleetComplianceDueSoonDays: number;
   blockFleetDispatchWhenComplianceDueSoon: boolean;
+  requirePredefinedFleetTripDestinationOnDispatch: boolean;
 }
 
 export const maintenanceSettingsService = {
@@ -50,4 +52,3 @@ export const maintenanceSettingsService = {
 };
 
 export default maintenanceSettingsService;
-

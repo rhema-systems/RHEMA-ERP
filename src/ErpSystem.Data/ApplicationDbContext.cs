@@ -72,6 +72,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<SystemSettings> SystemSettings { get; set; }
     public DbSet<Security> Securities { get; set; }
 
+    // File upload governance (per-tenant, per-category)
+    public DbSet<FileUploadPolicy> FileUploadPolicies { get; set; }
+    public DbSet<FileUploadRecord> FileUploadRecords { get; set; }
+
     // Logging entities
     public DbSet<AuditLog> AuditLogs { get; set; }
     public DbSet<SecurityLog> SecurityLogs { get; set; }
@@ -296,6 +300,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<PurchaseOrderItem> PurchaseOrderItems { get; set; }
     public DbSet<PurchaseOrderReceipt> PurchaseOrderReceipts { get; set; }
     public DbSet<PurchaseOrderReceiptItem> PurchaseOrderReceiptItems { get; set; }
+    public DbSet<PurchaseOrderLandedCostPlan> PurchaseOrderLandedCostPlans { get; set; }
+    public DbSet<PurchaseOrderLandedCostPlanItem> PurchaseOrderLandedCostPlanItems { get; set; }
     public DbSet<PurchaseRequisition> PurchaseRequisitions { get; set; }
     public DbSet<ConsignmentSettlement> ConsignmentSettlements { get; set; }
 
@@ -399,7 +405,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     // Fleet Management (Maintenance)
     public DbSet<FleetTrip> FleetTrips { get; set; }
+    public DbSet<FleetTripDestination> FleetTripDestinations { get; set; }
     public DbSet<FleetComplianceItem> FleetComplianceItems { get; set; }
+    public DbSet<FleetComplianceTemplate> FleetComplianceTemplates { get; set; }
+    public DbSet<FleetComplianceTemplateItem> FleetComplianceTemplateItems { get; set; }
+    public DbSet<FleetVehicleComplianceTemplate> FleetVehicleComplianceTemplates { get; set; }
     public DbSet<FleetFuelTransaction> FleetFuelTransactions { get; set; }
     public DbSet<FleetVehicleAssignment> FleetVehicleAssignments { get; set; }
     public DbSet<FleetTripInspection> FleetTripInspections { get; set; }
@@ -425,15 +435,41 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<EhcTicket> EhcTickets { get; set; }
     public DbSet<EhcTicketCategory> EhcTicketCategories { get; set; }
     public DbSet<EhcRootCauseCode> EhcRootCauseCodes { get; set; }
+    public DbSet<EhcCannedResponse> EhcCannedResponses { get; set; }
     public DbSet<EhcTicketMessage> EhcTicketMessages { get; set; }
     public DbSet<EhcTicketAttachment> EhcTicketAttachments { get; set; }
     public DbSet<EhcTicketStatusHistory> EhcTicketStatusHistories { get; set; }
     public DbSet<EhcSlaTemplate> EhcSlaTemplates { get; set; }
     public DbSet<EhcWorkflowRoutingRule> EhcWorkflowRoutingRules { get; set; }
     public DbSet<EhcTicketAuditEvent> EhcTicketAuditEvents { get; set; }
+    public DbSet<EhcTicketFeedback> EhcTicketFeedbacks { get; set; }
+    public DbSet<EhcTicketWatcher> EhcTicketWatchers { get; set; }
+    public DbSet<EhcTicketLink> EhcTicketLinks { get; set; }
+    public DbSet<EhcProblem> EhcProblems { get; set; }
+    public DbSet<EhcProblemTicketLink> EhcProblemTicketLinks { get; set; }
+    public DbSet<EhcCapaTask> EhcCapaTasks { get; set; }
+    public DbSet<EhcProblemAuditEvent> EhcProblemAuditEvents { get; set; }
+    public DbSet<EhcAgentReplyProfile> EhcAgentReplyProfiles { get; set; }
+    public DbSet<EhcKnowledgeBaseCategory> EhcKnowledgeBaseCategories { get; set; }
+    public DbSet<EhcKnowledgeBaseArticle> EhcKnowledgeBaseArticles { get; set; }
+    public DbSet<EhcFaqCategory> EhcFaqCategories { get; set; }
+    public DbSet<EhcFaqItem> EhcFaqItems { get; set; }
+    public DbSet<EhcTicketPriorityLevel> EhcTicketPriorityLevels { get; set; }
     public DbSet<EhcEscalationPolicy> EhcEscalationPolicies { get; set; }
     public DbSet<EhcEscalationPolicyLevel> EhcEscalationPolicyLevels { get; set; }
     public DbSet<EhcEscalationExecution> EhcEscalationExecutions { get; set; }
+    public DbSet<EhcLegalHold> EhcLegalHolds { get; set; }
+    public DbSet<EhcRetentionCategoryException> EhcRetentionCategoryExceptions { get; set; }
+    public DbSet<EhcComplianceAuditExport> EhcComplianceAuditExports { get; set; }
+    public DbSet<EhcServiceRequestType> EhcServiceRequestTypes { get; set; }
+    public DbSet<EhcServiceRequest> EhcServiceRequests { get; set; }
+    public DbSet<EhcServiceRequestAttachment> EhcServiceRequestAttachments { get; set; }
+    public DbSet<EhcServiceRequestAuditEvent> EhcServiceRequestAuditEvents { get; set; }
+    public DbSet<EhcInboundEmailChannel> EhcInboundEmailChannels { get; set; }
+    public DbSet<EhcInboundEmailMessage> EhcInboundEmailMessages { get; set; }
+    public DbSet<EhcInboundEmailWebhookQueueItem> EhcInboundEmailWebhookQueueItems { get; set; }
+    public DbSet<EhcInboundMessagingChannel> EhcInboundMessagingChannels { get; set; }
+    public DbSet<EhcInboundMessagingMessage> EhcInboundMessagingMessages { get; set; }
 
     // Workflow Engine entities
     public DbSet<WorkflowDefinition> WorkflowDefinitions { get; set; }
@@ -469,6 +505,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // Fleet configurations
         builder.ApplyConfiguration(new FleetTripConfiguration());
         builder.ApplyConfiguration(new FleetComplianceItemConfiguration());
+        builder.ApplyConfiguration(new FleetComplianceTemplateConfiguration());
+        builder.ApplyConfiguration(new FleetComplianceTemplateItemConfiguration());
+        builder.ApplyConfiguration(new FleetVehicleComplianceTemplateConfiguration());
         builder.ApplyConfiguration(new FleetFuelTransactionConfiguration());
         builder.ApplyConfiguration(new FleetVehicleAssignmentConfiguration());
         builder.ApplyConfiguration(new FleetTripInspectionConfiguration());
@@ -664,6 +703,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.HasOne(s => s.Tenant).WithMany().HasForeignKey(s => s.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(s => s.TenantId);
+        });
+
+        builder.Entity<FileUploadPolicy>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Category }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.IsEnabled });
+        });
+
+        builder.Entity<FileUploadRecord>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Category });
+            entity.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            entity.HasIndex(x => new { x.TenantId, x.FilePath }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.UploadedByUserId });
         });
 
         // Configure SecurityAlert entity
@@ -2710,6 +2763,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(x => new { x.TenantId, x.IsActive });
         });
 
+        builder.Entity<EhcCannedResponse>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.IsActive });
+            entity.HasIndex(x => new { x.TenantId, x.AppliesToType });
+            entity.HasIndex(x => new { x.TenantId, x.CategoryId });
+
+            entity.HasOne(x => x.Category)
+                .WithMany()
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
         builder.Entity<EhcSlaTemplate>(entity =>
         {
             entity.HasIndex(x => new { x.TenantId, x.IsActive });
@@ -2786,6 +2852,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithOne(a => a.Ticket)
                 .HasForeignKey(a => a.TicketId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(x => x.Watchers)
+                .WithOne(w => w.Ticket)
+                .HasForeignKey(w => w.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<EhcTicketMessage>(entity =>
@@ -2809,6 +2880,197 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(x => new { x.TenantId, x.TicketId });
             entity.HasIndex(x => new { x.TenantId, x.EventType });
             entity.HasIndex(x => new { x.TenantId, x.IsInternal });
+        });
+
+        builder.Entity<EhcTicketFeedback>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.TicketId });
+            entity.HasIndex(x => new { x.TenantId, x.TicketId, x.SubmittedByUserId }).IsUnique();
+
+            entity.HasOne(x => x.SubmittedByUser)
+                .WithMany()
+                .HasForeignKey(x => x.SubmittedByUserId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<EhcTicketWatcher>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.TicketId });
+            entity.HasIndex(x => new { x.TenantId, x.TicketId, x.UserId }).IsUnique();
+
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<EhcTicketLink>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.TicketId });
+            entity.HasIndex(x => new { x.TenantId, x.RelatedTicketId });
+            entity.HasIndex(x => new { x.TenantId, x.TicketId, x.RelatedTicketId, x.LinkType }).IsUnique();
+
+            entity.HasOne(x => x.Ticket)
+                .WithMany(t => t.Links)
+                .HasForeignKey(x => x.TicketId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.RelatedTicket)
+                .WithMany()
+                .HasForeignKey(x => x.RelatedTicketId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<EhcProblem>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.ProblemNumber }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.Status });
+            entity.HasIndex(x => new { x.TenantId, x.Priority });
+            entity.HasIndex(x => new { x.TenantId, x.DepartmentId });
+            entity.HasIndex(x => new { x.TenantId, x.OwnerUserId });
+
+            entity.HasOne(x => x.Category)
+                .WithMany()
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.Subcategory)
+                .WithMany()
+                .HasForeignKey(x => x.SubcategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.Department)
+                .WithMany()
+                .HasForeignKey(x => x.DepartmentId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.OwnerUser)
+                .WithMany()
+                .HasForeignKey(x => x.OwnerUserId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.CreatedFromTicket)
+                .WithMany()
+                .HasForeignKey(x => x.CreatedFromTicketId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.RootCause)
+                .WithMany()
+                .HasForeignKey(x => x.RootCauseId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasMany(x => x.TicketLinks)
+                .WithOne(l => l.Problem)
+                .HasForeignKey(l => l.ProblemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(x => x.CapaTasks)
+                .WithOne(t => t.Problem)
+                .HasForeignKey(t => t.ProblemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(x => x.AuditEvents)
+                .WithOne(a => a.Problem)
+                .HasForeignKey(a => a.ProblemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<EhcProblemTicketLink>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.ProblemId });
+            entity.HasIndex(x => new { x.TenantId, x.TicketId });
+            entity.HasIndex(x => new { x.TenantId, x.ProblemId, x.TicketId }).IsUnique();
+
+            entity.HasOne(x => x.Ticket)
+                .WithMany()
+                .HasForeignKey(x => x.TicketId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<EhcCapaTask>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.ProblemId });
+            entity.HasIndex(x => new { x.TenantId, x.Status });
+            entity.HasIndex(x => new { x.TenantId, x.AssignedToUserId });
+            entity.HasIndex(x => new { x.TenantId, x.AssignedDepartmentId });
+            entity.HasIndex(x => new { x.TenantId, x.DueAt });
+
+            entity.HasOne(x => x.AssignedToUser)
+                .WithMany()
+                .HasForeignKey(x => x.AssignedToUserId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.AssignedDepartment)
+                .WithMany()
+                .HasForeignKey(x => x.AssignedDepartmentId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<EhcProblemAuditEvent>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.ProblemId });
+            entity.HasIndex(x => new { x.TenantId, x.EventType });
+            entity.HasIndex(x => new { x.TenantId, x.ActorUserId });
+
+            entity.HasOne(x => x.ActorUser)
+                .WithMany()
+                .HasForeignKey(x => x.ActorUserId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<EhcAgentReplyProfile>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.UserId }).IsUnique();
+
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<EhcKnowledgeBaseCategory>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.IsActive });
+        });
+
+        builder.Entity<EhcKnowledgeBaseArticle>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.CategoryId });
+            entity.HasIndex(x => new { x.TenantId, x.IsPublished });
+            entity.HasIndex(x => new { x.TenantId, x.IsInternalOnly });
+
+            entity.HasOne(x => x.Category)
+                .WithMany()
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<EhcFaqCategory>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.IsActive });
+        });
+
+        builder.Entity<EhcFaqItem>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.CategoryId });
+            entity.HasIndex(x => new { x.TenantId, x.IsPublished });
+            entity.HasIndex(x => new { x.TenantId, x.IsInternalOnly });
+            entity.HasIndex(x => new { x.TenantId, x.SortOrder });
+
+            entity.HasOne(x => x.Category)
+                .WithMany()
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<EhcTicketPriorityLevel>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Priority }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.IsActive });
+            entity.HasIndex(x => new { x.TenantId, x.SortOrder });
         });
 
         builder.Entity<EhcEscalationPolicy>(entity =>
@@ -2847,6 +3109,24 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.HasIndex(x => new { x.TenantId, x.TicketId, x.PolicyId, x.Level }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.ExecutedAtUtc });
+        });
+
+        builder.Entity<EhcLegalHold>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.TicketId, x.IsActive });
+            entity.HasIndex(x => new { x.TenantId, x.CreatedAt });
+        });
+
+        builder.Entity<EhcRetentionCategoryException>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.CategoryId }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.IsActive });
+        });
+
+        builder.Entity<EhcComplianceAuditExport>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            entity.HasIndex(x => new { x.TenantId, x.FromUtc, x.ToUtc });
         });
     }
 
@@ -3593,11 +3873,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(wl => wl.WarehouseId);
             entity.HasIndex(wl => wl.ParentLocationId);
             entity.HasIndex(wl => wl.IsActive);
+            entity.HasIndex(wl => wl.ConsignmentWarehouseId);
 
             // Warehouse relationship with Restrict to avoid cascade conflicts
             entity.HasOne(wl => wl.Warehouse)
                 .WithMany(w => w.Locations)
                 .HasForeignKey(wl => wl.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(wl => wl.ConsignmentWarehouse)
+                .WithMany()
+                .HasForeignKey(wl => wl.ConsignmentWarehouseId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             // Self-referencing relationship for parent/child locations
@@ -3718,6 +4004,30 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             //     .WithMany()
             //     .HasForeignKey(pori => pori.LocationId)
             //     .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // PurchaseOrderLandedCostPlan entity
+        builder.Entity<PurchaseOrderLandedCostPlan>(entity =>
+        {
+            entity.HasIndex(p => p.PurchaseOrderId).IsUnique();
+            entity.HasIndex(p => p.Status);
+
+            entity.HasOne(p => p.PurchaseOrder)
+                .WithMany()
+                .HasForeignKey(p => p.PurchaseOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // PurchaseOrderLandedCostPlanItem entity
+        builder.Entity<PurchaseOrderLandedCostPlanItem>(entity =>
+        {
+            entity.HasIndex(i => i.PurchaseOrderLandedCostPlanId);
+            entity.HasIndex(i => i.SupplierId);
+
+            entity.HasOne(i => i.PurchaseOrderLandedCostPlan)
+                .WithMany(p => p.Items)
+                .HasForeignKey(i => i.PurchaseOrderLandedCostPlanId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // StockAdjustment entity

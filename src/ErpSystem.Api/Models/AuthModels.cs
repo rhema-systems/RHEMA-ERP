@@ -33,7 +33,8 @@ namespace ErpSystem.Api.Models
         public required string Username { get; set; }
 
         [Required]
-        [StringLength(100, MinimumLength = 8)]
+        // Do not enforce minimum length here: LDAP passwords can be shorter than the local policy.
+        [StringLength(100, MinimumLength = 1)]
         public required string Password { get; set; }
 
         [StringLength(50)]

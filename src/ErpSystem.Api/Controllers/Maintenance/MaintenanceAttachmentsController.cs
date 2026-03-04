@@ -54,7 +54,17 @@ public class MaintenanceAttachmentsController : ControllerBase
                 return BadRequest("No files provided");
             }
 
-            var allowedTypes = new[] { "WorkOrder", "Asset", "Inspection", "FleetCompliance", "FleetIncident" };
+            var allowedTypes = new[]
+            {
+                "WorkOrder",
+                "Asset",
+                "Inspection",
+                "FleetCompliance",
+                "FleetIncident",
+                "FleetTrip",
+                "FleetFuelTransaction",
+                "FleetCostEntry"
+            };
             if (!allowedTypes.Contains(entityType, StringComparer.OrdinalIgnoreCase))
             {
                 return BadRequest($"Entity type must be one of: {string.Join(", ", allowedTypes)}");
@@ -409,6 +419,9 @@ public class MaintenanceAttachmentsController : ControllerBase
             "inspection" => "maintenance-inspections",
             "fleetcompliance" => "maintenance-fleet",
             "fleetincident" => "maintenance-fleet",
+            "fleettrip" => "maintenance-fleet",
+            "fleetfueltransaction" => "maintenance-fleet",
+            "fleetcostentry" => "maintenance-fleet",
             _ => "maintenance-general"
         };
     }

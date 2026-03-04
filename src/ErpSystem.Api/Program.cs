@@ -247,20 +247,24 @@ app.MapControllers();
 app.MapHub<ErpSystem.Api.Hubs.DashboardHub>("/api/hubs/dashboard");
 
 // Initialize database and seed data
-Console.WriteLine("🔄 Starting database initialization...");
+app.Logger.LogInformation("Starting database initialization...");
 try
 {
     await InitializeDatabaseAsync(app);
-    Console.WriteLine("✅ Database initialization completed");
+    app.Logger.LogInformation("Database initialization completed");
 }
 catch (Exception ex)
 {
-    Console.WriteLine($"❌ Database initialization failed: {ex.Message}");
-    Console.WriteLine($"   Stack trace: {ex.StackTrace}");
+    app.Logger.LogError(ex, "Database initialization failed");
 }
 
-// Skip seeding for now
-// await SeedDatabaseAsync(app);
+// Seed demo/basic data in Development to make local testing easier.
+if (app.Environment.IsDevelopment())
+{
+    app.Logger.LogInformation("Starting Development data seeding...");
+    await SeedDatabaseAsync(app);
+    app.Logger.LogInformation("Development data seeding completed");
+}
 
 // Workflow automation trigger - comprehensive testing active
 // Version: 2.0.0 - Full CI/CD Pipeline Integration
@@ -274,7 +278,7 @@ async Task InitializeDatabaseAsync(WebApplication app)
 
     try
     {
-        Console.WriteLine("   → Testing database connection...");
+        logger.LogDebug("Testing database connection...");
 
         // Test connection first with a short timeout
         using var testCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -282,33 +286,25 @@ async Task InitializeDatabaseAsync(WebApplication app)
 
         if (!canConnect)
         {
-            Console.WriteLine("   ❌ Cannot connect to database");
-            logger.LogError("Cannot connect to database");
+            logger.LogError("Database connection check failed. Skipping migrations.");
             return;
         }
 
-        Console.WriteLine("   ✅ Database connection successful");
-        Console.WriteLine("   → Running migrations...");
+        logger.LogInformation("Database connection successful. Running migrations...");
 
         // Add timeout to prevent hanging
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await context.Database.MigrateAsync(cts.Token);
 
-        Console.WriteLine("   ✅ Database migration completed successfully");
+        logger.LogInformation("Database migration completed successfully");
     }
-    catch (OperationCanceledException)
+    catch (OperationCanceledException ex)
     {
-        logger.LogError("Database operation timed out");
-        Console.WriteLine("   ❌ Database operation timed out - check if SQL Server is running");
+        logger.LogError(ex, "Database operation timed out. Check if SQL Server is running and reachable.");
     }
     catch (Exception ex)
     {
         logger.LogError(ex, "An error occurred while migrating the database");
-        Console.WriteLine($"   ❌ Database error: {ex.Message}");
-        if (ex.InnerException != null)
-        {
-            Console.WriteLine($"   ❌ Inner error: {ex.InnerException.Message}");
-        }
     }
 }
 

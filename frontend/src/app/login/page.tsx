@@ -252,7 +252,7 @@ function LoginFormWithSearchParams() {
       authService.requestLoginOtp({
         identifier: payload.identifier,
         channel: payload.channel,
-        tenantCode: undefined,
+        tenantCode: (securitySettings as any)?.tenantCode || undefined,
         recaptchaToken: payload.recaptchaToken,
       }),
     onSuccess: (resp) => {
@@ -272,7 +272,7 @@ function LoginFormWithSearchParams() {
         identifier: payload.identifier,
         channel: payload.channel,
         otpCode: payload.otpCode,
-        tenantCode: undefined,
+        tenantCode: (securitySettings as any)?.tenantCode || undefined,
         rememberMe: false,
         twoFactorCode: payload.twoFactorCode,
         recaptchaToken: payload.recaptchaToken,

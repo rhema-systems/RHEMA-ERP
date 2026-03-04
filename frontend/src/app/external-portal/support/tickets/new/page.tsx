@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import ReCAPTCHA from 'react-google-recaptcha';
@@ -54,6 +54,26 @@ export default function NewExternalPortalSupportTicketPage() {
     queryKey: ['ehc', 'categories', currentTenantCode],
     queryFn: () => ehcTicketService.listCategories(),
   });
+
+  const { data: priorityLevels } = useQuery({
+    queryKey: ['ehc', 'priorities', currentTenantCode],
+    queryFn: () => ehcTicketService.listPriorityLevels(),
+  });
+
+  const activePriorityLevels = useMemo(() => {
+    return (priorityLevels ?? [])
+      .filter((p) => p.isActive)
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  }, [priorityLevels]);
+
+  useEffect(() => {
+    if (!activePriorityLevels.length) return;
+    setForm((f) => {
+      const exists = activePriorityLevels.some((p) => p.priority === (f.priority as any));
+      if (exists) return f;
+      return { ...f, priority: activePriorityLevels[0].priority as EhcTicketPriority };
+    });
+  }, [activePriorityLevels]);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -183,10 +203,20 @@ export default function NewExternalPortalSupportTicketPage() {
                     value={form.priority}
                     onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as EhcTicketPriority }))}
                   >
-                    <option value="Low">Low</option>
-                    <option value="Medium">Medium</option>
-                    <option value="High">High</option>
-                    <option value="Critical">Critical</option>
+                    {activePriorityLevels.length ? (
+                      activePriorityLevels.map((p) => (
+                        <option key={p.priority} value={p.priority}>
+                          {p.displayName}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="Low">Low</option>
+                        <option value="Medium">Medium</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                      </>
+                    )}
                   </select>
                 </div>
               </div>

@@ -54,6 +54,7 @@ public class MaintenanceSettingsService : IMaintenanceSettingsService
 
             settings.FleetComplianceDueSoonDays = dto.FleetComplianceDueSoonDays;
             settings.BlockFleetDispatchWhenComplianceDueSoon = dto.BlockFleetDispatchWhenComplianceDueSoon;
+            settings.RequirePredefinedFleetTripDestinationOnDispatch = dto.RequirePredefinedFleetTripDestinationOnDispatch;
             settings.UpdatedAt = DateTime.UtcNow;
 
             await _settingsRepository.UpdateAsync(settings);
@@ -84,10 +85,10 @@ public class MaintenanceSettingsService : IMaintenanceSettingsService
             TenantId = settings.TenantId,
             FleetComplianceDueSoonDays = settings.FleetComplianceDueSoonDays,
             BlockFleetDispatchWhenComplianceDueSoon = settings.BlockFleetDispatchWhenComplianceDueSoon,
+            RequirePredefinedFleetTripDestinationOnDispatch = settings.RequirePredefinedFleetTripDestinationOnDispatch,
             CreatedAt = settings.CreatedAt,
             CreatedById = settings.CreatedById,
             UpdatedAt = settings.UpdatedAt
         };
     }
 }
-

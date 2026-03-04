@@ -47,6 +47,51 @@ public class EhcRootCauseCode : TenantEntity
     public bool IsActive { get; set; } = true;
 }
 
+[Table("EhcCannedResponses")]
+public class EhcCannedResponse : TenantEntity
+{
+    [Required]
+    [StringLength(50)]
+    public string Code { get; set; } = string.Empty;
+
+    [Required]
+    [StringLength(200)]
+    public string Title { get; set; } = string.Empty;
+
+    [Required]
+    [Column(TypeName = "nvarchar(max)")]
+    public string Body { get; set; } = string.Empty;
+
+    public bool IsActive { get; set; } = true;
+
+    public EhcTicketType? AppliesToType { get; set; }
+
+    public Guid? CategoryId { get; set; }
+
+    [ForeignKey(nameof(CategoryId))]
+    public virtual EhcTicketCategory? Category { get; set; }
+}
+
+[Table("EhcAgentReplyProfiles")]
+public class EhcAgentReplyProfile : TenantEntity
+{
+    [Required]
+    public Guid UserId { get; set; }
+
+    [ForeignKey(nameof(UserId))]
+    public virtual ApplicationUser User { get; set; } = null!;
+
+    /// <summary>
+    /// Optional signature appended to requester-facing replies.
+    /// </summary>
+    [StringLength(2000)]
+    public string? Signature { get; set; }
+
+    public bool IsSignatureEnabled { get; set; } = true;
+
+    public bool AppendSignatureToReplies { get; set; } = true;
+}
+
 [Table("EhcSlaTemplates")]
 public class EhcSlaTemplate : TenantEntity
 {
@@ -183,6 +228,14 @@ public class EhcTicket : TenantEntity
     public DateTime? ResolvedAt { get; set; }
     public DateTime? ClosedAt { get; set; }
 
+    // Applied SLA snapshot (for pause/resume math and auditability)
+    public Guid? AppliedSlaTemplateId { get; set; }
+    public int? AppliedFirstResponseMinutes { get; set; }
+    public int? AppliedResolutionMinutes { get; set; }
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string? AppliedSlaCalendarConfigurationJson { get; set; }
+
     [StringLength(100)]
     public string? RelatedEntityType { get; set; }
 
@@ -205,6 +258,9 @@ public class EhcTicket : TenantEntity
     public virtual ICollection<EhcTicketAttachment> Attachments { get; set; } = new List<EhcTicketAttachment>();
     public virtual ICollection<EhcTicketStatusHistory> StatusHistory { get; set; } = new List<EhcTicketStatusHistory>();
     public virtual ICollection<EhcTicketAuditEvent> AuditEvents { get; set; } = new List<EhcTicketAuditEvent>();
+    public virtual ICollection<EhcTicketFeedback> Feedbacks { get; set; } = new List<EhcTicketFeedback>();
+    public virtual ICollection<EhcTicketWatcher> Watchers { get; set; } = new List<EhcTicketWatcher>();
+    public virtual ICollection<EhcTicketLink> Links { get; set; } = new List<EhcTicketLink>();
 }
 
 [Table("EhcTicketMessages")]
@@ -317,4 +373,66 @@ public class EhcTicketAuditEvent : TenantEntity
 
     [Column(TypeName = "nvarchar(max)")]
     public string? DataJson { get; set; }
+}
+
+[Table("EhcTicketFeedbacks")]
+public class EhcTicketFeedback : TenantEntity
+{
+    [Required]
+    public Guid TicketId { get; set; }
+
+    [ForeignKey(nameof(TicketId))]
+    public virtual EhcTicket Ticket { get; set; } = null!;
+
+    [Required]
+    public Guid SubmittedByUserId { get; set; }
+
+    [ForeignKey(nameof(SubmittedByUserId))]
+    public virtual ApplicationUser SubmittedByUser { get; set; } = null!;
+
+    /// <summary>
+    /// Customer satisfaction rating (1-5).
+    /// </summary>
+    public int Rating { get; set; }
+
+    [StringLength(2000)]
+    public string? Comment { get; set; }
+}
+
+[Table("EhcTicketWatchers")]
+public class EhcTicketWatcher : TenantEntity
+{
+    [Required]
+    public Guid TicketId { get; set; }
+
+    [ForeignKey(nameof(TicketId))]
+    public virtual EhcTicket Ticket { get; set; } = null!;
+
+    [Required]
+    public Guid UserId { get; set; }
+
+    [ForeignKey(nameof(UserId))]
+    public virtual ApplicationUser User { get; set; } = null!;
+}
+
+[Table("EhcTicketLinks")]
+public class EhcTicketLink : TenantEntity
+{
+    [Required]
+    public Guid TicketId { get; set; }
+
+    [ForeignKey(nameof(TicketId))]
+    public virtual EhcTicket Ticket { get; set; } = null!;
+
+    [Required]
+    public Guid RelatedTicketId { get; set; }
+
+    [ForeignKey(nameof(RelatedTicketId))]
+    public virtual EhcTicket RelatedTicket { get; set; } = null!;
+
+    [Required]
+    public EhcTicketLinkType LinkType { get; set; } = EhcTicketLinkType.Related;
+
+    [StringLength(500)]
+    public string? Notes { get; set; }
 }

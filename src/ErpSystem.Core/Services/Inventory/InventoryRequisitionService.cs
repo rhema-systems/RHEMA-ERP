@@ -20,6 +20,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
     private readonly IInventoryRequisitionItemRepository _requisitionItemRepository;
     private readonly IInventoryItemRepository _itemRepository;
     private readonly IWarehouseRepository _warehouseRepository;
+    private readonly IWarehouseLocationRepository _warehouseLocationRepository;
     private readonly IWarehouseQuantityRepository _warehouseQuantityRepository;
     private readonly IStockMovementRepository _stockMovementRepository;
     private readonly IConsignmentSettlementService _consignmentSettlementService;
@@ -34,6 +35,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         IInventoryRequisitionItemRepository requisitionItemRepository,
         IInventoryItemRepository itemRepository,
         IWarehouseRepository warehouseRepository,
+        IWarehouseLocationRepository warehouseLocationRepository,
         IWarehouseQuantityRepository warehouseQuantityRepository,
         IStockMovementRepository stockMovementRepository,
         IConsignmentSettlementService consignmentSettlementService,
@@ -47,6 +49,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         _requisitionItemRepository = requisitionItemRepository;
         _itemRepository = itemRepository;
         _warehouseRepository = warehouseRepository;
+        _warehouseLocationRepository = warehouseLocationRepository;
         _warehouseQuantityRepository = warehouseQuantityRepository;
         _stockMovementRepository = stockMovementRepository;
         _consignmentSettlementService = consignmentSettlementService;
@@ -390,8 +393,27 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             if (issueItem.IssuedQuantity > remainingToIssue)
                 throw new InvalidOperationException($"Cannot issue more than remaining quantity for {requisitionItem.ItemCode}");
 
+            var effectiveLocationId = issueItem.LocationId ?? requisition.LocationId;
+            var effectiveWarehouseId = requisition.WarehouseId;
+            var isConsignmentWarehouse = warehouse.IsConsignmentWarehouse;
+
+            if (effectiveLocationId.HasValue && effectiveLocationId.Value != Guid.Empty)
+            {
+                var location = await _warehouseLocationRepository.GetByIdAsync(effectiveLocationId.Value);
+                if (location != null)
+                {
+                    effectiveWarehouseId = location.InventoryWarehouseId;
+                }
+            }
+
+            if (effectiveWarehouseId != requisition.WarehouseId)
+            {
+                var wh = await _warehouseRepository.GetByIdAsync(effectiveWarehouseId);
+                isConsignmentWarehouse = wh?.IsConsignmentWarehouse == true;
+            }
+
             // Check stock availability
-            var warehouseQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(requisition.WarehouseId, requisitionItem.InventoryItemId);
+            var warehouseQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(effectiveWarehouseId, requisitionItem.InventoryItemId);
             if (warehouseQty == null || warehouseQty.AvailableStock < issueItem.IssuedQuantity)
                 throw new InvalidOperationException($"Insufficient stock for {requisitionItem.ItemCode}");
 
@@ -409,13 +431,16 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             warehouseQty.AvailableStock -= issueItem.IssuedQuantity;
             await _warehouseQuantityRepository.UpdateAsync(warehouseQty);
 
-            // Update inventory item quantities
-            var inventoryItem = await _itemRepository.GetByIdAsync(requisitionItem.InventoryItemId);
-            if (inventoryItem != null)
+            // Update owned/main inventory item quantities only for non-consignment warehouses/bins.
+            if (!isConsignmentWarehouse)
             {
-                inventoryItem.CurrentStock -= issueItem.IssuedQuantity;
-                inventoryItem.AvailableStock -= issueItem.IssuedQuantity;
-                await _itemRepository.UpdateAsync(inventoryItem);
+                var inventoryItem = await _itemRepository.GetByIdAsync(requisitionItem.InventoryItemId);
+                if (inventoryItem != null)
+                {
+                    inventoryItem.CurrentStock -= issueItem.IssuedQuantity;
+                    inventoryItem.AvailableStock -= issueItem.IssuedQuantity;
+                    await _itemRepository.UpdateAsync(inventoryItem);
+                }
             }
 
             // Create stock movement
@@ -430,8 +455,8 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 ReferenceType = ReferenceType.Requisition,
                 ReferenceNumber = requisition.RequisitionNumber,
                 ReferenceId = requisition.Id,
-                WarehouseId = requisition.WarehouseId,
-                LocationId = issueItem.LocationId ?? requisition.LocationId,
+                WarehouseId = effectiveWarehouseId,
+                LocationId = effectiveLocationId,
                 Notes = $"Issued for requisition {requisition.RequisitionNumber}",
                 TenantId = _currentUserProvider.TenantId
             };

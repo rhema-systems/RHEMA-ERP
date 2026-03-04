@@ -520,6 +520,86 @@ public class TenantController : ControllerBase
     }
 
     /// <summary>
+    /// List/search LDAP users (Active Directory) using the provided connection settings.
+    /// </summary>
+    [HttpPost("ldap/users")]
+    [Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin)]
+    public async Task<ActionResult<ListLdapUsersResultDto>> ListLdapUsers([FromBody] ListLdapUsersRequest request)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(request.LdapServer))
+            {
+                return Ok(new ListLdapUsersResultDto
+                {
+                    Success = false,
+                    Message = "LDAP server is required",
+                    Users = new List<LdapDirectoryUserDto>()
+                });
+            }
+
+            if (!request.LdapPort.HasValue || request.LdapPort <= 0)
+            {
+                return Ok(new ListLdapUsersResultDto
+                {
+                    Success = false,
+                    Message = "Valid LDAP port is required",
+                    Users = new List<LdapDirectoryUserDto>()
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.LdapBaseDn))
+            {
+                return Ok(new ListLdapUsersResultDto
+                {
+                    Success = false,
+                    Message = "LDAP Base DN is required",
+                    Users = new List<LdapDirectoryUserDto>()
+                });
+            }
+
+            var testTenant = new Tenant
+            {
+                LdapEnabled = true,
+                LdapServer = request.LdapServer,
+                LdapPort = request.LdapPort,
+                LdapBaseDn = request.LdapBaseDn,
+                LdapBindDn = request.LdapBindDn,
+                LdapBindPassword = request.LdapBindPassword
+            };
+
+            var limit = request.Limit.GetValueOrDefault(200);
+            var users = await _ldapAuthenticationService.SearchUsersAsync(request.Query, limit, testTenant);
+
+            return Ok(new ListLdapUsersResultDto
+            {
+                Success = true,
+                Message = $"Found {users.Count} user(s)",
+                Users = users.Select(u => new LdapDirectoryUserDto
+                {
+                    Username = u.Username,
+                    UserPrincipalName = u.UserPrincipalName,
+                    DistinguishedName = u.DistinguishedName,
+                    DisplayName = u.DisplayName,
+                    Email = u.Email,
+                    FirstName = u.FirstName,
+                    LastName = u.LastName
+                }).ToList()
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error listing LDAP users");
+            return Ok(new ListLdapUsersResultDto
+            {
+                Success = false,
+                Message = $"Error listing LDAP users: {ex.Message}",
+                Users = new List<LdapDirectoryUserDto>()
+            });
+        }
+    }
+
+    /// <summary>
     /// Get modules for the current tenant
     /// </summary>
     /// <returns>List of tenant modules</returns>
@@ -746,6 +826,35 @@ public class TestLdapResultDto
 {
     public bool Success { get; set; }
     public string Message { get; set; } = string.Empty;
+}
+
+public class ListLdapUsersRequest
+{
+    public string? LdapServer { get; set; }
+    public int? LdapPort { get; set; }
+    public string? LdapBaseDn { get; set; }
+    public string? LdapBindDn { get; set; }
+    public string? LdapBindPassword { get; set; }
+    public string? Query { get; set; }
+    public int? Limit { get; set; }
+}
+
+public class LdapDirectoryUserDto
+{
+    public string Username { get; set; } = string.Empty;
+    public string UserPrincipalName { get; set; } = string.Empty;
+    public string DistinguishedName { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string FirstName { get; set; } = string.Empty;
+    public string LastName { get; set; } = string.Empty;
+}
+
+public class ListLdapUsersResultDto
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public List<LdapDirectoryUserDto> Users { get; set; } = new();
 }
 
 public class UpdateTenantRequest

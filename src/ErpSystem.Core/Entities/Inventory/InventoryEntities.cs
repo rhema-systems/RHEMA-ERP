@@ -789,6 +789,23 @@ public class WarehouseLocation : TenantEntity
     public bool IsPickingLocation { get; set; } = true;
     public bool IsReceivingLocation { get; set; } = true;
 
+    /// <summary>
+    /// When true, inventory stored in this bin/location is treated as consignment stock and is excluded from owned/main inventory totals.
+    /// The stock is attributed to <see cref="ConsignmentWarehouseId"/> for warehouse-level reporting and settlement triggers.
+    /// </summary>
+    public bool IsConsignmentBin { get; set; } = false;
+
+    /// <summary>
+    /// The consignment warehouse that "owns" the inventory in this location (optional unless <see cref="IsConsignmentBin"/> is true).
+    /// </summary>
+    public Guid? ConsignmentWarehouseId { get; set; }
+
+    [NotMapped]
+    public Guid InventoryWarehouseId =>
+        IsConsignmentBin && ConsignmentWarehouseId.HasValue && ConsignmentWarehouseId.Value != Guid.Empty
+            ? ConsignmentWarehouseId.Value
+            : WarehouseId;
+
     // === ENHANCED FIELDS ===
 
     // Special Location Types
@@ -859,6 +876,7 @@ public class WarehouseLocation : TenantEntity
 
     // Navigation Properties
     public virtual Warehouse Warehouse { get; set; } = null!;
+    public virtual Warehouse? ConsignmentWarehouse { get; set; }
     public virtual WarehouseLocation? ParentLocation { get; set; }
     public virtual InventoryItem? DedicatedItem { get; set; }
     public virtual ICollection<WarehouseLocation> ChildLocations { get; set; } = new List<WarehouseLocation>();

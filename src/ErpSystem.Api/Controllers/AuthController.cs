@@ -401,26 +401,45 @@ namespace ErpSystem.Api.Controllers
                     }
                 }
 
+                // Resolve the default tenant (used for LDAP auto-provisioning / internal ERP context)
+                Tenant? defaultTenant = null;
+                try
+                {
+                    defaultTenant = await _tenantService.GetTenantByIdAsync(Constants.Tenants.DefaultTenantId);
+                    if (defaultTenant == null || defaultTenant.Status != TenantStatus.Active)
+                    {
+                        defaultTenant = null;
+                    }
+                }
+                catch
+                {
+                    defaultTenant = null;
+                }
+
                 ApplicationUser? user = null;
                 bool isLdapAuthenticated = false;
                 LdapUser? ldapUser = null;
+                string? ldapFailureReason = null;
 
                 // First try to find existing user in database
                 user = await _userManager.FindByNameAsync(request.Username) ??
                        await _userManager.FindByEmailAsync(request.Username);
 
-                // If LDAP is enabled for this tenant, try LDAP authentication
-                if (tenant?.LdapEnabled == true)
+                // Prefer LDAP authentication when available. If a tenant code isn't provided, use the default tenant's LDAP config.
+                var tenantForLdap = tenant ?? defaultTenant;
+
+                if (tenantForLdap?.LdapEnabled == true)
                 {
                     _logger.LogInformation(
                         "Attempting LDAP authentication for user {Username} using tenant {TenantId}. Server={LdapServer}, Port={LdapPort}, BaseDn={LdapBaseDn}",
                         request.Username,
-                        tenant.Id,
-                        tenant.LdapServer,
-                        tenant.LdapPort ?? 389,
-                        tenant.LdapBaseDn);
+                        tenantForLdap.Id,
+                        tenantForLdap.LdapServer,
+                        tenantForLdap.LdapPort ?? 389,
+                        tenantForLdap.LdapBaseDn);
 
-                    var ldapResult = await _ldapAuthService.AuthenticateAsync(request.Username, request.Password, tenant);
+                    var ldapResult = await _ldapAuthService.AuthenticateAsync(request.Username, request.Password, tenantForLdap);
+                    ldapFailureReason = ldapResult.ErrorMessage;
 
                     _logger.LogInformation(
                         "LDAP authentication call completed for user {Username}. Success={Success}, Error={Error}",
@@ -434,23 +453,30 @@ namespace ErpSystem.Api.Controllers
                         ldapUser = ldapResult.User;
                         _logger.LogInformation("LDAP authentication successful for user: {Username}", request.Username);
 
-                        // If user doesn't exist locally, create them from LDAP data
+                        // If user doesn't exist locally, auto-provision them after successful LDAP authentication.
+                        // Requirement: create with AuthenticationProvider=LDAP, no role assignment, and default tenant context.
                         if (user == null)
                         {
                             _logger.LogInformation("Creating local user from LDAP data for: {Username}", request.Username);
 
+                            var provisionTenantId = defaultTenant?.Id ?? tenantForLdap.Id;
+                            var email = !string.IsNullOrWhiteSpace(ldapUser.Email) ? ldapUser.Email : $"{ldapUser.Username}@ldap.local";
+
                             user = new ApplicationUser
                             {
+                                Id = Guid.NewGuid(),
                                 UserName = ldapUser.Username,
-                                Email = ldapUser.Email,
+                                Email = email,
                                 FirstName = ldapUser.FirstName,
                                 LastName = ldapUser.LastName,
-                                TenantId = tenant.Id,
+                                TenantId = provisionTenantId,
                                 IsActive = true,
                                 EmailConfirmed = true, // Trust LDAP email
-                                AuthenticationProvider = AuthenticationProvider.LDAP
+                                AuthenticationProvider = AuthenticationProvider.LDAP,
+                                LdapDn = string.IsNullOrWhiteSpace(ldapUser.DistinguishedName) ? null : ldapUser.DistinguishedName
                             };
 
+                            // Create without a local password (LDAP remains the source of truth).
                             var createResult = await _userManager.CreateAsync(user);
                             if (!createResult.Succeeded)
                             {
@@ -458,17 +484,21 @@ namespace ErpSystem.Api.Controllers
                                     string.Join(", ", createResult.Errors.Select(e => e.Description)));
                                 return StatusCode(500, new { message = "Failed to create user account" });
                             }
-
-                            // Assign default role (Employee) for new LDAP users
-                            await _userManager.AddToRoleAsync(user, "Employee");
                         }
                         else
                         {
                             // Update existing user with latest LDAP data
                             user.FirstName = ldapUser.FirstName;
                             user.LastName = ldapUser.LastName;
-                            user.Email = ldapUser.Email;
+                            var fallbackEmail = user.Email;
+                            if (string.IsNullOrWhiteSpace(fallbackEmail))
+                            {
+                                fallbackEmail = $"{ldapUser.Username}@ldap.local";
+                            }
+                            user.Email = !string.IsNullOrWhiteSpace(ldapUser.Email) ? ldapUser.Email : fallbackEmail;
                             user.AuthenticationProvider = AuthenticationProvider.LDAP;
+                            user.IsActive = true;
+                            user.LdapDn = string.IsNullOrWhiteSpace(ldapUser.DistinguishedName) ? user.LdapDn : ldapUser.DistinguishedName;
                             await _userManager.UpdateAsync(user);
                         }
                     }
@@ -503,6 +533,44 @@ namespace ErpSystem.Api.Controllers
                         request.TenantCode);
                 }
 
+                // If LDAP is enabled and this user is an LDAP user, do not fall back to local password authentication.
+                if (!isLdapAuthenticated &&
+                    tenantForLdap?.LdapEnabled == true &&
+                    user != null &&
+                    user.AuthenticationProvider == AuthenticationProvider.LDAP)
+                {
+                    _logger.LogWarning(
+                        "Login failed for LDAP user {Username}: LDAP authentication failed. Reason={Reason}",
+                        request.Username,
+                        ldapFailureReason ?? "Unknown");
+
+                    var loginFailureSecurityLog = new SecurityLog
+                    {
+                        Action = SecurityAction.LoginFailure.ToString(),
+                        Success = false,
+                        IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                        Username = request.Username,
+                        UserId = user.Id,
+                        Details = $"LDAP authentication failed: {ldapFailureReason ?? "Invalid credentials"}",
+                        FailureReason = "Invalid credentials",
+                        UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                        TenantId = user.TenantId
+                    };
+                    await _securityLogService.CreateSecurityLogAsync(loginFailureSecurityLog);
+
+                    var responseMessage = "Invalid credentials";
+                    if (string.Equals(ldapFailureReason, "Authentication service error", StringComparison.OrdinalIgnoreCase))
+                    {
+                        responseMessage = "Directory service error. Please contact your system administrator.";
+                    }
+                    else if (string.Equals(ldapFailureReason, "LDAP is not configured for this tenant", StringComparison.OrdinalIgnoreCase))
+                    {
+                        responseMessage = "Directory service is not configured. Please contact your system administrator.";
+                    }
+
+                    return Unauthorized(new { message = responseMessage });
+                }
+
                 // If user still not found and LDAP is not enabled or failed
                 if (user == null)
                 {
@@ -526,7 +594,8 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 // If tenant code provided, validate that user belongs to the tenant
-                if (tenant != null)
+                // NOTE: For LDAP-authenticated users we allow login without requiring pre-created UserTenant mappings.
+                if (tenant != null && !isLdapAuthenticated)
                 {
                     var userTenant = await _userTenantService.GetUserTenantRelationshipAsync(user.Id, tenant.Id);
                     if (userTenant == null || !await _userTenantService.HasActiveAccessAsync(user.Id, tenant.Id))
@@ -677,7 +746,9 @@ namespace ErpSystem.Api.Controllers
                     _logger.LogInformation("2FA verification successful for user {Username}", request.Username);
                 }
 
-                return await CompleteSuccessfulLoginAsync(user, tenant, request.Username, "Login successful");
+                // For LDAP logins without an explicit tenant selection, use the default tenant context in the session/response.
+                var sessionTenant = isLdapAuthenticated ? (defaultTenant ?? tenantForLdap) : tenant;
+                return await CompleteSuccessfulLoginAsync(user, sessionTenant, request.Username, "Login successful");
             }
             catch (Exception ex)
             {
@@ -1619,22 +1690,30 @@ namespace ErpSystem.Api.Controllers
                         maxAttempts: 5,
                         HttpContext.RequestAborted);
 
-                    try
-                    {
-                        if (channel == OtpChannel.Email)
-                        {
-                            await _emailService.SendEmailAsync(new EmailDto
-                            {
-                                To = user.Email ?? identifier,
-                                Subject = "Your login code",
-                                Body = $"Your one-time login code is <strong>{otp}</strong>. It expires in 10 minutes.",
-                                IsHtml = true
-                            });
-                        }
-                        else
-                        {
-                            await _tenantSmsSender.SendAsync(
-                                tenantId,
+                     try
+                     {
+                         if (channel == OtpChannel.Email)
+                         {
+                             var delivered = await _emailService.SendEmailAsync(new EmailDto
+                             {
+                                 To = user.Email ?? identifier,
+                                 Subject = "Your login code",
+                                 Body = $"Your one-time login code is <strong>{otp}</strong>. It expires in 10 minutes.",
+                                 IsHtml = true
+                             });
+
+                             if (!delivered)
+                             {
+                                 _logger.LogWarning(
+                                     "Login OTP email was not delivered (tenant={TenantId} userId={UserId})",
+                                     tenantId,
+                                     user.Id);
+                             }
+                         }
+                         else
+                         {
+                             await _tenantSmsSender.SendAsync(
+                                 tenantId,
                                 user.PhoneNumber ?? identifier,
                                 $"Your one-time login code is {otp}. It expires in 10 minutes.",
                                 HttpContext.RequestAborted);

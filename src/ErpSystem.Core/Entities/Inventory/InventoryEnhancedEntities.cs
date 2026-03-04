@@ -154,6 +154,13 @@ public class GoodsReceiptNote : TenantEntity
     [MaxLength(50)]
     public string GRNNumber { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Link back to the Procurement receipt (PurchaseOrderReceipt) that produced this GRN snapshot.
+    /// This allows inventory workflows (like landed cost) to be accessed from the Procurement receipt UI
+    /// even when Inventory GRNs use their own IDs.
+    /// </summary>
+    public Guid? PurchaseOrderReceiptId { get; set; }
+
     public Guid? PurchaseOrderId { get; set; }
 
     [MaxLength(50)]
@@ -749,6 +756,12 @@ public class LandedCost : TenantEntity
     [MaxLength(200)]
     public string? Description { get; set; }
 
+    /// <summary>
+    /// Document currency for totals and allocations (typically GRN/PO currency).
+    /// </summary>
+    [MaxLength(10)]
+    public string Currency { get; set; } = "USD";
+
     // Source Reference (GRN, PO, etc.)
     [Required]
     public Guid GoodsReceiptNoteId { get; set; }
@@ -819,15 +832,30 @@ public class LandedCostItem : TenantEntity
     [MaxLength(10)]
     public string Currency { get; set; } = "USD";
 
-    [Column(TypeName = "decimal(18,6)")]
+    /// <summary>
+    /// Exchange rate to the parent LandedCost.Currency.
+    /// </summary>
+    [Column(TypeName = "decimal(18,4)")]
     public decimal ExchangeRate { get; set; } = 1;
 
+    /// <summary>
+    /// Amount converted into the parent LandedCost.Currency.
+    /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal AmountInBaseCurrency { get; set; } = 0;
 
-    // Allocation method: ByValue, ByQuantity, ByWeight, ByVolume, Equal
+    // Allocation method per cost line: ByValue, ByQuantity, ByWeight, ByVolume, Equal, Manual
     [MaxLength(50)]
     public string AllocationMethod { get; set; } = "ByValue";
+
+    // Service supplier (can differ per cost line)
+    public Guid? SupplierId { get; set; }
+
+    [MaxLength(200)]
+    public string? SupplierName { get; set; }
+
+    [MaxLength(100)]
+    public string? ReferenceNumber { get; set; }
 
     [MaxLength(100)]
     public string? InvoiceNumber { get; set; }
@@ -870,6 +898,12 @@ public class LandedCostAllocation : TenantEntity
     // Cost layer reference (for updating valuation)
     public Guid? CostLayerId { get; set; }
 
+    /// <summary>
+    /// Link to the valuation FIFO layer (InventoryLayers) that this allocation was applied to (if applicable).
+    /// This is used for audit/reversal in the new valuation engine.
+    /// </summary>
+    public Guid? InventoryLayerId { get; set; }
+
     [MaxLength(500)]
     public string? Notes { get; set; }
 
@@ -879,6 +913,7 @@ public class LandedCostAllocation : TenantEntity
     public virtual GoodsReceiptNoteItem GoodsReceiptNoteItem { get; set; } = null!;
     public virtual InventoryItem InventoryItem { get; set; } = null!;
     public virtual InventoryCostLayer? CostLayer { get; set; }
+    public virtual InventoryLayer? InventoryLayer { get; set; }
 }
 
 #endregion

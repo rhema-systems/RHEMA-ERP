@@ -20,6 +20,7 @@ export interface FleetVehicleListDto {
   name: string;
   assetNumber: string;
   assetCategoryId: string;
+  assetType?: string | null;
   licensePlate?: string | null;
   vin?: string | null;
   status: string;
@@ -64,6 +65,10 @@ export interface FleetTripDto {
   purpose?: string | null;
   origin?: string | null;
   destination?: string | null;
+  fleetTripDestinationId?: string | null;
+  fleetTripDestinationName?: string | null;
+  expectedHours?: number | null;
+  expectedMileage?: number | null;
   notes?: string | null;
 
   plannedStartAt?: string | null;
@@ -90,6 +95,7 @@ export interface CreateFleetTripDto {
   purpose?: string | null;
   origin?: string | null;
   destination?: string | null;
+  fleetTripDestinationId?: string | null;
   notes?: string | null;
   plannedStartAt?: string | null;
   plannedEndAt?: string | null;
@@ -99,6 +105,7 @@ export interface DispatchFleetTripDto {
   dispatchedAt?: string | null;
   startMileage?: number | null;
   startOperatingHours?: number | null;
+  fleetTripDestinationId?: string | null;
 }
 
 export interface CompleteFleetTripDto {
@@ -108,6 +115,25 @@ export interface CompleteFleetTripDto {
   notes?: string | null;
 }
 
+export interface FleetTripDestinationDto {
+  id: string;
+  name: string;
+  origin?: string | null;
+  destination?: string | null;
+  expectedHours?: number | null;
+  expectedMileage?: number | null;
+  isActive: boolean;
+}
+
+export interface CreateFleetTripDestinationDto {
+  name: string;
+  origin?: string | null;
+  destination?: string | null;
+  expectedHours?: number | null;
+  expectedMileage?: number | null;
+  isActive: boolean;
+}
+
 export interface FleetComplianceItemDto {
   id: string;
   vehicleAssetId: string;
@@ -115,7 +141,7 @@ export interface FleetComplianceItemDto {
   complianceType: string;
   referenceNumber?: string | null;
   issueDate?: string | null;
-  expiryDate: string;
+  expiryDate?: string | null;
   isCritical: boolean;
   notes?: string | null;
   createdAt: string;
@@ -130,6 +156,42 @@ export interface CreateFleetComplianceItemDto {
   isCritical: boolean;
   notes?: string | null;
   documentLinks?: string | null;
+}
+
+export interface FleetComplianceTemplateItemDto {
+  id: string;
+  templateId: string;
+  complianceType: string;
+  isCritical: boolean;
+  sortOrder: number;
+}
+
+export interface FleetComplianceTemplateDto {
+  id: string;
+  name: string;
+  description?: string | null;
+  isActive: boolean;
+  items?: FleetComplianceTemplateItemDto[];
+}
+
+export interface CreateFleetComplianceTemplateItemDto {
+  complianceType: string;
+  isCritical: boolean;
+  sortOrder: number;
+}
+
+export interface CreateFleetComplianceTemplateDto {
+  name: string;
+  description?: string | null;
+  isActive: boolean;
+  items: CreateFleetComplianceTemplateItemDto[];
+}
+
+export interface FleetVehicleComplianceTemplateDto {
+  vehicleAssetId: string;
+  templateId: string;
+  templateName: string;
+  appliedAt: string;
 }
 
 export interface FleetFuelTransactionDto {
@@ -552,9 +614,11 @@ export interface FleetCostEntryDto {
 }
 
 export interface CreateFleetCostEntryDto {
-  vehicleAssetId: string;
+  fleetTripId?: string | null;
+  vehicleAssetId?: string | null;
   costDateUtc?: string | null;
   costType: string;
+  source?: string | null;
   amount: number;
   currencyCode?: string | null;
   notes?: string | null;
@@ -588,18 +652,67 @@ export const fleetService = {
     pageSize?: number;
     searchTerm?: string;
     categoryId?: string;
+    assetType?: string;
   }): Promise<PagedResult<FleetVehicleListDto>> {
     const usp = new URLSearchParams();
     usp.set('page', String(params?.page ?? 1));
     usp.set('pageSize', String(params?.pageSize ?? 25));
     if (params?.searchTerm) usp.set('searchTerm', params.searchTerm);
     if (params?.categoryId) usp.set('categoryId', params.categoryId);
+    if (params?.assetType) usp.set('assetType', params.assetType);
 
     const response = await fetch(`${API_BASE_URL}/maintenance/fleet/vehicles?${usp.toString()}`, {
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error(await readError(response));
     return response.json();
+  },
+
+  async getTripDestinations(params?: { activeOnly?: boolean }): Promise<FleetTripDestinationDto[]> {
+    const usp = new URLSearchParams();
+    if (params?.activeOnly) usp.set('activeOnly', 'true');
+
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/trip-destinations?${usp.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async getTripDestination(id: string): Promise<FleetTripDestinationDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/trip-destinations/${id}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async createTripDestination(dto: CreateFleetTripDestinationDto): Promise<FleetTripDestinationDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/trip-destinations`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async updateTripDestination(id: string, dto: CreateFleetTripDestinationDto): Promise<FleetTripDestinationDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/trip-destinations/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async deleteTripDestination(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/trip-destinations/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
   },
 
   async createVehicle(dto: CreateFleetVehicleDto) {
@@ -834,6 +947,67 @@ export const fleetService = {
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error(await readError(response));
+  },
+
+  async getComplianceTemplates(includeInactive = false): Promise<FleetComplianceTemplateDto[]> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/compliance/templates?includeInactive=${includeInactive ? 'true' : 'false'}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async getComplianceTemplate(id: string): Promise<FleetComplianceTemplateDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/compliance/templates/${id}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async createComplianceTemplate(dto: CreateFleetComplianceTemplateDto): Promise<FleetComplianceTemplateDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/compliance/templates`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async updateComplianceTemplate(id: string, dto: CreateFleetComplianceTemplateDto): Promise<FleetComplianceTemplateDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/compliance/templates/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async deleteComplianceTemplate(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/compliance/templates/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+  },
+
+  async getVehicleComplianceTemplate(vehicleAssetId: string): Promise<FleetVehicleComplianceTemplateDto | null> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/compliance/vehicle/${vehicleAssetId}/template`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async applyComplianceTemplate(vehicleAssetId: string, templateId: string): Promise<FleetVehicleComplianceTemplateDto> {
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/compliance/vehicle/${vehicleAssetId}/template/${templateId}`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
   },
 
   async getFuel(vehicleAssetId: string, page = 1, pageSize = 25): Promise<PagedResult<FleetFuelTransactionDto>> {
@@ -1117,6 +1291,17 @@ export const fleetService = {
     usp.set('page', String(page));
     usp.set('pageSize', String(pageSize));
     const response = await fetch(`${API_BASE_URL}/maintenance/fleet/costs/vehicle/${vehicleAssetId}?${usp.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json();
+  },
+
+  async getTripCosts(fleetTripId: string, page = 1, pageSize = 25): Promise<PagedResult<FleetCostEntryDto>> {
+    const usp = new URLSearchParams();
+    usp.set('page', String(page));
+    usp.set('pageSize', String(pageSize));
+    const response = await fetch(`${API_BASE_URL}/maintenance/fleet/costs/trip/${fleetTripId}?${usp.toString()}`, {
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error(await readError(response));

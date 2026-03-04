@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
@@ -164,11 +165,68 @@ public sealed class DataRetentionBackgroundService : BackgroundService
                 .ExecuteDeleteAsync(cancellationToken);
 
             // EHC audit events
-            var ehcCutoff = now.AddDays(-Math.Clamp(policy.EhcAuditEventRetentionDays, 1, 3650));
-            counts["EhcTicketAuditEvents"] = await db.EhcTicketAuditEvents
+            var defaultEhcRetentionDays = Math.Clamp(policy.EhcAuditEventRetentionDays, 1, 3650);
+            var defaultEhcCutoff = now.AddDays(-defaultEhcRetentionDays);
+
+            var heldTicketIdsQ = db.EhcLegalHolds
                 .IgnoreQueryFilters()
-                .Where(e => e.TenantId == tenantId && e.CreatedAt < ehcCutoff)
-                .ExecuteDeleteAsync(cancellationToken);
+                .Where(h => h.TenantId == tenantId && !h.IsDeleted && h.IsActive)
+                .Select(h => h.TicketId);
+
+            var overrides = await db.EhcRetentionCategoryExceptions
+                .IgnoreQueryFilters()
+                .Where(x => x.TenantId == tenantId && !x.IsDeleted && x.IsActive)
+                .Select(x => new { x.CategoryId, x.AuditEventRetentionDays })
+                .ToListAsync(cancellationToken);
+
+            var overrideCategoryIds = overrides.Select(x => x.CategoryId).Distinct().ToList();
+
+            var totalDeletedEhc = 0;
+
+            if (overrideCategoryIds.Count == 0)
+            {
+                totalDeletedEhc += await db.EhcTicketAuditEvents
+                    .IgnoreQueryFilters()
+                    .Where(e => e.TenantId == tenantId && e.CreatedAt < defaultEhcCutoff)
+                    .Where(e => !heldTicketIdsQ.Contains(e.TicketId))
+                    .ExecuteDeleteAsync(cancellationToken);
+            }
+            else
+            {
+                // Default retention applies to tickets not in override categories.
+                totalDeletedEhc += await db.EhcTicketAuditEvents
+                    .IgnoreQueryFilters()
+                    .Where(e => e.TenantId == tenantId && e.CreatedAt < defaultEhcCutoff)
+                    .Where(e => !heldTicketIdsQ.Contains(e.TicketId))
+                    .Where(e => !db.EhcTickets
+                        .IgnoreQueryFilters()
+                        .Any(t =>
+                            t.TenantId == tenantId &&
+                            t.Id == e.TicketId &&
+                            t.CategoryId.HasValue &&
+                            overrideCategoryIds.Contains(t.CategoryId.Value)))
+                    .ExecuteDeleteAsync(cancellationToken);
+
+                // Per-category overrides.
+                foreach (var o in overrides)
+                {
+                    var days = Math.Clamp(o.AuditEventRetentionDays, 1, 3650);
+                    var cutoff = now.AddDays(-days);
+                    totalDeletedEhc += await db.EhcTicketAuditEvents
+                        .IgnoreQueryFilters()
+                        .Where(e => e.TenantId == tenantId && e.CreatedAt < cutoff)
+                        .Where(e => !heldTicketIdsQ.Contains(e.TicketId))
+                        .Where(e => db.EhcTickets
+                            .IgnoreQueryFilters()
+                            .Any(t =>
+                                t.TenantId == tenantId &&
+                                t.Id == e.TicketId &&
+                                t.CategoryId == o.CategoryId))
+                        .ExecuteDeleteAsync(cancellationToken);
+                }
+            }
+
+            counts["EhcTicketAuditEvents"] = totalDeletedEhc;
 
             run.CountsJson = JsonSerializer.Serialize(counts);
             run.CompletedAtUtc = DateTime.UtcNow;
@@ -189,4 +247,3 @@ public sealed class DataRetentionBackgroundService : BackgroundService
         await db.SaveChangesAsync(cancellationToken);
     }
 }
-

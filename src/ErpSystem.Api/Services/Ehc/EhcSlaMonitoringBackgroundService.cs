@@ -108,7 +108,9 @@ public sealed class EhcSlaMonitoringBackgroundService : BackgroundService
                 .AsNoTracking()
                 .Where(t => t.TenantId == tenantId && !t.IsDeleted)
                 .Where(t => t.Status != Core.Enums.EhcTicketStatus.Closed)
-                .Where(t => t.Status != Core.Enums.EhcTicketStatus.Resolved);
+                .Where(t => t.Status != Core.Enums.EhcTicketStatus.Resolved)
+                .Where(t => t.Status != Core.Enums.EhcTicketStatus.PendingUser)
+                .Where(t => t.Status != Core.Enums.EhcTicketStatus.PendingThirdParty);
 
             var tickets = await q
                 .Select(t => new TicketSlaRow

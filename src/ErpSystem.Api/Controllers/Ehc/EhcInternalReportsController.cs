@@ -1,5 +1,7 @@
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Services.Ehc.Sla;
 using ErpSystem.Shared;
 using OfficeOpenXml;
 using QuestPDF.Fluent;
@@ -123,6 +125,89 @@ public sealed class EhcInternalReportsController : ControllerBase
         public int Count { get; set; }
     }
 
+    private sealed class FeedbackSummaryDto
+    {
+        public int FeedbackCount { get; set; }
+        public double? AvgRating { get; set; }
+        public int ResolvedOrClosedTickets { get; set; }
+        public double? ResponseRatePercent { get; set; }
+        public Dictionary<int, int> RatingDistribution { get; set; } = new(); // 1-5
+    }
+
+    private sealed class FeedbackByAgentRowDto
+    {
+        public Guid? AgentUserId { get; set; }
+        public string AgentName { get; set; } = string.Empty;
+        public int FeedbackCount { get; set; }
+        public double? AvgRating { get; set; }
+    }
+
+    private sealed class FeedbackByDepartmentRowDto
+    {
+        public Guid? DepartmentId { get; set; }
+        public string DepartmentName { get; set; } = string.Empty;
+        public int FeedbackCount { get; set; }
+        public double? AvgRating { get; set; }
+    }
+
+    private sealed class FeedbackTrendPointDto
+    {
+        public string Date { get; set; } = string.Empty; // yyyy-MM-dd
+        public int FeedbackCount { get; set; }
+        public double? AvgRating { get; set; }
+    }
+
+    private sealed class ProblemLinkTrendPointDto
+    {
+        public string Date { get; set; } = string.Empty; // yyyy-MM-dd
+        public int LinkedTickets { get; set; }
+        public int DistinctProblems { get; set; }
+    }
+
+    private sealed class ProblemStatusCountDto
+    {
+        public EhcProblemStatus Status { get; set; }
+        public int Count { get; set; }
+    }
+
+    private sealed class ProblemPriorityCountDto
+    {
+        public EhcTicketPriority Priority { get; set; }
+        public int Count { get; set; }
+    }
+
+    private sealed class ProblemDepartmentCountDto
+    {
+        public Guid? DepartmentId { get; set; }
+        public string DepartmentName { get; set; } = string.Empty;
+        public int Count { get; set; }
+    }
+
+    private sealed class TopRecurringProblemDto
+    {
+        public Guid ProblemId { get; set; }
+        public string ProblemNumber { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public EhcProblemStatus Status { get; set; }
+        public EhcTicketPriority Priority { get; set; }
+        public string DepartmentName { get; set; } = string.Empty;
+        public string OwnerName { get; set; } = string.Empty;
+        public int LinkedTicketsCount { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private sealed class ProblemsSummaryDto
+    {
+        public int TotalProblems { get; set; }
+        public int OpenProblems { get; set; }
+        public int ProblemsCreatedLastDays { get; set; }
+        public int LinkedTicketsLastDays { get; set; }
+        public List<ProblemStatusCountDto> ByStatus { get; set; } = new();
+        public List<ProblemPriorityCountDto> ByPriority { get; set; } = new();
+        public List<ProblemDepartmentCountDto> ByDepartment { get; set; } = new();
+        public List<TopRecurringProblemDto> TopRecurring { get; set; } = new();
+    }
+
     private sealed class HelpdeskSummaryDto
     {
         public HelpdeskSummaryTotalsDto Totals { get; set; } = new();
@@ -136,6 +221,13 @@ public sealed class EhcInternalReportsController : ControllerBase
 
     private Guid GetTenantIdOrEmpty()
         => _currentUserService.TenantId ?? Guid.Empty;
+
+    private static DateTime ClampFromUtc(int days)
+    {
+        if (days < 1) days = 1;
+        if (days > 365) days = 365;
+        return DateTime.UtcNow.Date.AddDays(-days + 1);
+    }
 
     private async Task<HelpdeskSummaryDto> BuildSummaryAsync(Guid tenantId, CancellationToken cancellationToken)
     {
@@ -277,6 +369,322 @@ public sealed class EhcInternalReportsController : ControllerBase
         return summary;
     }
 
+    private async Task<FeedbackSummaryDto> BuildFeedbackSummaryAsync(Guid tenantId, int days, CancellationToken cancellationToken)
+    {
+        var fromUtc = ClampFromUtc(days);
+
+        var ticketsQ = _db.EhcTickets
+            .AsNoTracking()
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted && t.CreatedAt >= fromUtc);
+
+        var resolvedOrClosed = await ticketsQ
+            .Where(t => t.Status == EhcTicketStatus.Resolved || t.Status == EhcTicketStatus.Closed)
+            .CountAsync(cancellationToken);
+
+        var feedbackQ = _db.EhcTicketFeedbacks
+            .AsNoTracking()
+            .Where(f => f.TenantId == tenantId && !f.IsDeleted && f.CreatedAt >= fromUtc && f.Rating >= 1 && f.Rating <= 5);
+
+        var feedbackCount = await feedbackQ.CountAsync(cancellationToken);
+        var avg = feedbackCount == 0 ? (double?)null : await feedbackQ.AverageAsync(f => (double)f.Rating, cancellationToken);
+
+        var dist = await feedbackQ
+            .GroupBy(f => f.Rating)
+            .Select(g => new { rating = g.Key, count = g.Count() })
+            .ToListAsync(cancellationToken);
+
+        var map = new Dictionary<int, int>();
+        for (var r = 1; r <= 5; r++)
+        {
+            map[r] = dist.FirstOrDefault(x => x.rating == r)?.count ?? 0;
+        }
+
+        double? responseRate = null;
+        if (resolvedOrClosed > 0)
+        {
+            responseRate = Math.Round((feedbackCount * 100.0) / resolvedOrClosed, 2);
+        }
+
+        return new FeedbackSummaryDto
+        {
+            FeedbackCount = feedbackCount,
+            AvgRating = avg.HasValue ? Math.Round(avg.Value, 2) : null,
+            ResolvedOrClosedTickets = resolvedOrClosed,
+            ResponseRatePercent = responseRate,
+            RatingDistribution = map
+        };
+    }
+
+    private async Task<List<FeedbackByAgentRowDto>> BuildFeedbackByAgentAsync(Guid tenantId, int days, CancellationToken cancellationToken)
+    {
+        var fromUtc = ClampFromUtc(days);
+
+        var rows = await (
+            from f in _db.EhcTicketFeedbacks.AsNoTracking()
+            join t in _db.EhcTickets.AsNoTracking() on f.TicketId equals t.Id
+            where f.TenantId == tenantId && !f.IsDeleted && f.CreatedAt >= fromUtc
+               && t.TenantId == tenantId && !t.IsDeleted
+               && f.Rating >= 1 && f.Rating <= 5
+            group new { f, t } by t.AssignedToUserId into g
+            select new
+            {
+                agentUserId = g.Key,
+                count = g.Count(),
+                avg = g.Average(x => (double)x.f.Rating)
+            }
+        ).ToListAsync(cancellationToken);
+
+        var agentIds = rows
+            .Where(r => r.agentUserId.HasValue && r.agentUserId.Value != Guid.Empty)
+            .Select(r => r.agentUserId!.Value)
+            .Distinct()
+            .ToList();
+
+        var names = await _db.Users
+            .AsNoTracking()
+            .Where(u => u.TenantId == tenantId && u.IsActive && agentIds.Contains(u.Id))
+            .Select(u => new { u.Id, Name = (u.FirstName + " " + u.LastName).Trim() })
+            .ToListAsync(cancellationToken);
+
+        var nameById = names.ToDictionary(x => x.Id, x => x.Name);
+
+        return rows
+            .Select(r => new FeedbackByAgentRowDto
+            {
+                AgentUserId = r.agentUserId,
+                AgentName = r.agentUserId.HasValue && r.agentUserId.Value != Guid.Empty && nameById.TryGetValue(r.agentUserId.Value, out var n) ? n : "Unassigned",
+                FeedbackCount = r.count,
+                AvgRating = Math.Round(r.avg, 2)
+            })
+            .OrderByDescending(x => x.FeedbackCount)
+            .ThenByDescending(x => x.AvgRating ?? 0)
+            .ToList();
+    }
+
+    private async Task<List<FeedbackByDepartmentRowDto>> BuildFeedbackByDepartmentAsync(Guid tenantId, int days, CancellationToken cancellationToken)
+    {
+        var fromUtc = ClampFromUtc(days);
+
+        var rows = await (
+            from f in _db.EhcTicketFeedbacks.AsNoTracking()
+            join t in _db.EhcTickets.AsNoTracking() on f.TicketId equals t.Id
+            where f.TenantId == tenantId && !f.IsDeleted && f.CreatedAt >= fromUtc
+               && t.TenantId == tenantId && !t.IsDeleted
+               && f.Rating >= 1 && f.Rating <= 5
+            group new { f, t } by t.AssignedDepartmentId into g
+            select new
+            {
+                departmentId = g.Key,
+                count = g.Count(),
+                avg = g.Average(x => (double)x.f.Rating)
+            }
+        ).ToListAsync(cancellationToken);
+
+        var deptIds = rows
+            .Where(r => r.departmentId.HasValue && r.departmentId.Value != Guid.Empty)
+            .Select(r => r.departmentId!.Value)
+            .Distinct()
+            .ToList();
+
+        var names = await _db.Departments
+            .AsNoTracking()
+            .Where(d => d.TenantId == tenantId && !d.IsDeleted && deptIds.Contains(d.Id))
+            .Select(d => new { d.Id, d.Name })
+            .ToListAsync(cancellationToken);
+
+        var nameById = names.ToDictionary(x => x.Id, x => x.Name);
+
+        return rows
+            .Select(r => new FeedbackByDepartmentRowDto
+            {
+                DepartmentId = r.departmentId,
+                DepartmentName = r.departmentId.HasValue && r.departmentId.Value != Guid.Empty && nameById.TryGetValue(r.departmentId.Value, out var n) ? n : "Unassigned",
+                FeedbackCount = r.count,
+                AvgRating = Math.Round(r.avg, 2)
+            })
+            .OrderByDescending(x => x.FeedbackCount)
+            .ThenByDescending(x => x.AvgRating ?? 0)
+            .ToList();
+    }
+
+    private async Task<List<FeedbackTrendPointDto>> BuildFeedbackTrendAsync(Guid tenantId, int days, CancellationToken cancellationToken)
+    {
+        var fromUtc = ClampFromUtc(days);
+
+        var raw = await _db.EhcTicketFeedbacks
+            .AsNoTracking()
+            .Where(f => f.TenantId == tenantId && !f.IsDeleted && f.CreatedAt >= fromUtc && f.Rating >= 1 && f.Rating <= 5)
+            .GroupBy(f => f.CreatedAt.Date)
+            .Select(g => new
+            {
+                date = g.Key,
+                FeedbackCount = g.Count(),
+                AvgRating = g.Average(x => (double?)x.Rating)
+            })
+            .OrderBy(x => x.date)
+            .ToListAsync(cancellationToken);
+
+        return raw
+            .Select(x => new FeedbackTrendPointDto
+            {
+                Date = x.date.ToString("yyyy-MM-dd"),
+                FeedbackCount = x.FeedbackCount,
+                AvgRating = x.AvgRating.HasValue ? Math.Round(x.AvgRating.Value, 2) : null
+            })
+            .ToList();
+    }
+
+    private async Task<ProblemsSummaryDto> BuildProblemsSummaryAsync(Guid tenantId, int days, int top, CancellationToken cancellationToken)
+    {
+        var summary = new ProblemsSummaryDto();
+        if (tenantId == Guid.Empty)
+            return summary;
+
+        days = ClampDays(days);
+        top = Math.Clamp(top, 1, 50);
+        var fromUtc = ClampFromUtc(days);
+
+        var baseQ = _db.EhcProblems
+            .AsNoTracking()
+            .Where(p => p.TenantId == tenantId && !p.IsDeleted);
+
+        summary.TotalProblems = await baseQ.CountAsync(cancellationToken);
+        summary.OpenProblems = await baseQ
+            .Where(p => p.Status != EhcProblemStatus.Resolved && p.Status != EhcProblemStatus.Closed)
+            .CountAsync(cancellationToken);
+
+        summary.ProblemsCreatedLastDays = await baseQ
+            .Where(p => p.CreatedAt >= fromUtc)
+            .CountAsync(cancellationToken);
+
+        summary.LinkedTicketsLastDays = await _db.EhcProblemTicketLinks
+            .AsNoTracking()
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.CreatedAt >= fromUtc)
+            .CountAsync(cancellationToken);
+
+        summary.ByStatus = await baseQ
+            .GroupBy(p => p.Status)
+            .Select(g => new ProblemStatusCountDto { Status = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
+            .ToListAsync(cancellationToken);
+
+        summary.ByPriority = await baseQ
+            .GroupBy(p => p.Priority)
+            .Select(g => new ProblemPriorityCountDto { Priority = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
+            .ToListAsync(cancellationToken);
+
+        var byDept = await baseQ
+            .GroupBy(p => p.DepartmentId)
+            .Select(g => new { departmentId = g.Key, count = g.Count() })
+            .OrderByDescending(x => x.count)
+            .ToListAsync(cancellationToken);
+
+        var deptIds = byDept
+            .Where(x => x.departmentId.HasValue && x.departmentId.Value != Guid.Empty)
+            .Select(x => x.departmentId!.Value)
+            .Distinct()
+            .ToList();
+
+        var deptNames = await _db.Departments
+            .AsNoTracking()
+            .Where(d => d.TenantId == tenantId && !d.IsDeleted && deptIds.Contains(d.Id))
+            .Select(d => new { d.Id, d.Name })
+            .ToListAsync(cancellationToken);
+
+        var deptNameById = deptNames.ToDictionary(x => x.Id, x => x.Name);
+        summary.ByDepartment = byDept.Select(x => new ProblemDepartmentCountDto
+        {
+            DepartmentId = x.departmentId,
+            DepartmentName = x.departmentId.HasValue && x.departmentId.Value != Guid.Empty && deptNameById.TryGetValue(x.departmentId.Value, out var n) ? n : "Unassigned",
+            Count = x.count
+        }).ToList();
+
+        var linkCounts = await _db.EhcProblemTicketLinks
+            .AsNoTracking()
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted)
+            .GroupBy(l => l.ProblemId)
+            .Select(g => new { problemId = g.Key, count = g.Count() })
+            .OrderByDescending(x => x.count)
+            .Take(top)
+            .ToListAsync(cancellationToken);
+
+        var topIds = linkCounts.Select(x => x.problemId).ToList();
+        if (topIds.Count == 0)
+            return summary;
+
+        var problems = await _db.EhcProblems
+            .AsNoTracking()
+            .Where(p => p.TenantId == tenantId && !p.IsDeleted && topIds.Contains(p.Id))
+            .Select(p => new
+            {
+                p.Id,
+                p.ProblemNumber,
+                p.Title,
+                p.Status,
+                p.Priority,
+                p.DepartmentId,
+                departmentName = p.Department != null ? p.Department.Name : null,
+                ownerName = p.OwnerUser != null ? (p.OwnerUser.FirstName + " " + p.OwnerUser.LastName).Trim() : null,
+                p.CreatedAt
+            })
+            .ToListAsync(cancellationToken);
+
+        var probById = problems.ToDictionary(x => x.Id, x => x);
+        summary.TopRecurring = linkCounts
+            .Where(x => probById.ContainsKey(x.problemId))
+            .Select(x =>
+            {
+                var p = probById[x.problemId];
+                return new TopRecurringProblemDto
+                {
+                    ProblemId = p.Id,
+                    ProblemNumber = p.ProblemNumber,
+                    Title = p.Title,
+                    Status = p.Status,
+                    Priority = p.Priority,
+                    DepartmentName = p.departmentName ?? "Unassigned",
+                    OwnerName = p.ownerName ?? "Unassigned",
+                    LinkedTicketsCount = x.count,
+                    CreatedAt = p.CreatedAt
+                };
+            })
+            .ToList();
+
+        return summary;
+    }
+
+    private async Task<List<ProblemLinkTrendPointDto>> BuildProblemLinkTrendAsync(Guid tenantId, int days, CancellationToken cancellationToken)
+    {
+        days = ClampDays(days);
+        var fromUtc = ClampFromUtc(days);
+
+        if (tenantId == Guid.Empty)
+            return new List<ProblemLinkTrendPointDto>();
+
+        var raw = await _db.EhcProblemTicketLinks
+            .AsNoTracking()
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.CreatedAt >= fromUtc)
+            .GroupBy(l => l.CreatedAt.Date)
+            .Select(g => new
+            {
+                date = g.Key,
+                LinkedTickets = g.Count(),
+                DistinctProblems = g.Select(x => x.ProblemId).Distinct().Count()
+            })
+            .OrderBy(x => x.date)
+            .ToListAsync(cancellationToken);
+
+        return raw
+            .Select(x => new ProblemLinkTrendPointDto
+            {
+                Date = x.date.ToString("yyyy-MM-dd"),
+                LinkedTickets = x.LinkedTickets,
+                DistinctProblems = x.DistinctProblems
+            })
+            .ToList();
+    }
+
     private static int ClampDays(int days) => Math.Clamp(days, 1, 365);
 
     private static void PdfKeyValueRow(TableDescriptor t, string key, string value)
@@ -301,6 +709,58 @@ public sealed class EhcInternalReportsController : ControllerBase
         }
     }
 
+    private static DateTime EnsureUtc(DateTime dt)
+        => dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+
+    private static TimeZoneInfo ResolveTimeZoneOrUtc(string? calendarJson)
+    {
+        if (string.IsNullOrWhiteSpace(calendarJson))
+        {
+            return TimeZoneInfo.Utc;
+        }
+
+        if (!EhcSlaCalendarConfiguration.TryParse(calendarJson, out var cfg, out _))
+        {
+            return TimeZoneInfo.Utc;
+        }
+
+        var tzId = cfg?.TimeZoneId;
+        if (string.IsNullOrWhiteSpace(tzId))
+        {
+            return TimeZoneInfo.Utc;
+        }
+
+        return EhcSlaCalendarConfiguration.TryResolveTimeZone(tzId, out var tz, out _)
+            ? tz
+            : TimeZoneInfo.Utc;
+    }
+
+    private static TimeZoneInfo ResolveTimeZoneFromTicketCalendarOrDefault(
+        string? ticketCalendarJson,
+        TimeZoneInfo defaultTimeZone,
+        Dictionary<string, TimeZoneInfo> cache)
+    {
+        if (string.IsNullOrWhiteSpace(ticketCalendarJson))
+        {
+            return defaultTimeZone;
+        }
+
+        var key = ticketCalendarJson.Trim();
+        if (cache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        var tz = ResolveTimeZoneOrUtc(key);
+        if (tz.Equals(TimeZoneInfo.Utc) && !defaultTimeZone.Equals(TimeZoneInfo.Utc))
+        {
+            tz = defaultTimeZone;
+        }
+
+        cache[key] = tz;
+        return tz;
+    }
+
     private async Task<List<SlaCompliancePointDto>> BuildSlaComplianceAsync(Guid tenantId, int days, CancellationToken cancellationToken)
     {
         var points = new List<SlaCompliancePointDto>();
@@ -308,40 +768,102 @@ public sealed class EhcInternalReportsController : ControllerBase
 
         days = ClampDays(days);
         var now = DateTime.UtcNow;
-        var start = now.Date.AddDays(-(days - 1));
+
+        // Group by the SLA calendar's local date (time zone from SLA templates / ticket snapshot calendar).
+        // Use the most recently updated active SLA template timezone as the chart timezone fallback.
+        var chartCalendarJson = await _db.EhcSlaTemplates
+            .AsNoTracking()
+            .Where(t => t.TenantId == tenantId && t.IsActive && !t.IsDeleted && !string.IsNullOrWhiteSpace(t.CalendarConfigurationJson))
+            .OrderByDescending(t => t.UpdatedAt ?? t.CreatedAt)
+            .Select(t => t.CalendarConfigurationJson)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var chartTimeZone = ResolveTimeZoneOrUtc(chartCalendarJson);
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(now, chartTimeZone);
+        var startLocal = DateTime.SpecifyKind(localNow.Date.AddDays(-(days - 1)), DateTimeKind.Unspecified);
+        var endLocalExclusive = DateTime.SpecifyKind(startLocal.AddDays(days), DateTimeKind.Unspecified);
+
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(startLocal, chartTimeZone);
+        var endUtcExclusive = TimeZoneInfo.ConvertTimeToUtc(endLocalExclusive, chartTimeZone);
+
+        var startLocalDate = DateOnly.FromDateTime(startLocal);
+        var endLocalExclusiveDate = DateOnly.FromDateTime(endLocalExclusive);
 
         var baseQ = _db.EhcTickets
             .AsNoTracking()
-            .Where(t => t.TenantId == tenantId && !t.IsDeleted && t.CreatedAt >= start);
+            .Where(t =>
+                t.TenantId == tenantId &&
+                !t.IsDeleted &&
+                t.CreatedAt >= startUtc &&
+                t.CreatedAt < endUtcExclusive);
 
-        var raw = await baseQ
-            .GroupBy(t => t.CreatedAt.Date)
-            .Select(g => new
+        var rows = await baseQ
+            .Select(t => new
             {
-                date = g.Key,
-                total = g.Count(),
-                frMet = g.Count(t => t.FirstResponseDueAt.HasValue &&
-                                    t.FirstRespondedAt.HasValue &&
-                                    t.FirstRespondedAt.Value <= t.FirstResponseDueAt.Value),
-                frBreached = g.Count(t => t.FirstResponseDueAt.HasValue &&
-                                         ((t.FirstRespondedAt.HasValue && t.FirstRespondedAt.Value > t.FirstResponseDueAt.Value) ||
-                                          (!t.FirstRespondedAt.HasValue && t.FirstResponseDueAt.Value <= now))),
-                resMet = g.Count(t => t.ResolutionDueAt.HasValue &&
-                                     t.ResolvedAt.HasValue &&
-                                     t.ResolvedAt.Value <= t.ResolutionDueAt.Value),
-                resBreached = g.Count(t => t.ResolutionDueAt.HasValue &&
-                                          ((t.ResolvedAt.HasValue && t.ResolvedAt.Value > t.ResolutionDueAt.Value) ||
-                                           (!t.ResolvedAt.HasValue && t.ResolutionDueAt.Value <= now)))
+                t.CreatedAt,
+                t.Status,
+                t.FirstResponseDueAt,
+                t.FirstRespondedAt,
+                t.ResolutionDueAt,
+                t.ResolvedAt,
+                t.AppliedSlaCalendarConfigurationJson
             })
             .ToListAsync(cancellationToken);
 
-        var byDate = raw.ToDictionary(x => x.date, x => x);
+        var tzCache = new Dictionary<string, TimeZoneInfo>(StringComparer.Ordinal);
+
+        var agg = new Dictionary<DateOnly, (int total, int frMet, int frBreached, int resMet, int resBreached)>();
+        foreach (var r in rows)
+        {
+            var tz = ResolveTimeZoneFromTicketCalendarOrDefault(r.AppliedSlaCalendarConfigurationJson, chartTimeZone, tzCache);
+            var createdUtc = EnsureUtc(r.CreatedAt);
+            var createdLocal = TimeZoneInfo.ConvertTimeFromUtc(createdUtc, tz);
+            var localDate = DateOnly.FromDateTime(createdLocal);
+
+            if (localDate < startLocalDate || localDate >= endLocalExclusiveDate)
+            {
+                continue;
+            }
+
+            var isPaused = r.Status is EhcTicketStatus.PendingUser or EhcTicketStatus.PendingThirdParty;
+
+            var frMet = r.FirstResponseDueAt.HasValue &&
+                        r.FirstRespondedAt.HasValue &&
+                        r.FirstRespondedAt.Value <= r.FirstResponseDueAt.Value;
+
+            var frBreached = r.FirstResponseDueAt.HasValue &&
+                             !isPaused &&
+                             ((r.FirstRespondedAt.HasValue && r.FirstRespondedAt.Value > r.FirstResponseDueAt.Value) ||
+                              (!r.FirstRespondedAt.HasValue && r.FirstResponseDueAt.Value <= now));
+
+            var resMet = r.ResolutionDueAt.HasValue &&
+                         r.ResolvedAt.HasValue &&
+                         r.ResolvedAt.Value <= r.ResolutionDueAt.Value;
+
+            var resBreached = r.ResolutionDueAt.HasValue &&
+                              !isPaused &&
+                              ((r.ResolvedAt.HasValue && r.ResolvedAt.Value > r.ResolutionDueAt.Value) ||
+                               (!r.ResolvedAt.HasValue && r.ResolutionDueAt.Value <= now));
+
+            if (!agg.TryGetValue(localDate, out var a))
+            {
+                a = (0, 0, 0, 0, 0);
+            }
+
+            a.total += 1;
+            if (frMet) a.frMet += 1;
+            if (frBreached) a.frBreached += 1;
+            if (resMet) a.resMet += 1;
+            if (resBreached) a.resBreached += 1;
+            agg[localDate] = a;
+        }
 
         points = new List<SlaCompliancePointDto>(days);
         for (var i = 0; i < days; i++)
         {
-            var d = start.AddDays(i);
-            if (!byDate.TryGetValue(d, out var x))
+            var d = startLocal.AddDays(i);
+            var key = DateOnly.FromDateTime(d);
+            if (!agg.TryGetValue(key, out var x))
             {
                 points.Add(new SlaCompliancePointDto { Date = d.ToString("yyyy-MM-dd") });
                 continue;
@@ -545,6 +1067,102 @@ public sealed class EhcInternalReportsController : ControllerBase
         }
     }
 
+    [HttpGet("feedback/summary")]
+    public async Task<ActionResult> GetFeedbackSummary([FromQuery] int days = 30, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var tenantId = GetTenantIdOrEmpty();
+            var result = await BuildFeedbackSummaryAsync(tenantId, days, cancellationToken);
+            return Ok(new { success = true, data = result });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building EHC feedback summary report");
+            return StatusCode(500, new { success = false, message = "Failed to load report" });
+        }
+    }
+
+    [HttpGet("feedback/by-agent")]
+    public async Task<ActionResult> GetFeedbackByAgent([FromQuery] int days = 30, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var tenantId = GetTenantIdOrEmpty();
+            var rows = await BuildFeedbackByAgentAsync(tenantId, days, cancellationToken);
+            return Ok(new { success = true, data = rows });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building EHC feedback by-agent report");
+            return StatusCode(500, new { success = false, message = "Failed to load report" });
+        }
+    }
+
+    [HttpGet("feedback/by-department")]
+    public async Task<ActionResult> GetFeedbackByDepartment([FromQuery] int days = 30, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var tenantId = GetTenantIdOrEmpty();
+            var rows = await BuildFeedbackByDepartmentAsync(tenantId, days, cancellationToken);
+            return Ok(new { success = true, data = rows });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building EHC feedback by-department report");
+            return StatusCode(500, new { success = false, message = "Failed to load report" });
+        }
+    }
+
+    [HttpGet("feedback/trend")]
+    public async Task<ActionResult> GetFeedbackTrend([FromQuery] int days = 30, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var tenantId = GetTenantIdOrEmpty();
+            var points = await BuildFeedbackTrendAsync(tenantId, days, cancellationToken);
+            return Ok(new { success = true, data = points });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building EHC feedback trend report");
+            return StatusCode(500, new { success = false, message = "Failed to load report" });
+        }
+    }
+
+    [HttpGet("problems/summary")]
+    public async Task<ActionResult> GetProblemsSummary([FromQuery] int days = 30, [FromQuery] int top = 15, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var tenantId = GetTenantIdOrEmpty();
+            var result = await BuildProblemsSummaryAsync(tenantId, days, top, cancellationToken);
+            return Ok(new { success = true, data = result });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building EHC problems summary report");
+            return StatusCode(500, new { success = false, message = "Failed to load report" });
+        }
+    }
+
+    [HttpGet("problems/link-trend")]
+    public async Task<ActionResult> GetProblemLinkTrend([FromQuery] int days = 30, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var tenantId = GetTenantIdOrEmpty();
+            var result = await BuildProblemLinkTrendAsync(tenantId, days, cancellationToken);
+            return Ok(new { success = true, data = result });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building EHC problem link trend report");
+            return StatusCode(500, new { success = false, message = "Failed to load report" });
+        }
+    }
+
     [HttpGet("export/agent-performance.xlsx")]
     public async Task<IActionResult> ExportAgentPerformanceExcel([FromQuery] int days = 30, CancellationToken cancellationToken = default)
     {
@@ -675,6 +1293,278 @@ public sealed class EhcInternalReportsController : ControllerBase
         var bytes = await package.GetAsByteArrayAsync(cancellationToken);
         var fileName = $"ehc-escalations-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx";
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+    }
+
+    [HttpGet("export/feedback-summary.xlsx")]
+    public async Task<IActionResult> ExportFeedbackSummaryExcel([FromQuery] int days = 30, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantIdOrEmpty();
+        var summary = await BuildFeedbackSummaryAsync(tenantId, days, cancellationToken);
+
+        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+        using var package = new ExcelPackage();
+        var ws = package.Workbook.Worksheets.Add("Feedback Summary");
+
+        ws.Cells[1, 1].Value = "Days";
+        ws.Cells[1, 2].Value = days;
+        ws.Cells[2, 1].Value = "Feedback Count";
+        ws.Cells[2, 2].Value = summary.FeedbackCount;
+        ws.Cells[3, 1].Value = "Average Rating";
+        ws.Cells[3, 2].Value = summary.AvgRating;
+        ws.Cells[4, 1].Value = "Resolved/Closed Tickets";
+        ws.Cells[4, 2].Value = summary.ResolvedOrClosedTickets;
+        ws.Cells[5, 1].Value = "Response Rate (%)";
+        ws.Cells[5, 2].Value = summary.ResponseRatePercent;
+
+        ws.Cells[7, 1].Value = "Rating";
+        ws.Cells[7, 2].Value = "Count";
+        ws.Cells[7, 1, 7, 2].Style.Font.Bold = true;
+
+        var r = 8;
+        foreach (var kv in summary.RatingDistribution.OrderBy(x => x.Key))
+        {
+            ws.Cells[r, 1].Value = kv.Key;
+            ws.Cells[r, 2].Value = kv.Value;
+            r++;
+        }
+
+        ws.Cells[ws.Dimension.Address].AutoFitColumns();
+
+        var bytes = await package.GetAsByteArrayAsync(cancellationToken);
+        var fileName = $"ehc-feedback-summary-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx";
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+    }
+
+    [HttpGet("export/feedback-by-agent.xlsx")]
+    public async Task<IActionResult> ExportFeedbackByAgentExcel([FromQuery] int days = 30, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantIdOrEmpty();
+        var rows = await BuildFeedbackByAgentAsync(tenantId, days, cancellationToken);
+
+        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+        using var package = new ExcelPackage();
+        var ws = package.Workbook.Worksheets.Add("Feedback By Agent");
+
+        var headers = new[] { "Agent", "Feedback Count", "Avg Rating" };
+        for (var c = 0; c < headers.Length; c++)
+        {
+            ws.Cells[1, c + 1].Value = headers[c];
+            ws.Cells[1, c + 1].Style.Font.Bold = true;
+        }
+
+        var r = 2;
+        foreach (var row in rows)
+        {
+            ws.Cells[r, 1].Value = row.AgentName;
+            ws.Cells[r, 2].Value = row.FeedbackCount;
+            ws.Cells[r, 3].Value = row.AvgRating;
+            r++;
+        }
+
+        ws.Cells[ws.Dimension.Address].AutoFitColumns();
+
+        var bytes = await package.GetAsByteArrayAsync(cancellationToken);
+        var fileName = $"ehc-feedback-by-agent-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx";
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+    }
+
+    [HttpGet("export/feedback-by-department.xlsx")]
+    public async Task<IActionResult> ExportFeedbackByDepartmentExcel([FromQuery] int days = 30, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantIdOrEmpty();
+        var rows = await BuildFeedbackByDepartmentAsync(tenantId, days, cancellationToken);
+
+        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+        using var package = new ExcelPackage();
+        var ws = package.Workbook.Worksheets.Add("Feedback By Department");
+
+        var headers = new[] { "Department", "Feedback Count", "Avg Rating" };
+        for (var c = 0; c < headers.Length; c++)
+        {
+            ws.Cells[1, c + 1].Value = headers[c];
+            ws.Cells[1, c + 1].Style.Font.Bold = true;
+        }
+
+        var r = 2;
+        foreach (var row in rows)
+        {
+            ws.Cells[r, 1].Value = row.DepartmentName;
+            ws.Cells[r, 2].Value = row.FeedbackCount;
+            ws.Cells[r, 3].Value = row.AvgRating;
+            r++;
+        }
+
+        ws.Cells[ws.Dimension.Address].AutoFitColumns();
+
+        var bytes = await package.GetAsByteArrayAsync(cancellationToken);
+        var fileName = $"ehc-feedback-by-department-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx";
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+    }
+
+    [HttpGet("export/feedback-summary.pdf")]
+    public async Task<IActionResult> ExportFeedbackSummaryPdf([FromQuery] int days = 30, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantIdOrEmpty();
+        var summary = await BuildFeedbackSummaryAsync(tenantId, days, cancellationToken);
+
+        QuestPDF.Settings.License = LicenseType.Community;
+
+        var bytes = Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Margin(24);
+                page.Size(PageSizes.A4);
+                page.DefaultTextStyle(x => x.FontSize(10));
+
+                page.Header().Row(row =>
+                {
+                    row.RelativeItem().Column(col =>
+                    {
+                        col.Item().Text("CSAT Summary").FontSize(18).SemiBold();
+                        col.Item().Text($"Range: last {days} days • Generated: {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC").FontColor(Colors.Grey.Medium);
+                    });
+                });
+
+                page.Content().Column(col =>
+                {
+                    col.Item().PaddingBottom(6).Text("Totals").FontSize(12).SemiBold();
+
+                    col.Item().Table(t =>
+                    {
+                        t.ColumnsDefinition(cols =>
+                        {
+                            cols.RelativeColumn();
+                            cols.RelativeColumn();
+                        });
+
+                        PdfKeyValueRow(t, "Feedback count", summary.FeedbackCount.ToString("N0"));
+                        PdfKeyValueRow(t, "Average rating", summary.AvgRating?.ToString("0.00") ?? "—");
+                        PdfKeyValueRow(t, "Resolved/Closed tickets", summary.ResolvedOrClosedTickets.ToString("N0"));
+                        PdfKeyValueRow(t, "Response rate (%)", summary.ResponseRatePercent?.ToString("0.00") ?? "—");
+                    });
+
+                    col.Item().PaddingTop(12).PaddingBottom(6).Text("Rating Distribution").FontSize(12).SemiBold();
+                    col.Item().Table(t =>
+                    {
+                        t.ColumnsDefinition(cols =>
+                        {
+                            cols.ConstantColumn(80);
+                            cols.RelativeColumn();
+                        });
+
+                        PdfTableHeader(t, "Rating", "Count");
+                        foreach (var kv in summary.RatingDistribution.OrderBy(x => x.Key))
+                        {
+                            PdfTableRow(t, kv.Key.ToString(), kv.Value.ToString("N0"));
+                        }
+                    });
+                });
+            });
+        }).GeneratePdf();
+
+        var fileName = $"ehc-feedback-summary-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf";
+        return File(bytes, "application/pdf", fileName);
+    }
+
+    [HttpGet("export/feedback-by-agent.pdf")]
+    public async Task<IActionResult> ExportFeedbackByAgentPdf([FromQuery] int days = 30, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantIdOrEmpty();
+        var rows = await BuildFeedbackByAgentAsync(tenantId, days, cancellationToken);
+
+        QuestPDF.Settings.License = LicenseType.Community;
+
+        var bytes = Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Margin(24);
+                page.Size(PageSizes.A4);
+                page.DefaultTextStyle(x => x.FontSize(10));
+
+                page.Header().Row(row =>
+                {
+                    row.RelativeItem().Column(col =>
+                    {
+                        col.Item().Text("CSAT by Agent").FontSize(18).SemiBold();
+                        col.Item().Text($"Range: last {days} days • Generated: {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC").FontColor(Colors.Grey.Medium);
+                    });
+                });
+
+                page.Content().Column(col =>
+                {
+                    col.Item().Table(t =>
+                    {
+                        t.ColumnsDefinition(cols =>
+                        {
+                            cols.RelativeColumn();
+                            cols.ConstantColumn(90);
+                            cols.ConstantColumn(90);
+                        });
+
+                        PdfTableHeader(t, "Agent", "Responses", "Avg Rating");
+                        foreach (var r in rows)
+                        {
+                            PdfTableRow(t, r.AgentName, r.FeedbackCount.ToString("N0"), r.AvgRating?.ToString("0.00") ?? "—");
+                        }
+                    });
+                });
+            });
+        }).GeneratePdf();
+
+        var fileName = $"ehc-feedback-by-agent-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf";
+        return File(bytes, "application/pdf", fileName);
+    }
+
+    [HttpGet("export/feedback-by-department.pdf")]
+    public async Task<IActionResult> ExportFeedbackByDepartmentPdf([FromQuery] int days = 30, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantIdOrEmpty();
+        var rows = await BuildFeedbackByDepartmentAsync(tenantId, days, cancellationToken);
+
+        QuestPDF.Settings.License = LicenseType.Community;
+
+        var bytes = Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Margin(24);
+                page.Size(PageSizes.A4);
+                page.DefaultTextStyle(x => x.FontSize(10));
+
+                page.Header().Row(row =>
+                {
+                    row.RelativeItem().Column(col =>
+                    {
+                        col.Item().Text("CSAT by Department").FontSize(18).SemiBold();
+                        col.Item().Text($"Range: last {days} days • Generated: {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC").FontColor(Colors.Grey.Medium);
+                    });
+                });
+
+                page.Content().Column(col =>
+                {
+                    col.Item().Table(t =>
+                    {
+                        t.ColumnsDefinition(cols =>
+                        {
+                            cols.RelativeColumn();
+                            cols.ConstantColumn(90);
+                            cols.ConstantColumn(90);
+                        });
+
+                        PdfTableHeader(t, "Department", "Responses", "Avg Rating");
+                        foreach (var r in rows)
+                        {
+                            PdfTableRow(t, r.DepartmentName, r.FeedbackCount.ToString("N0"), r.AvgRating?.ToString("0.00") ?? "—");
+                        }
+                    });
+                });
+            });
+        }).GeneratePdf();
+
+        var fileName = $"ehc-feedback-by-department-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf";
+        return File(bytes, "application/pdf", fileName);
     }
 
     [HttpGet("export/summary.pdf")]

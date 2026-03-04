@@ -102,6 +102,23 @@ public interface IPurchaseOrderItemRepository : IGenericRepository<PurchaseOrder
     Task DeleteItemAsync(Guid itemId);
 }
 
+/// <summary>
+/// Repository interface for planned landed costs captured at PO stage
+/// </summary>
+public interface IPurchaseOrderLandedCostPlanRepository : IGenericRepository<PurchaseOrderLandedCostPlan>
+{
+    Task<PurchaseOrderLandedCostPlan?> GetByPurchaseOrderIdAsync(Guid purchaseOrderId);
+    Task<PurchaseOrderLandedCostPlan?> GetWithItemsByPurchaseOrderIdAsync(Guid purchaseOrderId);
+}
+
+/// <summary>
+/// Repository interface for PO planned landed cost items
+/// </summary>
+public interface IPurchaseOrderLandedCostPlanItemRepository : IGenericRepository<PurchaseOrderLandedCostPlanItem>
+{
+    Task<IEnumerable<PurchaseOrderLandedCostPlanItem>> GetByPlanIdAsync(Guid planId);
+}
+
 #endregion
 
 #region Purchase Order Receipt Repositories

@@ -83,6 +83,14 @@ namespace ErpSystem.Web.Services
                 await EnsureEhcCategoriesSeededAsync();
                 await EnsureEhcSlaTemplatesSeededAsync();
 
+                // Always ensure baseline KB exists (Phase 2 agent productivity)
+                _logger.LogInformation("Ensuring EHC knowledge base is seeded...");
+                await EnsureEhcKnowledgeBaseSeededAsync();
+
+                // Always ensure baseline file upload governance exists (Phase 2 attachment hardening)
+                _logger.LogInformation("Ensuring file upload policies are seeded...");
+                await EnsureFileUploadPoliciesSeededAsync();
+
                 // Always ensure baseline EHC notification topics exist (templated in-app/email notifications)
                 _logger.LogInformation("Ensuring EHC notification topics are seeded...");
                 await EnsureEhcNotificationTopicsSeededAsync();
@@ -104,6 +112,15 @@ namespace ErpSystem.Web.Services
                     // Seed quality control checklists
                     _logger.LogInformation("Ensuring QC checklists are seeded...");
                     await SeedQualityControlChecklistsAsync();
+
+                    // Seed EHC helpdesk demo data (tickets, feedback, problems, service requests, channels, compliance)
+                    _logger.LogInformation("Ensuring EHC helpdesk demo data is seeded...");
+                    var defaultTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Code == "DEFAULT");
+                    if (defaultTenant != null)
+                    {
+                        var ehcDemoSeeder = new EhcHelpdeskDemoSeeder(_context, _logger);
+                        await ehcDemoSeeder.SeedAsync(defaultTenant.Id);
+                    }
                 }
 
                 await _context.SaveChangesAsync();
@@ -393,6 +410,17 @@ namespace ErpSystem.Web.Services
                     <p>Open ticket: <a href="{{ActionUrl}}">{{ActionUrl}}</a></p>
                     """);
 
+                var feedbackRequestedTemplateId = await EnsureEmailTemplateAsync(
+                    tenantId,
+                    name: "EHC Feedback Requested (Requester)",
+                    subject: "How did we do? {{ticketNumber}}",
+                    htmlBody:
+                    """
+                    <h2>We’d love your feedback</h2>
+                    <p>Your ticket <strong>{{ticketNumber}}</strong> has been marked as {{status}}.</p>
+                    <p>Please rate your experience here: <a href="{{ActionUrl}}">{{ActionUrl}}</a></p>
+                    """);
+
                 await EnsureNotificationTopicAsync(
                     tenantId,
                     key: "EhcTicket.Created.Requester",
@@ -465,6 +493,24 @@ namespace ErpSystem.Web.Services
                         (kind: "UserFromData", value: "requesterUserId", inApp: true, email: true)
                     });
 
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.FeedbackRequested.Requester",
+                    name: "EHC Feedback Requested (Requester)",
+                    description: "Ask the requester to rate support after resolution/closure.",
+                    entityType: "EhcTicket",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: true,
+                    inAppTitleTemplate: "Feedback requested: {{ticketNumber}}",
+                    inAppBodyTemplate: "How was your experience? Please rate ticket {{ticketNumber}}.",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: feedbackRequestedTemplateId,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "requesterUserId", inApp: true, email: true)
+                    });
+
                 // Internal topics (in-app only by default).
                 await EnsureNotificationTopicAsync(
                     tenantId,
@@ -482,7 +528,8 @@ namespace ErpSystem.Web.Services
                     recipients: new[]
                     {
                         (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false),
-                        (kind: "Role", value: Constants.Roles.HelpdeskAgent, inApp: true, email: false)
+                        (kind: "Role", value: Constants.Roles.HelpdeskAgent, inApp: true, email: false),
+                        (kind: "UsersFromData", value: "watcherUserIds", inApp: true, email: false)
                     });
 
                 await EnsureNotificationTopicAsync(
@@ -501,6 +548,7 @@ namespace ErpSystem.Web.Services
                     recipients: new[]
                     {
                         (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "UsersFromData", value: "watcherUserIds", inApp: true, email: false),
                         (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false)
                     });
 
@@ -520,7 +568,66 @@ namespace ErpSystem.Web.Services
                     recipients: new[]
                     {
                         (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "UsersFromData", value: "watcherUserIds", inApp: true, email: false),
                         (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.AgentMessage.Internal",
+                    name: "EHC Ticket Agent Message (Internal)",
+                    description: "Notify internal users when a support agent replies to the requester.",
+                    entityType: "EhcTicket",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: false,
+                    inAppTitleTemplate: "Support replied: {{ticketNumber}}",
+                    inAppBodyTemplate: "{{messagePreview}}",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: null,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "UsersFromData", value: "watcherUserIds", inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.InternalComment.Internal",
+                    name: "EHC Ticket Internal Note (Internal)",
+                    description: "Notify internal users when an internal note is added to a ticket.",
+                    entityType: "EhcTicket",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: false,
+                    inAppTitleTemplate: "Internal note: {{ticketNumber}}",
+                    inAppBodyTemplate: "{{messagePreview}}",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: null,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "UsersFromData", value: "watcherUserIds", inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcTicket.Mention.Internal",
+                    name: "EHC Ticket Mention (Internal)",
+                    description: "Notify internal users when they are @mentioned on a ticket.",
+                    entityType: "EhcTicket",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: false,
+                    inAppTitleTemplate: "Mention: {{ticketNumber}}",
+                    inAppBodyTemplate: "{{mentionedByName}} mentioned you: {{messagePreview}}",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: null,
+                    recipients: new[]
+                    {
+                        (kind: "UsersFromData", value: "mentionedUserIds", inApp: true, email: false)
                     });
 
                 await EnsureNotificationTopicAsync(
@@ -539,6 +646,7 @@ namespace ErpSystem.Web.Services
                     recipients: new[]
                     {
                         (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "UsersFromData", value: "watcherUserIds", inApp: true, email: false),
                         (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false)
                     });
 
@@ -558,6 +666,7 @@ namespace ErpSystem.Web.Services
                     recipients: new[]
                     {
                         (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "UsersFromData", value: "watcherUserIds", inApp: true, email: false),
                         (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false)
                     });
 
@@ -577,6 +686,7 @@ namespace ErpSystem.Web.Services
                     recipients: new[]
                     {
                         (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "UsersFromData", value: "watcherUserIds", inApp: true, email: false),
                         (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false)
                     });
 
@@ -596,6 +706,7 @@ namespace ErpSystem.Web.Services
                     recipients: new[]
                     {
                         (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "UsersFromData", value: "watcherUserIds", inApp: true, email: false),
                         (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false),
                         (kind: "Role", value: Constants.Roles.HelpdeskManager, inApp: true, email: false)
                     });
@@ -616,8 +727,227 @@ namespace ErpSystem.Web.Services
                     recipients: new[]
                     {
                         (kind: "UserFromData", value: "assignedToUserId", inApp: true, email: false),
+                        (kind: "UsersFromData", value: "watcherUserIds", inApp: true, email: false),
                         (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false),
                         (kind: "Role", value: Constants.Roles.HelpdeskManager, inApp: true, email: false)
+                    });
+
+                // Service Catalog / Service Requests (customer + internal notifications)
+                var srSubmittedTemplateId = await EnsureEmailTemplateAsync(
+                    tenantId,
+                    name: "Service Request Submitted (Customer)",
+                    subject: "Service request submitted: {{requestNumber}}",
+                    htmlBody:
+                    """
+                    <h2>Service request submitted</h2>
+                    <p>Your service request <strong>{{requestNumber}}</strong> has been submitted.</p>
+                    <p><strong>Type:</strong> {{requestTypeName}}</p>
+                    <p>You can view it here: <a href="{{ActionUrl}}">{{ActionUrl}}</a></p>
+                    """);
+
+                var srApprovedTemplateId = await EnsureEmailTemplateAsync(
+                    tenantId,
+                    name: "Service Request Approved (Customer)",
+                    subject: "Service request approved: {{requestNumber}}",
+                    htmlBody:
+                    """
+                    <h2>Service request approved</h2>
+                    <p>Your service request <strong>{{requestNumber}}</strong> has been approved.</p>
+                    <p>View: <a href="{{ActionUrl}}">{{ActionUrl}}</a></p>
+                    """);
+
+                var srRejectedTemplateId = await EnsureEmailTemplateAsync(
+                    tenantId,
+                    name: "Service Request Rejected (Customer)",
+                    subject: "Service request rejected: {{requestNumber}}",
+                    htmlBody:
+                    """
+                    <h2>Service request rejected</h2>
+                    <p>Your service request <strong>{{requestNumber}}</strong> was rejected.</p>
+                    <p><strong>Reason:</strong> {{reason}}</p>
+                    <p>View: <a href="{{ActionUrl}}">{{ActionUrl}}</a></p>
+                    """);
+
+                var srFulfilledTemplateId = await EnsureEmailTemplateAsync(
+                    tenantId,
+                    name: "Service Request Fulfilled (Customer)",
+                    subject: "Service request fulfilled: {{requestNumber}}",
+                    htmlBody:
+                    """
+                    <h2>Service request fulfilled</h2>
+                    <p>Your service request <strong>{{requestNumber}}</strong> has been fulfilled.</p>
+                    <p>View: <a href="{{ActionUrl}}">{{ActionUrl}}</a></p>
+                    """);
+
+                var srClosedTemplateId = await EnsureEmailTemplateAsync(
+                    tenantId,
+                    name: "Service Request Closed (Customer)",
+                    subject: "Service request closed: {{requestNumber}}",
+                    htmlBody:
+                    """
+                    <h2>Service request closed</h2>
+                    <p>Your service request <strong>{{requestNumber}}</strong> has been closed.</p>
+                    <p>View: <a href="{{ActionUrl}}">{{ActionUrl}}</a></p>
+                    """);
+
+                var srAttachmentTemplateId = await EnsureEmailTemplateAsync(
+                    tenantId,
+                    name: "Service Request Attachment (Customer)",
+                    subject: "New attachment: {{requestNumber}}",
+                    htmlBody:
+                    """
+                    <h2>New attachment</h2>
+                    <p>A new attachment was added to service request <strong>{{requestNumber}}</strong>.</p>
+                    <p><strong>File:</strong> {{fileName}}</p>
+                    <p>View: <a href="{{ActionUrl}}">{{ActionUrl}}</a></p>
+                    """);
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcServiceRequest.Submitted.Internal",
+                    name: "Service Request Submitted (Internal)",
+                    description: "Notify internal helpdesk users when a service request is submitted.",
+                    entityType: "EhcServiceRequest",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: false,
+                    inAppTitleTemplate: "New service request: {{requestNumber}}",
+                    inAppBodyTemplate: "{{requestTypeName}} — {{title}}",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: null,
+                    recipients: new[]
+                    {
+                        (kind: "Role", value: Constants.Roles.HelpdeskAgent, inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskManager, inApp: true, email: false)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcServiceRequest.Attachment.Internal",
+                    name: "Service Request Attachment (Internal)",
+                    description: "Notify internal helpdesk users when a requester uploads an attachment to a service request.",
+                    entityType: "EhcServiceRequest",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: false,
+                    inAppTitleTemplate: "Attachment: {{requestNumber}}",
+                    inAppBodyTemplate: "New attachment uploaded: {{fileName}}",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: null,
+                    recipients: new[]
+                    {
+                        (kind: "Role", value: Constants.Roles.HelpdeskAgent, inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskSupervisor, inApp: true, email: false),
+                        (kind: "Role", value: Constants.Roles.HelpdeskManager, inApp: true, email: false)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcServiceRequest.Submitted.Customer",
+                    name: "Service Request Submitted (Customer)",
+                    description: "Notify the requester when a service request is submitted.",
+                    entityType: "EhcServiceRequest",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: true,
+                    inAppTitleTemplate: "Request submitted: {{requestNumber}}",
+                    inAppBodyTemplate: "{{requestTypeName}}",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: srSubmittedTemplateId,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "TargetUserId", inApp: true, email: true)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcServiceRequest.Approved.Customer",
+                    name: "Service Request Approved (Customer)",
+                    description: "Notify the requester when a service request is approved.",
+                    entityType: "EhcServiceRequest",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: true,
+                    inAppTitleTemplate: "Approved: {{requestNumber}}",
+                    inAppBodyTemplate: "Your request was approved.",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: srApprovedTemplateId,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "TargetUserId", inApp: true, email: true)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcServiceRequest.Rejected.Customer",
+                    name: "Service Request Rejected (Customer)",
+                    description: "Notify the requester when a service request is rejected.",
+                    entityType: "EhcServiceRequest",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: true,
+                    inAppTitleTemplate: "Rejected: {{requestNumber}}",
+                    inAppBodyTemplate: "{{reason}}",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: srRejectedTemplateId,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "TargetUserId", inApp: true, email: true)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcServiceRequest.Fulfilled.Customer",
+                    name: "Service Request Fulfilled (Customer)",
+                    description: "Notify the requester when a service request is fulfilled.",
+                    entityType: "EhcServiceRequest",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: true,
+                    inAppTitleTemplate: "Fulfilled: {{requestNumber}}",
+                    inAppBodyTemplate: "Your request was fulfilled.",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: srFulfilledTemplateId,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "TargetUserId", inApp: true, email: true)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcServiceRequest.Closed.Customer",
+                    name: "Service Request Closed (Customer)",
+                    description: "Notify the requester when a service request is closed.",
+                    entityType: "EhcServiceRequest",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: true,
+                    inAppTitleTemplate: "Closed: {{requestNumber}}",
+                    inAppBodyTemplate: "Your request was closed.",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: srClosedTemplateId,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "TargetUserId", inApp: true, email: true)
+                    });
+
+                await EnsureNotificationTopicAsync(
+                    tenantId,
+                    key: "EhcServiceRequest.Attachment.Customer",
+                    name: "Service Request Attachment (Customer)",
+                    description: "Notify the requester when an attachment is added by support.",
+                    entityType: "EhcServiceRequest",
+                    isRequired: false,
+                    enableInApp: true,
+                    enableEmail: true,
+                    inAppTitleTemplate: "Attachment: {{requestNumber}}",
+                    inAppBodyTemplate: "{{fileName}}",
+                    actionUrlTemplate: "{{ActionUrl}}",
+                    emailTemplateId: srAttachmentTemplateId,
+                    recipients: new[]
+                    {
+                        (kind: "UserFromData", value: "TargetUserId", inApp: true, email: true)
                     });
             }
 
@@ -1269,6 +1599,95 @@ namespace ErpSystem.Web.Services
             {
                 _logger.LogInformation("Default tenant modules already up to date for {TenantName}.", defaultTenant.Name);
             }
+        }
+
+        private async Task EnsureEhcKnowledgeBaseSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    var hasAny = await _context.EhcKnowledgeBaseArticles.AnyAsync(a => a.TenantId == tenant.Id && !a.IsDeleted);
+                    if (hasAny)
+                    {
+                        continue;
+                    }
+
+                    var now = DateTime.UtcNow;
+
+                    var cat = new ErpSystem.Core.Entities.Ehc.EhcKnowledgeBaseCategory
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        Code = "GENERAL",
+                        Name = "General",
+                        Description = "General support articles",
+                        IsActive = true,
+                        CreatedAt = now,
+                        CreatedBy = "System"
+                    };
+
+                    _context.EhcKnowledgeBaseCategories.Add(cat);
+
+                    _context.EhcKnowledgeBaseArticles.Add(new ErpSystem.Core.Entities.Ehc.EhcKnowledgeBaseArticle
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        Code = "GETTING_STARTED",
+                        Title = "Getting started with Helpdesk tickets",
+                        Summary = "How to create, assign and transition tickets.",
+                        Body = "Use Helpdesk → Tickets to create and track enquiries/complaints/support requests.\n\nTip: You can @mention colleagues using @email and add them as watchers for updates.",
+                        CategoryId = cat.Id,
+                        TagsCsv = "helpdesk,tickets,workflow,watchers,mentions",
+                        IsPublished = true,
+                        IsInternalOnly = true,
+                        ViewCount = 0,
+                        CreatedAt = now,
+                        CreatedBy = "System"
+                    });
+
+                    await _context.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed EHC knowledge base");
+            }
+        }
+
+        private async Task EnsureFileUploadPoliciesSeededAsync()
+        {
+            var tenants = await _context.Tenants.AsNoTracking().Where(t => !t.IsDeleted).Select(t => new { t.Id }).ToListAsync();
+            if (tenants.Count == 0) return;
+
+            foreach (var t in tenants)
+            {
+                var tenantId = t.Id;
+                if (tenantId == Guid.Empty) continue;
+
+                var hasGlobal = await _context.FileUploadPolicies.AnyAsync(p => p.TenantId == tenantId && !p.IsDeleted && p.Category == "*");
+                if (!hasGlobal)
+                {
+                    _context.FileUploadPolicies.Add(new FileUploadPolicy
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        Category = "*",
+                        IsEnabled = true,
+                        MaxFileSizeBytes = 10 * 1024 * 1024, // 10MB (matches appsettings defaults)
+                        MaxTenantTotalBytes = 5L * 1024 * 1024 * 1024, // 5GB per tenant baseline
+                        MaxCategoryTotalBytes = 1024L * 1024 * 1024, // 1GB per category baseline
+                        AllowedExtensionsCsv = null, // fallback to API defaults/config
+                        AllowedMimeTypesCsv = null, // fallback to API defaults/config
+                        RequireVirusScan = false,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = "System"
+                    });
+                }
+            }
+
+            await _context.SaveChangesAsync();
         }
 
         private async Task CreateTestUserAsync(

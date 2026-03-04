@@ -53,6 +53,8 @@ const priorityBadgeClassName = (p: EhcTicketPriority) => {
   }
 };
 
+const isTerminalStatus = (s: EhcTicketStatus) => s === 'Resolved' || s === 'Closed';
+
 export default function HelpdeskTicketsPage() {
   const router = useRouter();
   const qc = useQueryClient();
@@ -132,6 +134,21 @@ export default function HelpdeskTicketsPage() {
     queryKey: ['ehc', 'internal', 'departments'],
     queryFn: () => ehcInternalTicketService.listDepartments(),
   });
+
+  const { data: priorityLevels } = useQuery({
+    queryKey: ['ehc', 'internal', 'priorities'],
+    queryFn: () => ehcInternalTicketService.listPriorityLevels(),
+  });
+
+  const activePriorityLevels = useMemo(() => {
+    return (priorityLevels ?? [])
+      .filter((p) => p.isActive)
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  }, [priorityLevels]);
+
+  const priorityLabelByValue = useMemo(() => {
+    return new Map((priorityLevels ?? []).map((p) => [p.priority, p.displayName] as const));
+  }, [priorityLevels]);
 
   const { data: categories } = useQuery({
     queryKey: ['ehc', 'admin', 'categories'],
@@ -220,7 +237,11 @@ export default function HelpdeskTicketsPage() {
         id: 'priority',
         header: 'Priority',
         accessorFn: (r) => r.priority,
-        cell: ({ row }) => <Badge className={priorityBadgeClassName(row.original.priority)}>{row.original.priority}</Badge>,
+        cell: ({ row }) => (
+          <Badge className={priorityBadgeClassName(row.original.priority)}>
+            {priorityLabelByValue.get(row.original.priority) ?? row.original.priority}
+          </Badge>
+        ),
       },
       {
         id: 'status',
@@ -242,6 +263,62 @@ export default function HelpdeskTicketsPage() {
         id: 'assignedToName',
         header: 'Assignee',
         accessorFn: (r) => r.assignedToName || '—',
+      },
+      {
+        id: 'sla',
+        header: 'SLA',
+        accessorFn: (r) => {
+          const now = Date.now();
+          const firstResponseDueAt = r.firstResponseDueAt ? Date.parse(r.firstResponseDueAt) : Number.NaN;
+          const resolutionDueAt = r.resolutionDueAt ? Date.parse(r.resolutionDueAt) : Number.NaN;
+          const firstRespondedAt = r.firstRespondedAt ? Date.parse(r.firstRespondedAt) : Number.NaN;
+          const resolvedAt = r.resolvedAt ? Date.parse(r.resolvedAt) : Number.NaN;
+          const closedAt = r.closedAt ? Date.parse(r.closedAt) : Number.NaN;
+
+          const firstResponseOverdue = !isTerminalStatus(r.status) && !Number.isNaN(firstResponseDueAt) && now > firstResponseDueAt && Number.isNaN(firstRespondedAt);
+          const resolutionOverdue = !isTerminalStatus(r.status) && !Number.isNaN(resolutionDueAt) && now > resolutionDueAt && Number.isNaN(resolvedAt) && Number.isNaN(closedAt);
+
+          if (resolutionOverdue) return 'ResolutionOverdue';
+          if (firstResponseOverdue) return 'FirstResponseOverdue';
+          return '';
+        },
+        cell: ({ row }) => {
+          const t = row.original;
+          if (isTerminalStatus(t.status)) return <span className="text-slate-500">—</span>;
+
+          const now = Date.now();
+          const firstResponseDueAt = t.firstResponseDueAt ? Date.parse(t.firstResponseDueAt) : Number.NaN;
+          const resolutionDueAt = t.resolutionDueAt ? Date.parse(t.resolutionDueAt) : Number.NaN;
+          const firstRespondedAt = t.firstRespondedAt ? Date.parse(t.firstRespondedAt) : Number.NaN;
+          const resolvedAt = t.resolvedAt ? Date.parse(t.resolvedAt) : Number.NaN;
+          const closedAt = t.closedAt ? Date.parse(t.closedAt) : Number.NaN;
+
+          const firstResponseOverdue = !Number.isNaN(firstResponseDueAt) && now > firstResponseDueAt && Number.isNaN(firstRespondedAt);
+          const resolutionOverdue = !Number.isNaN(resolutionDueAt) && now > resolutionDueAt && Number.isNaN(resolvedAt) && Number.isNaN(closedAt);
+
+          if (!firstResponseOverdue && !resolutionOverdue) return <span className="text-slate-500">—</span>;
+
+          return (
+            <div className="flex flex-col gap-1">
+              {firstResponseOverdue ? (
+                <Badge
+                  className="bg-orange-600 text-white hover:bg-orange-600/90 dark:bg-orange-500 dark:hover:bg-orange-500/90 w-fit"
+                  title={t.firstResponseDueAt ? `First response was due: ${formatCreatedAt(t.firstResponseDueAt)}` : 'First response overdue'}
+                >
+                  Response overdue
+                </Badge>
+              ) : null}
+              {resolutionOverdue ? (
+                <Badge
+                  className="bg-red-600 text-white hover:bg-red-600/90 dark:bg-red-500 dark:hover:bg-red-500/90 w-fit"
+                  title={t.resolutionDueAt ? `Resolution was due: ${formatCreatedAt(t.resolutionDueAt)}` : 'Resolution overdue'}
+                >
+                  Resolution overdue
+                </Badge>
+              ) : null}
+            </div>
+          );
+        },
       },
     ];
   }, [formatCreatedAt]);
@@ -308,10 +385,11 @@ export default function HelpdeskTicketsPage() {
             <Label className="text-xs text-slate-600">Priority</Label>
             <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={priority} onChange={(e) => setPriority(e.target.value as any)}>
               <option value="">All</option>
-              <option value="Low">Low</option>
-              <option value="Medium">Medium</option>
-              <option value="High">High</option>
-              <option value="Critical">Critical</option>
+              {activePriorityLevels.map((p) => (
+                <option key={p.priority} value={p.priority}>
+                  {p.displayName}
+                </option>
+              ))}
             </select>
           </div>
 

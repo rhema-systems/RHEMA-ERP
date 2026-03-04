@@ -1993,6 +1993,7 @@ public class MaintenanceAssetDto
     public DateTime? LastOperatingHoursUpdate { get; set; }
     public double? Mileage { get; set; }
     public DateTime? LastMileageUpdate { get; set; }
+    public bool IsFleetAsset { get; set; } = false;
 
     // Navigation properties
     public MaintenanceAssetCategoryDto? AssetCategory { get; set; }
@@ -2035,6 +2036,7 @@ public class MaintenanceAssetListDto
     public DateTime? WarrantyEndDate { get; set; }
     public DateTime? WarrantyStartDate { get; set; }
     public string? SerialNumber { get; set; }
+    public bool IsFleetAsset { get; set; } = false;
 }
 
 public class CreateMaintenanceAssetDto
@@ -2098,6 +2100,7 @@ public class CreateMaintenanceAssetDto
     public string? Specifications { get; set; }
     public string? DocumentLinks { get; set; }
     public string? Images { get; set; }
+    public bool IsFleetAsset { get; set; } = false;
 }
 
 public class UpdateMaintenanceAssetDto
@@ -2156,6 +2159,7 @@ public class UpdateMaintenanceAssetDto
     public string? Specifications { get; set; }
     public string? DocumentLinks { get; set; }
     public string? Images { get; set; }
+    public bool IsFleetAsset { get; set; } = false;
 }
 
 // MaintenanceAssetCategory DTOs

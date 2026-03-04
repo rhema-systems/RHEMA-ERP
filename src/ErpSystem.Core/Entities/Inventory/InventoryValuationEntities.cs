@@ -473,7 +473,12 @@ public enum InventoryMovementType
     /// <summary>
     /// Requisition return
     /// </summary>
-    RequisitionReturn = 15
+    RequisitionReturn = 15,
+
+    /// <summary>
+    /// Value-only adjustment from landed cost revaluation (no quantity movement)
+    /// </summary>
+    LandedCostRevaluation = 16
 }
 
 /// <summary>

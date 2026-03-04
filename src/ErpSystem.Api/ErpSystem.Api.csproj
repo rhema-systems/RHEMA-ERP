@@ -74,6 +74,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Proxies" Version="8.0.0" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
     <PackageReference Include="Twilio" Version="7.14.3" />
+    <PackageReference Include="Azure.Identity" Version="1.14.2" />
   </ItemGroup>
 
   <ItemGroup>
