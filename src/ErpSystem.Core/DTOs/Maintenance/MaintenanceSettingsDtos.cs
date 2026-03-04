@@ -7,6 +7,7 @@ public class MaintenanceSettingsDto
 
     public int FleetComplianceDueSoonDays { get; set; }
     public bool BlockFleetDispatchWhenComplianceDueSoon { get; set; }
+    public bool RequirePredefinedFleetTripDestinationOnDispatch { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public Guid? CreatedById { get; set; }
@@ -17,5 +18,5 @@ public class UpdateMaintenanceSettingsDto
 {
     public int FleetComplianceDueSoonDays { get; set; }
     public bool BlockFleetDispatchWhenComplianceDueSoon { get; set; }
+    public bool RequirePredefinedFleetTripDestinationOnDispatch { get; set; }
 }
-

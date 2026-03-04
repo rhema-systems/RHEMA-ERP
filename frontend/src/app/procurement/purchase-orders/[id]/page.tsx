@@ -46,10 +46,24 @@ import { toast } from 'sonner';
 import {
   purchasingService,
   PurchaseOrderDetailDto,
+  PurchaseOrderLandedCostPlanDto,
   ApprovalDto
 } from '@/services/purchasingService';
 import { format } from 'date-fns';
 import Link from 'next/link';
+
+const LANDED_COST_TYPES: Array<{ value: number; label: string }> = [
+  { value: 1, label: 'Freight / Shipping' },
+  { value: 2, label: 'Customs Duty' },
+  { value: 3, label: 'Insurance' },
+  { value: 4, label: 'Handling' },
+  { value: 5, label: 'Brokerage' },
+  { value: 6, label: 'Storage / Warehousing' },
+  { value: 7, label: 'Other' },
+];
+
+const getLandedCostTypeLabel = (costType: number) =>
+  LANDED_COST_TYPES.find(t => t.value === costType)?.label || 'Other';
 
 const POStatuses = [
   { value: 'Draft', label: 'Draft', color: 'bg-gray-100 text-gray-800', icon: FileText },
@@ -68,6 +82,7 @@ export default function PurchaseOrderDetailPage() {
   const id = params.id as string;
   
   const [order, setOrder] = useState<PurchaseOrderDetailDto | null>(null);
+  const [landedCostPlan, setLandedCostPlan] = useState<PurchaseOrderLandedCostPlanDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
@@ -78,8 +93,12 @@ export default function PurchaseOrderDetailPage() {
     try {
       setLoading(true);
       setError(null);
-      const data = await purchasingService.getPurchaseOrderById(id);
+      const [data, plan] = await Promise.all([
+        purchasingService.getPurchaseOrderById(id),
+        purchasingService.getPurchaseOrderLandedCostPlan(id)
+      ]);
       setOrder(data);
+      setLandedCostPlan(plan);
     } catch (err: any) {
       console.error('Error fetching purchase order:', err);
       setError('Failed to load purchase order');
@@ -519,6 +538,71 @@ export default function PurchaseOrderDetailPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Planned Landed Costs (carried to GRN) */}
+          {landedCostPlan && (landedCostPlan.items?.length || 0) > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <TruckIcon className="h-5 w-5" />
+                  Planned Landed Costs (carried to GRN)
+                </CardTitle>
+                <CardDescription>
+                  Total planned ({(landedCostPlan.currency || 'USD').toUpperCase()}):{' '}
+                  {(landedCostPlan.totalPlannedCost || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {landedCostPlan.notes && (
+                  <div>
+                    <Label className="text-muted-foreground">Notes</Label>
+                    <p className="mt-1 text-sm whitespace-pre-wrap">{landedCostPlan.notes}</p>
+                  </div>
+                )}
+
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="min-w-[180px]">Type</TableHead>
+                        <TableHead>Description</TableHead>
+                        <TableHead className="min-w-[220px]">Service Supplier</TableHead>
+                        <TableHead className="min-w-[140px]">Allocation</TableHead>
+                        <TableHead className="min-w-[120px] text-right">Amount</TableHead>
+                        <TableHead className="min-w-[90px]">Curr</TableHead>
+                        <TableHead className="min-w-[100px] text-right">Rate</TableHead>
+                        <TableHead className="min-w-[150px] text-right">In Plan Curr</TableHead>
+                        <TableHead className="min-w-[140px]">Ref</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {landedCostPlan.items.map((i) => (
+                        <TableRow key={i.id}>
+                          <TableCell className="font-medium">{getLandedCostTypeLabel(i.costType)}</TableCell>
+                          <TableCell className="max-w-[420px] truncate" title={i.description}>
+                            {i.description}
+                          </TableCell>
+                          <TableCell>{i.supplierName || '-'}</TableCell>
+                          <TableCell>{i.allocationMethod}</TableCell>
+                          <TableCell className="text-right">
+                            {i.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </TableCell>
+                          <TableCell>{(i.currency || landedCostPlan.currency || 'USD').toUpperCase()}</TableCell>
+                          <TableCell className="text-right">
+                            {(i.exchangeRate || 1).toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                          </TableCell>
+                          <TableCell className="text-right font-medium">
+                            {(i.amountInPlanCurrency || (i.amount * (i.exchangeRate || 1))).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </TableCell>
+                          <TableCell>{i.referenceNumber || '-'}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Terms & Notes */}
           {(order.terms || order.notes) && (

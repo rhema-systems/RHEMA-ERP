@@ -11,6 +11,84 @@ import { Label } from '@/components/ui/label';
 import { ehcAdminService, type CreateEhcSlaTemplateAdmin, type EhcSlaTemplateAdmin } from '@/services/ehcAdminService';
 import type { EhcTicketPriority, EhcTicketType } from '@/services/ehcTicketService';
 
+type CalendarMode = 'builder' | 'raw';
+
+type CalendarBuilderState = {
+  enabled: boolean;
+  mode: CalendarMode;
+  timeZoneId: string;
+  workdayStart: string;
+  workdayEnd: string;
+  workingDays: Record<number, boolean>;
+  holidaysText: string;
+  rawJson: string;
+};
+
+const defaultCalendarState = (): CalendarBuilderState => ({
+  enabled: false,
+  mode: 'builder',
+  timeZoneId: 'UTC',
+  workdayStart: '08:00',
+  workdayEnd: '17:00',
+  workingDays: { 1: true, 2: true, 3: true, 4: true, 5: true, 6: false, 0: false },
+  holidaysText: '',
+  rawJson: '',
+});
+
+const tryParseCalendarJson = (json?: string | null): Partial<CalendarBuilderState> | null => {
+  if (!json || !json.trim()) return null;
+  try {
+    const obj = JSON.parse(json);
+    const get = (k: string) => (obj?.[k] ?? obj?.[k[0].toLowerCase() + k.slice(1)]);
+    const workingDays = get('WorkingDays');
+    const holidays = get('Holidays');
+
+    const wd: Record<number, boolean> = { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false };
+    if (Array.isArray(workingDays)) {
+      for (const d of workingDays) {
+        const n = Number(d);
+        if (Number.isFinite(n) && n >= 0 && n <= 6) wd[n] = true;
+      }
+    }
+
+    return {
+      enabled: true,
+      mode: 'builder',
+      timeZoneId: String(get('TimeZoneId') ?? 'UTC'),
+      workdayStart: String(get('WorkdayStart') ?? '08:00'),
+      workdayEnd: String(get('WorkdayEnd') ?? '17:00'),
+      workingDays: wd,
+      holidaysText: Array.isArray(holidays) ? holidays.filter(Boolean).join('\n') : '',
+      rawJson: json,
+    };
+  } catch {
+    return { enabled: true, mode: 'raw', rawJson: json };
+  }
+};
+
+const buildCalendarJsonFromBuilder = (c: CalendarBuilderState): string => {
+  const workingDays = Object.entries(c.workingDays)
+    .filter(([, v]) => !!v)
+    .map(([k]) => Number(k))
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b);
+
+  const holidays = (c.holidaysText || '')
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  const payload: any = {
+    TimeZoneId: c.timeZoneId?.trim() || undefined,
+    WorkdayStart: c.workdayStart || '08:00',
+    WorkdayEnd: c.workdayEnd || '17:00',
+    WorkingDays: workingDays.length > 0 ? workingDays : undefined,
+    Holidays: holidays.length > 0 ? holidays : undefined,
+  };
+
+  return JSON.stringify(payload);
+};
+
 export default function HelpdeskSlaAdminPage() {
   const qc = useQueryClient();
 
@@ -57,10 +135,18 @@ export default function HelpdeskSlaAdminPage() {
     categoryId: null,
     firstResponseMinutes: 60,
     resolutionMinutes: 1440,
+    calendarConfigurationJson: null,
   });
+  const [calendar, setCalendar] = useState<CalendarBuilderState>(() => defaultCalendarState());
 
   const save = useMutation({
     mutationFn: async () => {
+      const calendarConfigurationJson = !calendar.enabled
+        ? null
+        : calendar.mode === 'raw'
+          ? (calendar.rawJson || '').trim() || null
+          : buildCalendarJsonFromBuilder(calendar);
+
       const payload: CreateEhcSlaTemplateAdmin = {
         name: form.name.trim(),
         isActive: !!form.isActive,
@@ -69,6 +155,7 @@ export default function HelpdeskSlaAdminPage() {
         categoryId: form.categoryId || null,
         firstResponseMinutes: Number(form.firstResponseMinutes) || 60,
         resolutionMinutes: Number(form.resolutionMinutes) || 1440,
+        calendarConfigurationJson,
       };
 
       if (editing) {
@@ -87,7 +174,9 @@ export default function HelpdeskSlaAdminPage() {
         categoryId: null,
         firstResponseMinutes: 60,
         resolutionMinutes: 1440,
+        calendarConfigurationJson: null,
       });
+      setCalendar(defaultCalendarState());
       await qc.invalidateQueries({ queryKey: ['ehc', 'admin', 'slaTemplates'] });
     },
   });
@@ -109,7 +198,11 @@ export default function HelpdeskSlaAdminPage() {
       categoryId: t.categoryId || null,
       firstResponseMinutes: t.firstResponseMinutes,
       resolutionMinutes: t.resolutionMinutes,
+      calendarConfigurationJson: t.calendarConfigurationJson || null,
     });
+
+    const parsed = tryParseCalendarJson(t.calendarConfigurationJson);
+    setCalendar({ ...defaultCalendarState(), ...(parsed || {}), enabled: !!t.calendarConfigurationJson });
   };
 
   const selectedTypeForCategories = form.ticketType || null;
@@ -218,6 +311,113 @@ export default function HelpdeskSlaAdminPage() {
             </div>
           </div>
 
+          <div className="rounded-md border p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="font-medium">Business hours calendar</div>
+                <div className="text-sm text-slate-600">Optional. When enabled, SLA timers count only during working hours and skip holidays.</div>
+              </div>
+              <select
+                className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                value={calendar.enabled ? 'true' : 'false'}
+                onChange={(e) => setCalendar((c) => ({ ...c, enabled: e.target.value === 'true' }))}
+              >
+                <option value="false">Disabled</option>
+                <option value="true">Enabled</option>
+              </select>
+            </div>
+
+            {calendar.enabled ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <Label className="mr-2">Mode</Label>
+                  <select
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    value={calendar.mode}
+                    onChange={(e) => setCalendar((c) => ({ ...c, mode: e.target.value as CalendarMode }))}
+                  >
+                    <option value="builder">Builder</option>
+                    <option value="raw">Raw JSON</option>
+                  </select>
+                </div>
+
+                {calendar.mode === 'builder' ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label>TimeZoneId</Label>
+                        <Input value={calendar.timeZoneId} onChange={(e) => setCalendar((c) => ({ ...c, timeZoneId: e.target.value }))} placeholder="UTC" />
+                        <div className="text-xs text-slate-600">Tip: use <span className="font-mono">UTC</span> for simplest cross-platform setup.</div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Workday start</Label>
+                        <Input type="time" value={calendar.workdayStart} onChange={(e) => setCalendar((c) => ({ ...c, workdayStart: e.target.value }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Workday end</Label>
+                        <Input type="time" value={calendar.workdayEnd} onChange={(e) => setCalendar((c) => ({ ...c, workdayEnd: e.target.value }))} />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Working days</Label>
+                      <div className="flex flex-wrap gap-3 text-sm">
+                        {[
+                          { d: 1, label: 'Mon' },
+                          { d: 2, label: 'Tue' },
+                          { d: 3, label: 'Wed' },
+                          { d: 4, label: 'Thu' },
+                          { d: 5, label: 'Fri' },
+                          { d: 6, label: 'Sat' },
+                          { d: 0, label: 'Sun' },
+                        ].map((x) => (
+                          <label key={x.d} className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={!!calendar.workingDays[x.d]}
+                              onChange={(e) =>
+                                setCalendar((c) => ({ ...c, workingDays: { ...c.workingDays, [x.d]: e.target.checked } }))
+                              }
+                            />
+                            {x.label}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Holidays (one per line, yyyy-MM-dd)</Label>
+                      <textarea
+                        className="w-full min-h-[90px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={calendar.holidaysText}
+                        onChange={(e) => setCalendar((c) => ({ ...c, holidaysText: e.target.value }))}
+                        placeholder="2026-01-01&#10;2026-04-10"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>JSON preview</Label>
+                      <pre className="text-xs bg-slate-50 border rounded-md p-3 overflow-auto">{buildCalendarJsonFromBuilder(calendar)}</pre>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label>CalendarConfigurationJson</Label>
+                    <textarea
+                      className="w-full min-h-[140px] rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+                      value={calendar.rawJson}
+                      onChange={(e) => setCalendar((c) => ({ ...c, rawJson: e.target.value }))}
+                      placeholder='{"TimeZoneId":"UTC","WorkdayStart":"08:00","WorkdayEnd":"17:00","WorkingDays":[1,2,3,4,5],"Holidays":["2026-01-01"]}'
+                    />
+                    <Button type="button" variant="outline" onClick={() => setCalendar((c) => ({ ...c, mode: 'builder', ...(tryParseCalendarJson(c.rawJson) || {}) }))}>
+                      Load into builder
+                    </Button>
+                  </div>
+                )}
+              </>
+            ) : null}
+          </div>
+
           <div className="flex items-center gap-2">
             <Button onClick={() => save.mutate()} disabled={save.isPending || !form.name.trim()}>
               {editing ? <Save className="h-4 w-4 mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
@@ -236,7 +436,9 @@ export default function HelpdeskSlaAdminPage() {
                     categoryId: null,
                     firstResponseMinutes: 60,
                     resolutionMinutes: 1440,
+                    calendarConfigurationJson: null,
                   });
+                  setCalendar(defaultCalendarState());
                 }}
               >
                 Cancel
@@ -270,6 +472,7 @@ export default function HelpdeskSlaAdminPage() {
                     <th className="py-2 pr-4">Category</th>
                     <th className="py-2 pr-4">First resp.</th>
                     <th className="py-2 pr-4">Resolution</th>
+                    <th className="py-2 pr-4">Calendar</th>
                     <th className="py-2 pr-4"></th>
                   </tr>
                 </thead>
@@ -283,6 +486,7 @@ export default function HelpdeskSlaAdminPage() {
                       <td className="py-2 pr-4">{t.categoryName || 'Any'}</td>
                       <td className="py-2 pr-4">{t.firstResponseMinutes}m</td>
                       <td className="py-2 pr-4">{t.resolutionMinutes}m</td>
+                      <td className="py-2 pr-4">{t.calendarConfigurationJson ? 'Yes' : 'No'}</td>
                       <td className="py-2 pr-4 text-right">
                         <Button
                           variant="ghost"

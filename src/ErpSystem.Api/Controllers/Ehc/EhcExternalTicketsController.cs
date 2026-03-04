@@ -121,6 +121,54 @@ public sealed class EhcExternalTicketsController : ControllerBase
         }
     }
 
+    [HttpGet("{id:guid}/links")]
+    public async Task<ActionResult> GetLinks(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var links = await _ticketService.GetMyTicketLinksAsync(id, cancellationToken);
+            return Ok(new { success = true, data = links });
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { success = false, message = "Ticket not found" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving external EHC ticket links {TicketId}", id);
+            return StatusCode(500, new { success = false, message = "Failed to load ticket links" });
+        }
+    }
+
+    [HttpPost("{id:guid}/feedback")]
+    [EnableRateLimiting("SensitivePolicy")]
+    public async Task<ActionResult> SubmitFeedback(Guid id, [FromBody] SubmitEhcTicketFeedbackRequestDto request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            request ??= new SubmitEhcTicketFeedbackRequestDto();
+            var result = await _ticketService.SubmitMyTicketFeedbackAsync(id, request, cancellationToken);
+            return Ok(new { success = true, data = result });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { success = false, message = "Ticket not found" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error submitting feedback for EHC ticket {TicketId}", id);
+            return StatusCode(500, new { success = false, message = "Failed to submit feedback" });
+        }
+    }
+
     [HttpPost("{id:guid}/messages")]
     [EnableRateLimiting("SensitivePolicy")]
     public async Task<ActionResult> AddMessage(Guid id, [FromBody] AddEhcTicketMessageRequestDto request, CancellationToken cancellationToken)

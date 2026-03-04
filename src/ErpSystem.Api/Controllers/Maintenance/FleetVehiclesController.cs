@@ -27,11 +27,12 @@ public class FleetVehiclesController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
         [FromQuery] string? searchTerm = null,
-        [FromQuery] Guid? categoryId = null)
+        [FromQuery] Guid? categoryId = null,
+        [FromQuery] string? assetType = null)
     {
         try
         {
-            var result = await _fleetVehicleService.GetVehiclesPagedAsync(page, pageSize, searchTerm, categoryId);
+            var result = await _fleetVehicleService.GetVehiclesPagedAsync(page, pageSize, searchTerm, categoryId, assetType);
             return Ok(result);
         }
         catch (Exception ex)

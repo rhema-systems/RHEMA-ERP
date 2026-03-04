@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
@@ -806,6 +807,22 @@ public class SimpleWorkflowService : IWorkflowService
             context["createdAt"] = partner.CreatedAt;
         }
 
+        if (IsEntityType(entityTypeRecord, "SERVICE_REQUEST", "ServiceRequest", "Service Request"))
+        {
+            var repo = _unitOfWork.Repository<EhcServiceRequest>();
+            var req = await repo.GetByIdAsync(entityId, r => r.RequestType, r => r.RequesterUser);
+
+            context["serviceRequestId"] = req.Id;
+            context["serviceRequestNumber"] = req.RequestNumber;
+            context["serviceRequestTitle"] = req.Title ?? string.Empty;
+            context["serviceRequestStatus"] = req.Status.ToString();
+            context["serviceRequestTypeCode"] = req.RequestType?.Code ?? string.Empty;
+            context["serviceRequestTypeName"] = req.RequestType?.Name ?? string.Empty;
+            context["requesterUserId"] = req.RequesterUserId;
+            context["requesterEmail"] = req.RequesterUser?.Email ?? string.Empty;
+            context["formDataJson"] = req.FormDataJson ?? "{}";
+        }
+
         return context;
     }
 
@@ -876,6 +893,24 @@ public class SimpleWorkflowService : IWorkflowService
                 item.EntityTitle = jobCard.Title;
                 item.EntityDescription = jobCard.ProblemDescription ?? jobCard.Description ?? string.Empty;
                 return;
+            }
+        }
+
+        if (string.Equals(entityTypeRecord.Code, "SERVICE_REQUEST", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(entityTypeRecord.Name, "ServiceRequest", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(entityTypeRecord.Name, "Service Request", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var repo = _unitOfWork.Repository<EhcServiceRequest>();
+                var req = await repo.GetByIdAsync(entityId, r => r.RequestType);
+                item.EntityTitle = $"{req.RequestNumber} - {req.RequestType?.Name ?? "Service Request"}";
+                item.EntityDescription = req.Title ?? string.Empty;
+                return;
+            }
+            catch
+            {
+                // ignore and fall through
             }
         }
 

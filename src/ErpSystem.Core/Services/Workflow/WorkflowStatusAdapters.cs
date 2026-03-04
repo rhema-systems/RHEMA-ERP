@@ -1,6 +1,7 @@
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 
@@ -533,4 +534,59 @@ public sealed class BusinessPartnerWorkflowStatusAdapter : IWorkflowStatusAdapte
 
     private static BusinessPartner RequirePartner(object entity)
         => entity as BusinessPartner ?? throw new InvalidOperationException("Expected BusinessPartner entity.");
+}
+
+public sealed class ServiceRequestWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "ServiceRequest",
+        "Service Request",
+        "SERVICE_REQUEST"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+    {
+        var req = RequireServiceRequest(entity);
+        req.SubmittedAtUtc ??= DateTime.UtcNow;
+
+        req.Status = outcome switch
+        {
+            WorkflowOutcome.Approved => EhcServiceRequestStatus.Approved,
+            WorkflowOutcome.Rejected => EhcServiceRequestStatus.Rejected,
+            _ => EhcServiceRequestStatus.PendingApproval
+        };
+    }
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+    {
+        var req = RequireServiceRequest(entity);
+        req.SubmittedAtUtc ??= DateTime.UtcNow;
+
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                req.Status = EhcServiceRequestStatus.Approved;
+                req.ApprovedAtUtc = DateTime.UtcNow;
+                req.ApprovedByUserId = userId;
+                req.RejectedAtUtc = null;
+                req.RejectedByUserId = null;
+                req.RejectionReason = null;
+                break;
+            case WorkflowOutcome.Rejected:
+                req.Status = EhcServiceRequestStatus.Rejected;
+                req.RejectedAtUtc = DateTime.UtcNow;
+                req.RejectedByUserId = userId;
+                req.RejectionReason = rejectionReason;
+                req.ApprovedAtUtc = null;
+                req.ApprovedByUserId = null;
+                break;
+            default:
+                req.Status = EhcServiceRequestStatus.PendingApproval;
+                break;
+        }
+    }
+
+    private static EhcServiceRequest RequireServiceRequest(object entity)
+        => entity as EhcServiceRequest ?? throw new InvalidOperationException("Expected EhcServiceRequest entity.");
 }

@@ -19,6 +19,7 @@ public class StockAdjustmentService : IStockAdjustmentService
     private readonly IStockMovementRepository _movementRepository;
     private readonly IWarehouseQuantityRepository _warehouseQuantityRepository;
     private readonly IWarehouseLocationRepository _locationRepository;
+    private readonly IWarehouseRepository _warehouseRepository;
     private readonly IConsignmentSettlementService _consignmentSettlementService;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<StockAdjustmentService> _logger;
@@ -29,6 +30,7 @@ public class StockAdjustmentService : IStockAdjustmentService
         IStockMovementRepository movementRepository,
         IWarehouseQuantityRepository warehouseQuantityRepository,
         IWarehouseLocationRepository locationRepository,
+        IWarehouseRepository warehouseRepository,
         IConsignmentSettlementService consignmentSettlementService,
         ICurrentUserProvider currentUserProvider,
         ILogger<StockAdjustmentService> logger)
@@ -38,6 +40,7 @@ public class StockAdjustmentService : IStockAdjustmentService
         _movementRepository = movementRepository;
         _warehouseQuantityRepository = warehouseQuantityRepository;
         _locationRepository = locationRepository;
+        _warehouseRepository = warehouseRepository;
         _consignmentSettlementService = consignmentSettlementService;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
@@ -436,61 +439,88 @@ public class StockAdjustmentService : IStockAdjustmentService
             // Apply adjustments to inventory
             foreach (var item in adjustment.Items)
             {
-                // Update inventory item stock
                 var inventoryItem = await _itemRepository.GetByIdAsync(item.InventoryItemId);
-                if (inventoryItem != null)
+
+                var location = item.LocationId.HasValue && item.LocationId.Value != Guid.Empty
+                    ? await _locationRepository.GetByIdAsync(item.LocationId.Value)
+                    : null;
+
+                var effectiveWarehouseId = location != null
+                    ? location.InventoryWarehouseId
+                    : (adjustment.WarehouseId ?? Guid.Empty);
+
+                var isConsignmentWarehouse = false;
+                if (effectiveWarehouseId != Guid.Empty)
+                {
+                    var wh = await _warehouseRepository.GetByIdAsync(effectiveWarehouseId);
+                    isConsignmentWarehouse = wh?.IsConsignmentWarehouse == true;
+                }
+
+                // Update warehouse quantity (always; consignment stock still needs accurate warehouse-level balances).
+                WarehouseQuantity? warehouseQty = null;
+                if (effectiveWarehouseId != Guid.Empty)
+                {
+                    warehouseQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(effectiveWarehouseId, item.InventoryItemId);
+                    if (warehouseQty == null)
+                    {
+                        warehouseQty = new WarehouseQuantity
+                        {
+                            TenantId = adjustment.TenantId,
+                            InventoryItemId = item.InventoryItemId,
+                            WarehouseId = effectiveWarehouseId,
+                            CurrentStock = 0,
+                            AvailableStock = 0,
+                            AllocatedStock = 0,
+                            AverageCost = item.UnitCost,
+                            LastMovementDate = DateTime.UtcNow,
+                            CreatedById = userId
+                        };
+
+                        await _warehouseQuantityRepository.AddAsync(warehouseQty);
+                    }
+
+                    warehouseQty.CurrentStock += item.AdjustmentQuantity;
+                    warehouseQty.AvailableStock = warehouseQty.CurrentStock - warehouseQty.AllocatedStock;
+                    warehouseQty.LastMovementDate = DateTime.UtcNow;
+                    await _warehouseQuantityRepository.UpdateAsync(warehouseQty);
+                }
+
+                // Update owned/main inventory item totals only for non-consignment warehouses/bins.
+                if (!isConsignmentWarehouse && inventoryItem != null)
                 {
                     inventoryItem.CurrentStock += item.AdjustmentQuantity;
                     inventoryItem.AvailableStock = inventoryItem.CurrentStock - inventoryItem.AllocatedStock;
                     inventoryItem.LastStockDate = DateTime.UtcNow;
                     await _itemRepository.UpdateAsync(inventoryItem);
-
-                    // Create stock movement record
-                    var movementType = item.AdjustmentQuantity >= 0 ? "Adjustment+" : "Adjustment-";
-                    var movement = new StockMovement
-                    {
-                        TenantId = adjustment.TenantId, // Inherit TenantId from parent adjustment
-                        InventoryItemId = item.InventoryItemId,
-                        MovementType = movementType,
-                        Quantity = item.AdjustmentQuantity,
-                        UnitCost = item.UnitCost,
-                        TotalValue = item.AdjustmentValue,
-                        MovementDate = DateTime.UtcNow,
-                        ReferenceType = ReferenceType.Adjustment,
-                        ReferenceNumber = adjustment.AdjustmentNumber,
-                        ReferenceId = adjustment.Id,
-                        LocationId = item.LocationId,
-                        Notes = $"{adjustment.ReasonCode}: {item.Notes ?? adjustment.Description}",
-                        SerialNumber = item.SerialNumber,
-                        LotNumber = item.LotNumber,
-                        RunningBalance = inventoryItem.CurrentStock,
-                        ProcessedById = userId
-                    };
-
-                    // Get warehouse from location if available
-                    if (item.LocationId.HasValue)
-                    {
-                        var location = await _locationRepository.GetByIdAsync(item.LocationId.Value);
-                        if (location != null)
-                        {
-                            movement.WarehouseId = location.WarehouseId;
-
-                            // Update warehouse quantity
-                            var warehouseQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(
-                                location.WarehouseId, item.InventoryItemId);
-                            if (warehouseQty != null)
-                            {
-                                warehouseQty.CurrentStock += item.AdjustmentQuantity;
-                                warehouseQty.AvailableStock = warehouseQty.CurrentStock - warehouseQty.AllocatedStock;
-                                warehouseQty.LastMovementDate = DateTime.UtcNow;
-                                await _warehouseQuantityRepository.UpdateAsync(warehouseQty);
-                            }
-                        }
-                    }
-
-                    await _movementRepository.AddAsync(movement);
-                    await _consignmentSettlementService.TryCreateFromStockMovementAsync(movement);
                 }
+
+                // Create stock movement record
+                var movementType = item.AdjustmentQuantity >= 0 ? "Adjustment+" : "Adjustment-";
+                var movement = new StockMovement
+                {
+                    TenantId = adjustment.TenantId, // Inherit TenantId from parent adjustment
+                    InventoryItemId = item.InventoryItemId,
+                    MovementType = movementType,
+                    Quantity = item.AdjustmentQuantity,
+                    UnitCost = item.UnitCost,
+                    TotalValue = item.AdjustmentValue,
+                    MovementDate = DateTime.UtcNow,
+                    ReferenceType = ReferenceType.Adjustment,
+                    ReferenceNumber = adjustment.AdjustmentNumber,
+                    ReferenceId = adjustment.Id,
+                    WarehouseId = effectiveWarehouseId != Guid.Empty ? effectiveWarehouseId : null,
+                    LocationId = item.LocationId,
+                    Notes = $"{adjustment.ReasonCode}: {item.Notes ?? adjustment.Description}",
+                    SerialNumber = item.SerialNumber,
+                    LotNumber = item.LotNumber,
+                    RunningBalance = !isConsignmentWarehouse
+                        ? (inventoryItem?.CurrentStock ?? 0)
+                        : (warehouseQty?.CurrentStock ?? 0),
+                    ProcessedById = userId
+                };
+
+                await _movementRepository.AddAsync(movement);
+                await _consignmentSettlementService.TryCreateFromStockMovementAsync(movement);
             }
 
             // Update adjustment status

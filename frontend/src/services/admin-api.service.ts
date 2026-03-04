@@ -226,6 +226,22 @@ export interface EmailSettings {
   fromName: string;
 }
 
+export interface SmsSettings {
+  defaultProvider: string;
+  fallbackProvidersCsv: string;
+
+  twilioEnabled: boolean;
+  twilioAccountSid: string;
+  twilioAuthToken: string;
+  twilioFromNumber: string;
+
+  ghanaGatewayEnabled: boolean;
+  ghanaGatewayUrlTemplate: string;
+  ghanaGatewayApiKey: string;
+  ghanaGatewaySenderId: string;
+  ghanaGatewayTimeoutSeconds: number;
+}
+
 export interface PasswordPolicy {
   minLength: number;
   requireUppercase: boolean;
@@ -673,6 +689,10 @@ class AdminApiService {
     return apiService.request<EmailSettings>('/settings/email');
   }
 
+  async getSmsSettings(): Promise<SmsSettings> {
+    return apiService.request<SmsSettings>('/settings/sms');
+  }
+
   async saveEmailSettings(settings: EmailSettings): Promise<EmailSettings> {
     console.log('Saving email settings:', settings.smtpHost, settings.fromAddress);
     try {
@@ -708,6 +728,39 @@ class AdminApiService {
         return result;
       } catch (createError) {
         console.error('Failed to save email settings:', createError);
+        throw createError;
+      }
+    }
+  }
+
+  async saveSmsSettings(settings: SmsSettings): Promise<SmsSettings> {
+    console.log('Saving SMS settings:', settings.defaultProvider);
+    try {
+      const existing = await this.getSmsSettings();
+      let result: SmsSettings;
+      if (existing && (existing.twilioAccountSid || existing.ghanaGatewayUrlTemplate))
+      {
+        result = await apiService.request<SmsSettings>('/settings/sms', {
+          method: 'PUT',
+          body: JSON.stringify(settings),
+        });
+      }
+      else
+      {
+        result = await apiService.request<SmsSettings>('/settings/sms', {
+          method: 'POST',
+          body: JSON.stringify(settings),
+        });
+      }
+      return result;
+    } catch (error: unknown) {
+      try {
+        return await apiService.request<SmsSettings>('/settings/sms', {
+          method: 'POST',
+          body: JSON.stringify(settings),
+        });
+      } catch (createError) {
+        console.error('Failed to save SMS settings:', createError);
         throw createError;
       }
     }
@@ -897,6 +950,48 @@ class AdminApiService {
       return result;
     } catch (error) {
       console.error('Failed to test LDAP connection:', error);
+      throw error;
+    }
+  }
+
+  // LDAP: List/Search users (Active Directory)
+  async listLdapUsers(ldapSettings: {
+    ldapServer?: string;
+    ldapPort?: number;
+    ldapBaseDn?: string;
+    ldapBindDn?: string;
+    ldapBindPassword?: string;
+    query?: string;
+    limit?: number;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    users: Array<{
+      username: string;
+      userPrincipalName: string;
+      distinguishedName: string;
+      displayName: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+    }>;
+  }> {
+    console.log('Listing LDAP users:', ldapSettings.ldapServer, 'base:', ldapSettings.ldapBaseDn);
+    try {
+      return await apiService.request('/tenant/ldap/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          ldapServer: ldapSettings.ldapServer,
+          ldapPort: ldapSettings.ldapPort,
+          ldapBaseDn: ldapSettings.ldapBaseDn,
+          ldapBindDn: ldapSettings.ldapBindDn,
+          ldapBindPassword: ldapSettings.ldapBindPassword,
+          query: ldapSettings.query,
+          limit: ldapSettings.limit
+        }),
+      });
+    } catch (error) {
+      console.error('Failed to list LDAP users:', error);
       throw error;
     }
   }

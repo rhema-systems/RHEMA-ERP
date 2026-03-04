@@ -26,7 +26,8 @@ public class FleetVehicleService : IFleetVehicleService
         int page,
         int pageSize,
         string? searchTerm = null,
-        Guid? categoryId = null)
+        Guid? categoryId = null,
+        string? assetType = null)
     {
         if (page <= 0) page = 1;
         if (pageSize <= 0) pageSize = 25;
@@ -38,7 +39,14 @@ public class FleetVehicleService : IFleetVehicleService
         var activeAssignmentsQ = assignmentRepo.GetQueryable(x => x.TenantId == tenantId && x.IsActive);
 
         var q = assetRepo.GetQueryable(a => a.TenantId == tenantId)
-            .Where(a => a.AssetCategory != null && a.AssetCategory.AssetType == "Vehicle");
+            .Where(a => a.IsFleetAsset);
+
+        // Optional filter for screens that specifically need an asset type (e.g., trip dispatch expects Vehicle assets).
+        if (!string.IsNullOrWhiteSpace(assetType))
+        {
+            var t = assetType.Trim();
+            q = q.Where(a => a.AssetCategory != null && a.AssetCategory.AssetType == t);
+        }
 
         if (categoryId.HasValue && categoryId.Value != Guid.Empty)
         {
@@ -67,6 +75,7 @@ public class FleetVehicleService : IFleetVehicleService
                 Name = a.Name,
                 AssetNumber = a.AssetNumber,
                 AssetCategoryId = a.AssetCategoryId,
+                AssetType = a.AssetCategory != null ? a.AssetCategory.AssetType : null,
                 LicensePlate = a.LicensePlate,
                 Vin = a.VIN,
                 Status = a.Status.ToString(),
@@ -104,8 +113,7 @@ public class FleetVehicleService : IFleetVehicleService
         var asset = await _maintenanceAssetService.GetAssetByIdAsync(vehicleAssetId);
         if (asset == null) return null;
 
-        var assetType = asset.AssetCategory?.AssetType ?? asset.AssetType;
-        if (!string.Equals(assetType, "Vehicle", StringComparison.OrdinalIgnoreCase))
+        if (!asset.IsFleetAsset)
             return null;
 
         return asset;
@@ -137,7 +145,8 @@ public class FleetVehicleService : IFleetVehicleService
             Mileage = dto.Mileage,
             OperatingHours = dto.OperatingHours,
             LicensePlate = dto.LicensePlate,
-            VIN = dto.Vin
+            VIN = dto.Vin,
+            IsFleetAsset = true
         };
 
         return await _maintenanceAssetService.CreateAssetAsync(createAssetDto);

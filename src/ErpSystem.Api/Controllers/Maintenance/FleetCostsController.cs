@@ -39,6 +39,26 @@ public class FleetCostsController : ControllerBase
         }
     }
 
+    [HttpGet("trip/{fleetTripId:guid}")]
+    public async Task<ActionResult<PagedResult<FleetCostEntryDto>>> GetForTrip(
+        Guid fleetTripId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25,
+        [FromQuery] DateTime? fromUtc = null,
+        [FromQuery] DateTime? toUtc = null)
+    {
+        try
+        {
+            var result = await _service.GetPagedForTripAsync(fleetTripId, page, pageSize, fromUtc, toUtc);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving fleet costs for trip {FleetTripId}", fleetTripId);
+            return StatusCode(500, "An error occurred while retrieving costs");
+        }
+    }
+
     [HttpPost]
     [Authorize(Policy = "MaintenanceWrite")]
     public async Task<ActionResult<FleetCostEntryDto>> Create([FromBody] CreateFleetCostEntryDto dto)

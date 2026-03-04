@@ -129,8 +129,10 @@ public class NotificationTopicsController : ControllerBase
                 IsActive = dto.IsActive,
                 EnableInApp = dto.EnableInApp,
                 EnableEmail = dto.EnableEmail,
+                EnableSms = dto.EnableSms,
                 InAppTitleTemplate = string.IsNullOrWhiteSpace(dto.InAppTitleTemplate) ? null : dto.InAppTitleTemplate.Trim(),
                 InAppBodyTemplate = string.IsNullOrWhiteSpace(dto.InAppBodyTemplate) ? null : dto.InAppBodyTemplate.Trim(),
+                SmsBodyTemplate = string.IsNullOrWhiteSpace(dto.SmsBodyTemplate) ? null : dto.SmsBodyTemplate.Trim(),
                 EmailTemplateId = dto.EmailTemplateId,
                 ActionUrlTemplate = string.IsNullOrWhiteSpace(dto.ActionUrlTemplate) ? null : dto.ActionUrlTemplate.Trim(),
                 CreatedAt = DateTime.UtcNow,
@@ -155,6 +157,7 @@ public class NotificationTopicsController : ControllerBase
                     RecipientValue = value,
                     SendInApp = r.SendInApp,
                     SendEmail = r.SendEmail,
+                    SendSms = r.SendSms,
                     CreatedAt = DateTime.UtcNow,
                     CreatedById = userId
                 });
@@ -213,16 +216,18 @@ public class NotificationTopicsController : ControllerBase
             if (topic.IsRequired && !dto.IsActive)
                 return BadRequest("This topic is required and cannot be deactivated.");
 
-            if (topic.IsRequired && !dto.EnableInApp && !dto.EnableEmail)
-                return BadRequest("This topic is required and must have at least one channel enabled (In-app or Email).");
+            if (topic.IsRequired && !dto.EnableInApp && !dto.EnableEmail && !dto.EnableSms)
+                return BadRequest("This topic is required and must have at least one channel enabled (In-app, Email, or SMS).");
 
             topic.Name = name;
             topic.Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim();
             topic.IsActive = dto.IsActive;
             topic.EnableInApp = dto.EnableInApp;
             topic.EnableEmail = dto.EnableEmail;
+            topic.EnableSms = dto.EnableSms;
             topic.InAppTitleTemplate = string.IsNullOrWhiteSpace(dto.InAppTitleTemplate) ? null : dto.InAppTitleTemplate.Trim();
             topic.InAppBodyTemplate = string.IsNullOrWhiteSpace(dto.InAppBodyTemplate) ? null : dto.InAppBodyTemplate.Trim();
+            topic.SmsBodyTemplate = string.IsNullOrWhiteSpace(dto.SmsBodyTemplate) ? null : dto.SmsBodyTemplate.Trim();
             topic.EmailTemplateId = dto.EmailTemplateId;
             topic.ActionUrlTemplate = string.IsNullOrWhiteSpace(dto.ActionUrlTemplate) ? null : dto.ActionUrlTemplate.Trim();
             topic.UpdatedAt = DateTime.UtcNow;
@@ -259,6 +264,7 @@ public class NotificationTopicsController : ControllerBase
                     IsSystem = false,
                     SendInApp = r.SendInApp,
                     SendEmail = r.SendEmail,
+                    SendSms = r.SendSms,
                     CreatedAt = DateTime.UtcNow,
                     CreatedById = userId
                 });
@@ -337,8 +343,10 @@ public class NotificationTopicsController : ControllerBase
             IsActive = t.IsActive,
             EnableInApp = t.EnableInApp,
             EnableEmail = t.EnableEmail,
+            EnableSms = t.EnableSms,
             InAppTitleTemplate = t.InAppTitleTemplate,
             InAppBodyTemplate = t.InAppBodyTemplate,
+            SmsBodyTemplate = t.SmsBodyTemplate,
             EmailTemplateId = t.EmailTemplateId,
             ActionUrlTemplate = t.ActionUrlTemplate,
             Recipients = (t.Recipients ?? new List<NotificationTopicRecipient>())
@@ -352,7 +360,8 @@ public class NotificationTopicsController : ControllerBase
                     RecipientValue = r.RecipientValue,
                     IsSystem = r.IsSystem,
                     SendInApp = r.SendInApp,
-                    SendEmail = r.SendEmail
+                    SendEmail = r.SendEmail,
+                    SendSms = r.SendSms
                 })
                 .ToList()
         };
@@ -467,7 +476,7 @@ public class NotificationTopicsController : ControllerBase
                             topic.EnableEmail = true;
                             changed = true;
                         }
-                        if (isRequired && !topic.EnableInApp && !topic.EnableEmail)
+                        if (isRequired && !topic.EnableInApp && !topic.EnableEmail && !topic.EnableSms)
                         {
                             // Ensure required topics always have at least one channel.
                             topic.EnableInApp = true;
@@ -719,6 +728,7 @@ public class NotificationTopicsController : ControllerBase
                             IsSystem = true,
                             SendInApp = true,
                             SendEmail = true,
+                            SendSms = false,
                             CreatedAt = DateTime.UtcNow,
                             CreatedById = userId
                         });

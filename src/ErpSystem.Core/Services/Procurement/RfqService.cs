@@ -490,6 +490,7 @@ public class RfqService : IRfqService
 
                 // Build selections: one quote line per RFQ item.
                 var selections = new List<(RequestForQuotationItem Item, RequestForQuotationQuote Quote, RequestForQuotationQuoteItem QuoteItem)>();
+                var awardReasonByItemId = new Dictionary<Guid, string?>();
 
                 if (string.Equals(mode, "WinnerTakesAll", StringComparison.OrdinalIgnoreCase))
                 {
@@ -521,15 +522,16 @@ public class RfqService : IRfqService
                     if (distinctItemIds.Count != rfqItems.Count)
                         throw new InvalidOperationException("Split award requires selecting a supplier quote for every RFQ item.");
 
-                    var selectedByItem = lines
+                    var selectedLineByItem = lines
                         .GroupBy(l => l.RfqItemId)
-                        .ToDictionary(g => g.Key, g => g.Last().QuoteId);
+                        .ToDictionary(g => g.Key, g => g.Last());
 
                     foreach (var item in rfqItems)
                     {
-                        if (!selectedByItem.TryGetValue(item.Id, out var quoteId))
+                        if (!selectedLineByItem.TryGetValue(item.Id, out var selectedLine))
                             throw new InvalidOperationException($"Split award selection missing for RFQ line {item.LineNumber}: {item.Description}");
 
+                        var quoteId = selectedLine.QuoteId;
                         var quote = submittedQuotes.FirstOrDefault(q => q.Id == quoteId)
                             ?? throw new InvalidOperationException($"Selected quote {quoteId} was not found or not submitted.");
 
@@ -538,6 +540,10 @@ public class RfqService : IRfqService
 
                         if (quoteItem == null)
                             throw new InvalidOperationException($"Selected quote is missing pricing for RFQ line {item.LineNumber}: {item.Description}");
+
+                        awardReasonByItemId[item.Id] = string.IsNullOrWhiteSpace(selectedLine.AwardReason)
+                            ? null
+                            : selectedLine.AwardReason.Trim();
 
                         selections.Add((item, quote, quoteItem));
                     }
@@ -643,6 +649,7 @@ public class RfqService : IRfqService
                         QuoteItemId = quoteItem.Id,
                         UnitPrice = quoteItem.UnitPrice,
                         LineTotal = quoteItem.LineTotal,
+                        AwardReason = awardReasonByItemId.TryGetValue(item.Id, out var reason) ? reason : null,
                         CreatedAt = DateTime.UtcNow,
                         CreatedById = _currentUserProvider.UserId
                     };

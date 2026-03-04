@@ -9,12 +9,14 @@ public interface ILdapAuthenticationService
     Task<LdapAuthenticationResult> AuthenticateAsync(string username, string password, Tenant tenant);
     Task<LdapUser?> GetLdapUserAsync(string username, Tenant tenant);
     Task<LdapAuthenticationResult> TestConnectionAsync(Tenant tenant);
+    Task<IReadOnlyList<LdapDirectoryUser>> SearchUsersAsync(string? query, int limit, Tenant tenant);
 }
 
 public class LdapAuthenticationService : ILdapAuthenticationService
 {
     private readonly ILogger<LdapAuthenticationService> _logger;
     private static readonly string[] attrs = new[] { "distinguishedName", "displayName", "mail", "givenName", "sn" };
+    private static readonly string[] listUserAttrs = new[] { "distinguishedName", "displayName", "mail", "givenName", "sn", "sAMAccountName", "userPrincipalName" };
 
     public LdapAuthenticationService(ILogger<LdapAuthenticationService> logger)
     {
@@ -128,6 +130,11 @@ public class LdapAuthenticationService : ILdapAuthenticationService
                     FirstName = GetAttributeValue(userEntry, "givenName") ?? "",
                     LastName = GetAttributeValue(userEntry, "sn") ?? ""
                 };
+
+                    if (string.IsNullOrWhiteSpace(ldapUser.Email))
+                    {
+                        _logger.LogWarning("LDAP user {Username} has no email ('mail') attribute configured.", username);
+                    }
 
 	                _logger.LogInformation("LDAP authentication succeeded for user {Username}", username);
 	                return new LdapAuthenticationResult { Success = true, User = ldapUser };
@@ -319,10 +326,125 @@ public class LdapAuthenticationService : ILdapAuthenticationService
         });
     }
 
+    public async Task<IReadOnlyList<LdapDirectoryUser>> SearchUsersAsync(string? query, int limit, Tenant tenant)
+    {
+        if (!tenant.LdapEnabled || string.IsNullOrEmpty(tenant.LdapServer))
+        {
+            throw new InvalidOperationException("LDAP is not configured for this tenant");
+        }
+
+        if (string.IsNullOrWhiteSpace(tenant.LdapBaseDn))
+        {
+            throw new InvalidOperationException("LDAP Base DN is required");
+        }
+
+        var cappedLimit = Math.Clamp(limit, 1, 500);
+        var normalizedQuery = (query ?? string.Empty).Trim();
+
+        return await Task.Run(() =>
+        {
+            using var connection = new LdapConnection();
+            connection.Connect(tenant.LdapServer, tenant.LdapPort ?? 389);
+
+            if (!string.IsNullOrEmpty(tenant.LdapBindDn) && !string.IsNullOrEmpty(tenant.LdapBindPassword))
+            {
+                connection.Bind(tenant.LdapBindDn, tenant.LdapBindPassword);
+            }
+            else
+            {
+                connection.Bind("", "");
+            }
+
+            var filter = BuildUserSearchFilter(normalizedQuery);
+            var searchResults = connection.Search(
+                tenant.LdapBaseDn,
+                2, // LdapConnection.SCOPE_SUB
+                filter,
+                listUserAttrs,
+                false
+            );
+
+            var users = new List<LdapDirectoryUser>(Math.Min(cappedLimit, 100));
+            while (searchResults.HasMore() && users.Count < cappedLimit)
+            {
+                LdapEntry entry;
+                try
+                {
+                    entry = searchResults.Next();
+                }
+                catch (LdapException ex)
+                {
+                    _logger.LogWarning(ex, "LDAP user search iteration failed");
+                    break;
+                }
+
+                var username = GetAttributeValue(entry, "sAMAccountName") ?? string.Empty;
+                var upn = GetAttributeValue(entry, "userPrincipalName") ?? string.Empty;
+                var dn = entry.Dn ?? string.Empty;
+                var displayName = GetAttributeValue(entry, "displayName") ?? string.Empty;
+                var email = GetAttributeValue(entry, "mail") ?? string.Empty;
+                var firstName = GetAttributeValue(entry, "givenName") ?? string.Empty;
+                var lastName = GetAttributeValue(entry, "sn") ?? string.Empty;
+
+                if (string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(upn))
+                {
+                    username = upn;
+                }
+
+                users.Add(new LdapDirectoryUser
+                {
+                    Username = username,
+                    UserPrincipalName = upn,
+                    DistinguishedName = dn,
+                    DisplayName = displayName,
+                    Email = email,
+                    FirstName = firstName,
+                    LastName = lastName
+                });
+            }
+
+            return users;
+        });
+    }
+
+    private static string BuildUserSearchFilter(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return "(&(objectCategory=person)(objectClass=user))";
+        }
+
+        var q = EscapeLdapFilterValue(query);
+        return $"(&(objectCategory=person)(objectClass=user)(|(sAMAccountName=*{q}*)(userPrincipalName=*{q}*)(displayName=*{q}*)(mail=*{q}*)))";
+    }
+
+    private static string EscapeLdapFilterValue(string value)
+    {
+        return value
+            .Replace("\\", "\\5c")
+            .Replace("*", "\\2a")
+            .Replace("(", "\\28")
+            .Replace(")", "\\29")
+            .Replace("\0", "\\00");
+    }
+
     private static string? GetAttributeValue(LdapEntry entry, string attributeName)
     {
-        var attribute = entry.GetAttribute(attributeName);
-        return attribute?.StringValue;
+        try
+        {
+            var attribute = entry.GetAttribute(attributeName);
+            return attribute?.StringValue;
+        }
+        catch (KeyNotFoundException)
+        {
+            // Novell.Directory.Ldap may throw when an attribute is not present on the entry.
+            return null;
+        }
+        catch
+        {
+            // Best-effort: missing/malformed attributes should not break authentication.
+            return null;
+        }
     }
 }
 
@@ -336,6 +458,17 @@ public class LdapAuthenticationResult
 public class LdapUser
 {
     public string Username { get; set; } = string.Empty;
+    public string DistinguishedName { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string FirstName { get; set; } = string.Empty;
+    public string LastName { get; set; } = string.Empty;
+}
+
+public class LdapDirectoryUser
+{
+    public string Username { get; set; } = string.Empty;
+    public string UserPrincipalName { get; set; } = string.Empty;
     public string DistinguishedName { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;

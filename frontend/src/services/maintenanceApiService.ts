@@ -21,6 +21,7 @@ export interface Asset {
   nextMaintenanceDate?: string;
   warrantyEndDate?: string;
   warrantyStartDate?: string;
+  isFleetAsset?: boolean;
 }
 
 export interface WorkOrderType {

@@ -43,12 +43,17 @@ public class NotificationTopic : TenantEntity
     // Channels
     public bool EnableInApp { get; set; } = true;
     public bool EnableEmail { get; set; } = false;
+    public bool EnableSms { get; set; } = false;
 
     // In-app templates (tokenized using {{token}} from event data)
     [MaxLength(200)]
     public string? InAppTitleTemplate { get; set; }
 
     public string? InAppBodyTemplate { get; set; }
+
+    // SMS templates (tokenized using {{token}} from event data)
+    [MaxLength(500)]
+    public string? SmsBodyTemplate { get; set; }
 
     // Email template uses existing EmailTemplates (Module="Notifications") to reuse UI/editor
     public Guid? EmailTemplateId { get; set; }
@@ -100,5 +105,6 @@ public class NotificationTopicRecipient : TenantEntity
 
     public bool SendInApp { get; set; } = true;
     public bool SendEmail { get; set; } = false;
+    public bool SendSms { get; set; } = false;
 }
 

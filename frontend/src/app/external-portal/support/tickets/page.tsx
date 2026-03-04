@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Eye, Plus, Ticket } from 'lucide-react';
+import { Eye, Plus, Star, Ticket } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label';
 import { useSignalR } from '@/hooks/useSignalR';
 import { useToast } from '@/hooks/use-toast';
 import { ehcTicketService } from '@/services/ehcTicketService';
-import type { EhcMyTicketsFilters, EhcTicketCategoryTree, EhcTicketPriority, EhcTicketSource, EhcTicketStatus, EhcTicketType } from '@/services/ehcTicketService';
+import type { EhcMyTicketsFilters, EhcTicketCategoryTree, EhcTicketListItem, EhcTicketPriority, EhcTicketSource, EhcTicketStatus, EhcTicketType } from '@/services/ehcTicketService';
 
 const statusBadgeClassName = (s: EhcTicketStatus) => {
   switch (s) {
@@ -102,6 +102,8 @@ const sourceLabel = (s: EhcTicketSource) => {
   }
 };
 
+const isTerminalStatus = (s: EhcTicketStatus) => s === 'Resolved' || s === 'Closed';
+
 export default function ExternalPortalSupportTicketsPage() {
   const router = useRouter();
   const qc = useQueryClient();
@@ -121,6 +123,21 @@ export default function ExternalPortalSupportTicketsPage() {
     queryKey: ['ehc', 'categories', 'external'],
     queryFn: () => ehcTicketService.listCategories(),
   });
+
+  const { data: priorityLevels } = useQuery({
+    queryKey: ['ehc', 'priorities', 'external'],
+    queryFn: () => ehcTicketService.listPriorityLevels(),
+  });
+
+  const activePriorityLevels = useMemo(() => {
+    return (priorityLevels ?? [])
+      .filter((p) => p.isActive)
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  }, [priorityLevels]);
+
+  const priorityLabelByValue = useMemo(() => {
+    return new Map((priorityLevels ?? []).map((p) => [p.priority, p.displayName] as const));
+  }, [priorityLevels]);
 
   const allCategoryOptions = useMemo(() => flattenCategoryTree(categories || []), [categories]);
   const visibleCategoryOptions = useMemo(() => {
@@ -194,6 +211,52 @@ export default function ExternalPortalSupportTicketsPage() {
     return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(dt);
   };
 
+  const getOverdueInfo = (t: EhcTicketListItem): { label: string; title: string } | null => {
+    if (isTerminalStatus(t.status)) return null;
+
+    const now = Date.now();
+    const firstResponseDueAt = t.firstResponseDueAt ? Date.parse(t.firstResponseDueAt) : NaN;
+    const resolutionDueAt = t.resolutionDueAt ? Date.parse(t.resolutionDueAt) : NaN;
+
+    const firstRespondedAt = t.firstRespondedAt ? Date.parse(t.firstRespondedAt) : NaN;
+    const resolvedAt = t.resolvedAt ? Date.parse(t.resolvedAt) : NaN;
+    const closedAt = t.closedAt ? Date.parse(t.closedAt) : NaN;
+
+    const firstResponseOverdue = !Number.isNaN(firstResponseDueAt) && now > firstResponseDueAt && Number.isNaN(firstRespondedAt);
+    const resolutionOverdue = !Number.isNaN(resolutionDueAt) && now > resolutionDueAt && Number.isNaN(resolvedAt) && Number.isNaN(closedAt);
+
+    if (!firstResponseOverdue && !resolutionOverdue) return null;
+
+    if (resolutionOverdue) {
+      return { label: 'SLA Overdue', title: `Resolution was due: ${formatCreatedAt(t.resolutionDueAt as string)}` };
+    }
+
+    return { label: 'Response Overdue', title: `First response was due: ${formatCreatedAt(t.firstResponseDueAt as string)}` };
+  };
+
+  const renderRatingStars = (rating: number | null | undefined) => {
+    const r = typeof rating === 'number' && rating >= 1 && rating <= 5 ? rating : 0;
+    const title = r ? `Rated ${r}/5` : 'Not rated yet';
+
+    return (
+      <div className="flex items-center gap-0.5" title={title} aria-label={title}>
+        {Array.from({ length: 5 }).map((_, i) => {
+          const filled = i < r;
+          return (
+            <Star
+              key={i}
+              className={
+                filled
+                  ? 'h-4 w-4 text-yellow-500 fill-yellow-500'
+                  : 'h-4 w-4 text-slate-300 dark:text-slate-600'
+              }
+            />
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -246,10 +309,11 @@ export default function ExternalPortalSupportTicketsPage() {
             <Label className="text-xs text-slate-600">Priority</Label>
             <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={priority} onChange={(e) => setPriority(e.target.value as any)}>
               <option value="">All</option>
-              <option value="Low">Low</option>
-              <option value="Medium">Medium</option>
-              <option value="High">High</option>
-              <option value="Critical">Critical</option>
+              {activePriorityLevels.map((p) => (
+                <option key={p.priority} value={p.priority}>
+                  {p.displayName}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -344,7 +408,16 @@ export default function ExternalPortalSupportTicketsPage() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <div className="font-semibold text-slate-900">{t.ticketNumber}</div>
                     <Badge className={statusBadgeClassName(t.status)}>{t.status}</Badge>
-                    <Badge className={priorityBadgeClassName(t.priority)}>{t.priority}</Badge>
+                    <Badge className={priorityBadgeClassName(t.priority)}>{priorityLabelByValue.get(t.priority) ?? t.priority}</Badge>
+                    {(() => {
+                      const overdue = getOverdueInfo(t);
+                      return overdue ? (
+                        <Badge className="bg-red-600 text-white hover:bg-red-600/90 dark:bg-red-500 dark:hover:bg-red-500/90" title={overdue.title}>
+                          {overdue.label}
+                        </Badge>
+                      ) : null;
+                    })()}
+                    {renderRatingStars(t.feedbackRating)}
                   </div>
                   <div className="text-sm text-slate-700 mt-1 truncate">{t.subject || `${t.ticketType} • ${t.priority}`}</div>
                   <div className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">

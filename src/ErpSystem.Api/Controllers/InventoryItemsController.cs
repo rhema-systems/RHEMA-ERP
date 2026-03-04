@@ -566,6 +566,13 @@ public class InventoryItemsController : ControllerBase
                 tenantId = DefaultTenantId;
             }
 
+            var consignmentWarehouseIds = await _warehouseRepository
+                .GetQueryable(w => w.TenantId == tenantId && w.IsConsignmentWarehouse && !w.IsDeleted)
+                .AsNoTracking()
+                .Select(w => w.Id)
+                .ToListAsync();
+            var consignmentWarehouseIdSet = consignmentWarehouseIds.ToHashSet();
+
             IQueryable<InventoryMovement> movementQuery = _inventoryMovementRepository
                 .GetQueryable(m => m.TenantId == tenantId && m.IsPosted)
                 .AsNoTracking();
@@ -730,7 +737,9 @@ public class InventoryItemsController : ControllerBase
                 .ToListAsync();
 
             // Overall average cost from balances per item (across warehouses/locations).
-            var itemAvgCosts = await balanceQuery
+            var ownedBalanceQuery = balanceQuery.Where(b => !consignmentWarehouseIdSet.Contains(b.WarehouseId));
+
+            var itemAvgCosts = await ownedBalanceQuery
                 .GroupBy(b => b.InventoryItemId)
                 .Select(g => new
                 {
@@ -747,7 +756,7 @@ public class InventoryItemsController : ControllerBase
             foreach (var item in items)
             {
                 var totalOnHand = wqMap
-                    .Where(kvp => kvp.Key.InventoryItemId == item.Id)
+                    .Where(kvp => kvp.Key.InventoryItemId == item.Id && !consignmentWarehouseIdSet.Contains(kvp.Key.WarehouseId))
                     .Sum(kvp => kvp.Value.CurrentStock);
 
                 item.CurrentStock = totalOnHand;

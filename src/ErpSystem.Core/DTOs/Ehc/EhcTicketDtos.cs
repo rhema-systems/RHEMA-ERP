@@ -45,6 +45,17 @@ public sealed class EhcTicketListItemDto
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 
+    // SLA timestamps (for grids/flags)
+    public DateTime? FirstResponseDueAt { get; set; }
+    public DateTime? ResolutionDueAt { get; set; }
+    public DateTime? FirstRespondedAt { get; set; }
+    public DateTime? ResolvedAt { get; set; }
+    public DateTime? ClosedAt { get; set; }
+
+    // Feedback (CSAT)
+    public int? FeedbackRating { get; set; }
+    public DateTime? FeedbackSubmittedAt { get; set; }
+
     // Internal-only (not populated for external users)
     public string? AssignedDepartmentName { get; set; }
     public string? AssignedToName { get; set; }
@@ -88,10 +99,35 @@ public sealed class EhcTicketDetailDto
     public string? RequesterEmail { get; set; }
     public string? RequesterAuthenticationProvider { get; set; }
 
+    // Complaint/RCA (internal-only)
+    public Guid? RootCauseId { get; set; }
+    public string? RootCauseCode { get; set; }
+    public string? RootCauseName { get; set; }
+    public string? RootCauseDetails { get; set; }
+    public string? ResolutionSummary { get; set; }
+
+    // Feedback (CSAT)
+    public int? FeedbackRating { get; set; }
+    public string? FeedbackComment { get; set; }
+    public DateTime? FeedbackSubmittedAt { get; set; }
+
     public List<EhcTicketMessageDto> Messages { get; set; } = new();
     public List<EhcTicketAttachmentDto> Attachments { get; set; } = new();
     public List<EhcTicketStatusHistoryDto> StatusHistory { get; set; } = new();
     public List<EhcTicketAuditEventDto> AuditTrail { get; set; } = new();
+}
+
+public sealed class SubmitEhcTicketFeedbackRequestDto
+{
+    public int Rating { get; set; }
+    public string? Comment { get; set; }
+}
+
+public sealed class UpdateEhcTicketRcaRequestDto
+{
+    public Guid? RootCauseId { get; set; }
+    public string? RootCauseDetails { get; set; }
+    public string? ResolutionSummary { get; set; }
 }
 
 public sealed class EhcTicketMessageDto

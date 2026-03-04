@@ -70,6 +70,7 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
 
         var inAppUserIds = new HashSet<Guid>();
         var emailAddresses = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var smsNumbers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Resolve recipients.
         foreach (var rule in recipients)
@@ -81,15 +82,16 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
                 continue;
             }
 
-            if (!topic.EnableInApp && !topic.EnableEmail)
+            if (!topic.EnableInApp && !topic.EnableEmail && !topic.EnableSms)
             {
                 continue;
             }
 
             var wantInApp = topic.EnableInApp && rule.SendInApp;
             var wantEmail = topic.EnableEmail && rule.SendEmail;
+            var wantSms = topic.EnableSms && rule.SendSms;
 
-            if (!wantInApp && !wantEmail)
+            if (!wantInApp && !wantEmail && !wantSms)
             {
                 continue;
             }
@@ -102,11 +104,16 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
                 if (wantInApp)
                     inAppUserIds.Add(userId);
 
-                if (wantEmail)
+                if (wantEmail || wantSms)
                 {
                     var user = await _userManager.FindByIdAsync(userId.ToString());
-                    if (user != null && user.IsActive && user.TenantId == evt.TenantId && !string.IsNullOrWhiteSpace(user.Email))
-                        emailAddresses.Add(user.Email);
+                    if (user != null && user.IsActive && user.TenantId == evt.TenantId)
+                    {
+                        if (wantEmail && !string.IsNullOrWhiteSpace(user.Email))
+                            emailAddresses.Add(user.Email);
+                        if (wantSms && !string.IsNullOrWhiteSpace(user.PhoneNumber))
+                            smsNumbers.Add(user.PhoneNumber);
+                    }
                 }
 
                 continue;
@@ -122,6 +129,9 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
 
                     if (wantEmail && !string.IsNullOrWhiteSpace(user.Email))
                         emailAddresses.Add(user.Email);
+
+                    if (wantSms && !string.IsNullOrWhiteSpace(user.PhoneNumber))
+                        smsNumbers.Add(user.PhoneNumber);
                 }
 
                 continue;
@@ -142,6 +152,9 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
                 if (wantEmail && !string.IsNullOrWhiteSpace(user.Email))
                     emailAddresses.Add(user.Email);
 
+                if (wantSms && !string.IsNullOrWhiteSpace(user.PhoneNumber))
+                    smsNumbers.Add(user.PhoneNumber);
+
                 continue;
             }
 
@@ -161,6 +174,9 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
 
                     if (wantEmail && !string.IsNullOrWhiteSpace(user.Email))
                         emailAddresses.Add(user.Email);
+
+                    if (wantSms && !string.IsNullOrWhiteSpace(user.PhoneNumber))
+                        smsNumbers.Add(user.PhoneNumber);
                 }
 
                 continue;
@@ -182,6 +198,9 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
 
                     if (wantEmail && !string.IsNullOrWhiteSpace(user.Email))
                         emailAddresses.Add(user.Email);
+
+                    if (wantSms && !string.IsNullOrWhiteSpace(user.PhoneNumber))
+                        smsNumbers.Add(user.PhoneNumber);
                 }
 
                 continue;
@@ -207,6 +226,9 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
 
                     if (wantEmail && !string.IsNullOrWhiteSpace(user.Email))
                         emailAddresses.Add(user.Email);
+
+                    if (wantSms && !string.IsNullOrWhiteSpace(user.PhoneNumber))
+                        smsNumbers.Add(user.PhoneNumber);
                 }
 
                 continue;
@@ -263,6 +285,34 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
                         var user = await _userManager.FindByIdAsync(uid.ToString());
                         if (user != null && user.IsActive && user.TenantId == evt.TenantId && !string.IsNullOrWhiteSpace(user.Email))
                             emailAddresses.Add(user.Email);
+                    }
+                }
+
+                if (wantSms)
+                {
+                    if (!string.IsNullOrWhiteSpace(bp.PrimaryPhone))
+                        smsNumbers.Add(bp.PrimaryPhone);
+
+                    var portalUserIds = new HashSet<Guid>();
+                    if (bp.UserId.HasValue && bp.UserId.Value != Guid.Empty)
+                        portalUserIds.Add(bp.UserId.Value);
+
+                    try
+                    {
+                        var subUsers = await _businessPartnerUserRepository.GetActiveByBusinessPartnerIdAsync(bp.Id);
+                        foreach (var u in subUsers)
+                            portalUserIds.Add(u.UserId);
+                    }
+                    catch
+                    {
+                        // Best-effort.
+                    }
+
+                    foreach (var uid in portalUserIds)
+                    {
+                        var user = await _userManager.FindByIdAsync(uid.ToString());
+                        if (user != null && user.IsActive && user.TenantId == evt.TenantId && !string.IsNullOrWhiteSpace(user.PhoneNumber))
+                            smsNumbers.Add(user.PhoneNumber);
                     }
                 }
 
@@ -324,6 +374,34 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
                     }
                 }
 
+                if (wantSms)
+                {
+                    if (!string.IsNullOrWhiteSpace(bp.PrimaryPhone))
+                        smsNumbers.Add(bp.PrimaryPhone);
+
+                    var portalUserIds = new HashSet<Guid>();
+                    if (bp.UserId.HasValue && bp.UserId.Value != Guid.Empty)
+                        portalUserIds.Add(bp.UserId.Value);
+
+                    try
+                    {
+                        var subUsers = await _businessPartnerUserRepository.GetActiveByBusinessPartnerIdAsync(bp.Id);
+                        foreach (var u in subUsers)
+                            portalUserIds.Add(u.UserId);
+                    }
+                    catch
+                    {
+                        // Best-effort.
+                    }
+
+                    foreach (var uid in portalUserIds)
+                    {
+                        var user = await _userManager.FindByIdAsync(uid.ToString());
+                        if (user != null && user.IsActive && user.TenantId == evt.TenantId && !string.IsNullOrWhiteSpace(user.PhoneNumber))
+                            smsNumbers.Add(user.PhoneNumber);
+                    }
+                }
+
                 continue;
             }
 
@@ -345,7 +423,7 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
 
             if (string.Equals(kind, "DepartmentType", StringComparison.OrdinalIgnoreCase))
             {
-                if (!wantInApp && !wantEmail)
+                if (!wantInApp && !wantEmail && !wantSms)
                     continue;
 
                 if (!TryParseDepartmentType(value, out var deptType))
@@ -380,11 +458,14 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
 
                     if (wantEmail && !string.IsNullOrWhiteSpace(user.Email))
                         emailAddresses.Add(user.Email);
+
+                    if (wantSms && !string.IsNullOrWhiteSpace(user.PhoneNumber))
+                        smsNumbers.Add(user.PhoneNumber);
                 }
             }
         }
 
-        if (inAppUserIds.Count == 0 && emailAddresses.Count == 0)
+        if (inAppUserIds.Count == 0 && emailAddresses.Count == 0 && smsNumbers.Count == 0)
         {
             return;
         }
@@ -395,9 +476,12 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
 
         var title = RenderTemplate(titleTemplate ?? string.Empty, data);
         var message = RenderTemplate(bodyTemplate ?? string.Empty, data);
+        var smsTemplate = string.IsNullOrWhiteSpace(topic.SmsBodyTemplate) ? message : topic.SmsBodyTemplate;
+        var smsMessage = RenderTemplate(smsTemplate ?? string.Empty, data);
 
         if (string.IsNullOrWhiteSpace(title)) title = topic.Name;
         if (string.IsNullOrWhiteSpace(message)) message = topic.Description ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(smsMessage)) smsMessage = message;
 
         var actionUrl = ResolveActionUrl(topic, data);
 
@@ -490,6 +574,35 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
                     EntityId = evt.EntityId,
                     ActionUrl = null,
                     AdditionalData = additional
+                });
+            }
+        }
+
+        if (topic.EnableSms && smsNumbers.Count > 0)
+        {
+            foreach (var phone in smsNumbers)
+            {
+                queued.Add(new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = evt.TenantId,
+                    RecipientId = Guid.Empty,
+                    NotificationType = "SMS",
+                    Title = title,
+                    Message = smsMessage,
+                    Priority = "Normal",
+                    Status = "Pending",
+                    IsRead = false,
+                    ScheduledFor = now,
+                    SentAt = null,
+                    AttemptCount = 0,
+                    LastError = null,
+                    DeliveryMethods = "SMS",
+                    PhoneNumber = phone,
+                    EntityType = evt.EntityType,
+                    EntityId = evt.EntityId,
+                    ActionUrl = null,
+                    AdditionalData = JsonSerializer.Serialize(new { topic = new { key = topic.Key } })
                 });
             }
         }

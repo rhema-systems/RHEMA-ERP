@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Plus, Search, Eye, Edit, Calendar, AlertCircle, Settings, History, MapPin } from 'lucide-react';
 import {
@@ -51,6 +52,7 @@ interface Asset {
   serialNumber: string;
   licensePlate?: string;
   vin?: string;
+  isFleetAsset?: boolean;
   purchaseDate: string;
   warrantyExpiry: string;
   lastMaintenanceDate: string;
@@ -108,6 +110,7 @@ function AssetsPageContent() {
     serialNumber: '',
     licensePlate: '',
     vin: '',
+    isFleetAsset: false,
     purchaseDate: '',
     warrantyExpiry: '',
     criticality: 'Medium' as const,
@@ -169,6 +172,7 @@ function AssetsPageContent() {
         category: asset.assetCategory?.name || asset.categoryName || asset.CategoryName || 'Unknown',
         licensePlate: asset.licensePlate || asset.LicensePlate || '',
         vin: asset.vin || asset.VIN || asset.Vin || '',
+        isFleetAsset: asset.isFleetAsset ?? asset.IsFleetAsset ?? false,
         // Map date fields with proper formatting
         purchaseDate: formatDateForInput(asset.purchaseDate || asset.PurchaseDate),
         warrantyExpiry: formatDateForInput(asset.warrantyEndDate || asset.WarrantyEndDate || asset.warrantyExpiry),
@@ -328,10 +332,16 @@ function AssetsPageContent() {
     if (assetTypes.length === 0) return;
 
     const assetTypeParam = (searchParams.get('assetType') || '').trim();
+    const addToFleetParam = (searchParams.get('addToFleet') || '').trim().toLowerCase();
+    const addToFleet = addToFleetParam === '1' || addToFleetParam === 'true';
     if (assetTypeParam) {
       const match = assetTypes.find((t) => (t.assetType || '').toLowerCase() === assetTypeParam.toLowerCase());
       if (match) {
-        setNewAsset((prev) => ({ ...prev, category: match.name }));
+        setNewAsset((prev) => ({
+          ...prev,
+          category: match.name,
+          isFleetAsset: (match.assetType || '').toLowerCase() === 'vehicle' ? addToFleet : false,
+        }));
         if (categoryFilter === 'all') setCategoryFilter(match.name);
       }
     }
@@ -450,6 +460,7 @@ function AssetsPageContent() {
         serialNumber: newAsset.serialNumber?.trim() || null,
         licensePlate: isVehicleCategory ? (newAsset.licensePlate?.trim() || null) : null,
         vin: isVehicleCategory ? (newAsset.vin?.trim() || null) : null,
+        isFleetAsset: isVehicleCategory ? !!newAsset.isFleetAsset : false,
         location: newAsset.location?.trim() || null,
         status: 'Active',
         criticality: newAsset.criticality || 'Medium',
@@ -544,6 +555,7 @@ function AssetsPageContent() {
         serialNumber: '',
         licensePlate: '',
         vin: '',
+        isFleetAsset: false,
         purchaseDate: '',
         warrantyExpiry: '',
         criticality: 'Medium',
@@ -569,6 +581,7 @@ function AssetsPageContent() {
       serialNumber: asset.serialNumber || '',
       licensePlate: asset.licensePlate || '',
       vin: asset.vin || '',
+      isFleetAsset: !!asset.isFleetAsset,
       purchaseDate: formatDateForInput(asset.purchaseDate),
       warrantyExpiry: formatDateForInput(asset.warrantyExpiry),
       criticality: asset.criticality || 'Medium',
@@ -631,6 +644,7 @@ function AssetsPageContent() {
           serialNumber: newAsset.serialNumber,
           licensePlate: isVehicleCategory ? (newAsset.licensePlate?.trim() || null) : null,
           vin: isVehicleCategory ? (newAsset.vin?.trim() || null) : null,
+          isFleetAsset: isVehicleCategory ? !!newAsset.isFleetAsset : false,
           location: newAsset.location,
           status: 'Active',
           criticality: newAsset.criticality,
@@ -673,6 +687,7 @@ function AssetsPageContent() {
         serialNumber: '',
         licensePlate: '',
         vin: '',
+        isFleetAsset: false,
         purchaseDate: '',
         warrantyExpiry: '',
         criticality: 'Medium',
@@ -976,6 +991,15 @@ function AssetsPageContent() {
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="flex items-start gap-3 rounded-md border bg-muted/10 p-3 lg:col-span-4">
+                    <Switch checked={!!newAsset.isFleetAsset} onCheckedChange={(v) => setNewAsset((prev) => ({ ...prev, isFleetAsset: v }))} />
+                    <div className="space-y-1">
+                      <Label>Add to Fleet</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Only assets flagged as Fleet will appear in Fleet Management.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -1172,6 +1196,15 @@ function AssetsPageContent() {
                         <SelectItem value="Rented">Rented</SelectItem>
                       </SelectContent>
                     </Select>
+                  </div>
+                  <div className="flex items-start gap-3 rounded-md border bg-muted/10 p-3 lg:col-span-4">
+                    <Switch checked={!!newAsset.isFleetAsset} onCheckedChange={(v) => setNewAsset((prev) => ({ ...prev, isFleetAsset: v }))} />
+                    <div className="space-y-1">
+                      <Label>Add to Fleet</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Only assets flagged as Fleet will appear in Fleet Management.
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}

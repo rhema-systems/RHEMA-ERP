@@ -35,7 +35,7 @@ public class FleetInspectionsController : ControllerBase
     }
 
     [HttpPost("start")]
-    [Authorize(Policy = "MaintenanceWrite")]
+    [Authorize(Policy = "FleetInspectionWrite")]
     public async Task<ActionResult<FleetTripInspectionDto>> Start([FromBody] StartFleetTripInspectionDto dto)
     {
         try
@@ -55,7 +55,7 @@ public class FleetInspectionsController : ControllerBase
     }
 
     [HttpPost("{inspectionId:guid}/complete")]
-    [Authorize(Policy = "MaintenanceWrite")]
+    [Authorize(Policy = "FleetInspectionWrite")]
     public async Task<ActionResult<FleetTripInspectionDto>> Complete(Guid inspectionId, [FromBody] CompleteFleetTripInspectionDto dto)
     {
         try
@@ -75,7 +75,7 @@ public class FleetInspectionsController : ControllerBase
     }
 
     [HttpPost("{inspectionId:guid}/cancel")]
-    [Authorize(Policy = "MaintenanceWrite")]
+    [Authorize(Policy = "FleetInspectionWrite")]
     public async Task<ActionResult> Cancel(Guid inspectionId, [FromQuery] string? notes = null)
     {
         try

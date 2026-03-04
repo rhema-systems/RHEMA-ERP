@@ -21,11 +21,13 @@ namespace ErpSystem.Api.Controllers.Ehc;
 public sealed class EhcInternalTicketsController : ControllerBase
 {
     private readonly IEhcTicketService _ticketService;
+    private readonly IEhcProblemService _problemService;
     private readonly ILogger<EhcInternalTicketsController> _logger;
 
-    public EhcInternalTicketsController(IEhcTicketService ticketService, ILogger<EhcInternalTicketsController> logger)
+    public EhcInternalTicketsController(IEhcTicketService ticketService, IEhcProblemService problemService, ILogger<EhcInternalTicketsController> logger)
     {
         _ticketService = ticketService;
+        _problemService = problemService;
         _logger = logger;
     }
 
@@ -181,6 +183,71 @@ public sealed class EhcInternalTicketsController : ControllerBase
         {
             _logger.LogError(ex, "Error transitioning internal EHC ticket {TicketId} to {TargetStatus}", id, targetStatus);
             return StatusCode(500, new { success = false, message = "Failed to transition ticket" });
+        }
+    }
+
+    [HttpPut("{id:guid}/rca")]
+    public async Task<ActionResult> UpdateRca(Guid id, [FromBody] UpdateEhcTicketRcaRequestDto request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _ticketService.UpdateTicketRcaAsync(id, request, cancellationToken);
+            return Ok(new { success = true, data = result });
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { success = false, message = "Ticket not found" });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating RCA details for EHC ticket {TicketId}", id);
+            return StatusCode(500, new { success = false, message = "Failed to update RCA" });
+        }
+    }
+
+    [HttpPost("{id:guid}/convert-to-problem")]
+    public async Task<ActionResult> ConvertToProblem(Guid id, [FromBody] ConvertEhcTicketToProblemRequestDto request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _problemService.ConvertTicketToProblemAsync(id, request, cancellationToken);
+            return Ok(new { success = true, data = result });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { success = false, message = "Ticket not found" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error converting ticket {TicketId} to problem", id);
+            return StatusCode(500, new { success = false, message = "Failed to convert ticket to problem" });
+        }
+    }
+
+    [HttpGet("{id:guid}/problems")]
+    public async Task<ActionResult> TicketProblems(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _problemService.GetTicketProblemsAsync(id, cancellationToken);
+            return Ok(new { success = true, data = result });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving problems for ticket {TicketId}", id);
+            return StatusCode(500, new { success = false, message = "Failed to load ticket problems" });
         }
     }
 

@@ -850,6 +850,7 @@ public class LandedCostItemDto
     public string Currency { get; set; } = "USD";
     public decimal ExchangeRate { get; set; }
     public decimal AmountInBaseCurrency { get; set; }
+    public string AllocationMethod { get; set; } = "ByValue";
     public Guid? SupplierId { get; set; }
     public string? SupplierName { get; set; }
     public string? ReferenceNumber { get; set; }
@@ -900,10 +901,32 @@ public class CreateLandedCostItemDto
     [Range(0.000001, double.MaxValue)]
     public decimal ExchangeRate { get; set; } = 1;
 
+    [MaxLength(50)]
+    public string AllocationMethod { get; set; } = "ByValue";
+
     public Guid? SupplierId { get; set; }
 
     [MaxLength(100)]
     public string? ReferenceNumber { get; set; }
+}
+
+public class SetManualLandedCostAllocationsDto
+{
+    [Required]
+    public List<ManualLandedCostAllocationLineDto> Allocations { get; set; } = new();
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+}
+
+public class ManualLandedCostAllocationLineDto
+{
+    [Required]
+    public Guid GoodsReceiptNoteItemId { get; set; }
+
+    [Required]
+    [Range(0, double.MaxValue)]
+    public decimal AllocatedAmount { get; set; }
 }
 
 #endregion

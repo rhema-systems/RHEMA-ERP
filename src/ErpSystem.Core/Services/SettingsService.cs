@@ -14,6 +14,9 @@ public interface ISettingsService
     Task<EmailSettings> UpdateEmailSettingsAsync(EmailSettings settings);
     Task<bool> TestEmailSettingsAsync(EmailSettings settings, string testEmail);
 
+    // SMS (per-tenant)
+    Task<SmsSettings?> GetSmsSettingsAsync();
+    Task<SmsSettings> UpdateSmsSettingsAsync(SmsSettings settings);
 
     Task<Security?> GetSecuritySettingsAsync();
     Task<Security?> GetSecuritySettingsAsync(Guid tenantId);
@@ -169,6 +172,132 @@ public class SettingsService : ISettingsService
         {
             _logger.LogWarning(ex, "Failed to send test email to {TestEmail}", testEmail);
             return false;
+        }
+    }
+
+    #endregion
+
+    #region SMS Settings
+
+    public async Task<SmsSettings?> GetSmsSettingsAsync()
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            return null;
+        }
+
+        try
+        {
+            var smsSettings = await _unitOfWork.Repository<SmsSettings>()
+                .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted);
+
+            if (smsSettings == null)
+            {
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(smsSettings.TwilioAuthToken))
+            {
+                try
+                {
+                    smsSettings.TwilioAuthToken = _cryptoService.Decrypt(smsSettings.TwilioAuthToken);
+                }
+                catch
+                {
+                    // backwards compatibility (plain text)
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(smsSettings.GhanaGatewayApiKey))
+            {
+                try
+                {
+                    smsSettings.GhanaGatewayApiKey = _cryptoService.Decrypt(smsSettings.GhanaGatewayApiKey);
+                }
+                catch
+                {
+                    // backwards compatibility (plain text)
+                }
+            }
+
+            return smsSettings;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving SMS settings");
+            throw;
+        }
+    }
+
+    public async Task<SmsSettings> UpdateSmsSettingsAsync(SmsSettings settings)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            throw new InvalidOperationException("Tenant ID is required");
+        }
+
+        try
+        {
+            var repo = _unitOfWork.Repository<SmsSettings>();
+            var existing = await repo.FirstOrDefaultAsync(s => s.TenantId == tenantId);
+
+            if (existing != null)
+            {
+                existing.IsDeleted = false;
+                existing.DeletedAt = null;
+                existing.DeletedBy = null;
+
+                existing.DefaultProvider = settings.DefaultProvider;
+                existing.FallbackProvidersJson = settings.FallbackProvidersJson;
+
+                existing.TwilioEnabled = settings.TwilioEnabled;
+                existing.TwilioAccountSid = settings.TwilioAccountSid;
+                existing.TwilioAuthToken = string.IsNullOrWhiteSpace(settings.TwilioAuthToken)
+                    ? settings.TwilioAuthToken
+                    : _cryptoService.Encrypt(settings.TwilioAuthToken);
+                existing.TwilioFromNumber = settings.TwilioFromNumber;
+
+                existing.GhanaGatewayEnabled = settings.GhanaGatewayEnabled;
+                existing.GhanaGatewayUrlTemplate = settings.GhanaGatewayUrlTemplate;
+                existing.GhanaGatewayApiKey = string.IsNullOrWhiteSpace(settings.GhanaGatewayApiKey)
+                    ? settings.GhanaGatewayApiKey
+                    : _cryptoService.Encrypt(settings.GhanaGatewayApiKey);
+                existing.GhanaGatewaySenderId = settings.GhanaGatewaySenderId;
+                existing.GhanaGatewayTimeoutSeconds = settings.GhanaGatewayTimeoutSeconds;
+
+                existing.UpdatedAt = DateTime.UtcNow;
+                existing.UpdatedBy = _currentUserService.UserName;
+
+                await repo.UpdateAsync(existing);
+                await _unitOfWork.SaveChangesAsync();
+                return existing;
+            }
+
+            settings.Id = Guid.NewGuid();
+            settings.TenantId = tenantId;
+            settings.CreatedAt = DateTime.UtcNow;
+            settings.CreatedBy = _currentUserService.UserName;
+
+            if (!string.IsNullOrWhiteSpace(settings.TwilioAuthToken))
+            {
+                settings.TwilioAuthToken = _cryptoService.Encrypt(settings.TwilioAuthToken);
+            }
+
+            if (!string.IsNullOrWhiteSpace(settings.GhanaGatewayApiKey))
+            {
+                settings.GhanaGatewayApiKey = _cryptoService.Encrypt(settings.GhanaGatewayApiKey);
+            }
+
+            var created = await repo.AddAsync(settings);
+            await _unitOfWork.SaveChangesAsync();
+            return created;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating SMS settings");
+            throw;
         }
     }
 

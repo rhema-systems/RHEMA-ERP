@@ -68,6 +68,7 @@ interface NotificationTopicRecipientDto {
   isSystem?: boolean
   sendInApp: boolean
   sendEmail: boolean
+  sendSms: boolean
 }
 
 interface NotificationTopicDto {
@@ -83,8 +84,10 @@ interface NotificationTopicDto {
   isActive: boolean
   enableInApp: boolean
   enableEmail: boolean
+  enableSms: boolean
   inAppTitleTemplate?: string | null
   inAppBodyTemplate?: string | null
+  smsBodyTemplate?: string | null
   actionUrlTemplate?: string | null
   emailTemplateId?: string | null
   recipients: NotificationTopicRecipientDto[]
@@ -103,8 +106,10 @@ const emptyForm = {
   isActive: true,
   enableInApp: true,
   enableEmail: true,
+  enableSms: false,
   inAppTitleTemplate: '',
   inAppBodyTemplate: '',
+  smsBodyTemplate: '',
   actionUrlTemplate: '',
   emailTemplateId: '' as string,
   recipients: [] as NotificationTopicRecipientDto[],
@@ -473,6 +478,7 @@ const NotificationTopics: React.FC = () => {
         isSystem: !!r.isSystem,
         sendInApp: !!r.sendInApp,
         sendEmail: !!r.sendEmail,
+        sendSms: !!(r as any).sendSms,
       })),
     })
     setEditOpen(true)
@@ -488,8 +494,10 @@ const NotificationTopics: React.FC = () => {
     isActive: !!form.isActive,
     enableInApp: !!form.enableInApp,
     enableEmail: !!form.enableEmail,
+    enableSms: !!form.enableSms,
     inAppTitleTemplate: form.inAppTitleTemplate?.trim() || null,
     inAppBodyTemplate: form.inAppBodyTemplate?.trim() || null,
+    smsBodyTemplate: form.smsBodyTemplate?.trim() || null,
     actionUrlTemplate: form.actionUrlTemplate?.trim() || null,
     emailTemplateId: form.emailTemplateId ? form.emailTemplateId : null,
     recipients: (form.recipients || [])
@@ -499,6 +507,7 @@ const NotificationTopics: React.FC = () => {
         recipientValue: (r.recipientValue || '').trim(),
         sendInApp: !!r.sendInApp,
         sendEmail: !!r.sendEmail,
+        sendSms: !!r.sendSms,
       }))
       .filter(r => r.recipientKind && r.recipientValue),
   })
@@ -561,7 +570,7 @@ const NotificationTopics: React.FC = () => {
       ...f,
       recipients: [
         ...(f.recipients || []),
-        { recipientKind: 'Role', recipientValue: '', sendInApp: true, sendEmail: true },
+        { recipientKind: 'Role', recipientValue: '', sendInApp: true, sendEmail: true, sendSms: false },
       ],
     }))
   }
@@ -905,6 +914,10 @@ const TopicForm: React.FC<{
               <Switch checked={form.enableEmail} onCheckedChange={v => update({ enableEmail: v })} />
               <Label>Email</Label>
             </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={form.enableSms} onCheckedChange={v => update({ enableSms: v })} />
+              <Label>SMS</Label>
+            </div>
           </div>
         </div>
 
@@ -969,6 +982,17 @@ const TopicForm: React.FC<{
             onChange={e => update({ inAppBodyTemplate: e.target.value })}
             placeholder="e.g. Supplier {{SupplierName}} submitted a quote for {{RfqNumber}}."
           />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="topic-sms-body">SMS Body Template (optional)</Label>
+          <Textarea
+            id="topic-sms-body"
+            value={form.smsBodyTemplate}
+            onChange={e => update({ smsBodyTemplate: e.target.value })}
+            placeholder="e.g. {{Title}} - {{Message}}"
+          />
+          <div className="text-xs text-muted-foreground">Used when the topic and recipient have SMS enabled.</div>
         </div>
 
         <div className="space-y-2">
@@ -1231,6 +1255,10 @@ const TopicForm: React.FC<{
                         <div className="flex items-center gap-2">
                           <Switch checked={!!r.sendEmail} onCheckedChange={v => onUpdateRecipient(idx, { sendEmail: v })} disabled={isSystemRule} />
                           <span className="text-sm">Email</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch checked={!!r.sendSms} onCheckedChange={v => onUpdateRecipient(idx, { sendSms: v })} disabled={isSystemRule} />
+                          <span className="text-sm">SMS</span>
                         </div>
                       </div>
                     </div>

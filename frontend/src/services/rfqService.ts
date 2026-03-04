@@ -104,7 +104,7 @@ export interface RfqDetailDto extends RfqDto {
 export interface CreatePurchaseOrdersFromRfqDto {
   mode: 'WinnerTakesAll' | 'SplitAward';
   quoteId?: string;
-  lines?: { rfqItemId: string; quoteId: string }[];
+  lines?: { rfqItemId: string; quoteId: string; awardReason?: string }[];
 }
 
 export interface CreatePurchaseOrdersFromRfqResponseDto {
@@ -153,6 +153,14 @@ export const rfqService = {
     });
     if (!response.ok) throw new Error(await readApiError(response));
     return response.json();
+  },
+
+  async getRfqPdf(id: string): Promise<Blob> {
+    const response = await fetch(`${API_BASE_URL}/procurement/rfqs/${id}/pdf`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readApiError(response));
+    return response.blob();
   },
 
   async updateRfq(id: string, dto: UpdateRfqDto): Promise<RfqDetailDto> {

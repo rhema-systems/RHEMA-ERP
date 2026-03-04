@@ -22,6 +22,11 @@ public class RfqSplitAwardLineDto
 {
     public Guid RfqItemId { get; set; }
     public Guid QuoteId { get; set; }
+
+    /// <summary>
+    /// Optional reason/justification for awarding this RFQ line to the selected supplier.
+    /// </summary>
+    public string? AwardReason { get; set; }
 }
 
 public class CreatePurchaseOrdersFromRfqResponseDto

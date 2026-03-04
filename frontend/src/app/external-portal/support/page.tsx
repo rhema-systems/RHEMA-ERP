@@ -12,12 +12,18 @@ export default function ExternalPortalSupportHomePage() {
       <Card>
         <CardHeader>
           <CardTitle>Support</CardTitle>
-          <CardDescription>Submit and track enquiries, complaints, and helpdesk requests.</CardDescription>
+          <CardDescription>Submit and track enquiries, complaints, helpdesk tickets, and service requests.</CardDescription>
         </CardHeader>
         <CardContent className="flex items-center gap-3">
           <Button onClick={() => router.push('/support/tickets')}>My Tickets</Button>
           <Button variant="outline" onClick={() => router.push('/support/tickets/new')}>
             Create Ticket
+          </Button>
+          <Button variant="outline" onClick={() => router.push('/support/requests')}>
+            My Service Requests
+          </Button>
+          <Button variant="outline" onClick={() => router.push('/support/requests/new')}>
+            New Service Request
           </Button>
         </CardContent>
       </Card>

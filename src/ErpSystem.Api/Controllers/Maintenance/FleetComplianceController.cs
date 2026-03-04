@@ -11,11 +11,16 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 public class FleetComplianceController : ControllerBase
 {
     private readonly IFleetComplianceService _fleetComplianceService;
+    private readonly IFleetComplianceTemplateService _templateService;
     private readonly ILogger<FleetComplianceController> _logger;
 
-    public FleetComplianceController(IFleetComplianceService fleetComplianceService, ILogger<FleetComplianceController> logger)
+    public FleetComplianceController(
+        IFleetComplianceService fleetComplianceService,
+        IFleetComplianceTemplateService templateService,
+        ILogger<FleetComplianceController> logger)
     {
         _fleetComplianceService = fleetComplianceService;
+        _templateService = templateService;
         _logger = logger;
     }
 
@@ -126,6 +131,45 @@ public class FleetComplianceController : ControllerBase
         {
             _logger.LogError(ex, "Error retrieving dispatch-blocking compliance items for vehicle {VehicleAssetId}", vehicleAssetId);
             return StatusCode(500, "An error occurred while retrieving dispatch-blocking compliance items");
+        }
+    }
+
+    [HttpGet("vehicle/{vehicleAssetId:guid}/template")]
+    public async Task<ActionResult<FleetVehicleComplianceTemplateDto?>> GetVehicleTemplate(Guid vehicleAssetId)
+    {
+        try
+        {
+            var result = await _templateService.GetVehicleTemplateAsync(vehicleAssetId);
+            return Ok(result);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving compliance template for vehicle {VehicleAssetId}", vehicleAssetId);
+            return StatusCode(500, "An error occurred while retrieving the vehicle template");
+        }
+    }
+
+    [HttpPost("vehicle/{vehicleAssetId:guid}/template/{templateId:guid}")]
+    [Authorize(Policy = "MaintenanceWrite")]
+    public async Task<ActionResult<FleetVehicleComplianceTemplateDto>> ApplyTemplate(Guid vehicleAssetId, Guid templateId)
+    {
+        try
+        {
+            var result = await _templateService.ApplyTemplateToVehicleAsync(vehicleAssetId, templateId);
+            return Ok(result);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error applying compliance template {TemplateId} to vehicle {VehicleAssetId}", templateId, vehicleAssetId);
+            return StatusCode(500, "An error occurred while applying the template");
         }
     }
 }

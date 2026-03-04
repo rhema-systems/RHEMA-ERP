@@ -20,7 +20,7 @@ import {
   ListTodo,
   LifeBuoy,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { authService } from '@/services/auth';
 import { useRouter } from 'next/navigation';
+import type { Tenant } from '@/types';
 
 interface MenuItem {
   title: string;
@@ -104,6 +105,11 @@ const menuItems: MenuItem[] = [
     href: '/support/tickets',
     icon: LifeBuoy,
   },
+  {
+    title: 'Service Requests',
+    href: '/support/requests',
+    icon: ClipboardList,
+  },
 ];
 
 export function ExternalSidebar() {
@@ -111,6 +117,13 @@ export function ExternalSidebar() {
   const router = useRouter();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const user = authService.getStoredUser();
+  const [tenant, setTenant] = useState<Tenant | null>(() => authService.getCurrentTenant());
+
+  useEffect(() => {
+    const handler = (e: any) => setTenant(e?.detail || authService.getCurrentTenant());
+    window.addEventListener('tenant-changed', handler as any);
+    return () => window.removeEventListener('tenant-changed', handler as any);
+  }, []);
 
   const handleLogout = () => {
     authService.logout();
@@ -128,8 +141,13 @@ export function ExternalSidebar() {
       <div className="flex items-center justify-between p-4 border-b border-slate-700">
         {!isCollapsed && (
           <div className="flex items-center space-x-2">
-            <Building2 className="h-6 w-6 text-blue-400" />
-            <span className="font-semibold text-lg">External Portal</span>
+            {tenant?.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={tenant.logoUrl} alt={tenant.name || 'Tenant'} className="h-7 w-7 rounded object-contain bg-white p-1" />
+            ) : (
+              <Building2 className="h-6 w-6 text-blue-400" />
+            )}
+            <span className="font-semibold text-lg">{tenant?.name || 'External Portal'}</span>
           </div>
         )}
         <Button
@@ -148,12 +166,18 @@ export function ExternalSidebar() {
       <nav className="flex-1 overflow-y-auto p-4 space-y-2">
         {menuItems.map((item) => {
           const Icon = item.icon;
-          const isActive = item.href === '/support/tickets'
-            ? pathname === '/support/tickets' ||
-              pathname?.startsWith('/support/tickets/') ||
-              pathname === '/external-portal/support/tickets' ||
-              pathname?.startsWith('/external-portal/support/tickets/')
-            : pathname === item.href || pathname?.startsWith(item.href + '/');
+          const isActive =
+            item.href === '/support/tickets'
+              ? pathname === '/support/tickets' ||
+                pathname?.startsWith('/support/tickets/') ||
+                pathname === '/external-portal/support/tickets' ||
+                pathname?.startsWith('/external-portal/support/tickets/')
+              : item.href === '/support/requests'
+                ? pathname === '/support/requests' ||
+                  pathname?.startsWith('/support/requests/') ||
+                  pathname === '/external-portal/support/requests' ||
+                  pathname?.startsWith('/external-portal/support/requests/')
+                : pathname === item.href || pathname?.startsWith(item.href + '/');
 
           return (
             <Link

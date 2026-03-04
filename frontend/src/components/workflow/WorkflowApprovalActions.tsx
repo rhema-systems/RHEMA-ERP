@@ -215,7 +215,7 @@ export function WorkflowApprovalActions({
 
   return (
     <div className={className}>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {showStepBadge && effectiveStepName && (
           <Badge variant="outline" className="text-xs">
             Step: {effectiveStepName}

@@ -319,6 +319,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
                 PurchaseDate = a.PurchaseDate,
                 WarrantyEndDate = a.WarrantyEndDate,
                 WarrantyStartDate = a.WarrantyStartDate,
+                IsFleetAsset = a.IsFleetAsset,
                 // These would need additional queries or joins
                 ActiveWorkOrdersCount = 0, // TODO: Implement
                 LastMaintenanceDate = null, // TODO: Implement

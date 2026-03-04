@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +25,59 @@ public sealed class EhcExternalMetadataController : ControllerBase
         _db = db;
         _currentUserService = currentUserService;
         _logger = logger;
+    }
+
+    [HttpGet("priorities")]
+    public async Task<ActionResult> GetPriorities(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+            if (tenantId == Guid.Empty)
+            {
+                return Ok(new { success = true, data = Array.Empty<object>() });
+            }
+
+            var anyConfigured = await _db.EhcTicketPriorityLevels
+                .AsNoTracking()
+                .AnyAsync(p => p.TenantId == tenantId && !p.IsDeleted, cancellationToken);
+
+            var items = await _db.EhcTicketPriorityLevels
+                .AsNoTracking()
+                .Where(p => p.TenantId == tenantId && !p.IsDeleted && p.IsActive)
+                .OrderBy(p => p.SortOrder)
+                .ThenBy(p => p.Priority)
+                .Select(p => new
+                {
+                    priority = p.Priority,
+                    displayName = p.DisplayName,
+                    description = p.Description,
+                    isActive = p.IsActive,
+                    sortOrder = p.SortOrder
+                })
+                .ToListAsync(cancellationToken);
+
+            if (anyConfigured)
+            {
+                return Ok(new { success = true, data = items });
+            }
+
+            // Fallback when admin has not configured priorities yet.
+            var defaults = new[]
+            {
+                new { priority = EhcTicketPriority.Low, displayName = "Low", description = (string?)null, isActive = true, sortOrder = 1 },
+                new { priority = EhcTicketPriority.Medium, displayName = "Medium", description = (string?)null, isActive = true, sortOrder = 2 },
+                new { priority = EhcTicketPriority.High, displayName = "High", description = (string?)null, isActive = true, sortOrder = 3 },
+                new { priority = EhcTicketPriority.Critical, displayName = "Critical", description = (string?)null, isActive = true, sortOrder = 4 },
+            };
+
+            return Ok(new { success = true, data = defaults });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error loading EHC priorities metadata");
+            return StatusCode(500, new { success = false, message = "Failed to load metadata" });
+        }
     }
 
     [HttpGet("categories")]

@@ -18,7 +18,7 @@ import { authService } from '../../services/auth';
 import { settingsService } from '../../services/settings';
 import { apiService } from '../../services/api.service';
 import { tenantService } from '../../services/tenant';
-import type { LoginRequest } from '../../types';
+import type { LoginRequest, LoginResponse, OtpChannel } from '../../types';
 
 const makeLoginSchema = (requireRecaptcha: boolean) => z.object({
   username: z.string().min(3, 'Username must be at least 3 characters'),
@@ -40,6 +40,16 @@ function LoginFormWithSearchParams() {
   const [twoFactorToken, setTwoFactorToken] = useState('');
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [storedLoginData, setStoredLoginData] = useState<{ username: string; password: string; rememberMe: boolean } | null>(null);
+  const [authMode, setAuthMode] = useState<'password' | 'otp'>('password');
+  const [otpStage, setOtpStage] = useState<'request' | 'verify'>('request');
+  const [otpChannel, setOtpChannel] = useState<OtpChannel>('Email');
+  const [otpIdentifier, setOtpIdentifier] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpRecaptchaToken, setOtpRecaptchaToken] = useState('');
+  const [otpInfoMessage, setOtpInfoMessage] = useState('');
+  const [otpErrorMessage, setOtpErrorMessage] = useState('');
+  const [otpRequiresTwoFactor, setOtpRequiresTwoFactor] = useState(false);
+  const [otpTwoFactorCode, setOtpTwoFactorCode] = useState('');
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -106,6 +116,12 @@ function LoginFormWithSearchParams() {
   // Determine if reCAPTCHA should be shown based on settings and failed attempts
   const shouldShowRecaptcha = () => {
     if (!securitySettings) return false;
+
+    // If CAPTCHA is enabled for the tenant, always show it (backend enforces it when enabled)
+    if (securitySettings.captchaEnabled &&
+        (securitySettings.recaptchaSiteKey || securitySettings.hCaptchaSiteKey)) {
+      return true;
+    }
     
     // Only show CAPTCHA after failed attempts or suspicious activity, not always
     // Show after 2 or more failed attempts if configured (and we have a valid site key)
@@ -144,6 +160,54 @@ function LoginFormWithSearchParams() {
     },
   });
 
+  const redirectAfterLogin = async (response: LoginResponse) => {
+    // After successful login, check authentication provider
+    if (response.token) {
+      // If user is an external user (Local authentication), redirect to external portal
+      if (response.user?.authenticationProvider === 'Local') {
+        // Try to auto-select the best tenant (host-driven or single-tenant) to avoid an extra tenant-select step.
+        try {
+          const tenants = response.user?.accessibleTenants || [];
+
+          let preferredTenantCode: string | null = null;
+
+          if (tenants.length === 1) {
+            preferredTenantCode = tenants[0].tenantCode;
+          }
+
+          if (!preferredTenantCode) {
+            const publicSettings = await settingsService.getPublicSecuritySettings();
+            const hostTenantCode = (publicSettings as any)?.tenantCode as string | null | undefined;
+            const match = hostTenantCode ? tenants.find((t) => t.tenantCode === hostTenantCode) : null;
+            preferredTenantCode = match?.tenantCode ?? null;
+          }
+
+          if (!preferredTenantCode) {
+            const def = tenants.find((t) => t.isDefault) ?? null;
+            preferredTenantCode = def?.tenantCode ?? null;
+          }
+
+          if (preferredTenantCode) {
+            await tenantService.selectTenant(preferredTenantCode, false);
+
+            const host = typeof window !== 'undefined' ? window.location.hostname : '';
+            const isSupportHost = host.toLowerCase().startsWith('support.');
+            router.push(isSupportHost ? '/' : '/external-portal');
+            return;
+          }
+        } catch {
+          // ignore and fall back to tenant-select
+        }
+
+        // Fallback: tenant selection page auto-selects when possible.
+        router.push('/tenant-select');
+      } else {
+        // Internal users (LDAP or other) go to tenant selection
+        router.push('/tenant-select');
+      }
+    }
+  };
+
   const loginMutation = useMutation({
     mutationFn: (data: LoginRequest) => authService.login(data),
     onSuccess: async (response) => {
@@ -158,51 +222,7 @@ function LoginFormWithSearchParams() {
       // Clear stored login data after successful complete login
       setStoredLoginData(null);
 
-      // After successful login, check authentication provider
-      if (response.token) {
-        // If user is an external user (Local authentication), redirect to external portal
-        if (response.user?.authenticationProvider === 'Local') {
-          // Try to auto-select the best tenant (host-driven or single-tenant) to avoid an extra tenant-select step.
-          try {
-            const tenants = response.user?.accessibleTenants || [];
-
-            let preferredTenantCode: string | null = null;
-
-            if (tenants.length === 1) {
-              preferredTenantCode = tenants[0].tenantCode;
-            }
-
-            if (!preferredTenantCode) {
-              const publicSettings = await settingsService.getPublicSecuritySettings();
-              const hostTenantCode = (publicSettings as any)?.tenantCode as string | null | undefined;
-              const match = hostTenantCode ? tenants.find((t) => t.tenantCode === hostTenantCode) : null;
-              preferredTenantCode = match?.tenantCode ?? null;
-            }
-
-            if (!preferredTenantCode) {
-              const def = tenants.find((t) => t.isDefault) ?? null;
-              preferredTenantCode = def?.tenantCode ?? null;
-            }
-
-            if (preferredTenantCode) {
-              await tenantService.selectTenant(preferredTenantCode, false);
-
-              const host = typeof window !== 'undefined' ? window.location.hostname : '';
-              const isSupportHost = host.toLowerCase().startsWith('support.');
-              router.push(isSupportHost ? '/' : '/external-portal');
-              return;
-            }
-          } catch {
-            // ignore and fall back to tenant-select
-          }
-
-          // Fallback: tenant selection page auto-selects when possible.
-          router.push('/tenant-select');
-        } else {
-          // Internal users (LDAP or other) go to tenant selection
-          router.push('/tenant-select');
-        }
-      }
+      await redirectAfterLogin(response);
     },
     onError: (error: any) => {
       console.error('Login error details:', {
@@ -224,6 +244,51 @@ function LoginFormWithSearchParams() {
         // Clear stored login data on first-step errors
         setStoredLoginData(null);
       }
+    },
+  });
+
+  const requestOtpMutation = useMutation({
+    mutationFn: (payload: { identifier: string; channel: OtpChannel; recaptchaToken?: string }) =>
+      authService.requestLoginOtp({
+        identifier: payload.identifier,
+        channel: payload.channel,
+        tenantCode: (securitySettings as any)?.tenantCode || undefined,
+        recaptchaToken: payload.recaptchaToken,
+      }),
+    onSuccess: (resp) => {
+      setOtpErrorMessage('');
+      setOtpInfoMessage(resp.message || 'Code sent.');
+      setOtpStage('verify');
+    },
+    onError: (error: any) => {
+      const message = error.message || 'Failed to send code. Please try again.';
+      setOtpErrorMessage(message);
+    },
+  });
+
+  const verifyOtpMutation = useMutation({
+    mutationFn: (payload: { identifier: string; channel: OtpChannel; otpCode: string; twoFactorCode?: string; recaptchaToken?: string }) =>
+      authService.loginWithOtp({
+        identifier: payload.identifier,
+        channel: payload.channel,
+        otpCode: payload.otpCode,
+        tenantCode: (securitySettings as any)?.tenantCode || undefined,
+        rememberMe: false,
+        twoFactorCode: payload.twoFactorCode,
+        recaptchaToken: payload.recaptchaToken,
+      }),
+    onSuccess: async (response) => {
+      if (response.requiresTwoFactor) {
+        setOtpRequiresTwoFactor(true);
+        return;
+      }
+
+      setOtpRequiresTwoFactor(false);
+      await redirectAfterLogin(response);
+    },
+    onError: (error: any) => {
+      const message = error.message || 'Invalid code. Please try again.';
+      setOtpErrorMessage(message);
     },
   });
 
@@ -323,12 +388,14 @@ function LoginFormWithSearchParams() {
         <Card className="backdrop-blur-xl bg-white/95 dark:bg-slate-900/95 shadow-2xl border border-white/30 dark:border-slate-700/50 rounded-2xl">
           <CardHeader className="space-y-1 pb-6">
             <CardTitle className="text-2xl font-bold text-center">
-              {showTwoFactor ? '2FA Verification' : 'Sign In'}
+              {showTwoFactor ? '2FA Verification' : authMode === 'otp' ? (otpRequiresTwoFactor ? '2FA Verification' : 'Sign In with Code') : 'Sign In'}
             </CardTitle>
             <CardDescription className="text-center">
-              {showTwoFactor 
+              {showTwoFactor
                 ? 'Please enter your authentication code to complete login'
-                : 'Enter your credentials to access your account'
+                : authMode === 'otp'
+                  ? (otpRequiresTwoFactor ? 'Enter your authenticator code to complete login' : 'We will send a one-time code to your email or phone')
+                  : 'Enter your credentials to access your account'
               }
             </CardDescription>
             
@@ -352,6 +419,42 @@ function LoginFormWithSearchParams() {
             )}
           </CardHeader>
           <CardContent>
+            {/* Auth mode switch (not shown during password 2FA step) */}
+            {!showTwoFactor && (
+              <div className="grid grid-cols-2 gap-2 mb-6">
+                <Button
+                  type="button"
+                  variant={authMode === 'password' ? 'default' : 'outline'}
+                  onClick={() => {
+                    setAuthMode('password');
+                    setOtpStage('request');
+                    setOtpRequiresTwoFactor(false);
+                    setOtpErrorMessage('');
+                    setOtpInfoMessage('');
+                  }}
+                >
+                  Password
+                </Button>
+                <Button
+                  type="button"
+                  variant={authMode === 'otp' ? 'default' : 'outline'}
+                  onClick={() => {
+                    setAuthMode('otp');
+                    setShowTwoFactor(false);
+                    setTwoFactorCode('');
+                    setStoredLoginData(null);
+                    setOtpErrorMessage('');
+                    setOtpInfoMessage('');
+                    setOtpStage('request');
+                    setOtpRequiresTwoFactor(false);
+                  }}
+                >
+                  One-time code
+                </Button>
+              </div>
+            )}
+
+            {authMode === 'password' ? (
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
 
               {/* Username Field - Hidden during 2FA step */}
@@ -553,6 +656,193 @@ function LoginFormWithSearchParams() {
                 )}
               </Button>
             </form>
+            ) : (
+              <div className="space-y-6">
+                {/* Info message */}
+                {otpInfoMessage && (
+                  <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-4 border border-blue-200 dark:border-blue-800">
+                    <p className="text-sm text-blue-700 dark:text-blue-400 flex items-center gap-2">
+                      <Shield className="h-4 w-4" />
+                      {otpInfoMessage}
+                    </p>
+                  </div>
+                )}
+
+                {/* Error message */}
+                {otpErrorMessage && (
+                  <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-4 border border-red-200 dark:border-red-800">
+                    <p className="text-sm text-red-700 dark:text-red-400 flex items-center gap-2">
+                      <Shield className="h-4 w-4" />
+                      {otpErrorMessage}
+                    </p>
+                  </div>
+                )}
+
+                {/* Channel */}
+                {!otpRequiresTwoFactor && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      CHANNEL
+                    </Label>
+                    <select
+                      className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-slate-900 dark:border-slate-600"
+                      value={otpChannel}
+                      onChange={(e) => setOtpChannel(e.target.value as OtpChannel)}
+                      disabled={otpStage === 'verify'}
+                    >
+                      <option value="Email">Email</option>
+                      <option value="Sms">SMS</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* Identifier */}
+                {!otpRequiresTwoFactor && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      {otpChannel === 'Email' ? 'EMAIL ADDRESS' : 'PHONE NUMBER'}
+                    </Label>
+                    <Input
+                      type={otpChannel === 'Email' ? 'email' : 'tel'}
+                      placeholder={otpChannel === 'Email' ? 'you@company.com' : '+233XXXXXXXXX'}
+                      value={otpIdentifier}
+                      onChange={(e) => setOtpIdentifier(e.target.value)}
+                      disabled={otpStage === 'verify'}
+                    />
+                  </div>
+                )}
+
+                {/* OTP code */}
+                {otpStage === 'verify' && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      ONE-TIME CODE
+                    </Label>
+                    <Input
+                      inputMode="numeric"
+                      placeholder="123456"
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    />
+                    <div className="flex items-center justify-between">
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="px-0"
+                        onClick={() => {
+                          setOtpErrorMessage('');
+                          requestOtpMutation.mutate({
+                            identifier: otpIdentifier,
+                            channel: otpChannel,
+                            recaptchaToken: otpRecaptchaToken || undefined,
+                          });
+                        }}
+                        disabled={requestOtpMutation.isPending}
+                      >
+                        Resend code
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="px-0"
+                        onClick={() => {
+                          setOtpStage('request');
+                          setOtpCode('');
+                          setOtpRequiresTwoFactor(false);
+                          setOtpTwoFactorCode('');
+                        }}
+                      >
+                        Change channel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 2FA code (if enabled) */}
+                {otpRequiresTwoFactor && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      AUTHENTICATOR CODE
+                    </Label>
+                    <Input
+                      inputMode="numeric"
+                      placeholder="123456"
+                      value={otpTwoFactorCode}
+                      onChange={(e) => setOtpTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    />
+                  </div>
+                )}
+
+                {/* ReCAPTCHA */}
+                {showRecaptcha && securitySettings && (
+                  <div className="space-y-4">
+                    <div className="flex justify-center">
+                      <ReCAPTCHA
+                        sitekey={securitySettings.captchaProvider === 'recaptcha'
+                          ? securitySettings.recaptchaSiteKey || ''
+                          : securitySettings.hCaptchaSiteKey || ''}
+                        onChange={(token) => setOtpRecaptchaToken(token || '')}
+                      />
+                    </div>
+                    <p className="text-xs text-center text-slate-500 dark:text-slate-400">
+                      Using {securitySettings.captchaProvider === 'recaptcha' ? 'Google reCAPTCHA' : 'hCAPTCHA'}
+                    </p>
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                {otpStage === 'request' ? (
+                  <Button
+                    type="button"
+                    className="w-full h-12 text-base font-semibold"
+                    disabled={requestOtpMutation.isPending || !otpIdentifier.trim()}
+                    onClick={() => {
+                      setOtpErrorMessage('');
+                      setOtpInfoMessage('');
+                      requestOtpMutation.mutate({
+                        identifier: otpIdentifier,
+                        channel: otpChannel,
+                        recaptchaToken: otpRecaptchaToken || undefined,
+                      });
+                    }}
+                  >
+                    {requestOtpMutation.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      'Send code'
+                    )}
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    className="w-full h-12 text-base font-semibold"
+                    disabled={verifyOtpMutation.isPending || otpCode.replace(/\D/g, '').length !== 6 || (otpRequiresTwoFactor && otpTwoFactorCode.replace(/\D/g, '').length !== 6)}
+                    onClick={() => {
+                      setOtpErrorMessage('');
+                      verifyOtpMutation.mutate({
+                        identifier: otpIdentifier,
+                        channel: otpChannel,
+                        otpCode,
+                        twoFactorCode: otpRequiresTwoFactor ? otpTwoFactorCode : undefined,
+                        recaptchaToken: otpRecaptchaToken || undefined,
+                      });
+                    }}
+                  >
+                    {verifyOtpMutation.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Verifying...
+                      </>
+                    ) : (
+                      'Sign in'
+                    )}
+                  </Button>
+                )}
+              </div>
+            )}
 
             {/* Create Account Link - Only shown if any tenant allows self-registration */}
             {allowSelfRegistration && (

@@ -19,13 +19,15 @@ import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import fleetService, {
   CreateFleetComplianceItemDto,
   FleetComplianceItemDto,
+  FleetComplianceTemplateDto,
   FleetVehicleListDto,
 } from '@/services/fleetService';
 import maintenanceSettingsService from '@/services/maintenanceSettingsService';
 import { formatFleetDate } from '@/lib/date-format';
 import MaintenanceAttachmentsPanel from '@/components/maintenance/MaintenanceAttachmentsPanel';
 
-function getDueStatus(expiryDateIso: string, dueSoonDays: number): 'Overdue' | 'DueSoon' | 'Ok' {
+function getDueStatus(expiryDateIso?: string | null, dueSoonDays?: number): 'NotSet' | 'Overdue' | 'DueSoon' | 'Ok' {
+  if (!expiryDateIso) return 'NotSet';
   const expiry = new Date(expiryDateIso);
   if (Number.isNaN(expiry.getTime())) return 'Ok';
 
@@ -35,7 +37,7 @@ function getDueStatus(expiryDateIso: string, dueSoonDays: number): 'Overdue' | '
 
   const diffDays = Math.floor((expiryDateOnlyUtc - nowDateOnlyUtc) / (1000 * 60 * 60 * 24));
   if (diffDays < 0) return 'Overdue';
-  if (diffDays <= Math.max(0, dueSoonDays)) return 'DueSoon';
+  if (diffDays <= Math.max(0, dueSoonDays ?? 7)) return 'DueSoon';
   return 'Ok';
 }
 
@@ -45,6 +47,10 @@ export default function FleetCompliancePage() {
   const [vehicles, setVehicles] = React.useState<FleetVehicleListDto[]>([]);
   const [vehicleId, setVehicleId] = React.useState<string>('');
   const [dueSoonDays, setDueSoonDays] = React.useState<number>(7);
+
+  const [templates, setTemplates] = React.useState<FleetComplianceTemplateDto[]>([]);
+  const [templateId, setTemplateId] = React.useState<string>('');
+  const [applyingTemplate, setApplyingTemplate] = React.useState(false);
 
   const [loading, setLoading] = React.useState(false);
   const [items, setItems] = React.useState<FleetComplianceItemDto[]>([]);
@@ -79,6 +85,15 @@ export default function FleetCompliancePage() {
     }
   }, [toast]);
 
+  const loadTemplates = React.useCallback(async () => {
+    try {
+      const res = await fleetService.getComplianceTemplates(true);
+      setTemplates(res || []);
+    } catch (e: any) {
+      toast({ title: 'Failed to load templates', description: e?.message || String(e), variant: 'destructive' });
+    }
+  }, [toast]);
+
   const loadCompliance = React.useCallback(async () => {
     if (!vehicleId) return;
     setLoading(true);
@@ -94,6 +109,7 @@ export default function FleetCompliancePage() {
 
   React.useEffect(() => {
     loadVehicles();
+    loadTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -111,6 +127,45 @@ export default function FleetCompliancePage() {
   React.useEffect(() => {
     loadCompliance();
   }, [loadCompliance]);
+
+  React.useEffect(() => {
+    if (!vehicleId) {
+      setTemplateId('');
+      return;
+    }
+
+    (async () => {
+      try {
+        const current = await fleetService.getVehicleComplianceTemplate(vehicleId);
+        setTemplateId(current?.templateId || '');
+      } catch {
+        setTemplateId('');
+      }
+    })();
+  }, [vehicleId]);
+
+  const applyTemplate = async (nextTemplateId: string) => {
+    if (!vehicleId) {
+      toast({ title: 'Select a vehicle first', variant: 'destructive' });
+      return;
+    }
+    if (!nextTemplateId) {
+      toast({ title: 'Select a template', variant: 'destructive' });
+      return;
+    }
+
+    setApplyingTemplate(true);
+    try {
+      await fleetService.applyComplianceTemplate(vehicleId, nextTemplateId);
+      setTemplateId(nextTemplateId);
+      toast({ title: 'Template applied', description: 'Checklist rows were created for this vehicle.' });
+      await loadCompliance();
+    } catch (e: any) {
+      toast({ title: 'Failed to apply template', description: e?.message || String(e), variant: 'destructive' });
+    } finally {
+      setApplyingTemplate(false);
+    }
+  };
 
   const openCreate = () => {
     if (!vehicleId) {
@@ -204,7 +259,7 @@ export default function FleetCompliancePage() {
 
         <Button onClick={openCreate} disabled={!vehicleId}>
           <Plus className="mr-2 h-4 w-4" />
-          Add Compliance
+          Add Custom Item
         </Button>
       </div>
 
@@ -223,6 +278,38 @@ export default function FleetCompliancePage() {
               ))}
             </SelectContent>
           </Select>
+
+          <div className="space-y-2">
+            <Label>Compliance Template</Label>
+            <div className="flex flex-col gap-2 md:flex-row md:items-center">
+              <Select value={templateId || undefined} onValueChange={(v) => applyTemplate(v)} disabled={!vehicleId || applyingTemplate}>
+                <SelectTrigger className="w-full md:w-[420px]">
+                  <SelectValue placeholder={vehicleId ? 'Select template' : 'Select vehicle first'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {templates.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                      {!t.isActive ? ' (inactive)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  await loadTemplates();
+                  toast({ title: 'Templates refreshed' });
+                }}
+                disabled={applyingTemplate}
+              >
+                Refresh templates
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Select a template to auto-create the compliance checklist rows for this vehicle.
+            </p>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="rounded-md border">
@@ -267,7 +354,9 @@ export default function FleetCompliancePage() {
                         <TableCell>{formatFleetDate(i.issueDate)}</TableCell>
                         <TableCell>{formatFleetDate(i.expiryDate)}</TableCell>
                         <TableCell>
-                          {dueStatus === 'Overdue' ? (
+                          {dueStatus === 'NotSet' ? (
+                            <Badge variant="outline">Not set</Badge>
+                          ) : dueStatus === 'Overdue' ? (
                             <Badge variant="destructive">Overdue</Badge>
                           ) : dueStatus === 'DueSoon' ? (
                             <Badge variant="secondary">Due soon</Badge>
@@ -333,7 +422,7 @@ export default function FleetCompliancePage() {
           <DialogHeader>
             <DialogTitle>Compliance Documents</DialogTitle>
             <DialogDescription>
-              {docsItem ? `${docsItem.complianceType} — Expires ${formatFleetDate(docsItem.expiryDate)}` : 'Upload and view documents.'}
+              {docsItem ? `${docsItem.complianceType} — Expires ${formatFleetDate(docsItem.expiryDate, 'Not set')}` : 'Upload and view documents.'}
             </DialogDescription>
           </DialogHeader>
 

@@ -228,7 +228,9 @@ public interface ILandedCostService
     Task<IEnumerable<LandedCostDto>> GetByGRNAsync(Guid grnId);
     Task<LandedCostDetailDto?> GetByIdAsync(Guid id);
     Task<LandedCostDto> CreateAsync(CreateLandedCostDto dto, Guid userId);
-    Task<bool> AllocateCostsAsync(Guid landedCostId, string allocationMethod, Guid userId);
+    Task<LandedCostDto> InitializeFromPurchaseOrderPlanAsync(Guid goodsReceiptNoteId, Guid userId);
+    Task<bool> AllocateCostsAsync(Guid landedCostId, Guid userId);
+    Task<bool> SetManualAllocationsAsync(Guid landedCostId, Guid landedCostItemId, SetManualLandedCostAllocationsDto dto, Guid userId);
     Task<bool> ApproveAsync(Guid landedCostId, Guid userId);
     Task<bool> PostToInventoryAsync(Guid landedCostId, Guid userId);
     Task<bool> CancelAsync(Guid landedCostId, string reason, Guid userId);

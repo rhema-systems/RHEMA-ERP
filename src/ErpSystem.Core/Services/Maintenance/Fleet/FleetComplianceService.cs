@@ -38,7 +38,7 @@ public class FleetComplianceService : IFleetComplianceService
         var total = await q.CountAsync();
 
         var items = await q
-            .OrderBy(i => i.ExpiryDate)
+            .OrderBy(i => i.ExpiryDate ?? DateTime.MaxValue)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(i => new FleetComplianceItemDto
@@ -206,15 +206,15 @@ public class FleetComplianceService : IFleetComplianceService
         // Always block expired. Optionally block "due soon".
         if (blockDueSoon)
         {
-            q = q.Where(i => i.ExpiryDate.Date <= dueSoonCutoff);
+            q = q.Where(i => i.ExpiryDate.HasValue && i.ExpiryDate.Value.Date <= dueSoonCutoff);
         }
         else
         {
-            q = q.Where(i => i.ExpiryDate.Date < now.Date);
+            q = q.Where(i => i.ExpiryDate.HasValue && i.ExpiryDate.Value.Date < now.Date);
         }
 
         var items = await q
-            .OrderBy(i => i.ExpiryDate)
+            .OrderBy(i => i.ExpiryDate ?? DateTime.MaxValue)
             .Select(i => new FleetComplianceItemDto
             {
                 Id = i.Id,

@@ -17,5 +17,9 @@ public class MaintenanceSettings : TenantEntity
     /// When enabled, block fleet trip dispatch if any critical compliance item is due within FleetComplianceDueSoonDays.
     /// </summary>
     public bool BlockFleetDispatchWhenComplianceDueSoon { get; set; } = true;
-}
 
+    /// <summary>
+    /// When enabled, dispatch requires selecting a predefined FleetTripDestination (trip template/route).
+    /// </summary>
+    public bool RequirePredefinedFleetTripDestinationOnDispatch { get; set; } = false;
+}
