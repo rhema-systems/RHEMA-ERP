@@ -234,4 +234,52 @@ public class CurrenciesController : ControllerBase
         var isUnique = await _currencyService.IsCodeUniqueAsync(code, excludeId);
         return Ok(new { isUnique });
     }
+
+    /// <summary>
+    /// Activates a currency, making it available for use in transactions.
+    /// </summary>
+    [HttpPatch("{code}/activate")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    public async Task<ActionResult<CurrencyDto>> ActivateCurrency(string code)
+    {
+        try
+        {
+            var currency = await _currencyService.ToggleCurrencyStatusAsync(code, true);
+            return Ok(currency);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"Internal server error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Deactivates a currency, preventing it from being used in new transactions.
+    /// </summary>
+    [HttpPatch("{code}/deactivate")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    public async Task<ActionResult<CurrencyDto>> DeactivateCurrency(string code)
+    {
+        try
+        {
+            var currency = await _currencyService.ToggleCurrencyStatusAsync(code, false);
+            return Ok(currency);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"Internal server error: {ex.Message}");
+        }
+    }
 }
