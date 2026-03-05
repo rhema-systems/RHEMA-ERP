@@ -47,7 +47,9 @@ namespace ErpSystem.Api.Mapping
 
             // EmployeePosition mappings
             CreateMap<EmployeePosition, EmployeePositionDto>()
-                .ForMember(dest => dest.DepartmentName, opt => opt.MapFrom(src => src.Department.Name));
+                .ForMember(dest => dest.DepartmentName, opt => opt.MapFrom(src => src.Department.Name))
+                .ForMember(dest => dest.OrganizationLevelName, opt => opt.MapFrom(src => src.OrganizationLevel != null ? src.OrganizationLevel.Name : null))
+                .ForMember(dest => dest.OrganizationUnitName, opt => opt.MapFrom(src => src.OrganizationUnit != null ? src.OrganizationUnit.Name : null));
 
             CreateMap<CreateEmployeePositionDto, EmployeePosition>()
                 .ForMember(dest => dest.Id, opt => opt.Ignore())
