@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Eye, Save, Settings2, Trash2, UserPlus } from 'lucide-react';
 
@@ -14,6 +14,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
+import {
+  buildScopedHelpdeskDetailPath,
+  buildScopedHelpdeskNewPath,
+  getHelpdeskScopeConfig,
+  isExternalTicketSource,
+  isTicketInHelpdeskScope,
+} from '@/lib/helpdesk-scope';
 import { ehcInternalTicketService, type EhcAdminCategory } from '@/services/ehcInternalTicketService';
 import type { EhcTicketListItem, EhcTicketPriority, EhcTicketSource, EhcTicketStatus, EhcTicketType } from '@/services/ehcTicketService';
 
@@ -36,9 +43,6 @@ type QueueSavedView = {
   filters: QueueSavedFilters;
   createdAt: string; // ISO
 };
-
-const queueViewsStorageKey = 'ehc.helpdesk.queue.views.v1';
-const queueDefaultViewStorageKey = 'ehc.helpdesk.queue.defaultViewId.v1';
 
 const tryReadJson = <T,>(raw: string | null): T | null => {
   if (!raw) return null;
@@ -125,14 +129,21 @@ const priorityBadgeClassName = (p: EhcTicketPriority) => {
 
 export default function HelpdeskQueuePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const qc = useQueryClient();
   const { toast } = useToast();
   const { user } = useAuth();
+  const scopeParam = searchParams.get('scope');
+  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
+  const queueViewsStorageKey = `ehc.helpdesk.queue.views.${scopeConfig.scope}.v1`;
+  const queueDefaultViewStorageKey = `ehc.helpdesk.queue.defaultViewId.${scopeConfig.scope}.v1`;
 
   const [status, setStatus] = useState<EhcTicketStatus | ''>('');
-  const [ticketType, setTicketType] = useState<EhcTicketType | ''>('');
+  const [ticketType, setTicketType] = useState<EhcTicketType | ''>(
+    scopeConfig.allowedTicketTypes.length === 1 ? scopeConfig.defaultTicketType : '',
+  );
   const [priority, setPriority] = useState<EhcTicketPriority | ''>('');
-  const [source, setSource] = useState<EhcTicketSource | ''>('');
+  const [source, setSource] = useState<EhcTicketSource | ''>(scopeConfig.internalOnly ? 'Internal' : '');
   const [categoryId, setCategoryId] = useState<string>('');
   const [assignedDepartmentId, setAssignedDepartmentId] = useState<string>('');
   const [createdFrom, setCreatedFrom] = useState<string>('');
@@ -142,6 +153,23 @@ export default function HelpdeskQueuePage() {
     () => ({ status, ticketType, priority, source, categoryId, assignedDepartmentId, createdFrom, createdTo }),
     [assignedDepartmentId, categoryId, createdFrom, createdTo, priority, source, status, ticketType]
   );
+
+  const typeFilterLocked = scopeConfig.allowedTicketTypes.length === 1;
+  const ticketTypeQueryFilter = typeFilterLocked ? scopeConfig.defaultTicketType : ticketType || null;
+  const sourceQueryFilter = scopeConfig.internalOnly ? 'Internal' : source || null;
+
+  const scopedSourceOptions = useMemo<Array<{ value: EhcTicketSource | ''; label: string }>>(() => {
+    if (scopeConfig.internalOnly) return [{ value: 'Internal', label: 'Internal' }];
+    return [
+      { value: '', label: 'All external' },
+      { value: 'Web', label: 'Website' },
+      { value: 'Mobile', label: 'Mobile App' },
+      { value: 'Email', label: 'Email' },
+      { value: 'PhoneCall', label: 'Phone Call' },
+      { value: 'Sms', label: 'SMS' },
+      { value: 'WhatsApp', label: 'WhatsApp' },
+    ];
+  }, [scopeConfig.internalOnly]);
 
   const [viewsLoaded, setViewsLoaded] = useState(false);
   const [savedViews, setSavedViews] = useState<QueueSavedView[]>([]);
@@ -155,14 +183,14 @@ export default function HelpdeskQueuePage() {
   const clearFilters = useCallback(() => {
     setSelectedViewId('');
     setStatus('');
-    setTicketType('');
+    setTicketType(typeFilterLocked ? scopeConfig.defaultTicketType : '');
     setPriority('');
-    setSource('');
+    setSource(scopeConfig.internalOnly ? 'Internal' : '');
     setCategoryId('');
     setAssignedDepartmentId('');
     setCreatedFrom('');
     setCreatedTo('');
-  }, []);
+  }, [scopeConfig.defaultTicketType, scopeConfig.internalOnly, typeFilterLocked]);
 
   const applyFilters = useCallback((f: Partial<QueueSavedFilters>) => {
     const nf = normalizeFilters(f);
@@ -185,7 +213,12 @@ export default function HelpdeskQueuePage() {
     } catch {
       // ignore localStorage failures
     }
-  }, []);
+  }, [queueDefaultViewStorageKey, queueViewsStorageKey]);
+
+  useEffect(() => {
+    setViewsLoaded(false);
+    clearFilters();
+  }, [clearFilters, scopeConfig.scope]);
 
   useEffect(() => {
     if (viewsLoaded) return;
@@ -205,7 +238,7 @@ export default function HelpdeskQueuePage() {
     }
 
     setViewsLoaded(true);
-  }, [applyFilters, viewsLoaded]);
+  }, [applyFilters, queueDefaultViewStorageKey, queueViewsStorageKey, viewsLoaded]);
 
   useEffect(() => {
     if (!viewsLoaded) return;
@@ -252,7 +285,7 @@ export default function HelpdeskQueuePage() {
 
       if (e.key === 'n' || e.key === 'N') {
         e.preventDefault();
-        router.push('/helpdesk/tickets/new');
+        router.push(buildScopedHelpdeskNewPath(scopeConfig.scope));
         return;
       }
 
@@ -273,7 +306,7 @@ export default function HelpdeskQueuePage() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [clearFilters, qc, router, toast]);
+  }, [clearFilters, qc, router, toast, scopeConfig.scope]);
 
   const createdAtFormatter = useMemo(() => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }), []);
   const formatCreatedAt = useCallback(
@@ -304,16 +337,16 @@ export default function HelpdeskQueuePage() {
   );
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['ehc', 'internal', 'queue', { status, ticketType, priority, source, categoryId, assignedDepartmentId, createdFrom, createdTo }],
+    queryKey: ['ehc', 'internal', 'queue', scopeConfig.scope, { status, ticketTypeQueryFilter, priority, sourceQueryFilter, categoryId, assignedDepartmentId, createdFrom, createdTo }],
     queryFn: async () => {
       const statusesToFetch: EhcTicketStatus[] = status ? [status] : ['New', 'Acknowledged'];
       const lists = await Promise.all(
         statusesToFetch.map((s) =>
           ehcInternalTicketService.listTickets(1, 500, {
             status: s,
-            ticketType: ticketType || null,
+            ticketType: ticketTypeQueryFilter,
             priority: priority || null,
-            source: source || null,
+            source: sourceQueryFilter,
             categoryId: categoryId || null,
             assignedDepartmentId: assignedDepartmentId || null,
             createdFrom: createdFrom || null,
@@ -327,7 +360,12 @@ export default function HelpdeskQueuePage() {
         if (!t?.id) continue;
         if (!byId.has(t.id)) byId.set(t.id, t);
       }
-      return Array.from(byId.values()).filter((t) => !t.assignedToName);
+      return Array.from(byId.values()).filter(
+        (t) =>
+          !t.assignedToName &&
+          isTicketInHelpdeskScope(t, scopeConfig.scope) &&
+          (scopeConfig.internalOnly || source || isExternalTicketSource(t.source)),
+      );
     },
   });
 
@@ -354,7 +392,11 @@ export default function HelpdeskQueuePage() {
         header: 'Ticket #',
         accessorKey: 'ticketNumber',
         cell: ({ row }) => (
-          <button className="text-blue-600 hover:underline" onClick={() => router.push(`/helpdesk/tickets/${row.original.id}`)} title="Open ticket">
+          <button
+            className="text-blue-600 hover:underline"
+            onClick={() => router.push(buildScopedHelpdeskDetailPath(scopeConfig.scope, row.original.id))}
+            title="Open ticket"
+          >
             {row.original.ticketNumber}
           </button>
         ),
@@ -382,7 +424,7 @@ export default function HelpdeskQueuePage() {
       },
       { id: 'requesterName', header: 'Requester', accessorKey: 'requesterName' },
     ];
-  }, [formatCreatedAt, router]);
+  }, [formatCreatedAt, router, scopeConfig.scope]);
 
   const rowActions = useMemo<Array<DataTableAction<EhcTicketListItem>>>(() => {
     return [
@@ -390,7 +432,7 @@ export default function HelpdeskQueuePage() {
         id: 'view',
         label: 'View',
         icon: Eye as any,
-        onClick: (row) => router.push(`/helpdesk/tickets/${row.original.id}`),
+        onClick: (row) => router.push(buildScopedHelpdeskDetailPath(scopeConfig.scope, row.original.id)),
       },
       {
         id: 'assignToMe',
@@ -400,14 +442,14 @@ export default function HelpdeskQueuePage() {
         disabled: () => assignToMe.isPending,
       },
     ];
-  }, [assignToMe.isPending, router]);
+  }, [assignToMe.isPending, router, scopeConfig.scope]);
 
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Assignment Queue</h1>
-          <p className="text-slate-600">Unassigned tickets waiting for pickup.</p>
+          <h1 className="text-3xl font-bold">{scopeConfig.queueTitle}</h1>
+          <p className="text-slate-600">{scopeConfig.queueDescription}</p>
         </div>
       </div>
 
@@ -481,12 +523,20 @@ export default function HelpdeskQueuePage() {
 
           <div className="space-y-1">
             <Label className="text-xs text-slate-600">Type</Label>
-            <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={ticketType} onChange={(e) => setTicketType((e.target.value || '') as any)}>
-              <option value="">All</option>
-              <option value="Enquiry">Enquiry</option>
-              <option value="Complaint">Complaint</option>
-              <option value="Helpdesk">Helpdesk</option>
-            </select>
+            {typeFilterLocked ? (
+              <div className="flex h-10 items-center rounded-md border border-input bg-slate-50 px-3 text-sm text-slate-700">
+                {scopeConfig.ticketTypeLabel}
+              </div>
+            ) : (
+              <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={ticketType} onChange={(e) => setTicketType((e.target.value || '') as any)}>
+                <option value="">All</option>
+                {scopeConfig.allowedTicketTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="space-y-1">
@@ -514,16 +564,19 @@ export default function HelpdeskQueuePage() {
 
           <div className="space-y-1">
             <Label className="text-xs text-slate-600">Channel</Label>
-            <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={source} onChange={(e) => setSource((e.target.value || '') as any)}>
-              <option value="">All</option>
-              <option value="Web">Website</option>
-              <option value="Mobile">Mobile</option>
-              <option value="Email">Email</option>
-              <option value="Internal">Internal</option>
-              <option value="PhoneCall">Phone Call</option>
-              <option value="Sms">SMS</option>
-              <option value="WhatsApp">WhatsApp</option>
-            </select>
+            {scopeConfig.internalOnly ? (
+              <div className="flex h-10 items-center rounded-md border border-input bg-slate-50 px-3 text-sm text-slate-700">
+                Internal
+              </div>
+            ) : (
+              <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={source} onChange={(e) => setSource((e.target.value || '') as any)}>
+                {scopedSourceOptions.map((option) => (
+                  <option key={option.label} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="space-y-1 md:col-span-2">
@@ -748,10 +801,10 @@ export default function HelpdeskQueuePage() {
         error={error ? 'Failed to load queue.' : null}
         enableColumnFilters={false}
         enableExport={true}
-        exportFileName={`helpdesk-queue-${new Date().toISOString().slice(0, 10)}`}
+        exportFileName={`${scopeConfig.scope}-queue-${new Date().toISOString().slice(0, 10)}`}
         exportFormats={['csv', 'excel']}
         rowActions={rowActions}
-        onRowDoubleClick={(row) => router.push(`/helpdesk/tickets/${row.original.id}`)}
+        onRowDoubleClick={(row) => router.push(buildScopedHelpdeskDetailPath(scopeConfig.scope, row.original.id))}
         emptyStateMessage="No unassigned tickets match the current filter."
         toolbarActions={{
           refresh: () => refetch(),

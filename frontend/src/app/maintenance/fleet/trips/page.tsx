@@ -686,6 +686,10 @@ function FleetTripsPageContent() {
 
   const selectedExpectedHours = selected?.expectedHours ?? selectedDestinationTemplate?.expectedHours ?? plannedExpectedHours ?? null;
   const selectedExpectedMileage = selected?.expectedMileage ?? selectedDestinationTemplate?.expectedMileage ?? null;
+  const selectedVehicleFuelType =
+    selected?.vehicleFuelType ??
+    vehicles.find((vehicle) => vehicle.id === selected?.vehicleAssetId)?.fuelType ??
+    null;
 
   return (
     <div className="space-y-6 p-6">
@@ -1665,6 +1669,15 @@ function FleetTripsPageContent() {
               Fuel captured here is stored in Fleet Fuel Transactions and auto-creates a linked Fleet Cost Entry (with this trip as reference).
             </DialogDescription>
           </DialogHeader>
+
+          {selected ? (
+            <div className="rounded-md border bg-muted/20 px-4 py-3 text-sm">
+              <div className="font-medium">{selected.vehicleName}</div>
+              <div className="mt-1 text-muted-foreground">
+                Expected fuel type: {selectedVehicleFuelType || 'Not set on vehicle'}
+              </div>
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="space-y-2">

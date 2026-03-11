@@ -1254,4 +1254,31 @@ public class IssueRequisitionDto
     public string? Notes { get; set; }
 }
 
+public class ReturnRequisitionItemDto
+{
+    [Required]
+    public Guid ItemId { get; set; }
+
+    [Required]
+    [Range(0.01, double.MaxValue)]
+    public decimal ReturnedQuantity { get; set; }
+
+    public Guid? LocationId { get; set; }
+
+    [MaxLength(100)]
+    public string? LotNumber { get; set; }
+
+    [MaxLength(100)]
+    public string? SerialNumber { get; set; }
+}
+
+public class ReturnRequisitionDto
+{
+    [Required]
+    public List<ReturnRequisitionItemDto> Items { get; set; } = new();
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+}
+
 #endregion

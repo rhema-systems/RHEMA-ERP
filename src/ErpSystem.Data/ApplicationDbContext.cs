@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Pricing;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data.Configuration;
@@ -14,6 +15,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Data.Configuration.Maintenance;
 using ErpSystem.Data.Configuration.Pricing;
 using ErpSystem.Data.Configuration.Procurement;
+using ErpSystem.Data.Configuration.Projects;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -563,6 +565,46 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<PaymentTerm> PaymentTerms { get; set; }
     public DbSet<Currency> Currencies { get; set; }
 
+    // Project management entities
+    public DbSet<Project> Projects { get; set; }
+    public DbSet<ProjectType> ProjectTypes { get; set; }
+    public DbSet<ProjectPriority> ProjectPriorities { get; set; }
+    public DbSet<ProjectTemplate> ProjectTemplates { get; set; }
+    public DbSet<ProjectPortfolio> ProjectPortfolios { get; set; }
+    public DbSet<ProjectProgram> ProjectPrograms { get; set; }
+    public DbSet<ProjectManagementSettings> ProjectManagementSettings { get; set; }
+    public DbSet<ProjectCatalogEntry> ProjectCatalogEntries { get; set; }
+    public DbSet<ProjectInitiationVersion> ProjectInitiationVersions { get; set; }
+    public DbSet<ProjectMember> ProjectMembers { get; set; }
+    public DbSet<ProjectWorkItem> ProjectWorkItems { get; set; }
+    public DbSet<ProjectMilestone> ProjectMilestones { get; set; }
+    public DbSet<ProjectResourceAllocation> ProjectResourceAllocations { get; set; }
+    public DbSet<ProjectRisk> ProjectRisks { get; set; }
+    public DbSet<ProjectIssue> ProjectIssues { get; set; }
+    public DbSet<ProjectQualityCheckpoint> ProjectQualityCheckpoints { get; set; }
+    public DbSet<ProjectNonConformance> ProjectNonConformances { get; set; }
+    public DbSet<ProjectChangeRequest> ProjectChangeRequests { get; set; }
+    public DbSet<ProjectBillingSchedule> ProjectBillingSchedules { get; set; }
+    public DbSet<ProjectInvoiceRequest> ProjectInvoiceRequests { get; set; }
+    public DbSet<ProjectDeliverable> ProjectDeliverables { get; set; }
+    public DbSet<ProjectTaskDependency> ProjectTaskDependencies { get; set; }
+    public DbSet<ProjectInterdependency> ProjectInterdependencies { get; set; }
+    public DbSet<ProjectBaseline> ProjectBaselines { get; set; }
+    public DbSet<ProjectTimesheetEntry> ProjectTimesheetEntries { get; set; }
+    public DbSet<ProjectExpense> ProjectExpenses { get; set; }
+    public DbSet<ProjectRevenueRecognition> ProjectRevenueRecognitions { get; set; }
+    public DbSet<ProjectBudgetRevision> ProjectBudgetRevisions { get; set; }
+    public DbSet<ProjectForecastVersion> ProjectForecastVersions { get; set; }
+    public DbSet<ProjectAssetLink> ProjectAssetLinks { get; set; }
+    public DbSet<ProjectExternalAccessPolicy> ProjectExternalAccessPolicies { get; set; }
+    public DbSet<ProjectDecision> ProjectDecisions { get; set; }
+    public DbSet<ProjectMeetingMinute> ProjectMeetingMinutes { get; set; }
+    public DbSet<ProjectActionItem> ProjectActionItems { get; set; }
+    public DbSet<ProjectLessonLearned> ProjectLessonsLearned { get; set; }
+    public DbSet<ProjectDocument> ProjectDocuments { get; set; }
+    public DbSet<ProjectComment> ProjectComments { get; set; }
+    public DbSet<ProjectClosure> ProjectClosures { get; set; }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -658,6 +700,44 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ContractMilestoneConfiguration());
         builder.ApplyConfiguration(new ContractAmendmentConfiguration());
         builder.ApplyConfiguration(new ContractDocumentConfiguration());
+
+        // Project management configurations
+        builder.ApplyConfiguration(new ProjectTypeConfiguration());
+        builder.ApplyConfiguration(new ProjectPriorityConfiguration());
+        builder.ApplyConfiguration(new ProjectTemplateConfiguration());
+        builder.ApplyConfiguration(new ProjectPortfolioConfiguration());
+        builder.ApplyConfiguration(new ProjectProgramConfiguration());
+        builder.ApplyConfiguration(new ProjectManagementSettingsConfiguration());
+        builder.ApplyConfiguration(new ProjectCatalogEntryConfiguration());
+        builder.ApplyConfiguration(new ProjectConfiguration());
+        builder.ApplyConfiguration(new ProjectInitiationVersionConfiguration());
+        builder.ApplyConfiguration(new ProjectMemberConfiguration());
+        builder.ApplyConfiguration(new ProjectWorkItemConfiguration());
+        builder.ApplyConfiguration(new ProjectMilestoneConfiguration());
+        builder.ApplyConfiguration(new ProjectResourceAllocationConfiguration());
+        builder.ApplyConfiguration(new ProjectRiskConfiguration());
+        builder.ApplyConfiguration(new ProjectIssueConfiguration());
+        builder.ApplyConfiguration(new ProjectChangeRequestConfiguration());
+        builder.ApplyConfiguration(new ProjectBillingScheduleConfiguration());
+        builder.ApplyConfiguration(new ProjectInvoiceRequestConfiguration());
+        builder.ApplyConfiguration(new ProjectDeliverableConfiguration());
+        builder.ApplyConfiguration(new ProjectTaskDependencyConfiguration());
+        builder.ApplyConfiguration(new ProjectInterdependencyConfiguration());
+        builder.ApplyConfiguration(new ProjectBaselineConfiguration());
+        builder.ApplyConfiguration(new ProjectTimesheetEntryConfiguration());
+        builder.ApplyConfiguration(new ProjectExpenseConfiguration());
+        builder.ApplyConfiguration(new ProjectRevenueRecognitionConfiguration());
+        builder.ApplyConfiguration(new ProjectBudgetRevisionConfiguration());
+        builder.ApplyConfiguration(new ProjectForecastVersionConfiguration());
+        builder.ApplyConfiguration(new ProjectAssetLinkConfiguration());
+        builder.ApplyConfiguration(new ProjectExternalAccessPolicyConfiguration());
+        builder.ApplyConfiguration(new ProjectDecisionConfiguration());
+        builder.ApplyConfiguration(new ProjectMeetingMinuteConfiguration());
+        builder.ApplyConfiguration(new ProjectActionItemConfiguration());
+        builder.ApplyConfiguration(new ProjectLessonLearnedConfiguration());
+        builder.ApplyConfiguration(new ProjectDocumentConfiguration());
+        builder.ApplyConfiguration(new ProjectCommentConfiguration());
+        builder.ApplyConfiguration(new ProjectClosureConfiguration());
 
         // Price List configurations
         builder.ApplyConfiguration(new PriceListConfiguration());
@@ -4797,6 +4877,52 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             permissionId++;
         }
 
+        var moduleAccessPermissions = new[]
+        {
+            ("project.access", "Access Project Management", "Access the project management module"),
+            ("maintenance.access", "Access Maintenance Management", "Access the maintenance management module"),
+            ("fleet.access", "Access Fleet Management", "Access the fleet management module")
+        };
+
+        foreach (var (name, displayName, description) in moduleAccessPermissions)
+        {
+            permissions.Add(new Permission
+            {
+                Id = Guid.Parse($"00000000-0000-0000-0000-{permissionId:000000000000}"),
+                Name = name,
+                DisplayName = displayName,
+                Description = description,
+                Category = "Module Access",
+                IsSystemPermission = true,
+                CreatedAt = seedDateUtc,
+                CreatedBy = "System"
+            });
+            permissionId++;
+        }
+
+        var adminModulePermissions = new[]
+        {
+            ("admin.project-management", "Admin Project Management", "Manage project administration settings"),
+            ("admin.maintenance", "Admin Maintenance Management", "Manage maintenance administration settings"),
+            ("admin.fleet-management", "Admin Fleet Management", "Manage fleet administration settings")
+        };
+
+        foreach (var (name, displayName, description) in adminModulePermissions)
+        {
+            permissions.Add(new Permission
+            {
+                Id = Guid.Parse($"00000000-0000-0000-0000-{permissionId:000000000000}"),
+                Name = name,
+                DisplayName = displayName,
+                Description = description,
+                Category = "Administration Modules",
+                IsSystemPermission = true,
+                CreatedAt = seedDateUtc,
+                CreatedBy = "System"
+            });
+            permissionId++;
+        }
+
         builder.Entity<Permission>().HasData(permissions.ToArray());
 
         // Seed role-permission relationships
@@ -4842,7 +4968,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         var managerPermissions = permissions.Where(p =>
             p.Name.EndsWith(".read") ||
             p.Name == "users.update" ||
-            p.Name == "reports.create").ToList();
+            p.Name == "reports.create" ||
+            p.Name == "project.access" ||
+            p.Name == "maintenance.access" ||
+            p.Name == "fleet.access").ToList();
 
         foreach (var permission in managerPermissions)
         {
@@ -4860,7 +4989,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         var employeePermissions = permissions.Where(p =>
             p.Name == "dashboard.read" ||
             p.Name == "reports.read" ||
-            p.Name == "users.read").ToList();
+            p.Name == "users.read" ||
+            p.Name == "project.access" ||
+            p.Name == "maintenance.access" ||
+            p.Name == "fleet.access").ToList();
 
         foreach (var permission in employeePermissions)
         {

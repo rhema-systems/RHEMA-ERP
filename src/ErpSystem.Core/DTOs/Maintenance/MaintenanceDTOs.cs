@@ -1979,6 +1979,7 @@ public class MaintenanceAssetDto
     public string? SerialNumber { get; set; }
     public string? LicensePlate { get; set; }
     public string? VIN { get; set; }
+    public string? FuelType { get; set; }
     public DateTime? PurchaseDate { get; set; }
     public decimal? PurchasePrice { get; set; }
     public decimal? CurrentValue { get; set; }
@@ -2025,6 +2026,7 @@ public class MaintenanceAssetListDto
     public AssetOwnershipType OwnershipType { get; set; } = AssetOwnershipType.Owned;
     public string? LicensePlate { get; set; }
     public string? VIN { get; set; }
+    public string? FuelType { get; set; }
     public string Status { get; set; } = string.Empty;
     public string Criticality { get; set; } = string.Empty;
     public string? Location { get; set; }
@@ -2072,6 +2074,9 @@ public class CreateMaintenanceAssetDto
 
     [StringLength(50)]
     public string? VIN { get; set; }
+
+    [StringLength(20)]
+    public string? FuelType { get; set; }
 
     public DateTime? PurchaseDate { get; set; }
     public decimal? PurchasePrice { get; set; }
@@ -2133,6 +2138,9 @@ public class UpdateMaintenanceAssetDto
 
     [StringLength(50)]
     public string? VIN { get; set; }
+
+    [StringLength(20)]
+    public string? FuelType { get; set; }
 
     public DateTime? PurchaseDate { get; set; }
     public decimal? PurchasePrice { get; set; }

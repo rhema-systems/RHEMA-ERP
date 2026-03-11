@@ -311,6 +311,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
                 OwnershipType = a.OwnershipType,
                 LicensePlate = a.LicensePlate,
                 VIN = a.VIN,
+                FuelType = a.FuelType,
                 Status = a.Status.ToString(),
                 Criticality = a.Criticality.ToString(),
                 Location = a.Location,

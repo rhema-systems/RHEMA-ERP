@@ -52,6 +52,7 @@ interface Asset {
   serialNumber: string;
   licensePlate?: string;
   vin?: string;
+  fuelType?: string;
   isFleetAsset?: boolean;
   purchaseDate: string;
   warrantyExpiry: string;
@@ -74,6 +75,8 @@ interface MaintenanceHistory {
   status: string;
   cost: number;
 }
+
+const FUEL_TYPE_OPTIONS = ['Petrol', 'Diesel', 'Electric', 'Hybrid'] as const;
 
 
 function AssetsPageContent() {
@@ -110,6 +113,7 @@ function AssetsPageContent() {
     serialNumber: '',
     licensePlate: '',
     vin: '',
+    fuelType: '',
     isFleetAsset: false,
     purchaseDate: '',
     warrantyExpiry: '',
@@ -172,6 +176,7 @@ function AssetsPageContent() {
         category: asset.assetCategory?.name || asset.categoryName || asset.CategoryName || 'Unknown',
         licensePlate: asset.licensePlate || asset.LicensePlate || '',
         vin: asset.vin || asset.VIN || asset.Vin || '',
+        fuelType: asset.fuelType || asset.FuelType || '',
         isFleetAsset: asset.isFleetAsset ?? asset.IsFleetAsset ?? false,
         // Map date fields with proper formatting
         purchaseDate: formatDateForInput(asset.purchaseDate || asset.PurchaseDate),
@@ -460,6 +465,7 @@ function AssetsPageContent() {
         serialNumber: newAsset.serialNumber?.trim() || null,
         licensePlate: isVehicleCategory ? (newAsset.licensePlate?.trim() || null) : null,
         vin: isVehicleCategory ? (newAsset.vin?.trim() || null) : null,
+        fuelType: isVehicleCategory ? (newAsset.fuelType || null) : null,
         isFleetAsset: isVehicleCategory ? !!newAsset.isFleetAsset : false,
         location: newAsset.location?.trim() || null,
         status: 'Active',
@@ -555,6 +561,7 @@ function AssetsPageContent() {
         serialNumber: '',
         licensePlate: '',
         vin: '',
+        fuelType: '',
         isFleetAsset: false,
         purchaseDate: '',
         warrantyExpiry: '',
@@ -581,6 +588,7 @@ function AssetsPageContent() {
       serialNumber: asset.serialNumber || '',
       licensePlate: asset.licensePlate || '',
       vin: asset.vin || '',
+      fuelType: asset.fuelType || '',
       isFleetAsset: !!asset.isFleetAsset,
       purchaseDate: formatDateForInput(asset.purchaseDate),
       warrantyExpiry: formatDateForInput(asset.warrantyExpiry),
@@ -644,6 +652,7 @@ function AssetsPageContent() {
           serialNumber: newAsset.serialNumber,
           licensePlate: isVehicleCategory ? (newAsset.licensePlate?.trim() || null) : null,
           vin: isVehicleCategory ? (newAsset.vin?.trim() || null) : null,
+          fuelType: isVehicleCategory ? (newAsset.fuelType || null) : null,
           isFleetAsset: isVehicleCategory ? !!newAsset.isFleetAsset : false,
           location: newAsset.location,
           status: 'Active',
@@ -687,6 +696,7 @@ function AssetsPageContent() {
         serialNumber: '',
         licensePlate: '',
         vin: '',
+        fuelType: '',
         isFleetAsset: false,
         purchaseDate: '',
         warrantyExpiry: '',
@@ -967,6 +977,22 @@ function AssetsPageContent() {
                     />
                   </div>
                   <div className="space-y-2">
+                    <Label>Fuel Type</Label>
+                    <Select value={newAsset.fuelType || 'none'} onValueChange={(value) => setNewAsset((prev) => ({ ...prev, fuelType: value === 'none' ? '' : value }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select fuel type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Select fuel type</SelectItem>
+                        {FUEL_TYPE_OPTIONS.map((option) => (
+                          <SelectItem key={option} value={option}>
+                            {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
                     <Label htmlFor="year">Year</Label>
                     <Input
                       id="year"
@@ -1153,7 +1179,7 @@ function AssetsPageContent() {
                 </div>
               </div>
               {showVehicleFields && (
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
                   <div className="space-y-2">
                     <Label htmlFor="edit-licensePlate">Plate Number</Label>
                     <Input
@@ -1171,6 +1197,22 @@ function AssetsPageContent() {
                       onChange={(e) => setNewAsset(prev => ({ ...prev, vin: e.target.value }))}
                       placeholder="Vehicle identification number"
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Fuel Type</Label>
+                    <Select value={newAsset.fuelType || 'none'} onValueChange={(value) => setNewAsset((prev) => ({ ...prev, fuelType: value === 'none' ? '' : value }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select fuel type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Select fuel type</SelectItem>
+                        {FUEL_TYPE_OPTIONS.map((option) => (
+                          <SelectItem key={option} value={option}>
+                            {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="edit-year">Year</Label>
@@ -1592,7 +1634,7 @@ function AssetsPageContent() {
                     </div>
                   </div>
                   {selectedAssetIsVehicle && (
-                    <div className="mt-4 grid grid-cols-2 gap-4">
+                    <div className="mt-4 grid grid-cols-3 gap-4">
                       <div>
                         <Label className="text-sm font-medium text-muted-foreground">Plate Number</Label>
                         <p className="text-sm">{selectedAsset.licensePlate || 'Not specified'}</p>
@@ -1600,6 +1642,10 @@ function AssetsPageContent() {
                       <div>
                         <Label className="text-sm font-medium text-muted-foreground">VIN</Label>
                         <p className="text-sm">{selectedAsset.vin || 'Not specified'}</p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Fuel Type</Label>
+                        <p className="text-sm">{selectedAsset.fuelType || 'Not specified'}</p>
                       </div>
                     </div>
                   )}

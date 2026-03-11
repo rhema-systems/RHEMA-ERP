@@ -30,6 +30,9 @@ public sealed class ExternalUserAccessMiddleware : IMiddleware
         // Support portal (external)
         "/api/ehc/external",
 
+        // Project portal endpoints for linked external parties
+        "/api/projects/external",
+
         // Profile self-service endpoints
         "/api/user/profile",
         "/api/user/change-password",

@@ -19,6 +19,7 @@ export interface User {
   currentTenantName?: string;
   isActive: boolean;
   roles: string[];
+  permissions?: string[];
   phoneNumber?: string;
   createdAt?: string;
   lastLoginAt?: string;

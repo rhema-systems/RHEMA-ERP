@@ -108,6 +108,20 @@ if (args.Length > 0 && args[0] == "seed-db")
 
 var builder = WebApplication.CreateBuilder(args);
 
+if (builder.Environment.IsEnvironment("Testing")
+    && string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("DefaultConnection")))
+{
+    builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+    {
+        ["ConnectionStrings:DefaultConnection"] = "Server=(localdb)\\MSSQLLocalDB;Database=ErpSystem_TestHost;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true",
+        ["Database:Provider"] = "SqlServer",
+        ["SkipStartupInitialization"] = "true",
+        ["JwtSettings:SecretKey"] = "TestingOnlySecretKeyForApiHost1234567890",
+        ["JwtSettings:Issuer"] = "ErpSystem.Api.Tests",
+        ["JwtSettings:Audience"] = "ErpSystem.Api.Tests.Client"
+    });
+}
+
 // Configure host shutdown timeout
 builder.Host.ConfigureServices((context, services) =>
 {
@@ -246,24 +260,34 @@ app.MapControllers();
 // SignalR Hubs
 app.MapHub<ErpSystem.Api.Hubs.DashboardHub>("/api/hubs/dashboard");
 
-// Initialize database and seed data
-app.Logger.LogInformation("Starting database initialization...");
-try
-{
-    await InitializeDatabaseAsync(app);
-    app.Logger.LogInformation("Database initialization completed");
-}
-catch (Exception ex)
-{
-    app.Logger.LogError(ex, "Database initialization failed");
-}
+var skipStartupInitialization = app.Environment.IsEnvironment("Testing")
+    || app.Configuration.GetValue<bool>("SkipStartupInitialization");
 
-// Seed demo/basic data in Development to make local testing easier.
-if (app.Environment.IsDevelopment())
+if (!skipStartupInitialization)
 {
-    app.Logger.LogInformation("Starting Development data seeding...");
-    await SeedDatabaseAsync(app);
-    app.Logger.LogInformation("Development data seeding completed");
+    // Initialize database and seed data
+    app.Logger.LogInformation("Starting database initialization...");
+    try
+    {
+        await InitializeDatabaseAsync(app);
+        app.Logger.LogInformation("Database initialization completed");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Database initialization failed");
+    }
+
+    // Seed demo/basic data in Development to make local testing easier.
+    if (app.Environment.IsDevelopment())
+    {
+        app.Logger.LogInformation("Starting Development data seeding...");
+        await SeedDatabaseAsync(app);
+        app.Logger.LogInformation("Development data seeding completed");
+    }
+}
+else
+{
+    app.Logger.LogInformation("Skipping startup database initialization for environment {EnvironmentName}", app.Environment.EnvironmentName);
 }
 
 // Workflow automation trigger - comprehensive testing active
@@ -320,3 +344,5 @@ async Task SeedDatabaseAsync(WebApplication app)
         logger.LogError(ex, "An error occurred while seeding the database");
     }
 }
+
+public partial class Program;

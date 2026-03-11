@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Eye, Plus, RefreshCw } from 'lucide-react';
 
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { getHelpdeskScopeConfig } from '@/lib/helpdesk-scope';
 import { ehcServiceCatalogService, type EhcServiceRequestStatus } from '@/services/ehcServiceCatalogService';
 
 const statusBadgeClassName = (s: EhcServiceRequestStatus) => {
@@ -29,6 +30,9 @@ const statusBadgeClassName = (s: EhcServiceRequestStatus) => {
 
 export default function HelpdeskServiceRequestsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const scopeParam = searchParams.get('scope');
+  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<EhcServiceRequestStatus | ''>('');
 
@@ -55,11 +59,15 @@ export default function HelpdeskServiceRequestsPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Service Requests</h1>
-          <p className="text-slate-600 mt-1">Approve, fulfill, and close service catalog requests.</p>
+          <h1 className="text-3xl font-bold">
+            {scopeParam ? `${scopeConfig.moduleLabel} Service Requests` : 'Service Requests'}
+          </h1>
+          <p className="text-slate-600 mt-1">
+            {scopeParam ? `Service catalog requests for the ${scopeConfig.listTitle.toLowerCase()} branch.` : 'Approve, fulfill, and close service catalog requests.'}
+          </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={() => router.push('/helpdesk/requests/new')}>
+          <Button onClick={() => router.push(scopeParam ? `/helpdesk/requests/new?scope=${scopeParam}` : '/helpdesk/requests/new')}>
             <Plus className="w-4 h-4 mr-2" /> New request
           </Button>
           <Button variant="outline" onClick={() => refetch()}>
@@ -110,7 +118,7 @@ export default function HelpdeskServiceRequestsPage() {
                   </div>
                   {r.submittedAtUtc ? <div className="text-xs text-slate-500">Submitted: {new Date(r.submittedAtUtc).toLocaleString()}</div> : null}
                 </div>
-                <Link href={`/helpdesk/requests/${r.id}`}>
+                <Link href={scopeParam ? `/helpdesk/requests/${r.id}?scope=${scopeParam}` : `/helpdesk/requests/${r.id}`}>
                   <Button variant="outline" size="sm">
                     <Eye className="w-4 h-4 mr-1" /> View
                   </Button>

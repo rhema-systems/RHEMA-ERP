@@ -22,6 +22,7 @@ import {
 import { inventoryManagementService, WarehouseDto } from '@/services/inventoryManagementService';
 import { RequisitionDialog } from '@/components/inventory/RequisitionDialog';
 import { IssueRequisitionDialog } from '@/components/inventory/IssueRequisitionDialog';
+import { ReturnRequisitionDialog } from '@/components/inventory/ReturnRequisitionDialog';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 
@@ -71,6 +72,8 @@ export default function InventoryRequisitionsPage() {
   // Issue dialog state
   const [issueDialogOpen, setIssueDialogOpen] = useState(false);
   const [issueRequisitionId, setIssueRequisitionId] = useState<string | null>(null);
+  const [returnDialogOpen, setReturnDialogOpen] = useState(false);
+  const [returnRequisitionId, setReturnRequisitionId] = useState<string | null>(null);
 
   // Confirmation dialog states
   const [showCancelDialog, setShowCancelDialog] = useState(false);
@@ -136,6 +139,11 @@ export default function InventoryRequisitionsPage() {
   const handleIssue = (id: string) => {
     setIssueRequisitionId(id);
     setIssueDialogOpen(true);
+  };
+
+  const handleReturn = (id: string) => {
+    setReturnRequisitionId(id);
+    setReturnDialogOpen(true);
   };
 
   const handleCancelClick = (id: string) => {
@@ -273,6 +281,7 @@ export default function InventoryRequisitionsPage() {
                 <tbody>
                   {filteredRequisitions.map((req) => {
                     const status = normalizeStatus(req.status);
+                    const canReturn = status === 5 || status === 6 || status === 7;
                     const summary = workflowSummariesById[req.id];
                     const stepName = summary?.currentStepName || req.currentWorkflowStepName;
                     const pending = formatPendingApprovers(summary?.pendingApprovers || []);
@@ -367,6 +376,9 @@ export default function InventoryRequisitionsPage() {
                             {(status === 3 || status === 4 || status === 5) && (
                               <Button variant="ghost" size="sm" className="text-purple-600" onClick={() => handleIssue(req.id)} title="Issue Items"><Package className="h-4 w-4" /></Button>
                             )}
+                            {canReturn && (
+                              <Button variant="ghost" size="sm" className="text-amber-600" onClick={() => handleReturn(req.id)} title="Return Items"><CheckCircle className="h-4 w-4" /></Button>
+                            )}
                             {(status === 1 || status === 2) && (
                               <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleCancelClick(req.id)} title="Cancel"><XCircle className="h-4 w-4" /></Button>
                             )}
@@ -396,6 +408,13 @@ export default function InventoryRequisitionsPage() {
         open={issueDialogOpen}
         onOpenChange={setIssueDialogOpen}
         requisitionId={issueRequisitionId}
+        onSuccess={fetchData}
+      />
+
+      <ReturnRequisitionDialog
+        open={returnDialogOpen}
+        onOpenChange={setReturnDialogOpen}
+        requisitionId={returnRequisitionId}
         onSuccess={fetchData}
       />
 

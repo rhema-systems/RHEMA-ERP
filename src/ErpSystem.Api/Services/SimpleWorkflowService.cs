@@ -4,11 +4,13 @@ using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Services;
@@ -34,6 +36,7 @@ public class SimpleWorkflowService : IWorkflowService
     private readonly IPurchaseRequisitionRepository _purchaseRequisitionRepository;
     private readonly IPurchaseRequisitionItemRepository _purchaseRequisitionItemRepository;
     private readonly ITenderRepository _tenderRepository;
+    private readonly IProjectRepository _projectRepository;
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
     private readonly ICurrentUserService _currentUserService;
     private readonly UserManager<ApplicationUser> _userManager;
@@ -55,6 +58,7 @@ public class SimpleWorkflowService : IWorkflowService
         IPurchaseRequisitionRepository purchaseRequisitionRepository,
         IPurchaseRequisitionItemRepository purchaseRequisitionItemRepository,
         ITenderRepository tenderRepository,
+        IProjectRepository projectRepository,
         IBusinessPartnerRepository businessPartnerRepository,
         ICurrentUserService currentUserService,
         UserManager<ApplicationUser> userManager,
@@ -75,6 +79,7 @@ public class SimpleWorkflowService : IWorkflowService
         _purchaseRequisitionRepository = purchaseRequisitionRepository;
         _purchaseRequisitionItemRepository = purchaseRequisitionItemRepository;
         _tenderRepository = tenderRepository;
+        _projectRepository = projectRepository;
         _businessPartnerRepository = businessPartnerRepository;
         _currentUserService = currentUserService;
         _userManager = userManager;
@@ -789,6 +794,65 @@ public class SimpleWorkflowService : IWorkflowService
             context["createdAt"] = tender.CreatedAt;
         }
 
+        if (IsEntityType(entityTypeRecord, "PROJECT", "Project"))
+        {
+            var project = await _projectRepository.GetByIdAsync(entityId) ?? throw new InvalidOperationException("Project not found");
+            context["projectId"] = project.Id;
+            context["projectCode"] = project.ProjectCode;
+            context["title"] = project.Title;
+            context["status"] = project.Status;
+            context["projectTypeId"] = project.ProjectTypeId;
+            context["projectPriorityId"] = project.ProjectPriorityId;
+            context["projectManagerId"] = project.ProjectManagerId;
+            context["sponsorId"] = project.SponsorId;
+            context["startDate"] = project.StartDate;
+            context["targetEndDate"] = project.TargetEndDate;
+            context["estimatedBudget"] = project.EstimatedBudget ?? 0m;
+            context["approvedBudget"] = project.ApprovedBudget ?? 0m;
+            context["actualCost"] = project.ActualCost ?? 0m;
+            context["progressPercent"] = project.ProgressPercent;
+            context["approvalRequired"] = project.ApprovalRequired;
+            context["methodology"] = project.Methodology;
+        }
+
+        if (IsEntityType(entityTypeRecord, "PROJECT_DELIVERABLE", "ProjectDeliverable", "Project Deliverable"))
+        {
+            var deliverable = await _unitOfWork.Repository<ProjectDeliverable>()
+                .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Project, x => x.Milestone, x => x.WorkItem)
+                ?? throw new InvalidOperationException("Project deliverable not found");
+            context["projectDeliverableId"] = deliverable.Id;
+            context["projectId"] = deliverable.ProjectId;
+            context["projectCode"] = deliverable.Project?.ProjectCode ?? string.Empty;
+            context["projectTitle"] = deliverable.Project?.Title ?? string.Empty;
+            context["deliverableTitle"] = deliverable.Title;
+            context["deliverableStatus"] = deliverable.Status;
+            context["targetDate"] = deliverable.TargetDate;
+            context["externalSignOffRequired"] = deliverable.ExternalSignOffRequired;
+            context["externalSubmissionAllowed"] = deliverable.ExternalSubmissionAllowed;
+            context["workItemId"] = deliverable.WorkItemId;
+            context["workItemTitle"] = deliverable.WorkItem?.Title ?? string.Empty;
+            context["milestoneId"] = deliverable.MilestoneId;
+            context["milestoneTitle"] = deliverable.Milestone?.Title ?? string.Empty;
+        }
+
+        if (IsEntityType(entityTypeRecord, "PROJECT_CLOSURE", "ProjectClosure", "Project Closure"))
+        {
+            var closure = await _unitOfWork.Repository<ProjectClosure>()
+                .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Project)
+                ?? throw new InvalidOperationException("Project closure not found");
+            context["projectClosureId"] = closure.Id;
+            context["projectId"] = closure.ProjectId;
+            context["projectCode"] = closure.Project?.ProjectCode ?? string.Empty;
+            context["projectTitle"] = closure.Project?.Title ?? string.Empty;
+            context["closureStatus"] = closure.Status;
+            context["finalBudget"] = closure.FinalBudget ?? 0m;
+            context["finalCost"] = closure.FinalCost ?? 0m;
+            context["deliverablesAccepted"] = closure.DeliverablesAccepted;
+            context["tasksCompletedOrWaived"] = closure.TasksCompletedOrWaived;
+            context["assetsReconciled"] = closure.AssetsReconciled;
+            context["openItemsDisposed"] = closure.OpenItemsDisposed;
+        }
+
         if (IsEntityType(entityTypeRecord, "BUSINESS_PARTNER", "BusinessPartner", "Business Partner", "Supplier", "Contractor"))
         {
             var partner = await _businessPartnerRepository.GetByIdAsync(entityId) ?? throw new InvalidOperationException("Business partner not found");
@@ -907,6 +971,48 @@ public class SimpleWorkflowService : IWorkflowService
                 item.EntityTitle = $"{req.RequestNumber} - {req.RequestType?.Name ?? "Service Request"}";
                 item.EntityDescription = req.Title ?? string.Empty;
                 return;
+            }
+            catch
+            {
+                // ignore and fall through
+            }
+        }
+
+        if (string.Equals(entityTypeRecord.Code, "PROJECT_DELIVERABLE", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(entityTypeRecord.Name, "ProjectDeliverable", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(entityTypeRecord.Name, "Project Deliverable", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var deliverable = await _unitOfWork.Repository<ProjectDeliverable>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Project);
+                if (deliverable != null)
+                {
+                    item.EntityTitle = $"{deliverable.Project?.ProjectCode ?? "PRJ"} - {deliverable.Title}";
+                    item.EntityDescription = deliverable.Project?.Title ?? string.Empty;
+                    return;
+                }
+            }
+            catch
+            {
+                // ignore and fall through
+            }
+        }
+
+        if (string.Equals(entityTypeRecord.Code, "PROJECT_CLOSURE", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(entityTypeRecord.Name, "ProjectClosure", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(entityTypeRecord.Name, "Project Closure", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var closure = await _unitOfWork.Repository<ProjectClosure>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Project);
+                if (closure != null)
+                {
+                    item.EntityTitle = $"{closure.Project?.ProjectCode ?? "PRJ"} - Closure";
+                    item.EntityDescription = closure.Project?.Title ?? string.Empty;
+                    return;
+                }
             }
             catch
             {

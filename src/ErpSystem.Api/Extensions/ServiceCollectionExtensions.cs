@@ -327,6 +327,16 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceStaffScheduleRepository, ErpSystem.Data.Repositories.Maintenance.MaintenanceStaffScheduleRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceExpenseRepository, ErpSystem.Data.Repositories.Maintenance.MaintenanceExpenseRepository>();
 
+            // Project management repositories
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectRepository, ErpSystem.Data.Repositories.Projects.ProjectRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectTypeRepository, ErpSystem.Data.Repositories.Projects.ProjectTypeRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectPriorityRepository, ErpSystem.Data.Repositories.Projects.ProjectPriorityRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectTemplateRepository, ErpSystem.Data.Repositories.Projects.ProjectTemplateRepository>();
+services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectPortfolioRepository, ErpSystem.Data.Repositories.Projects.ProjectPortfolioRepository>();
+services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectProgramRepository, ErpSystem.Data.Repositories.Projects.ProjectProgramRepository>();
+services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectManagementSettingsRepository, ErpSystem.Data.Repositories.Projects.ProjectManagementSettingsRepository>();
+services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository, ErpSystem.Data.Repositories.Projects.ProjectCatalogRepository>();
+
             // Task template repositories
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetTaskTemplateRepository, ErpSystem.Data.Repositories.Maintenance.AssetTaskTemplateRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IAssetTypeTaskTemplateRepository, ErpSystem.Data.Repositories.Maintenance.AssetTypeTaskTemplateRepository>();
@@ -405,6 +415,10 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.InventoryTransferWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.InventoryRequisitionWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.TenderWorkflowStatusAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.ProjectWorkflowStatusAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.ProjectDeliverableWorkflowStatusAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.ProjectClosureWorkflowStatusAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.ProjectBudgetRevisionWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.BusinessPartnerWorkflowStatusAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapter, ErpSystem.Core.Services.Workflow.ServiceRequestWorkflowStatusAdapter>();
             services.AddScoped<ITenantService, TenantService>();
@@ -760,6 +774,9 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ITenderNegotiationService, ErpSystem.Core.Services.Procurement.TenderNegotiationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSettingsService, ErpSystem.Core.Services.Procurement.ProcurementSettingsService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceSettingsService, ErpSystem.Core.Services.Maintenance.MaintenanceSettingsService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectService, ErpSystem.Core.Services.Projects.ProjectService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectSetupService, ErpSystem.Core.Services.Projects.ProjectSetupService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectManagementSettingsService, ErpSystem.Core.Services.Projects.ProjectManagementSettingsService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAttachmentService, ErpSystem.Core.Services.Maintenance.MaintenanceAttachmentService>();
 
             // Fleet (Maintenance)
@@ -967,19 +984,23 @@ namespace ErpSystem.Api.Extensions
                     c.IncludeXmlComments(xmlPath);
                 }
 
-                // Group controllers by modules/tags for better organization
-                c.TagActionsBy(api =>
-                {
-                    var controllerName = api.ActionDescriptor.RouteValues["controller"];
+                 // Group controllers by modules/tags for better organization
+                 c.TagActionsBy(api =>
+                 {
+                     var controllerName = api.ActionDescriptor.RouteValues["controller"];
 
-                    // Categorize by module
-                    return controllerName switch
-                    {
-                        // Authentication & Authorization
-                        "Auth" or "Security" or "Users" or "Roles" or "Permissions" => stringArray,
+                     // Categorize by module
+                     return controllerName switch
+                     {
+                         // Enquiry, Helpdesk & Complaints (EHC) Module
+                         string name when !string.IsNullOrWhiteSpace(name) && name.StartsWith("Ehc", StringComparison.OrdinalIgnoreCase)
+                             => new[] { "🎫 Enquiry, Helpdesk & Complaints" },
 
-                        // Administration
-                        "Tenants" or "Settings" or "AuditLogs" or "SecurityLogs" => new[] { "⚙️ Administration" },
+                         // Authentication & Authorization
+                         "Auth" or "Security" or "Users" or "Roles" or "Permissions" => stringArray,
+
+                         // Administration
+                         "Tenants" or "Settings" or "AuditLogs" or "SecurityLogs" => new[] { "⚙️ Administration" },
 
                         // HR Module
                         "Employees" or "Departments" or "Sections" or "EmployeeSkills" => new[] { "👥 Human Resources" },

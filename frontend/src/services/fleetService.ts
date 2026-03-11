@@ -23,6 +23,7 @@ export interface FleetVehicleListDto {
   assetType?: string | null;
   licensePlate?: string | null;
   vin?: string | null;
+  fuelType?: string | null;
   status: string;
   categoryName: string;
   manufacturer?: string | null;
@@ -38,6 +39,7 @@ export interface CreateFleetVehicleDto {
   assetCategoryId: string;
   licensePlate?: string | null;
   vin?: string | null;
+  fuelType?: string | null;
   manufacturer?: string | null;
   model?: string | null;
   serialNumber?: string | null;
@@ -56,6 +58,7 @@ export interface FleetTripDto {
   vehicleName: string;
   vehicleAssetNumber?: string | null;
   vehicleLicensePlate?: string | null;
+  vehicleFuelType?: string | null;
 
   requestedByUserId: string;
   driverEmployeeId?: string | null;

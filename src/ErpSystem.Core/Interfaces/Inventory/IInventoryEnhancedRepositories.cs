@@ -250,6 +250,7 @@ public interface IPurchaseReturnItemRepository : IGenericRepository<PurchaseRetu
 public interface IInventoryRequisitionRepository : IGenericRepository<InventoryRequisition>
 {
     Task<IEnumerable<InventoryRequisition>> GetByStatusAsync(RequisitionStatus status);
+    Task<IEnumerable<InventoryRequisition>> GetByProjectAsync(Guid projectId);
     Task<IEnumerable<InventoryRequisition>> GetByWarehouseAsync(Guid warehouseId);
     Task<IEnumerable<InventoryRequisition>> GetByDepartmentAsync(Guid departmentId);
     Task<InventoryRequisition?> GetByRequisitionNumberAsync(string requisitionNumber);

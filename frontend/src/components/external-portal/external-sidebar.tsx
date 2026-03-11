@@ -74,6 +74,11 @@ const menuItems: MenuItem[] = [
     icon: ListTodo,
   },
   {
+    title: 'My Projects',
+    href: '/external-portal/projects',
+    icon: Briefcase,
+  },
+  {
     title: 'User Management',
     href: '/external-portal/user-management',
     icon: Users,
@@ -142,7 +147,6 @@ export function ExternalSidebar() {
         {!isCollapsed && (
           <div className="flex items-center space-x-2">
             {tenant?.logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
               <img src={tenant.logoUrl} alt={tenant.name || 'Tenant'} className="h-7 w-7 rounded object-contain bg-white p-1" />
             ) : (
               <Building2 className="h-6 w-6 text-blue-400" />

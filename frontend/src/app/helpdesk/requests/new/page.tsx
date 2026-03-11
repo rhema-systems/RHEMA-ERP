@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { getHelpdeskScopeConfig } from '@/lib/helpdesk-scope';
 import { ehcServiceCatalogService, type EhcServiceRequestType } from '@/services/ehcServiceCatalogService';
 import { fileUploadService } from '@/services/file-upload.service';
 
@@ -36,6 +37,9 @@ function parseFields(defJson: string): FormField[] {
 
 export default function NewHelpdeskServiceRequestPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const scopeParam = searchParams.get('scope');
+  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
   const [requestTypeId, setRequestTypeId] = useState<string>('');
   const [title, setTitle] = useState<string>('');
   const [formData, setFormData] = useState<Record<string, any>>({});
@@ -76,7 +80,7 @@ export default function NewHelpdeskServiceRequestPage() {
       return created;
     },
     onSuccess: (created) => {
-      router.push(`/helpdesk/requests/${created.id}`);
+      router.push(scopeParam ? `/helpdesk/requests/${created.id}?scope=${scopeParam}` : `/helpdesk/requests/${created.id}`);
     },
   });
 
@@ -88,10 +92,14 @@ export default function NewHelpdeskServiceRequestPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">New Service Request</h1>
-          <p className="text-slate-600 mt-1">Submit a service catalog request (internal staff).</p>
+          <h1 className="text-3xl font-bold">
+            {scopeParam ? `${scopeConfig.moduleLabel} Service Request` : 'New Service Request'}
+          </h1>
+          <p className="text-slate-600 mt-1">
+            {scopeParam ? `Submit a service catalog request from the ${scopeConfig.listTitle.toLowerCase()} branch.` : 'Submit a service catalog request (internal staff).'}
+          </p>
         </div>
-        <Button variant="outline" onClick={() => router.push('/helpdesk/requests')}>
+        <Button variant="outline" onClick={() => router.push(scopeParam ? `/helpdesk/requests?scope=${scopeParam}` : '/helpdesk/requests')}>
           Back to requests
         </Button>
       </div>
@@ -207,7 +215,7 @@ export default function NewHelpdeskServiceRequestPage() {
           {mutation.error ? <div className="text-sm text-red-600">Failed to submit request.</div> : null}
 
           <div className="flex items-center justify-end gap-2">
-            <Button variant="outline" onClick={() => router.push('/helpdesk/requests')}>
+            <Button variant="outline" onClick={() => router.push(scopeParam ? `/helpdesk/requests?scope=${scopeParam}` : '/helpdesk/requests')}>
               Cancel
             </Button>
             <Button disabled={!canSubmit} onClick={() => mutation.mutate()}>
@@ -219,4 +227,3 @@ export default function NewHelpdeskServiceRequestPage() {
     </div>
   );
 }
-

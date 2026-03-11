@@ -11,6 +11,7 @@ public class FleetVehicleListDto
     public string? AssetType { get; set; }
     public string? LicensePlate { get; set; }
     public string? Vin { get; set; }
+    public string? FuelType { get; set; }
     public string Status { get; set; } = string.Empty;
     public string CategoryName { get; set; } = string.Empty;
     public string? Manufacturer { get; set; }
@@ -36,6 +37,9 @@ public class CreateFleetVehicleDto
 
     [StringLength(50)]
     public string? Vin { get; set; }
+
+    [StringLength(20)]
+    public string? FuelType { get; set; }
 
     [StringLength(100)]
     public string? Manufacturer { get; set; }
@@ -67,6 +71,7 @@ public class FleetTripDto
     public string VehicleName { get; set; } = string.Empty;
     public string? VehicleAssetNumber { get; set; }
     public string? VehicleLicensePlate { get; set; }
+    public string? VehicleFuelType { get; set; }
 
     public Guid RequestedByUserId { get; set; }
     public Guid? DriverEmployeeId { get; set; }

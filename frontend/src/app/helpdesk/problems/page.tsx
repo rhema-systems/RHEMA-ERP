@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Eye, Plus, TriangleAlert } from 'lucide-react';
 
@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { DataTable, type DataTableAction, type DataTableColumn } from '@/components/ui/DataTable';
 import { useToast } from '@/hooks/use-toast';
+import { getHelpdeskScopeConfig } from '@/lib/helpdesk-scope';
 import { ehcInternalTicketService, type EhcAdminCategory } from '@/services/ehcInternalTicketService';
 import { ehcProblemService, type CreateEhcProblemRequest, type EhcProblemListItem, type EhcProblemStatus } from '@/services/ehcProblemService';
 import type { EhcTicketPriority } from '@/services/ehcTicketService';
@@ -67,8 +68,11 @@ const priorityBadgeClassName = (p: EhcTicketPriority) => {
 
 export default function HelpdeskProblemsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const qc = useQueryClient();
   const { toast } = useToast();
+  const scopeParam = searchParams.get('scope');
+  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
 
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<EhcProblemStatus | ''>('');
@@ -139,7 +143,11 @@ export default function HelpdeskProblemsPage() {
         header: 'Problem #',
         accessorKey: 'problemNumber',
         cell: ({ row }) => (
-          <button className="text-blue-600 hover:underline" onClick={() => router.push(`/helpdesk/problems/${row.original.id}`)} title="Open problem">
+          <button
+            className="text-blue-600 hover:underline"
+            onClick={() => router.push(scopeParam ? `/helpdesk/problems/${row.original.id}?scope=${scopeParam}` : `/helpdesk/problems/${row.original.id}`)}
+            title="Open problem"
+          >
             {row.original.problemNumber}
           </button>
         ),
@@ -175,10 +183,10 @@ export default function HelpdeskProblemsPage() {
         id: 'view',
         label: 'View',
         icon: Eye as any,
-        onClick: (row) => router.push(`/helpdesk/problems/${row.original.id}`),
+        onClick: (row) => router.push(scopeParam ? `/helpdesk/problems/${row.original.id}?scope=${scopeParam}` : `/helpdesk/problems/${row.original.id}`),
       },
     ];
-  }, [router]);
+  }, [router, scopeParam]);
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<CreateEhcProblemRequest>({
@@ -234,8 +242,10 @@ export default function HelpdeskProblemsPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Problems</h1>
-          <p className="text-slate-600">Track recurring incidents with RCA + CAPA.</p>
+          <h1 className="text-3xl font-bold">{scopeParam ? `${scopeConfig.moduleLabel} Problems` : 'Problems'}</h1>
+          <p className="text-slate-600">
+            {scopeParam ? `Recurring issue register for the ${scopeConfig.listTitle.toLowerCase()} branch.` : 'Track recurring incidents with RCA + CAPA.'}
+          </p>
         </div>
         <Button onClick={startCreate}>
           <Plus className="h-4 w-4 mr-2" />
@@ -340,7 +350,7 @@ export default function HelpdeskProblemsPage() {
         exportFileName={`helpdesk-problems-${new Date().toISOString().slice(0, 10)}`}
         exportFormats={['csv', 'excel']}
         rowActions={rowActions}
-        onRowDoubleClick={(row) => router.push(`/helpdesk/problems/${row.original.id}`)}
+        onRowDoubleClick={(row) => router.push(scopeParam ? `/helpdesk/problems/${row.original.id}?scope=${scopeParam}` : `/helpdesk/problems/${row.original.id}`)}
         emptyStateMessage="No problems match the current filter."
         toolbarActions={{
           refresh: () => refetch(),
@@ -453,4 +463,3 @@ export default function HelpdeskProblemsPage() {
     </div>
   );
 }
-

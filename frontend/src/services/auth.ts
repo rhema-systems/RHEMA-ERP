@@ -49,19 +49,26 @@ export class AuthService {
 
   async getCurrentUser(): Promise<User> {
     const userInfo = await apiService.getCurrentUser();
-    return {
+    const mappedUser = {
       id: userInfo.id,
       username: userInfo.username,
       email: userInfo.email,
       firstName: userInfo.firstName,
       lastName: userInfo.lastName,
       roles: userInfo.roles,
+      permissions: userInfo.permissions,
       isActive: userInfo.isActive,
       lastLoginAt: userInfo.lastLoginAt,
       createdAt: userInfo.createdAt,
       phoneNumber: userInfo.phoneNumber,
       tenantId: userInfo.tenantId,
     } as User;
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('user', JSON.stringify(mappedUser));
+    }
+
+    return mappedUser;
   }
 
   async refreshToken(): Promise<LoginResponse> {
@@ -156,6 +163,25 @@ export class AuthService {
     if (!user?.roles) return false;
     
     return roles.every(role => user.roles.includes(role));
+  }
+
+  hasPermission(permission: string): boolean {
+    const user = this.getStoredUser();
+    return user?.permissions?.includes(permission) ?? false;
+  }
+
+  hasAnyPermission(permissions: string[]): boolean {
+    const user = this.getStoredUser();
+    if (!user?.permissions) return false;
+
+    return permissions.some(permission => user.permissions?.includes(permission));
+  }
+
+  hasAllPermissions(permissions: string[]): boolean {
+    const user = this.getStoredUser();
+    if (!user?.permissions) return false;
+
+    return permissions.every(permission => user.permissions?.includes(permission));
   }
 }
 

@@ -61,6 +61,7 @@ export interface UserInfo {
   accessibleTenants: UserTenantInfo[];
   isActive: boolean;
   roles: string[];
+  permissions: string[];
   createdAt?: string;
   lastLoginAt?: string;
   tenantId?: string;

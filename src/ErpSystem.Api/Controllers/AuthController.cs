@@ -124,6 +124,16 @@ namespace ErpSystem.Api.Controllers
             return h.StartsWith("support.");
         }
 
+        private async Task<List<string>> GetUserPermissionsAsync(ApplicationUser user)
+        {
+            return await _context.UserRoles
+                .Where(ur => ur.UserId == user.Id)
+                .SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Name))
+                .Distinct()
+                .OrderBy(name => name)
+                .ToListAsync();
+        }
+
         private async Task<Guid> ResolveTenantIdForCaptchaAsync(string? tenantCode)
         {
             if (!string.IsNullOrWhiteSpace(tenantCode))
@@ -355,6 +365,7 @@ namespace ErpSystem.Api.Controllers
                     CurrentTenantName = tenant?.Name,
                     IsActive = user.IsActive,
                     Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                    Permissions = await GetUserPermissionsAsync(user),
                     AuthenticationProvider = user.AuthenticationProvider.ToString()
                 }
             };
@@ -798,6 +809,7 @@ namespace ErpSystem.Api.Controllers
                         CurrentTenantId = user.TenantId,
                         IsActive = user.IsActive,
                         Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                        Permissions = await GetUserPermissionsAsync(user),
                         AuthenticationProvider = user.AuthenticationProvider.ToString()
                     }
                 };
@@ -1112,6 +1124,7 @@ namespace ErpSystem.Api.Controllers
                     AccessibleTenants = accessibleTenants,
                     IsActive = user.IsActive,
                     Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                    Permissions = await GetUserPermissionsAsync(user),
                     AuthenticationProvider = user.AuthenticationProvider.ToString()
                 };
 
@@ -1288,6 +1301,7 @@ namespace ErpSystem.Api.Controllers
                         AccessibleTenants = accessibleTenants,
                         IsActive = user.IsActive,
                         Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                        Permissions = await GetUserPermissionsAsync(user),
                         AuthenticationProvider = user.AuthenticationProvider.ToString()
                     }
                 };
