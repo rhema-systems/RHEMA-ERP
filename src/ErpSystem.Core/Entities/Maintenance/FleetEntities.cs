@@ -34,6 +34,21 @@ public class FleetTrip : TenantEntity
     [MaxLength(200)]
     public string? Destination { get; set; }
 
+    /// <summary>
+    /// Optional predefined destination/template for this trip (route).
+    /// </summary>
+    public Guid? FleetTripDestinationId { get; set; }
+
+    /// <summary>
+    /// Expected trip duration in hours (from predefined destination/template).
+    /// </summary>
+    public double? ExpectedHours { get; set; }
+
+    /// <summary>
+    /// Expected trip mileage in km (from predefined destination/template).
+    /// </summary>
+    public double? ExpectedMileage { get; set; }
+
     [MaxLength(2000)]
     public string? Notes { get; set; }
 
@@ -78,6 +93,9 @@ public class FleetTrip : TenantEntity
 
     [ForeignKey(nameof(DriverEmployeeId))]
     public virtual Employee? DriverEmployee { get; set; }
+
+    [ForeignKey(nameof(FleetTripDestinationId))]
+    public virtual FleetTripDestination? FleetTripDestination { get; set; }
 }
 
 public static class FleetTripStatuses
@@ -96,6 +114,12 @@ public class FleetComplianceItem : TenantEntity
     [Required]
     public Guid VehicleAssetId { get; set; }
 
+    /// <summary>
+    /// Optional link to the template checklist item that created this record.
+    /// Helps avoid duplicates when applying templates to a vehicle.
+    /// </summary>
+    public Guid? TemplateItemId { get; set; }
+
     [Required]
     [MaxLength(100)]
     public string ComplianceType { get; set; } = string.Empty; // Registration, Insurance, Permit, Roadworthy, etc.
@@ -105,8 +129,10 @@ public class FleetComplianceItem : TenantEntity
 
     public DateTime? IssueDate { get; set; }
 
-    [Required]
-    public DateTime ExpiryDate { get; set; }
+    /// <summary>
+    /// Expiry date can be null for template-populated items before the user fills details.
+    /// </summary>
+    public DateTime? ExpiryDate { get; set; }
 
     /// <summary>
     /// When true, expiry/near-expiry blocks dispatch (configurable due-soon policy applies).
@@ -132,6 +158,80 @@ public class FleetComplianceItem : TenantEntity
     // Navigation
     [ForeignKey(nameof(VehicleAssetId))]
     public virtual MaintenanceAsset? VehicleAsset { get; set; }
+
+    [ForeignKey(nameof(TemplateItemId))]
+    public virtual FleetComplianceTemplateItem? TemplateItem { get; set; }
+}
+
+public class FleetComplianceTemplate : TenantEntity
+{
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(2000)]
+    public string? Description { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    public virtual ICollection<FleetComplianceTemplateItem> Items { get; set; } = new List<FleetComplianceTemplateItem>();
+}
+
+public class FleetComplianceTemplateItem : TenantEntity
+{
+    [Required]
+    public Guid TemplateId { get; set; }
+
+    [Required]
+    [MaxLength(100)]
+    public string ComplianceType { get; set; } = string.Empty;
+
+    public bool IsCritical { get; set; } = true;
+
+    public int SortOrder { get; set; } = 0;
+
+    [ForeignKey(nameof(TemplateId))]
+    public virtual FleetComplianceTemplate Template { get; set; } = null!;
+}
+
+public class FleetVehicleComplianceTemplate : TenantEntity
+{
+    [Required]
+    public Guid VehicleAssetId { get; set; }
+
+    [Required]
+    public Guid TemplateId { get; set; }
+
+    public DateTime AppliedAt { get; set; } = DateTime.UtcNow;
+
+    public Guid? AppliedByUserId { get; set; }
+
+    [ForeignKey(nameof(VehicleAssetId))]
+    public virtual MaintenanceAsset? VehicleAsset { get; set; }
+
+    [ForeignKey(nameof(TemplateId))]
+    public virtual FleetComplianceTemplate? Template { get; set; }
+}
+
+/// <summary>
+/// Predefined fleet trip destination/template (route) with expected duration and mileage.
+/// </summary>
+public class FleetTripDestination : TenantEntity
+{
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(200)]
+    public string? Origin { get; set; }
+
+    [MaxLength(200)]
+    public string? Destination { get; set; }
+
+    public double? ExpectedHours { get; set; }
+    public double? ExpectedMileage { get; set; }
+
+    public bool IsActive { get; set; } = true;
 }
 
 public class FleetFuelTransaction : TenantEntity

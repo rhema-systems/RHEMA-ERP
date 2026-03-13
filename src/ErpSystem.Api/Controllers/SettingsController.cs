@@ -444,6 +444,199 @@ public class SettingsController : ControllerBase
         }
     }
 
+    private async Task TryAuditAsync(string action, string resource, string resourceId, object? oldValues, object? newValues)
+    {
+        try
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var usernameClaim = User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst(ClaimTypes.Email)?.Value;
+            var tenantId = _currentUserService.TenantId;
+
+            if (!Guid.TryParse(userIdClaim, out var userId) || string.IsNullOrEmpty(usernameClaim) || !tenantId.HasValue)
+            {
+                return;
+            }
+
+            var auditLog = new Core.Entities.AuditLog
+            {
+                UserId = userId,
+                Username = usernameClaim,
+                Action = action,
+                Resource = resource,
+                ResourceId = resourceId,
+                OldValues = oldValues == null ? null : System.Text.Json.JsonSerializer.Serialize(oldValues),
+                NewValues = newValues == null ? null : System.Text.Json.JsonSerializer.Serialize(newValues),
+                IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                TenantId = tenantId.Value
+            };
+
+            await _auditLogService.CreateAuditLogAsync(auditLog);
+        }
+        catch
+        {
+            // Best-effort audit logging. Do not fail the request.
+        }
+    }
+
+    /// <summary>
+    /// Get SMS settings (per tenant)
+    /// </summary>
+    [HttpGet("sms")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<SmsSettingsDto>> GetSmsSettings()
+    {
+        try
+        {
+            var settings = await _settingsService.GetSmsSettingsAsync();
+            if (settings == null)
+            {
+                return Ok(new SmsSettingsDto
+                {
+                    DefaultProvider = "Twilio",
+                    FallbackProvidersCsv = "",
+                    TwilioEnabled = false,
+                    TwilioAccountSid = "",
+                    TwilioAuthToken = "",
+                    TwilioFromNumber = "",
+                    GhanaGatewayEnabled = false,
+                    GhanaGatewayUrlTemplate = "",
+                    GhanaGatewayApiKey = "",
+                    GhanaGatewaySenderId = "",
+                    GhanaGatewayTimeoutSeconds = 10
+                });
+            }
+
+            return Ok(new SmsSettingsDto
+            {
+                DefaultProvider = settings.DefaultProvider ?? "Twilio",
+                FallbackProvidersCsv = SmsSettingsDto.FallbackJsonToCsv(settings.FallbackProvidersJson),
+                TwilioEnabled = settings.TwilioEnabled,
+                TwilioAccountSid = settings.TwilioAccountSid ?? string.Empty,
+                TwilioAuthToken = settings.TwilioAuthToken ?? string.Empty,
+                TwilioFromNumber = settings.TwilioFromNumber ?? string.Empty,
+                GhanaGatewayEnabled = settings.GhanaGatewayEnabled,
+                GhanaGatewayUrlTemplate = settings.GhanaGatewayUrlTemplate ?? string.Empty,
+                GhanaGatewayApiKey = settings.GhanaGatewayApiKey ?? string.Empty,
+                GhanaGatewaySenderId = settings.GhanaGatewaySenderId ?? string.Empty,
+                GhanaGatewayTimeoutSeconds = settings.GhanaGatewayTimeoutSeconds
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving SMS settings");
+            return StatusCode(500, "An error occurred while retrieving SMS settings");
+        }
+    }
+
+    /// <summary>
+    /// Create SMS settings (per tenant)
+    /// </summary>
+    [HttpPost("sms")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<SmsSettingsDto>> CreateSmsSettings([FromBody] SmsSettingsDto request)
+    {
+        try
+        {
+            var existingSettings = await _settingsService.GetSmsSettingsAsync();
+            if (existingSettings != null)
+            {
+                return Conflict("SMS settings already exist. Use PUT to update them.");
+            }
+
+            var created = await _settingsService.UpdateSmsSettingsAsync(new Core.Entities.SmsSettings
+            {
+                DefaultProvider = request.DefaultProvider,
+                FallbackProvidersJson = SmsSettingsDto.FallbackCsvToJson(request.FallbackProvidersCsv),
+                TwilioEnabled = request.TwilioEnabled,
+                TwilioAccountSid = request.TwilioAccountSid,
+                TwilioAuthToken = request.TwilioAuthToken,
+                TwilioFromNumber = request.TwilioFromNumber,
+                GhanaGatewayEnabled = request.GhanaGatewayEnabled,
+                GhanaGatewayUrlTemplate = request.GhanaGatewayUrlTemplate,
+                GhanaGatewayApiKey = request.GhanaGatewayApiKey,
+                GhanaGatewaySenderId = request.GhanaGatewaySenderId,
+                GhanaGatewayTimeoutSeconds = request.GhanaGatewayTimeoutSeconds
+            });
+
+            await TryAuditAsync("CREATE", "SmsSettings", created.Id.ToString(), oldValues: null, newValues: request);
+
+            return CreatedAtAction(nameof(GetSmsSettings), null, new SmsSettingsDto
+            {
+                DefaultProvider = created.DefaultProvider ?? "Twilio",
+                FallbackProvidersCsv = SmsSettingsDto.FallbackJsonToCsv(created.FallbackProvidersJson),
+                TwilioEnabled = created.TwilioEnabled,
+                TwilioAccountSid = created.TwilioAccountSid ?? string.Empty,
+                TwilioAuthToken = created.TwilioAuthToken ?? string.Empty,
+                TwilioFromNumber = created.TwilioFromNumber ?? string.Empty,
+                GhanaGatewayEnabled = created.GhanaGatewayEnabled,
+                GhanaGatewayUrlTemplate = created.GhanaGatewayUrlTemplate ?? string.Empty,
+                GhanaGatewayApiKey = created.GhanaGatewayApiKey ?? string.Empty,
+                GhanaGatewaySenderId = created.GhanaGatewaySenderId ?? string.Empty,
+                GhanaGatewayTimeoutSeconds = created.GhanaGatewayTimeoutSeconds
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating SMS settings");
+            return StatusCode(500, "An error occurred while creating SMS settings");
+        }
+    }
+
+    /// <summary>
+    /// Update SMS settings (per tenant)
+    /// </summary>
+    [HttpPut("sms")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<SmsSettingsDto>> UpdateSmsSettings([FromBody] SmsSettingsDto request)
+    {
+        try
+        {
+            var existing = await _settingsService.GetSmsSettingsAsync();
+            if (existing == null)
+            {
+                return NotFound("SMS settings not found. Use POST to create them first.");
+            }
+
+            var updated = await _settingsService.UpdateSmsSettingsAsync(new Core.Entities.SmsSettings
+            {
+                DefaultProvider = request.DefaultProvider,
+                FallbackProvidersJson = SmsSettingsDto.FallbackCsvToJson(request.FallbackProvidersCsv),
+                TwilioEnabled = request.TwilioEnabled,
+                TwilioAccountSid = request.TwilioAccountSid,
+                TwilioAuthToken = request.TwilioAuthToken,
+                TwilioFromNumber = request.TwilioFromNumber,
+                GhanaGatewayEnabled = request.GhanaGatewayEnabled,
+                GhanaGatewayUrlTemplate = request.GhanaGatewayUrlTemplate,
+                GhanaGatewayApiKey = request.GhanaGatewayApiKey,
+                GhanaGatewaySenderId = request.GhanaGatewaySenderId,
+                GhanaGatewayTimeoutSeconds = request.GhanaGatewayTimeoutSeconds
+            });
+
+            await TryAuditAsync("UPDATE", "SmsSettings", updated.Id.ToString(), oldValues: existing, newValues: request);
+
+            return Ok(new SmsSettingsDto
+            {
+                DefaultProvider = updated.DefaultProvider ?? "Twilio",
+                FallbackProvidersCsv = SmsSettingsDto.FallbackJsonToCsv(updated.FallbackProvidersJson),
+                TwilioEnabled = updated.TwilioEnabled,
+                TwilioAccountSid = updated.TwilioAccountSid ?? string.Empty,
+                TwilioAuthToken = updated.TwilioAuthToken ?? string.Empty,
+                TwilioFromNumber = updated.TwilioFromNumber ?? string.Empty,
+                GhanaGatewayEnabled = updated.GhanaGatewayEnabled,
+                GhanaGatewayUrlTemplate = updated.GhanaGatewayUrlTemplate ?? string.Empty,
+                GhanaGatewayApiKey = updated.GhanaGatewayApiKey ?? string.Empty,
+                GhanaGatewaySenderId = updated.GhanaGatewaySenderId ?? string.Empty,
+                GhanaGatewayTimeoutSeconds = updated.GhanaGatewayTimeoutSeconds
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating SMS settings");
+            return StatusCode(500, "An error occurred while updating SMS settings");
+        }
+    }
+
     #region Field Labels
 
     /// <summary>
@@ -597,6 +790,52 @@ public class TestEmailResultDto
 {
     public bool Success { get; set; }
     public string Message { get; set; } = string.Empty;
+}
+
+public class SmsSettingsDto
+{
+    public string DefaultProvider { get; set; } = "Twilio";
+
+    /// <summary>
+    /// Comma-separated list of fallback providers (e.g. "GhanaGateway").
+    /// </summary>
+    public string FallbackProvidersCsv { get; set; } = string.Empty;
+
+    public bool TwilioEnabled { get; set; } = false;
+    public string TwilioAccountSid { get; set; } = string.Empty;
+    public string TwilioAuthToken { get; set; } = string.Empty;
+    public string TwilioFromNumber { get; set; } = string.Empty;
+
+    public bool GhanaGatewayEnabled { get; set; } = false;
+    public string GhanaGatewayUrlTemplate { get; set; } = string.Empty;
+    public string GhanaGatewayApiKey { get; set; } = string.Empty;
+    public string GhanaGatewaySenderId { get; set; } = string.Empty;
+    public int GhanaGatewayTimeoutSeconds { get; set; } = 10;
+
+    public static string? FallbackCsvToJson(string? csv)
+    {
+        if (string.IsNullOrWhiteSpace(csv)) return null;
+        var items = csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return items.Length == 0 ? null : System.Text.Json.JsonSerializer.Serialize(items);
+    }
+
+    public static string FallbackJsonToCsv(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return string.Empty;
+        try
+        {
+            var items = System.Text.Json.JsonSerializer.Deserialize<string[]>(json) ?? Array.Empty<string>();
+            return string.Join(", ", items.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()));
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
 }
 
 public class SecuritySettingsDto

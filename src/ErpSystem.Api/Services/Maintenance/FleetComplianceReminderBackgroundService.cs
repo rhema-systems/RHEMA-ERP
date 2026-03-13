@@ -104,7 +104,7 @@ public sealed class FleetComplianceReminderBackgroundService : BackgroundService
 
             // Due soon: [today, cutoff]
             var dueSoonItems = await q
-                .Where(i => i.ExpiryDate.Date >= today && i.ExpiryDate.Date <= dueSoonCutoff)
+                .Where(i => i.ExpiryDate.HasValue && i.ExpiryDate.Value.Date >= today && i.ExpiryDate.Value.Date <= dueSoonCutoff)
                 .ToListAsync(cancellationToken);
 
             foreach (var item in dueSoonItems)
@@ -128,15 +128,15 @@ public sealed class FleetComplianceReminderBackgroundService : BackgroundService
                         ["VehicleAssetId"] = item.VehicleAssetId,
                         ["VehicleName"] = item.VehicleAsset?.Name ?? string.Empty,
                         ["ComplianceType"] = item.ComplianceType,
-                        ["ExpiryDate"] = item.ExpiryDate,
-                        ["DaysToExpiry"] = (item.ExpiryDate.Date - today).Days
+                        ["ExpiryDate"] = item.ExpiryDate!.Value,
+                        ["DaysToExpiry"] = (item.ExpiryDate!.Value.Date - today).Days
                     }
                 }, cancellationToken);
             }
 
             // Overdue: < today
             var overdueItems = await q
-                .Where(i => i.ExpiryDate.Date < today)
+                .Where(i => i.ExpiryDate.HasValue && i.ExpiryDate.Value.Date < today)
                 .ToListAsync(cancellationToken);
 
             foreach (var item in overdueItems)
@@ -160,8 +160,8 @@ public sealed class FleetComplianceReminderBackgroundService : BackgroundService
                         ["VehicleAssetId"] = item.VehicleAssetId,
                         ["VehicleName"] = item.VehicleAsset?.Name ?? string.Empty,
                         ["ComplianceType"] = item.ComplianceType,
-                        ["ExpiryDate"] = item.ExpiryDate,
-                        ["DaysOverdue"] = (today - item.ExpiryDate.Date).Days
+                        ["ExpiryDate"] = item.ExpiryDate!.Value,
+                        ["DaysOverdue"] = (today - item.ExpiryDate!.Value.Date).Days
                     }
                 }, cancellationToken);
             }

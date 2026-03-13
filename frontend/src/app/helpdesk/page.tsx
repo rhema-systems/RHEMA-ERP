@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 
 export default function HelpdeskHomePage() {
-  redirect('/helpdesk/tickets');
+  redirect('/helpdesk/helpdesk-complaints/internal');
 }
 

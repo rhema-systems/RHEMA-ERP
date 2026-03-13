@@ -567,7 +567,11 @@ public class WorkflowEngine : IWorkflowEngine
         var approval = approvals.FirstOrDefault(a => a.ApproverId == userId && a.Status == WorkflowApprovalStatus.Pending);
         if (approval == null)
         {
-            approval = approvals.FirstOrDefault(a => a.Status == WorkflowApprovalStatus.Pending && !string.IsNullOrWhiteSpace(a.ApproverRole));
+            var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            approval = approvals.FirstOrDefault(a =>
+                a.Status == WorkflowApprovalStatus.Pending &&
+                !string.IsNullOrWhiteSpace(a.ApproverRole) &&
+                roleSet.Contains(a.ApproverRole!));
         }
 
         if (approval == null)

@@ -41,8 +41,6 @@ public class GlobalExceptionHandlingMiddleware
 
     private async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
-        context.Response.ContentType = "application/json";
-
         var response = new ErrorResponse
         {
             TraceId = context.TraceIdentifier,
@@ -71,6 +69,13 @@ public class GlobalExceptionHandlingMiddleware
                 response.Title = "Forbidden";
                 response.Status = (int)HttpStatusCode.Forbidden;
                 response.Detail = "You do not have permission to access this resource.";
+                context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
+                break;
+
+            case UnauthorizedAccessException unauthorizedAccessEx:
+                response.Title = "Forbidden";
+                response.Status = (int)HttpStatusCode.Forbidden;
+                response.Detail = unauthorizedAccessEx.Message;
                 context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
                 break;
 
@@ -123,6 +128,12 @@ public class GlobalExceptionHandlingMiddleware
         // Persist exception details to SQL for admin troubleshooting (best-effort).
         await TryPersistExceptionAsync(context, exception, response);
 
+        if (context.Response.HasStarted)
+        {
+            _logger.LogWarning("The response has already started for {RequestPath}; skipping error response body write.", context.Request.Path);
+            return;
+        }
+
         // Only include detailed error information in development
         if (_environment.IsDevelopment())
         {
@@ -130,12 +141,25 @@ public class GlobalExceptionHandlingMiddleware
             response.StackTrace = exception.StackTrace;
         }
 
-        // Security: Don't leak sensitive information
-        await context.Response.WriteAsync(JsonSerializer.Serialize(response, new JsonSerializerOptions
+        try
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = _environment.IsDevelopment()
-        }));
+            context.Response.ContentType = "application/json";
+
+            // Security: Don't leak sensitive information
+            await context.Response.WriteAsync(JsonSerializer.Serialize(response, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                WriteIndented = _environment.IsDevelopment()
+            }));
+        }
+        catch (ObjectDisposedException writeEx)
+        {
+            _logger.LogWarning(writeEx, "The response stream was disposed before the error response could be written for {RequestPath}.", context.Request.Path);
+        }
+        catch (InvalidOperationException writeEx)
+        {
+            _logger.LogWarning(writeEx, "The error response could not be written for {RequestPath}.", context.Request.Path);
+        }
     }
 
     private async Task TryPersistExceptionAsync(HttpContext context, Exception exception, ErrorResponse response)
@@ -153,7 +177,7 @@ public class GlobalExceptionHandlingMiddleware
 
             var level = exception switch
             {
-                ValidationException or UnauthorizedException or ForbiddenException or NotFoundException or ConflictException or ArgumentException => "Warning",
+                ValidationException or UnauthorizedException or ForbiddenException or UnauthorizedAccessException or NotFoundException or ConflictException or ArgumentException => "Warning",
                 InvalidOperationException => "Error",
                 _ => "Critical"
             };
@@ -318,6 +342,7 @@ public class GlobalExceptionHandlingMiddleware
             case ValidationException:
             case UnauthorizedException:
             case ForbiddenException:
+            case UnauthorizedAccessException:
             case NotFoundException:
             case ConflictException:
             case ArgumentException:

@@ -121,6 +121,15 @@ export default function ReceivePurchaseOrderPage() {
     return Math.max(0, received - accepted - rejected);
   };
 
+  const getFallbackWarehouseId = (): string => {
+    const preferred = warehouses.find(w => w.isDefault) ?? (warehouses.length === 1 ? warehouses[0] : undefined);
+    return normalizeGuid(preferred?.id);
+  };
+
+  const getEffectiveWarehouseId = (item: ReceiptItemFormData): string => {
+    return normalizeGuid(item.warehouseId || item.poWarehouseId || order?.deliveryWarehouseId || getFallbackWarehouseId());
+  };
+
   const fetchOrder = async () => {
     try {
       setLoading(true);
@@ -160,8 +169,18 @@ export default function ReceivePurchaseOrderPage() {
       
       // Load all active warehouses so user can override PO-line warehouse at receiving.
       try {
-        const allWarehouses = unwrapWarehouses(await inventoryManagementService.getWarehouses(true))
-          .map(warehouse => ({ ...warehouse, id: normalizeGuid(warehouse.id) }));
+        let allWarehouses = unwrapWarehouses(await inventoryManagementService.getWarehouses(true));
+        if (allWarehouses.length === 0) {
+          allWarehouses = unwrapWarehouses(await inventoryManagementService.getActiveWarehouses());
+        }
+        if (allWarehouses.length === 0) {
+          allWarehouses = unwrapWarehouses(await inventoryManagementService.getAllWarehouses());
+        }
+
+        allWarehouses = allWarehouses
+          .map(warehouse => ({ ...warehouse, id: normalizeGuid(warehouse.id) }))
+          .filter(w => w.isActive);
+
         setWarehouses(allWarehouses);
 
         // Preload warehouse locations for any warehouses referenced by the receipt lines.
@@ -229,7 +248,7 @@ export default function ReceivePurchaseOrderPage() {
   const ensureWarehouseLocationsLoaded = async (warehouseId?: string) => {
     const idToLoad = normalizeGuid(warehouseId);
     if (!idToLoad) return;
-    if (warehouseLocationsByWarehouseId[idToLoad]) return;
+    if (warehouseLocationsByWarehouseId[idToLoad] && warehouseLocationsByWarehouseId[idToLoad].length > 0) return;
 
     try {
       const locations = unwrapWarehouseLocations(await inventoryManagementService.getWarehouseLocations(idToLoad))
@@ -332,10 +351,16 @@ export default function ReceivePurchaseOrderPage() {
   };
 
   const handleWarehouseChange = async (index: number, nextWarehouseIdRaw: string) => {
-    const nextWarehouseId =
-      nextWarehouseIdRaw === '__none__'
-        ? normalizeGuid(receiptItems[index]?.poWarehouseId || order?.deliveryWarehouseId)
-        : normalizeGuid(nextWarehouseIdRaw);
+    const fallbackWarehouseId = getFallbackWarehouseId();
+    const nextWarehouseId = nextWarehouseIdRaw === '__none__'
+      ? normalizeGuid(receiptItems[index]?.poWarehouseId || order?.deliveryWarehouseId || fallbackWarehouseId)
+      : normalizeGuid(nextWarehouseIdRaw);
+
+    if (!nextWarehouseId) {
+      toast.error('Please select a warehouse first');
+      return;
+    }
+
     const updatedItems = [...receiptItems];
     updatedItems[index].warehouseId = nextWarehouseId;
     // Reset location selection when warehouse changes.
@@ -731,24 +756,47 @@ export default function ReceivePurchaseOrderPage() {
                         <Select
                           value={item.locationId || '__none__'}
                           onOpenChange={(open) => {
-                            if (open) ensureWarehouseLocationsLoaded(item.warehouseId);
+                            if (!open) return;
+                            const effectiveWarehouseId = getEffectiveWarehouseId(item);
+                            if (!effectiveWarehouseId) return;
+
+                            // If user never selected a warehouse on the PO and this line has no explicit warehouse,
+                            // use the effective warehouse to load locations and keep the UX smooth.
+                            if (!normalizeGuid(item.warehouseId)) {
+                              handleItemFieldChange(index, 'warehouseId', effectiveWarehouseId);
+                            }
+
+                            ensureWarehouseLocationsLoaded(effectiveWarehouseId);
                           }}
                           onValueChange={(value) => {
                             const nextLocationId = value === '__none__' ? '' : normalizeGuid(value);
-                            handleItemFieldChange(index, 'locationId', nextLocationId);
+                            const effectiveWarehouseId = getEffectiveWarehouseId(item);
+                            const updatedItems = [...receiptItems];
+                            updatedItems[index].locationId = nextLocationId;
+                            if (nextLocationId && !normalizeGuid(updatedItems[index].warehouseId) && effectiveWarehouseId) {
+                              updatedItems[index].warehouseId = effectiveWarehouseId;
+                            }
+                            setReceiptItems(updatedItems);
                           }}
+                          disabled={!getEffectiveWarehouseId(item)}
                         >
                           <SelectTrigger className="h-9">
-                            <SelectValue placeholder="Select location" />
+                            <SelectValue placeholder={getEffectiveWarehouseId(item) ? "Select location" : "Select warehouse first"} />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="__none__">Select location…</SelectItem>
-                            {(warehouseLocationsByWarehouseId[normalizeGuid(item.warehouseId)] ?? []).map(location => (
+                            {(warehouseLocationsByWarehouseId[getEffectiveWarehouseId(item)] ?? []).map(location => (
                               <SelectItem key={location.id} value={location.id}>
                                 {location.locationCode}
                                 {location.name ? ` - ${location.name}` : ''}
                               </SelectItem>
                             ))}
+                            {getEffectiveWarehouseId(item) &&
+                              (warehouseLocationsByWarehouseId[getEffectiveWarehouseId(item)] ?? []).length === 0 && (
+                              <SelectItem value="__no_locations__" disabled>
+                                No locations found for this warehouse
+                              </SelectItem>
+                            )}
                           </SelectContent>
                         </Select>
                       </div>

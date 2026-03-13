@@ -19,6 +19,7 @@ export interface User {
   currentTenantName?: string;
   isActive: boolean;
   roles: string[];
+  permissions?: string[];
   phoneNumber?: string;
   createdAt?: string;
   lastLoginAt?: string;
@@ -34,6 +35,7 @@ export interface LoginRequest {
   tenantCode?: string;
   rememberMe?: boolean;
   twoFactorCode?: string;
+  recaptchaToken?: string;
 }
 
 export interface LoginResponse {
@@ -43,6 +45,30 @@ export interface LoginResponse {
   user?: User;
   requiresTwoFactor?: boolean;
   twoFactorToken?: string;
+}
+
+export type OtpChannel = 'Email' | 'Sms';
+
+export interface RequestLoginOtpRequest {
+  identifier: string;
+  channel: OtpChannel;
+  tenantCode?: string;
+  recaptchaToken?: string;
+}
+
+export interface RequestLoginOtpResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface VerifyLoginOtpRequest {
+  identifier: string;
+  channel: OtpChannel;
+  otpCode: string;
+  tenantCode?: string;
+  rememberMe?: boolean;
+  twoFactorCode?: string;
+  recaptchaToken?: string;
 }
 
 export interface RefreshTokenRequest {

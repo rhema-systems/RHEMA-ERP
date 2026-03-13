@@ -41,6 +41,7 @@ public sealed class EhcSlaTemplateDto
     public string? CategoryName { get; set; }
     public int FirstResponseMinutes { get; set; }
     public int ResolutionMinutes { get; set; }
+    public string? CalendarConfigurationJson { get; set; }
 }
 
 public sealed class CreateEhcSlaTemplateRequestDto
@@ -52,6 +53,7 @@ public sealed class CreateEhcSlaTemplateRequestDto
     public Guid? CategoryId { get; set; }
     public int FirstResponseMinutes { get; set; } = 60;
     public int ResolutionMinutes { get; set; } = 1440;
+    public string? CalendarConfigurationJson { get; set; }
 }
 
 public sealed class UpdateEhcSlaTemplateRequestDto
@@ -63,6 +65,7 @@ public sealed class UpdateEhcSlaTemplateRequestDto
     public Guid? CategoryId { get; set; }
     public int FirstResponseMinutes { get; set; } = 60;
     public int ResolutionMinutes { get; set; } = 1440;
+    public string? CalendarConfigurationJson { get; set; }
 }
 
 public sealed class EhcLookupItemDto

@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Services.Ehc.Sla;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -59,7 +60,8 @@ public sealed class EhcAdminSlaTemplatesController : ControllerBase
             CategoryId = t.CategoryId,
             CategoryName = t.Category?.Name,
             FirstResponseMinutes = t.FirstResponseMinutes,
-            ResolutionMinutes = t.ResolutionMinutes
+            ResolutionMinutes = t.ResolutionMinutes,
+            CalendarConfigurationJson = t.CalendarConfigurationJson
         }).ToList();
 
         return Ok(new { success = true, data });
@@ -81,6 +83,16 @@ public sealed class EhcAdminSlaTemplatesController : ControllerBase
                 return BadRequest(new { success = false, message = "Name is required." });
             }
 
+            string? normalizedCalendarJson = null;
+            if (!string.IsNullOrWhiteSpace(request.CalendarConfigurationJson))
+            {
+                if (!EhcSlaCalendarConfiguration.TryParseAndNormalize(request.CalendarConfigurationJson, out var normalized, out var calendarError))
+                {
+                    return BadRequest(new { success = false, message = calendarError });
+                }
+                normalizedCalendarJson = normalized;
+            }
+
             var now = DateTime.UtcNow;
             var tpl = new EhcSlaTemplate
             {
@@ -93,6 +105,7 @@ public sealed class EhcAdminSlaTemplatesController : ControllerBase
                 CategoryId = request.CategoryId,
                 FirstResponseMinutes = Math.Max(1, request.FirstResponseMinutes),
                 ResolutionMinutes = Math.Max(1, request.ResolutionMinutes),
+                CalendarConfigurationJson = normalizedCalendarJson,
                 CreatedAt = now,
                 CreatedBy = _currentUserService.UserName ?? "System"
             };
@@ -113,7 +126,8 @@ public sealed class EhcAdminSlaTemplatesController : ControllerBase
                     CategoryId = tpl.CategoryId,
                     CategoryName = null,
                     FirstResponseMinutes = tpl.FirstResponseMinutes,
-                    ResolutionMinutes = tpl.ResolutionMinutes
+                    ResolutionMinutes = tpl.ResolutionMinutes,
+                    CalendarConfigurationJson = tpl.CalendarConfigurationJson
                 }
             });
         }
@@ -141,6 +155,16 @@ public sealed class EhcAdminSlaTemplatesController : ControllerBase
                 return NotFound(new { success = false, message = "SLA template not found" });
             }
 
+            string? normalizedCalendarJson = null;
+            if (!string.IsNullOrWhiteSpace(request.CalendarConfigurationJson))
+            {
+                if (!EhcSlaCalendarConfiguration.TryParseAndNormalize(request.CalendarConfigurationJson, out var normalized, out var calendarError))
+                {
+                    return BadRequest(new { success = false, message = calendarError });
+                }
+                normalizedCalendarJson = normalized;
+            }
+
             tpl.Name = request.Name.Trim();
             tpl.IsActive = request.IsActive;
             tpl.TicketType = request.TicketType;
@@ -148,6 +172,7 @@ public sealed class EhcAdminSlaTemplatesController : ControllerBase
             tpl.CategoryId = request.CategoryId;
             tpl.FirstResponseMinutes = Math.Max(1, request.FirstResponseMinutes);
             tpl.ResolutionMinutes = Math.Max(1, request.ResolutionMinutes);
+            tpl.CalendarConfigurationJson = normalizedCalendarJson;
             tpl.UpdatedAt = DateTime.UtcNow;
             tpl.UpdatedBy = _currentUserService.UserName ?? "System";
 

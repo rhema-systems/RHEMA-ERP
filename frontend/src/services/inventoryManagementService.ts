@@ -495,12 +495,62 @@ export interface WarehouseLocationDto {
   isActive: boolean;
   isPickingLocation: boolean;
   isReceivingLocation: boolean;
+  isConsignmentBin?: boolean;
+  consignmentWarehouseId?: string | null;
   maxWeight?: number;
   maxVolume?: number;
   maxItems?: number;
   currentWeight: number;
   currentVolume: number;
   currentItemCount: number;
+}
+
+// ============================================================================
+// LANDED COST (GRN-level)
+// ============================================================================
+
+export interface LandedCostDto {
+  id: string;
+  landedCostNumber: string;
+  goodsReceiptNoteId: string;
+  grnNumber: string;
+  status: string;
+  totalCostAmount: number;
+  allocatedAmount: number;
+  currency: string;
+  notes?: string;
+  createdAtFormatted: string;
+}
+
+export interface LandedCostItemDto {
+  id: string;
+  costType: string | number;
+  description: string;
+  amount: number;
+  currency: string;
+  exchangeRate: number;
+  amountInBaseCurrency: number;
+  allocationMethod: string;
+  supplierId?: string;
+  supplierName?: string;
+  referenceNumber?: string;
+}
+
+export interface LandedCostAllocationDto {
+  id: string;
+  grnItemId: string;
+  itemCode: string;
+  itemName: string;
+  allocatedAmount: number;
+  allocationPercent: number;
+  newUnitCost: number;
+}
+
+export interface LandedCostDetailDto extends LandedCostDto {
+  approvedByName?: string;
+  approvedDate?: string;
+  costItems: LandedCostItemDto[];
+  allocations: LandedCostAllocationDto[];
 }
 
 export interface CreateWarehouseLocationDto {
@@ -512,6 +562,8 @@ export interface CreateWarehouseLocationDto {
   parentLocationId?: string;
   isPickingLocation: boolean;
   isReceivingLocation: boolean;
+  isConsignmentBin?: boolean;
+  consignmentWarehouseId?: string | null;
   maxWeight?: number;
   maxVolume?: number;
   maxItems?: number;
@@ -1187,6 +1239,20 @@ class InventoryManagementService {
     return response.data;
   }
 
+  async getActiveWarehouses(): Promise<WarehouseDto[]> {
+    const response = await axios.get(`${API_URL}/inventory/warehouses/active`, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  async getAllWarehouses(): Promise<WarehouseDto[]> {
+    const response = await axios.get(`${API_URL}/inventory/warehouses`, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
   async getWarehouseById(id: string): Promise<WarehouseDto> {
     const response = await axios.get(`${API_URL}/inventory/warehouses/${id}`, {
       headers: this.getAuthHeaders()
@@ -1217,7 +1283,7 @@ class InventoryManagementService {
   // ========== WAREHOUSE LOCATIONS ==========
 
   async getWarehouseLocations(warehouseId?: string): Promise<WarehouseLocationDto[]> {
-    const response = await axios.get(`${API_URL}/InventoryItems/warehouse-locations`, {
+    const response = await axios.get(`${API_URL}/inventory/warehouse-locations`, {
       params: { warehouseId },
       headers: this.getAuthHeaders()
     });
@@ -1249,6 +1315,13 @@ class InventoryManagementService {
     await axios.delete(`${API_URL}/inventory/warehouse-locations/${id}`, {
       headers: this.getAuthHeaders()
     });
+  }
+
+  async reclassifyExistingStockToConsignment(id: string): Promise<any> {
+    const response = await axios.post(`${API_URL}/inventory/warehouse-locations/${id}/reclassify-stock-to-consignment`, null, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
   }
 
   // ========== WAREHOUSE ITEMS ==========
@@ -1382,6 +1455,44 @@ class InventoryManagementService {
     await axios.post(`${API_URL}/inventory/goods-receipt-notes/${id}/cancel`, { reason }, {
       headers: this.getAuthHeaders()
     });
+  }
+
+  // ========== LANDED COSTS ==========
+
+  async getLandedCostsByGrn(grnId: string, ensure: boolean = false): Promise<LandedCostDto[]> {
+    const response = await axios.get(`${API_URL}/inventory/landed-costs/by-grn/${grnId}`, {
+      params: { ensure },
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  async getLandedCostById(id: string): Promise<LandedCostDetailDto> {
+    const response = await axios.get(`${API_URL}/inventory/landed-costs/${id}`, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  async initializeLandedCostFromPo(grnId: string): Promise<LandedCostDto> {
+    const response = await axios.post(`${API_URL}/inventory/landed-costs/initialize-from-po/${grnId}`, null, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  async allocateLandedCost(id: string): Promise<{ message: string }> {
+    const response = await axios.post(`${API_URL}/inventory/landed-costs/${id}/allocate`, null, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  async postLandedCostToInventory(id: string): Promise<{ message: string }> {
+    const response = await axios.post(`${API_URL}/inventory/landed-costs/${id}/post-to-inventory`, null, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
   }
 
   // ========== INVENTORY TRANSFERS ==========

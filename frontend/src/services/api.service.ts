@@ -24,6 +24,30 @@ export interface LoginResponse {
   twoFactorToken?: string;
 }
 
+export type OtpChannel = 'Email' | 'Sms';
+
+export interface RequestLoginOtpRequest {
+  identifier: string;
+  channel: OtpChannel;
+  tenantCode?: string;
+  recaptchaToken?: string;
+}
+
+export interface RequestLoginOtpResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface VerifyLoginOtpRequest {
+  identifier: string;
+  channel: OtpChannel;
+  otpCode: string;
+  tenantCode?: string;
+  rememberMe?: boolean;
+  twoFactorCode?: string;
+  recaptchaToken?: string;
+}
+
 export interface UserInfo {
   id: string;
   username: string;
@@ -37,6 +61,7 @@ export interface UserInfo {
   accessibleTenants: UserTenantInfo[];
   isActive: boolean;
   roles: string[];
+  permissions: string[];
   createdAt?: string;
   lastLoginAt?: string;
   tenantId?: string;
@@ -277,6 +302,31 @@ class ApiService {
   // Auth endpoints
   public async login(request: LoginRequest): Promise<LoginResponse> {
     const response = await this.privateRequest<LoginResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+
+    // Store tokens only if they exist
+    if (response.token) {
+      this.setToken(response.token);
+    }
+
+    if (response.refreshToken && typeof window !== 'undefined') {
+      localStorage.setItem('refreshToken', response.refreshToken);
+    }
+
+    return response;
+  }
+
+  public async requestLoginOtp(request: RequestLoginOtpRequest): Promise<RequestLoginOtpResponse> {
+    return this.publicRequest<RequestLoginOtpResponse>('/auth/otp/request', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  public async verifyLoginOtp(request: VerifyLoginOtpRequest): Promise<LoginResponse> {
+    const response = await this.publicRequest<LoginResponse>('/auth/otp/verify', {
       method: 'POST',
       body: JSON.stringify(request),
     });

@@ -33,6 +33,13 @@ interface RequisitionDialogProps {
   requisitionId?: string;
   warehouses: WarehouseDto[];
   onSuccess: () => void;
+  projectContext?: {
+    projectId: string;
+    projectCode: string;
+    projectTitle: string;
+    departmentId?: string;
+    departmentName?: string;
+  };
 }
 
 interface FormData {
@@ -94,7 +101,7 @@ const normalizeStatus = (status: number | string | undefined): number => {
   return statusMap[status] || 0;
 };
 
-export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, warehouses, onSuccess }: RequisitionDialogProps) {
+export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, warehouses, onSuccess, projectContext }: RequisitionDialogProps) {
   const { toast } = useToast();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -133,6 +140,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
   const isViewMode = mode === 'view';
   const isEditMode = mode === 'edit';
   const isCreateMode = mode === 'create';
+  const isProjectScoped = !!projectContext;
   const requisitionStatus = normalizeStatus(requisitionDetail?.status);
   const canEdit = !isViewMode && (isCreateMode || requisitionStatus === 1);
   const showApprovalsTab = !!requisitionDetail && !isCreateMode;
@@ -143,12 +151,22 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
       setActiveTab('details');
       setPendingItems([]);
       if (mode === 'create') {
-        setFormData({ departmentId: '', departmentName: '', costCenter: '', warehouseId: '', requisitionType: 1, priority: 'Normal', requiredDate: '', purpose: '', notes: '' });
+        setFormData({
+          departmentId: projectContext?.departmentId || '',
+          departmentName: projectContext?.departmentName || '',
+          costCenter: '',
+          warehouseId: '',
+          requisitionType: projectContext ? 2 : 1,
+          priority: 'Normal',
+          requiredDate: '',
+          purpose: '',
+          notes: '',
+        });
         setRequisitionDetail(null);
       }
       loadDepartments();
     }
-  }, [open, mode]);
+  }, [open, mode, projectContext]);
 
   // Load requisition details when editing/viewing
   useEffect(() => {
@@ -223,6 +241,8 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
           departmentName: formData.departmentName,
           costCenter: formData.costCenter,
           warehouseId: formData.warehouseId,
+          projectId: projectContext?.projectId,
+          projectCode: projectContext?.projectCode,
           requisitionType: formData.requisitionType,
           priority: formData.priority,
           requiredDate: formData.requiredDate || undefined,
@@ -238,6 +258,8 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
           departmentName: formData.departmentName,
           costCenter: formData.costCenter,
           warehouseId: formData.warehouseId,
+          projectId: projectContext?.projectId,
+          projectCode: projectContext?.projectCode,
           requiredDate: formData.requiredDate || undefined,
           purpose: formData.purpose,
           notes: formData.notes
@@ -399,7 +421,13 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
               </DialogTitle>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">
-                  {isCreateMode ? 'Create a new inventory requisition' : isEditMode ? 'Edit requisition details' : 'View requisition details'}
+                  {isCreateMode
+                    ? isProjectScoped
+                      ? 'Create a project-linked inventory requisition'
+                      : 'Create a new inventory requisition'
+                    : isEditMode
+                      ? 'Edit requisition details'
+                      : 'View requisition details'}
                 </span>
                 {requisitionDetail && getStatusBadge(requisitionDetail.status)}
                 {requisitionDetail && requisitionStatus === 2 && requisitionDetail.currentWorkflowStepName && (
@@ -422,13 +450,33 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
               </TabsList>
 
               <TabsContent value="details" className="space-y-4">
+                {projectContext ? (
+                  <Card className="border-dashed">
+                    <CardContent className="pt-4">
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <div>
+                          <div className="text-xs uppercase tracking-wide text-muted-foreground">Project</div>
+                          <div className="font-medium">{projectContext.projectTitle}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs uppercase tracking-wide text-muted-foreground">Project Code</div>
+                          <div className="font-medium">{projectContext.projectCode}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs uppercase tracking-wide text-muted-foreground">Context</div>
+                          <div className="font-medium">Project Requisition</div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : null}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Department *</Label>
                     <Select value={formData.departmentId} onValueChange={(v) => {
                       const dept = departments.find(d => d.id === v);
                       setFormData({ ...formData, departmentId: v, departmentName: dept?.name || '' });
-                    }} disabled={!canEdit}>
+                    }} disabled={!canEdit || (!!projectContext?.departmentId && isCreateMode)}>
                       <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
                       <SelectContent>
                         {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
@@ -446,7 +494,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                   </div>
                   <div className="space-y-2">
                     <Label>Requisition Type</Label>
-                    <Select value={formData.requisitionType.toString()} onValueChange={(v) => setFormData({ ...formData, requisitionType: parseInt(v) })} disabled={!canEdit}>
+                    <Select value={formData.requisitionType.toString()} onValueChange={(v) => setFormData({ ...formData, requisitionType: parseInt(v) })} disabled={!canEdit || isProjectScoped}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {RequisitionTypes.map(t => <SelectItem key={t.value} value={t.value.toString()}>{t.label}</SelectItem>)}

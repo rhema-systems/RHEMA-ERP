@@ -629,6 +629,8 @@ public class WarehouseLocationDto
     public bool IsActive { get; set; }
     public bool IsPickingLocation { get; set; }
     public bool IsReceivingLocation { get; set; }
+    public bool IsConsignmentBin { get; set; }
+    public Guid? ConsignmentWarehouseId { get; set; }
     public decimal? MaxWeight { get; set; }
     public decimal? MaxVolume { get; set; }
     public int? MaxItems { get; set; }
@@ -722,6 +724,16 @@ public class CreateWarehouseLocationDto
 
     public bool IsPickingLocation { get; set; } = true;
     public bool IsReceivingLocation { get; set; } = true;
+
+    /// <summary>
+    /// When true, inventory in this location is treated as consignment stock and excluded from owned/main inventory totals.
+    /// </summary>
+    public bool IsConsignmentBin { get; set; } = false;
+
+    /// <summary>
+    /// Required when <see cref="IsConsignmentBin"/> is true. Must reference a warehouse marked as consignment.
+    /// </summary>
+    public Guid? ConsignmentWarehouseId { get; set; }
 
     public decimal? MaxWeight { get; set; }
     public decimal? MaxVolume { get; set; }

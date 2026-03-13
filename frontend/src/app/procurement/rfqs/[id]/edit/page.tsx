@@ -16,7 +16,7 @@ import { rfqService, type CreatePurchaseOrdersFromRfqResponseDto, type RfqDetail
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { purchasingService, type SuggestedSupplierDto } from '@/services/purchasingService';
 import { toast } from 'sonner';
-import { ArrowLeft, CheckCircle2, Loader2, Send, Save, Users, Mail, Package } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Loader2, Printer, Send, Save, Users, Mail, Package } from 'lucide-react';
 
 export default function EditRfqPage() {
   const params = useParams();
@@ -37,6 +37,7 @@ export default function EditRfqPage() {
   const [awardMode, setAwardMode] = useState<'WinnerTakesAll' | 'SplitAward'>('WinnerTakesAll');
   const [winnerQuoteId, setWinnerQuoteId] = useState<string | null>(null);
   const [splitAwardByItemId, setSplitAwardByItemId] = useState<Record<string, string>>({});
+  const [splitAwardReasonByItemId, setSplitAwardReasonByItemId] = useState<Record<string, string>>({});
   const [awarding, setAwarding] = useState(false);
   const [confirmAwardOpen, setConfirmAwardOpen] = useState(false);
 
@@ -103,9 +104,11 @@ export default function EditRfqPage() {
             if (bestQuoteId) byItem[item.id] = bestQuoteId;
           }
           setSplitAwardByItemId(byItem);
+          setSplitAwardReasonByItemId({});
         } else {
           setWinnerQuoteId(null);
           setSplitAwardByItemId({});
+          setSplitAwardReasonByItemId({});
         }
       } catch (e: any) {
         console.error(e);
@@ -206,6 +209,17 @@ export default function EditRfqPage() {
     }
   };
 
+  const handlePrintPdf = async () => {
+    try {
+      const blob = await rfqService.getRfqPdf(rfqId);
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e.message || 'Failed to generate RFQ PDF');
+    }
+  };
+
   const openQuote = (quoteId: string) => {
     setSelectedQuoteId(quoteId);
     setQuoteOpen(true);
@@ -242,7 +256,11 @@ export default function EditRfqPage() {
         }
         result = await rfqService.awardAndCreatePurchaseOrders(rfq.id, {
           mode: 'SplitAward',
-          lines: (rfq.items || []).map((i) => ({ rfqItemId: i.id, quoteId: splitAwardByItemId[i.id] })),
+          lines: (rfq.items || []).map((i) => ({
+            rfqItemId: i.id,
+            quoteId: splitAwardByItemId[i.id],
+            awardReason: splitAwardReasonByItemId[i.id] || undefined,
+          })),
         });
       }
 
@@ -320,6 +338,10 @@ export default function EditRfqPage() {
           <Button onClick={handleSave} disabled={saving || sending || isSent} variant="outline">
             {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
             Save
+          </Button>
+          <Button onClick={handlePrintPdf} disabled={saving || sending} variant="outline">
+            <Printer className="h-4 w-4 mr-2" />
+            Print PDF
           </Button>
           <Button onClick={() => setConfirmSendOpen(true)} disabled={sending || selectedSupplierIds.length === 0 && !externalEmails.trim()}>
             {sending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
@@ -588,6 +610,7 @@ export default function EditRfqPage() {
                                 <th className="text-right p-2 w-24">Qty</th>
                                 <th className="text-left p-2 w-20">UOM</th>
                                 <th className="text-left p-2 w-64">Award To</th>
+                                <th className="text-left p-2 w-72">Reason (optional)</th>
                                 <th className="text-right p-2 w-32">Unit Cost</th>
                                 <th className="text-right p-2 w-32">Line Total</th>
                               </tr>
@@ -628,6 +651,20 @@ export default function EditRfqPage() {
                                           })}
                                         </SelectContent>
                                       </Select>
+                                    </td>
+                                    <td className="p-2">
+                                      <Input
+                                        value={splitAwardReasonByItemId[item.id] || ''}
+                                        onChange={(e) =>
+                                          setSplitAwardReasonByItemId((prev) => ({
+                                            ...prev,
+                                            [item.id]: e.target.value,
+                                          }))
+                                        }
+                                        disabled={!splitAwardByItemId[item.id]}
+                                        placeholder={splitAwardByItemId[item.id] ? 'Type a reason…' : 'Select supplier first'}
+                                        className="h-9"
+                                      />
                                     </td>
                                     <td className="p-2 text-right">{unitPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
                                     <td className="p-2 text-right">{lineTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>

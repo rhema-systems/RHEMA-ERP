@@ -4,7 +4,7 @@ namespace ErpSystem.Core.Interfaces.Maintenance;
 
 public interface IFleetVehicleService
 {
-    Task<PagedResult<FleetVehicleListDto>> GetVehiclesPagedAsync(int page, int pageSize, string? searchTerm = null, Guid? categoryId = null);
+    Task<PagedResult<FleetVehicleListDto>> GetVehiclesPagedAsync(int page, int pageSize, string? searchTerm = null, Guid? categoryId = null, string? assetType = null);
     Task<MaintenanceAssetDto?> GetVehicleByIdAsync(Guid vehicleAssetId);
     Task<MaintenanceAssetDto> CreateVehicleAsync(CreateFleetVehicleDto dto);
     Task<MaintenanceAssetDto> UpdateVehicleAsync(Guid vehicleAssetId, UpdateFleetVehicleDto dto);
@@ -24,6 +24,15 @@ public interface IFleetTripService
     Task<bool> CancelAsync(Guid tripId, string reason);
 }
 
+public interface IFleetTripDestinationService
+{
+    Task<IReadOnlyList<FleetTripDestinationDto>> GetAllAsync(bool activeOnly = false);
+    Task<FleetTripDestinationDto?> GetByIdAsync(Guid id);
+    Task<FleetTripDestinationDto> CreateAsync(CreateFleetTripDestinationDto dto);
+    Task<FleetTripDestinationDto> UpdateAsync(Guid id, UpdateFleetTripDestinationDto dto);
+    Task<bool> DeleteAsync(Guid id);
+}
+
 public interface IFleetComplianceService
 {
     Task<PagedResult<FleetComplianceItemDto>> GetComplianceItemsPagedAsync(Guid vehicleAssetId, int page, int pageSize);
@@ -32,6 +41,18 @@ public interface IFleetComplianceService
     Task<FleetComplianceItemDto> UpdateAsync(Guid id, UpdateFleetComplianceItemDto dto);
     Task<bool> DeleteAsync(Guid id);
     Task<IReadOnlyList<FleetComplianceItemDto>> GetDispatchBlockingItemsAsync(Guid vehicleAssetId, DateTime? asAtUtc = null);
+}
+
+public interface IFleetComplianceTemplateService
+{
+    Task<IReadOnlyList<FleetComplianceTemplateDto>> GetTemplatesAsync(bool includeInactive = false);
+    Task<FleetComplianceTemplateDto?> GetTemplateByIdAsync(Guid templateId);
+    Task<FleetComplianceTemplateDto> CreateTemplateAsync(CreateFleetComplianceTemplateDto dto);
+    Task<FleetComplianceTemplateDto> UpdateTemplateAsync(Guid templateId, UpdateFleetComplianceTemplateDto dto);
+    Task<bool> DeleteTemplateAsync(Guid templateId);
+
+    Task<FleetVehicleComplianceTemplateDto?> GetVehicleTemplateAsync(Guid vehicleAssetId);
+    Task<FleetVehicleComplianceTemplateDto> ApplyTemplateToVehicleAsync(Guid vehicleAssetId, Guid templateId);
 }
 
 public interface IFleetFuelService
@@ -115,6 +136,7 @@ public interface IFleetDashboardService
 public interface IFleetCostService
 {
     Task<PagedResult<FleetCostEntryDto>> GetPagedAsync(Guid vehicleAssetId, int page, int pageSize, DateTime? fromUtc = null, DateTime? toUtc = null);
+    Task<PagedResult<FleetCostEntryDto>> GetPagedForTripAsync(Guid fleetTripId, int page, int pageSize, DateTime? fromUtc = null, DateTime? toUtc = null);
     Task<FleetCostEntryDto> CreateAsync(CreateFleetCostEntryDto dto);
     Task<bool> DeleteAsync(Guid id);
 }

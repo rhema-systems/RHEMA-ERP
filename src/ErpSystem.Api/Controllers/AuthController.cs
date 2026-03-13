@@ -1,6 +1,8 @@
 using System.IdentityModel.Tokens.Jwt;
 using ErpSystem.Api.Models;
 using ErpSystem.Api.Services;
+using ErpSystem.Api.Services.Sms;
+using ErpSystem.Api.Services.Otp;
 using ErpSystem.Core.DTOs.Auth;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
@@ -35,7 +37,10 @@ namespace ErpSystem.Api.Controllers
         private readonly ITwoFactorAuthService _twoFactorService;
         private readonly IPasswordResetService _passwordResetService;
         private readonly IEmailService _emailService;
+        private readonly INotificationService _notificationService;
+        private readonly ITenantSmsSender _tenantSmsSender;
         private readonly ICaptchaVerificationService _captchaVerificationService;
+        private readonly IOtpService _otpService;
         private readonly ApplicationDbContext _context;
         private readonly IConfiguration _configuration;
         private readonly ILogger<AuthController> _logger;
@@ -56,7 +61,10 @@ namespace ErpSystem.Api.Controllers
             ITwoFactorAuthService twoFactorService,
             IPasswordResetService passwordResetService,
             IEmailService emailService,
+            INotificationService notificationService,
+            ITenantSmsSender tenantSmsSender,
             ICaptchaVerificationService captchaVerificationService,
+            IOtpService otpService,
             ApplicationDbContext context,
             IConfiguration configuration,
             ILogger<AuthController> logger)
@@ -76,7 +84,10 @@ namespace ErpSystem.Api.Controllers
             _twoFactorService = twoFactorService;
             _passwordResetService = passwordResetService;
             _emailService = emailService;
+            _notificationService = notificationService;
+            _tenantSmsSender = tenantSmsSender;
             _captchaVerificationService = captchaVerificationService;
+            _otpService = otpService;
             _context = context;
             _configuration = configuration;
             _logger = logger;
@@ -113,6 +124,16 @@ namespace ErpSystem.Api.Controllers
             return h.StartsWith("support.");
         }
 
+        private async Task<List<string>> GetUserPermissionsAsync(ApplicationUser user)
+        {
+            return await _context.UserRoles
+                .Where(ur => ur.UserId == user.Id)
+                .SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Name))
+                .Distinct()
+                .OrderBy(name => name)
+                .ToListAsync();
+        }
+
         private async Task<Guid> ResolveTenantIdForCaptchaAsync(string? tenantCode)
         {
             if (!string.IsNullOrWhiteSpace(tenantCode))
@@ -135,6 +156,221 @@ namespace ErpSystem.Api.Controllers
             }
 
             return Constants.Tenants.DefaultTenantId;
+        }
+
+        private static bool TryParseOtpChannel(string? channel, out OtpChannel otpChannel)
+        {
+            otpChannel = OtpChannel.Email;
+            if (string.IsNullOrWhiteSpace(channel))
+            {
+                return false;
+            }
+
+            var c = channel.Trim().ToLowerInvariant();
+            if (c is "email")
+            {
+                otpChannel = OtpChannel.Email;
+                return true;
+            }
+
+            if (c is "sms" or "text")
+            {
+                otpChannel = OtpChannel.Sms;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static string NormalizePhone(string phoneNumber)
+        {
+            var t = (phoneNumber ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(t)) return string.Empty;
+
+            var sb = new System.Text.StringBuilder();
+            foreach (var c in t)
+            {
+                if (c == '+' && sb.Length == 0)
+                {
+                    sb.Append(c);
+                    continue;
+                }
+
+                if (char.IsDigit(c))
+                {
+                    sb.Append(c);
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private async Task<IActionResult> CompleteSuccessfulLoginAsync(ApplicationUser user, Tenant? tenant, string usernameForLogs, string details)
+        {
+            // Determine the effective tenant ID for this login session
+            var effectiveTenantId = tenant?.Id ?? user.TenantId;
+
+            // If effectiveTenantId is still empty, try to get from UserTenants table
+            if (effectiveTenantId == Guid.Empty)
+            {
+                // Get active user tenants ordered by IsDefault
+                var userTenants = await _context.UserTenants
+                    .Where(ut => ut.UserId == user.Id && !ut.IsDeleted && ut.Status == UserTenantStatus.Active)
+                    .OrderByDescending(ut => ut.IsDefault)
+                    .ToListAsync();
+
+                if (userTenants.Any())
+                {
+                    effectiveTenantId = userTenants.First().TenantId;
+                    var isDefault = userTenants.First().IsDefault;
+                    _logger.LogInformation("Using {TenantType} tenant {TenantId} from UserTenants for user {Username}",
+                        isDefault ? "default" : "first active", effectiveTenantId, user.UserName);
+                }
+                else
+                {
+                    _logger.LogWarning("User {Username} has no tenant assigned in User.TenantId or UserTenants table", user.UserName);
+                    return Unauthorized(new { message = "User has no tenant assigned. Please contact administrator." });
+                }
+
+                // Update user's TenantId field for future logins
+                user.TenantId = effectiveTenantId;
+                await _userManager.UpdateAsync(user);
+                _logger.LogInformation("Updated user {Username} TenantId to {TenantId}", user.UserName, effectiveTenantId);
+            }
+
+            // Update user's current tenant if tenant was specified in login
+            if (tenant != null && user.TenantId != tenant.Id)
+            {
+                user.TenantId = tenant.Id;
+                await _userManager.UpdateAsync(user);
+                _logger.LogInformation("Updated user {Username} tenant to {TenantId}", user.UserName, tenant.Id);
+            }
+
+            // Get security settings for concurrent login prevention from user's tenant
+            var securitySettings = await _settingsService.GetSecuritySettingsAsync(effectiveTenantId);
+            var preventConcurrentLogin = securitySettings?.PreventConcurrentLogin.ToString() ?? "Disabled";
+
+            // Check if user can login based on concurrent login prevention settings
+            var canLogin = await _userSessionService.CanUserLoginAsync(user.Id, preventConcurrentLogin);
+            if (!canLogin)
+            {
+                _logger.LogWarning("Login prevented for user {Username}: Active session exists and prevention mode is {Mode}",
+                    usernameForLogs, preventConcurrentLogin);
+
+                var preventedLoginSecurityLog = new SecurityLog
+                {
+                    Action = SecurityAction.LoginFailure.ToString(),
+                    Success = false,
+                    IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                    Username = usernameForLogs,
+                    UserId = user.Id,
+                    Details = $"Login prevented due to concurrent session policy: {preventConcurrentLogin}",
+                    FailureReason = "Active session exists - concurrent login prevented",
+                    UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                    TenantId = user.TenantId
+                };
+                await _securityLogService.CreateSecurityLogAsync(preventedLoginSecurityLog);
+
+                return Unauthorized(new
+                {
+                    message = "You already have an active session. Please logout from other devices first.",
+                    code = "CONCURRENT_SESSION_PREVENTED"
+                });
+            }
+
+            // Get device information for session tracking
+            var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
+            var userAgent = Request.Headers["User-Agent"].FirstOrDefault() ?? "Unknown";
+            var deviceFingerprint = GenerateDeviceFingerprint(ipAddress, userAgent);
+
+            // Create user session (this handles concurrent login prevention logic)
+            var userSession = await _userSessionService.CreateSessionAsync(
+                user.Id,
+                effectiveTenantId,
+                ipAddress,
+                userAgent,
+                deviceFingerprint,
+                preventConcurrentLogin
+            );
+
+            // Generate token with session ID included
+            var token = await _tokenService.GenerateTokenAsync(user, userSession.SessionId);
+
+            // Extract JTI from the generated token and update the session
+            try
+            {
+                var tokenHandler = new JwtSecurityTokenHandler();
+                if (tokenHandler.CanReadToken(token))
+                {
+                    var jsonToken = tokenHandler.ReadJwtToken(token);
+                    var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
+
+                    if (!string.IsNullOrEmpty(jti))
+                    {
+                        userSession.JwtTokenId = jti;
+                        await _context.SaveChangesAsync(); // Save the JTI to the session
+                        _logger.LogDebug("Linked JWT token {Jti} to session {SessionId}", jti, userSession.SessionId);
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("Generated JWT token cannot be read: {TokenPreview}",
+                        token.Length > 50 ? string.Concat(token.AsSpan(0, 50), "...") : token);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to link JWT token to session {SessionId}", userSession.SessionId);
+                // Continue with login even if linking fails
+            }
+
+            // Update last login timestamp
+            user.LastLoginDate = DateTime.UtcNow;
+            await _userManager.UpdateAsync(user);
+            var refreshToken = _tokenService.GenerateRefreshToken();
+
+            // TODO: Store refresh token in database for security
+
+            _logger.LogInformation("{Details} for user: {Username}", details, usernameForLogs);
+
+            // Log login success using user's tenant context
+            var loginSuccessSecurityLog = new SecurityLog
+            {
+                Action = SecurityAction.LoginSuccess.ToString(),
+                Success = true,
+                IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                Username = usernameForLogs,
+                UserId = user.Id,
+                Details = details,
+                FailureReason = null,
+                UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                TenantId = user.TenantId
+            };
+            await _securityLogService.CreateSecurityLogAsync(loginSuccessSecurityLog);
+
+            var response = new LoginResponse
+            {
+                Token = token,
+                RefreshToken = refreshToken,
+                ExpiresAt = DateTime.UtcNow.AddHours(24), // Match JWT expiry
+                User = new UserInfo
+                {
+                    Id = user.Id,
+                    Username = user.UserName!,
+                    Email = user.Email!,
+                    FirstName = user.FirstName,
+                    LastName = user.LastName,
+                    CurrentTenantId = effectiveTenantId,
+                    CurrentTenantCode = tenant?.Code,
+                    CurrentTenantName = tenant?.Name,
+                    IsActive = user.IsActive,
+                    Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                    Permissions = await GetUserPermissionsAsync(user),
+                    AuthenticationProvider = user.AuthenticationProvider.ToString()
+                }
+            };
+
+            return Ok(response);
         }
 
         [HttpPost("login")]
@@ -176,26 +412,45 @@ namespace ErpSystem.Api.Controllers
                     }
                 }
 
+                // Resolve the default tenant (used for LDAP auto-provisioning / internal ERP context)
+                Tenant? defaultTenant = null;
+                try
+                {
+                    defaultTenant = await _tenantService.GetTenantByIdAsync(Constants.Tenants.DefaultTenantId);
+                    if (defaultTenant == null || defaultTenant.Status != TenantStatus.Active)
+                    {
+                        defaultTenant = null;
+                    }
+                }
+                catch
+                {
+                    defaultTenant = null;
+                }
+
                 ApplicationUser? user = null;
                 bool isLdapAuthenticated = false;
                 LdapUser? ldapUser = null;
+                string? ldapFailureReason = null;
 
                 // First try to find existing user in database
                 user = await _userManager.FindByNameAsync(request.Username) ??
                        await _userManager.FindByEmailAsync(request.Username);
 
-                // If LDAP is enabled for this tenant, try LDAP authentication
-                if (tenant?.LdapEnabled == true)
+                // Prefer LDAP authentication when available. If a tenant code isn't provided, use the default tenant's LDAP config.
+                var tenantForLdap = tenant ?? defaultTenant;
+
+                if (tenantForLdap?.LdapEnabled == true)
                 {
                     _logger.LogInformation(
                         "Attempting LDAP authentication for user {Username} using tenant {TenantId}. Server={LdapServer}, Port={LdapPort}, BaseDn={LdapBaseDn}",
                         request.Username,
-                        tenant.Id,
-                        tenant.LdapServer,
-                        tenant.LdapPort ?? 389,
-                        tenant.LdapBaseDn);
+                        tenantForLdap.Id,
+                        tenantForLdap.LdapServer,
+                        tenantForLdap.LdapPort ?? 389,
+                        tenantForLdap.LdapBaseDn);
 
-                    var ldapResult = await _ldapAuthService.AuthenticateAsync(request.Username, request.Password, tenant);
+                    var ldapResult = await _ldapAuthService.AuthenticateAsync(request.Username, request.Password, tenantForLdap);
+                    ldapFailureReason = ldapResult.ErrorMessage;
 
                     _logger.LogInformation(
                         "LDAP authentication call completed for user {Username}. Success={Success}, Error={Error}",
@@ -209,23 +464,30 @@ namespace ErpSystem.Api.Controllers
                         ldapUser = ldapResult.User;
                         _logger.LogInformation("LDAP authentication successful for user: {Username}", request.Username);
 
-                        // If user doesn't exist locally, create them from LDAP data
+                        // If user doesn't exist locally, auto-provision them after successful LDAP authentication.
+                        // Requirement: create with AuthenticationProvider=LDAP, no role assignment, and default tenant context.
                         if (user == null)
                         {
                             _logger.LogInformation("Creating local user from LDAP data for: {Username}", request.Username);
 
+                            var provisionTenantId = defaultTenant?.Id ?? tenantForLdap.Id;
+                            var email = !string.IsNullOrWhiteSpace(ldapUser.Email) ? ldapUser.Email : $"{ldapUser.Username}@ldap.local";
+
                             user = new ApplicationUser
                             {
+                                Id = Guid.NewGuid(),
                                 UserName = ldapUser.Username,
-                                Email = ldapUser.Email,
+                                Email = email,
                                 FirstName = ldapUser.FirstName,
                                 LastName = ldapUser.LastName,
-                                TenantId = tenant.Id,
+                                TenantId = provisionTenantId,
                                 IsActive = true,
                                 EmailConfirmed = true, // Trust LDAP email
-                                AuthenticationProvider = AuthenticationProvider.LDAP
+                                AuthenticationProvider = AuthenticationProvider.LDAP,
+                                LdapDn = string.IsNullOrWhiteSpace(ldapUser.DistinguishedName) ? null : ldapUser.DistinguishedName
                             };
 
+                            // Create without a local password (LDAP remains the source of truth).
                             var createResult = await _userManager.CreateAsync(user);
                             if (!createResult.Succeeded)
                             {
@@ -233,17 +495,21 @@ namespace ErpSystem.Api.Controllers
                                     string.Join(", ", createResult.Errors.Select(e => e.Description)));
                                 return StatusCode(500, new { message = "Failed to create user account" });
                             }
-
-                            // Assign default role (Employee) for new LDAP users
-                            await _userManager.AddToRoleAsync(user, "Employee");
                         }
                         else
                         {
                             // Update existing user with latest LDAP data
                             user.FirstName = ldapUser.FirstName;
                             user.LastName = ldapUser.LastName;
-                            user.Email = ldapUser.Email;
+                            var fallbackEmail = user.Email;
+                            if (string.IsNullOrWhiteSpace(fallbackEmail))
+                            {
+                                fallbackEmail = $"{ldapUser.Username}@ldap.local";
+                            }
+                            user.Email = !string.IsNullOrWhiteSpace(ldapUser.Email) ? ldapUser.Email : fallbackEmail;
                             user.AuthenticationProvider = AuthenticationProvider.LDAP;
+                            user.IsActive = true;
+                            user.LdapDn = string.IsNullOrWhiteSpace(ldapUser.DistinguishedName) ? user.LdapDn : ldapUser.DistinguishedName;
                             await _userManager.UpdateAsync(user);
                         }
                     }
@@ -278,6 +544,44 @@ namespace ErpSystem.Api.Controllers
                         request.TenantCode);
                 }
 
+                // If LDAP is enabled and this user is an LDAP user, do not fall back to local password authentication.
+                if (!isLdapAuthenticated &&
+                    tenantForLdap?.LdapEnabled == true &&
+                    user != null &&
+                    user.AuthenticationProvider == AuthenticationProvider.LDAP)
+                {
+                    _logger.LogWarning(
+                        "Login failed for LDAP user {Username}: LDAP authentication failed. Reason={Reason}",
+                        request.Username,
+                        ldapFailureReason ?? "Unknown");
+
+                    var loginFailureSecurityLog = new SecurityLog
+                    {
+                        Action = SecurityAction.LoginFailure.ToString(),
+                        Success = false,
+                        IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                        Username = request.Username,
+                        UserId = user.Id,
+                        Details = $"LDAP authentication failed: {ldapFailureReason ?? "Invalid credentials"}",
+                        FailureReason = "Invalid credentials",
+                        UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                        TenantId = user.TenantId
+                    };
+                    await _securityLogService.CreateSecurityLogAsync(loginFailureSecurityLog);
+
+                    var responseMessage = "Invalid credentials";
+                    if (string.Equals(ldapFailureReason, "Authentication service error", StringComparison.OrdinalIgnoreCase))
+                    {
+                        responseMessage = "Directory service error. Please contact your system administrator.";
+                    }
+                    else if (string.Equals(ldapFailureReason, "LDAP is not configured for this tenant", StringComparison.OrdinalIgnoreCase))
+                    {
+                        responseMessage = "Directory service is not configured. Please contact your system administrator.";
+                    }
+
+                    return Unauthorized(new { message = responseMessage });
+                }
+
                 // If user still not found and LDAP is not enabled or failed
                 if (user == null)
                 {
@@ -301,7 +605,8 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 // If tenant code provided, validate that user belongs to the tenant
-                if (tenant != null)
+                // NOTE: For LDAP-authenticated users we allow login without requiring pre-created UserTenant mappings.
+                if (tenant != null && !isLdapAuthenticated)
                 {
                     var userTenant = await _userTenantService.GetUserTenantRelationshipAsync(user.Id, tenant.Id);
                     if (userTenant == null || !await _userTenantService.HasActiveAccessAsync(user.Id, tenant.Id))
@@ -452,169 +757,9 @@ namespace ErpSystem.Api.Controllers
                     _logger.LogInformation("2FA verification successful for user {Username}", request.Username);
                 }
 
-                // Determine the effective tenant ID for this login session
-                var effectiveTenantId = tenant?.Id ?? user.TenantId;
-
-                // If effectiveTenantId is still empty, try to get from UserTenants table
-                if (effectiveTenantId == Guid.Empty)
-                {
-                    // Get active user tenants ordered by IsDefault
-                    var userTenants = await _context.UserTenants
-                        .Where(ut => ut.UserId == user.Id && !ut.IsDeleted && ut.Status == UserTenantStatus.Active)
-                        .OrderByDescending(ut => ut.IsDefault)
-                        .ToListAsync();
-
-                    if (userTenants.Any())
-                    {
-                        effectiveTenantId = userTenants.First().TenantId;
-                        var isDefault = userTenants.First().IsDefault;
-                        _logger.LogInformation("Using {TenantType} tenant {TenantId} from UserTenants for user {Username}",
-                            isDefault ? "default" : "first active", effectiveTenantId, user.UserName);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("User {Username} has no tenant assigned in User.TenantId or UserTenants table", user.UserName);
-                        return Unauthorized(new { message = "User has no tenant assigned. Please contact administrator." });
-                    }
-
-                    // Update user's TenantId field for future logins
-                    user.TenantId = effectiveTenantId;
-                    await _userManager.UpdateAsync(user);
-                    _logger.LogInformation("Updated user {Username} TenantId to {TenantId}", user.UserName, effectiveTenantId);
-                }
-
-                // Update user's current tenant if tenant was specified in login
-                if (tenant != null && user.TenantId != tenant.Id)
-                {
-                    user.TenantId = tenant.Id;
-                    await _userManager.UpdateAsync(user);
-                    _logger.LogInformation("Updated user {Username} tenant to {TenantId}", user.UserName, tenant.Id);
-                }
-
-                // Get security settings for concurrent login prevention from user's tenant
-                var securitySettings = await _settingsService.GetSecuritySettingsAsync(effectiveTenantId);
-                var preventConcurrentLogin = securitySettings?.PreventConcurrentLogin.ToString() ?? "Disabled";
-
-                // Check if user can login based on concurrent login prevention settings
-                var canLogin = await _userSessionService.CanUserLoginAsync(user.Id, preventConcurrentLogin);
-                if (!canLogin)
-                {
-                    _logger.LogWarning("Login prevented for user {Username}: Active session exists and prevention mode is {Mode}",
-                        request.Username, preventConcurrentLogin);
-
-                    var preventedLoginSecurityLog = new SecurityLog
-                    {
-                        Action = SecurityAction.LoginFailure.ToString(),
-                        Success = false,
-                        IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
-                        Username = request.Username,
-                        UserId = user.Id,
-                        Details = $"Login prevented due to concurrent session policy: {preventConcurrentLogin}",
-                        FailureReason = "Active session exists - concurrent login prevented",
-                        UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
-                        TenantId = user.TenantId
-                    };
-                    await _securityLogService.CreateSecurityLogAsync(preventedLoginSecurityLog);
-
-                    return Unauthorized(new
-                    {
-                        message = "You already have an active session. Please logout from other devices first.",
-                        code = "CONCURRENT_SESSION_PREVENTED"
-                    });
-                }
-
-                // Get device information for session tracking
-                var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
-                var userAgent = Request.Headers["User-Agent"].FirstOrDefault() ?? "Unknown";
-                var deviceFingerprint = GenerateDeviceFingerprint(ipAddress, userAgent);
-
-                // Create user session (this handles concurrent login prevention logic)
-                var userSession = await _userSessionService.CreateSessionAsync(
-                    user.Id,
-                    effectiveTenantId,
-                    ipAddress,
-                    userAgent,
-                    deviceFingerprint,
-                    preventConcurrentLogin
-                );
-
-                // Generate token with session ID included
-                var token = await _tokenService.GenerateTokenAsync(user, userSession.SessionId);
-
-                // Extract JTI from the generated token and update the session
-                try
-                {
-                    var tokenHandler = new JwtSecurityTokenHandler();
-                    if (tokenHandler.CanReadToken(token))
-                    {
-                        var jsonToken = tokenHandler.ReadJwtToken(token);
-                        var jti = jsonToken.Claims.FirstOrDefault(x => x.Type == JwtRegisteredClaimNames.Jti)?.Value;
-
-                        if (!string.IsNullOrEmpty(jti))
-                        {
-                            userSession.JwtTokenId = jti;
-                            await _context.SaveChangesAsync(); // Save the JTI to the session
-                            _logger.LogDebug("Linked JWT token {Jti} to session {SessionId}", jti, userSession.SessionId);
-                        }
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Generated JWT token cannot be read: {TokenPreview}",
-                            token.Length > 50 ? string.Concat(token.AsSpan(0, 50), "...") : token);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to link JWT token to session {SessionId}", userSession.SessionId);
-                    // Continue with login even if linking fails
-                }
-
-                // Update last login timestamp
-                user.LastLoginDate = DateTime.UtcNow;
-                await _userManager.UpdateAsync(user);
-                var refreshToken = _tokenService.GenerateRefreshToken();
-
-                // TODO: Store refresh token in database for security
-
-                _logger.LogInformation("Login successful for user: {Username}", request.Username);
-
-                // Log login success using user's tenant context
-                var loginSuccessSecurityLog = new SecurityLog
-                {
-                    Action = SecurityAction.LoginSuccess.ToString(),
-                    Success = true,
-                    IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
-                    Username = request.Username,
-                    UserId = user.Id,
-                    Details = "Login successful",
-                    FailureReason = null,
-                    UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
-                    TenantId = user.TenantId
-                };
-                await _securityLogService.CreateSecurityLogAsync(loginSuccessSecurityLog);
-
-                var response = new LoginResponse
-                {
-                    Token = token,
-                    RefreshToken = refreshToken,
-                    ExpiresAt = DateTime.UtcNow.AddHours(24), // Match JWT expiry
-                    User = new UserInfo
-                    {
-                        Id = user.Id,
-                        Username = user.UserName!,
-                        Email = user.Email!,
-                        FirstName = user.FirstName,
-                        LastName = user.LastName,
-                        CurrentTenantId = effectiveTenantId,
-                        CurrentTenantCode = tenant?.Code,
-                        CurrentTenantName = tenant?.Name,
-                        IsActive = user.IsActive,
-                        Roles = (await _userManager.GetRolesAsync(user)).ToList(),
-                        AuthenticationProvider = user.AuthenticationProvider.ToString()
-                    }
-                };
-
-                return Ok(response);
+                // For LDAP logins without an explicit tenant selection, use the default tenant context in the session/response.
+                var sessionTenant = isLdapAuthenticated ? (defaultTenant ?? tenantForLdap) : tenant;
+                return await CompleteSuccessfulLoginAsync(user, sessionTenant, request.Username, "Login successful");
             }
             catch (Exception ex)
             {
@@ -664,6 +809,7 @@ namespace ErpSystem.Api.Controllers
                         CurrentTenantId = user.TenantId,
                         IsActive = user.IsActive,
                         Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                        Permissions = await GetUserPermissionsAsync(user),
                         AuthenticationProvider = user.AuthenticationProvider.ToString()
                     }
                 };
@@ -978,6 +1124,7 @@ namespace ErpSystem.Api.Controllers
                     AccessibleTenants = accessibleTenants,
                     IsActive = user.IsActive,
                     Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                    Permissions = await GetUserPermissionsAsync(user),
                     AuthenticationProvider = user.AuthenticationProvider.ToString()
                 };
 
@@ -1154,6 +1301,7 @@ namespace ErpSystem.Api.Controllers
                         AccessibleTenants = accessibleTenants,
                         IsActive = user.IsActive,
                         Roles = (await _userManager.GetRolesAsync(user)).ToList(),
+                        Permissions = await GetUserPermissionsAsync(user),
                         AuthenticationProvider = user.AuthenticationProvider.ToString()
                     }
                 };
@@ -1345,8 +1493,30 @@ namespace ErpSystem.Api.Controllers
 
                 _logger.LogInformation("User registration successful for: {Username}", request.Username);
 
-                // TODO: Send OTP via SMS for phone verification
-                // For now, just return success
+                // Send OTP via SMS for phone verification (best-effort; do not fail registration if SMS fails)
+                try
+                {
+                    var phone = NormalizePhone(request.PhoneNumber);
+                    var otp = await _otpService.CreateOtpAsync(
+                        registrationTenant.Id,
+                        OtpPurpose.PhoneVerification,
+                        OtpChannel.Sms,
+                        phone,
+                        TimeSpan.FromMinutes(10),
+                        maxAttempts: 5,
+                        HttpContext.RequestAborted);
+
+                    await _tenantSmsSender.SendAsync(
+                        registrationTenant.Id,
+                        phone,
+                        $"Your {registrationTenant.Name} verification code is {otp}. It expires in 10 minutes.",
+                        HttpContext.RequestAborted);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to send phone verification OTP for user {Username}", request.Username);
+                }
+
                 return Ok(new RegisterResponse
                 {
                     Success = true,
@@ -1390,7 +1560,8 @@ namespace ErpSystem.Api.Controllers
                 _logger.LogInformation("OTP verification attempt for phone: {PhoneNumber}", request.PhoneNumber);
 
                 // Find user by phone number
-                var users = _userManager.Users.Where(u => u.PhoneNumber == request.PhoneNumber && !u.IsActive).ToList();
+                var normalizedPhone = NormalizePhone(request.PhoneNumber);
+                var users = _userManager.Users.Where(u => u.PhoneNumber == normalizedPhone && !u.IsActive).ToList();
                 var user = users.FirstOrDefault();
 
                 if (user == null)
@@ -1398,11 +1569,18 @@ namespace ErpSystem.Api.Controllers
                     return BadRequest(new { message = "Invalid phone number or user already verified." });
                 }
 
-                // TODO: Implement actual OTP verification logic
-                // For now, accept any 6-digit code
-                if (request.OtpCode.Length != 6 || !request.OtpCode.All(char.IsDigit))
+                var verify = await _otpService.VerifyOtpAsync(
+                    user.TenantId,
+                    OtpPurpose.PhoneVerification,
+                    OtpChannel.Sms,
+                    normalizedPhone,
+                    request.OtpCode,
+                    consumeOnSuccess: true,
+                    HttpContext.RequestAborted);
+
+                if (!verify.Success)
                 {
-                    return BadRequest(new { message = "Invalid OTP code. Please enter a 6-digit code." });
+                    return BadRequest(new { message = verify.FailureReason ?? "Invalid OTP code." });
                 }
 
                 // Activate the user account
@@ -1445,6 +1623,254 @@ namespace ErpSystem.Api.Controllers
             {
                 _logger.LogError(ex, "Error during OTP verification for phone: {PhoneNumber}", request.PhoneNumber);
                 return StatusCode(500, new { message = "An error occurred during OTP verification" });
+            }
+        }
+
+        [HttpPost("otp/request")]
+        [AllowAnonymous]
+        [EnableRateLimiting("SensitivePolicy")]
+        public async Task<IActionResult> RequestLoginOtp([FromBody] RequestLoginOtpRequest request)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+
+                if (!TryParseOtpChannel(request.Channel, out var channel))
+                {
+                    return BadRequest(new { message = "Invalid channel. Use 'Email' or 'Sms'." });
+                }
+
+                // CAPTCHA enforcement (when enabled for tenant)
+                Guid tenantIdForCaptcha;
+                try
+                {
+                    tenantIdForCaptcha = await ResolveTenantIdForCaptchaAsync(request.TenantCode);
+                    var host = GetEffectiveHost();
+                    var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    await _captchaVerificationService.EnsureCaptchaValidAsync(tenantIdForCaptcha, request.RecaptchaToken, host, remoteIp, HttpContext.RequestAborted);
+                }
+                catch (CaptchaVerificationException ex)
+                {
+                    return BadRequest(new { message = ex.Message });
+                }
+
+                // Resolve tenant for lookup (prefer tenant code if provided, else host)
+                Tenant? tenant = null;
+                if (!string.IsNullOrWhiteSpace(request.TenantCode))
+                {
+                    tenant = await _tenantService.GetTenantByCodeAsync(request.TenantCode);
+                }
+                else
+                {
+                    var host = GetEffectiveHost();
+                    if (!string.IsNullOrWhiteSpace(host))
+                    {
+                        tenant = await _tenantService.GetTenantByDomainAsync(host);
+                    }
+                }
+
+                var tenantId = tenant?.Id ?? tenantIdForCaptcha;
+                var identifier = request.Identifier.Trim();
+                if (channel == OtpChannel.Sms)
+                {
+                    identifier = NormalizePhone(identifier);
+                }
+
+                // Find user by identifier scoped to tenant; do not leak user existence in responses
+                ApplicationUser? user = null;
+                if (channel == OtpChannel.Email)
+                {
+                    var email = identifier.ToLowerInvariant();
+                    user = await _userManager.Users.FirstOrDefaultAsync(u => u.Email == email && u.TenantId == tenantId);
+                }
+                else
+                {
+                    user = await _userManager.Users.FirstOrDefaultAsync(u => u.PhoneNumber == identifier && u.TenantId == tenantId);
+                }
+
+                if (user != null &&
+                    user.IsActive &&
+                    user.AuthenticationProvider == AuthenticationProvider.Local)
+                {
+                    var otp = await _otpService.CreateOtpAsync(
+                        tenantId,
+                        OtpPurpose.Login,
+                        channel,
+                        identifier,
+                        TimeSpan.FromMinutes(10),
+                        maxAttempts: 5,
+                        HttpContext.RequestAborted);
+
+                     try
+                     {
+                         if (channel == OtpChannel.Email)
+                         {
+                             var delivered = await _emailService.SendEmailAsync(new EmailDto
+                             {
+                                 To = user.Email ?? identifier,
+                                 Subject = "Your login code",
+                                 Body = $"Your one-time login code is <strong>{otp}</strong>. It expires in 10 minutes.",
+                                 IsHtml = true
+                             });
+
+                             if (!delivered)
+                             {
+                                 _logger.LogWarning(
+                                     "Login OTP email was not delivered (tenant={TenantId} userId={UserId})",
+                                     tenantId,
+                                     user.Id);
+                             }
+                         }
+                         else
+                         {
+                             await _tenantSmsSender.SendAsync(
+                                 tenantId,
+                                user.PhoneNumber ?? identifier,
+                                $"Your one-time login code is {otp}. It expires in 10 minutes.",
+                                HttpContext.RequestAborted);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to deliver login OTP (tenant={TenantId} channel={Channel})", tenantId, channel);
+                    }
+                }
+
+                return Ok(new RequestLoginOtpResponse
+                {
+                    Success = true,
+                    Message = "If an account exists, a login code has been sent."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error requesting login OTP");
+                return StatusCode(500, new { message = "An error occurred while requesting OTP." });
+            }
+        }
+
+        [HttpPost("otp/verify")]
+        [AllowAnonymous]
+        [EnableRateLimiting("SensitivePolicy")]
+        public async Task<IActionResult> VerifyLoginOtp([FromBody] VerifyLoginOtpRequest request)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+
+                if (!TryParseOtpChannel(request.Channel, out var channel))
+                {
+                    return BadRequest(new { message = "Invalid channel. Use 'Email' or 'Sms'." });
+                }
+
+                // CAPTCHA enforcement (when enabled for tenant)
+                Guid tenantIdForCaptcha;
+                try
+                {
+                    tenantIdForCaptcha = await ResolveTenantIdForCaptchaAsync(request.TenantCode);
+                    var host = GetEffectiveHost();
+                    var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    await _captchaVerificationService.EnsureCaptchaValidAsync(tenantIdForCaptcha, request.RecaptchaToken, host, remoteIp, HttpContext.RequestAborted);
+                }
+                catch (CaptchaVerificationException ex)
+                {
+                    return BadRequest(new { message = ex.Message });
+                }
+
+                // Resolve tenant for lookup (prefer tenant code if provided, else host)
+                Tenant? tenant = null;
+                if (!string.IsNullOrWhiteSpace(request.TenantCode))
+                {
+                    tenant = await _tenantService.GetTenantByCodeAsync(request.TenantCode);
+                }
+                else
+                {
+                    var host = GetEffectiveHost();
+                    if (!string.IsNullOrWhiteSpace(host))
+                    {
+                        tenant = await _tenantService.GetTenantByDomainAsync(host);
+                    }
+                }
+
+                var tenantId = tenant?.Id ?? tenantIdForCaptcha;
+                var identifier = request.Identifier.Trim();
+                if (channel == OtpChannel.Sms)
+                {
+                    identifier = NormalizePhone(identifier);
+                }
+
+                ApplicationUser? user = null;
+                if (channel == OtpChannel.Email)
+                {
+                    var email = identifier.ToLowerInvariant();
+                    user = await _userManager.Users.FirstOrDefaultAsync(u => u.Email == email && u.TenantId == tenantId);
+                }
+                else
+                {
+                    user = await _userManager.Users.FirstOrDefaultAsync(u => u.PhoneNumber == identifier && u.TenantId == tenantId);
+                }
+
+                if (user == null || !user.IsActive || user.AuthenticationProvider != AuthenticationProvider.Local)
+                {
+                    return Unauthorized(new { message = "Invalid OTP credentials" });
+                }
+
+                // Optional TOTP 2FA if enabled (when enabled and 2FA code is missing, do not consume OTP yet)
+                var hasTwoFactorEnabled = await _userManager.GetTwoFactorEnabledAsync(user) && !string.IsNullOrEmpty(user.AuthenticatorKey);
+
+                var otpVerify = await _otpService.VerifyOtpAsync(
+                    tenantId,
+                    OtpPurpose.Login,
+                    channel,
+                    identifier,
+                    request.OtpCode,
+                    consumeOnSuccess: !hasTwoFactorEnabled || !string.IsNullOrWhiteSpace(request.TwoFactorCode),
+                    HttpContext.RequestAborted);
+
+                if (!otpVerify.Success)
+                {
+                    return Unauthorized(new { message = otpVerify.FailureReason ?? "Invalid OTP code" });
+                }
+
+                if (hasTwoFactorEnabled)
+                {
+                    if (string.IsNullOrWhiteSpace(request.TwoFactorCode))
+                    {
+                        return Ok(new LoginResponse
+                        {
+                            RequiresTwoFactor = true,
+                            TwoFactorToken = Guid.NewGuid().ToString("N"),
+                            Token = null,
+                            RefreshToken = null,
+                            ExpiresAt = null,
+                            User = null
+                        });
+                    }
+
+                    if (request.TwoFactorCode.Length != 6 || !request.TwoFactorCode.All(char.IsDigit))
+                    {
+                        return BadRequest(new { message = "Two-factor authentication code must be exactly 6 digits" });
+                    }
+
+                    var isValid2FA = await _twoFactorService.ValidateTotpAsync(user, request.TwoFactorCode);
+                    if (!isValid2FA)
+                    {
+                        return Unauthorized(new { message = "Invalid two-factor authentication code" });
+                    }
+                }
+
+                return await CompleteSuccessfulLoginAsync(user, tenant, user.UserName ?? identifier, "Login successful (OTP)");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error verifying login OTP");
+                return StatusCode(500, new { message = "An error occurred while verifying OTP." });
             }
         }
 

@@ -1,0 +1,4347 @@
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+
+function getAuthHeaders(isJson: boolean = true): HeadersInit {
+  const token = typeof window !== 'undefined'
+    ? localStorage.getItem('token') || localStorage.getItem('authToken')
+    : null;
+
+  return {
+    ...(isJson ? { 'Content-Type': 'application/json' } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+export interface PagedResult<T> {
+  items: T[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface ProjectLookupDto {
+  id: string;
+  projectCode: string;
+  title: string;
+  status: string;
+  projectTypeName?: string;
+  portfolioName?: string;
+  programName?: string;
+}
+
+export interface ProjectResourceLookupDto {
+  id: string;
+  displayName: string;
+  employeeNumber?: string;
+}
+
+export interface ProjectDto {
+  id: string;
+  projectCode: string;
+  title: string;
+  status: string;
+  summary?: string;
+  projectTypeName?: string;
+  projectPriorityName?: string;
+  portfolioId?: string;
+  portfolioName?: string;
+  programId?: string;
+  programName?: string;
+  projectManagerId?: string;
+  sponsorId?: string;
+  startDate?: string;
+  targetEndDate?: string;
+  estimatedBudget?: number;
+  approvedBudget?: number;
+  actualCost?: number;
+  progressPercent: number;
+  openRiskCount: number;
+  openIssueCount: number;
+  overdueMilestoneCount: number;
+  currentWorkflowStepName?: string;
+  externalPortalAccessEnabled: boolean;
+  externalCollaborationEnabled: boolean;
+  createdAt: string;
+}
+
+export interface ProjectInitiationVersionDto {
+  id: string;
+  versionNumber: number;
+  changeType: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface ProjectMemberDto {
+  id: string;
+  userId: string;
+  role: string;
+  isActive: boolean;
+  joinedAt: string;
+}
+
+export interface ProjectWorkItemDto {
+  id: string;
+  projectId: string;
+  parentId?: string;
+  nodeType: string;
+  title: string;
+  description?: string;
+  status: string;
+  priority?: string;
+  sortOrder: number;
+  assignedToUserId?: string;
+  plannedStartDate?: string;
+  plannedEndDate?: string;
+  actualStartDate?: string;
+  actualEndDate?: string;
+  percentComplete: number;
+  isRollupEnabled: boolean;
+  effortEstimateHours?: number;
+  actualEffortHours?: number;
+  baselinePlannedStartDate?: string;
+  baselinePlannedEndDate?: string;
+  baselineVarianceDays: number;
+  isOffBaseline: boolean;
+  canExternalUpdate?: boolean;
+  canExternalComment?: boolean;
+  children: ProjectWorkItemDto[];
+}
+
+export interface ProjectMilestoneDto {
+  id: string;
+  projectId: string;
+  workItemId?: string;
+  title: string;
+  description?: string;
+  targetDate: string;
+  actualDate?: string;
+  status: string;
+  requiresApproval: boolean;
+}
+
+export interface ProjectResourceAllocationDto {
+  id: string;
+  projectId: string;
+  workItemId?: string;
+  userId: string;
+  allocationRole: string;
+  allocationType: string;
+  allocationValue: number;
+  plannedHours?: number;
+  startDate: string;
+  endDate: string;
+  bookingType: string;
+  status: string;
+  notes?: string;
+  sourceAllocationId?: string;
+  replacementAllocationId?: string;
+  substitutionReason?: string;
+  canSubstitute: boolean;
+  hasConflict: boolean;
+  capacityUtilizationPercent: number;
+}
+
+export interface ProjectRiskDto {
+  id: string;
+  title: string;
+  description?: string;
+  ownerId?: string;
+  status: string;
+  category?: string;
+  probability: number;
+  impact: number;
+  exposure: number;
+  responseStrategy?: string;
+  mitigationPlan?: string;
+  dueDate?: string;
+}
+
+export interface ProjectIssueDto {
+  id: string;
+  title: string;
+  description?: string;
+  ownerId?: string;
+  status: string;
+  severity?: string;
+  targetResolutionDate?: string;
+  rootCause?: string;
+  correctiveAction?: string;
+}
+
+export interface ProjectQualityCheckpointDto {
+  id: string;
+  projectId: string;
+  workItemId?: string;
+  deliverableId?: string;
+  qaOwnerId?: string;
+  title: string;
+  description?: string;
+  status: string;
+  dueDate?: string;
+  requiresQaSignOff: boolean;
+  signedOffAt?: string;
+  signedOffById?: string;
+  signOffNotes?: string;
+}
+
+export interface ProjectNonConformanceDto {
+  id: string;
+  projectId: string;
+  qualityCheckpointId?: string;
+  deliverableId?: string;
+  ownerId?: string;
+  title: string;
+  description?: string;
+  severity: string;
+  status: string;
+  reportedAt: string;
+  targetResolutionDate?: string;
+  resolvedAt?: string;
+  correctiveAction?: string;
+  preventiveAction?: string;
+  resolutionNotes?: string;
+}
+
+export interface ProjectChangeRequestDto {
+  id: string;
+  title: string;
+  description?: string;
+  changeType?: string;
+  status: string;
+  businessImpact?: string;
+  riskImpact?: string;
+  costImpact?: number;
+  scheduleImpactDays?: number;
+}
+
+export interface ProjectBillingScheduleDto {
+  id: string;
+  projectId: string;
+  contractId?: string;
+  contractMilestoneId?: string;
+  milestoneId?: string;
+  name: string;
+  billingType: string;
+  amount: number;
+  billingPercentage?: number;
+  billingDate: string;
+  status: string;
+  description?: string;
+  isBillable: boolean;
+  contractMilestoneName?: string;
+}
+
+export interface ProjectInvoiceRequestDto {
+  id: string;
+  projectId: string;
+  billingScheduleId?: string;
+  contractId?: string;
+  requestNumber: string;
+  requestedAmount: number;
+  currency: string;
+  status: string;
+  requestedAt: string;
+  submittedAt?: string;
+  externalReference?: string;
+  notes?: string;
+}
+
+export interface ProjectDocumentDto {
+  id: string;
+  documentName: string;
+  category: string;
+  documentType: string;
+  filePath: string;
+  publicUrl?: string;
+  fileType?: string;
+  fileSize?: number;
+  versionLabel: string;
+  status: string;
+  isExternalVisible: boolean;
+  createdAt: string;
+  artifactLabel?: string;
+}
+
+export interface ProjectCommentDto {
+  id: string;
+  workItemId?: string;
+  commentType: string;
+  body: string;
+  mentionedUsersJson?: string;
+  createdAt: string;
+  createdBy?: string;
+}
+
+export interface ProjectDeliverableDto {
+  id: string;
+  projectId: string;
+  workItemId?: string;
+  milestoneId?: string;
+  submittedDocumentId?: string;
+  title: string;
+  description?: string;
+  status: string;
+  targetDate?: string;
+  submittedAt?: string;
+  submittedById?: string;
+  approvedAt?: string;
+  approvedById?: string;
+  externalApprovedAt?: string;
+  externalApprovedById?: string;
+  externalSubmissionAllowed: boolean;
+  externalSignOffRequired: boolean;
+  isExternalVisible: boolean;
+  acceptanceNotes?: string;
+  externalApprovalNotes?: string;
+  canExternalSubmit?: boolean;
+  canExternalApprove?: boolean;
+}
+
+export interface CreateProjectDeliverableDto {
+  workItemId?: string;
+  milestoneId?: string;
+  title: string;
+  description?: string;
+  status?: string;
+  targetDate?: string;
+  externalSubmissionAllowed?: boolean;
+  externalSignOffRequired?: boolean;
+  isExternalVisible?: boolean;
+}
+
+export interface SubmitProjectDeliverableDto {
+  submittedDocumentId?: string;
+  notes?: string;
+}
+
+export interface ProjectTaskDependencyDto {
+  id: string;
+  projectId: string;
+  predecessorWorkItemId: string;
+  successorWorkItemId: string;
+  dependencyType: string;
+  lagDays: number;
+  isEnforced: boolean;
+}
+
+export interface CreateProjectTaskDependencyDto {
+  predecessorWorkItemId: string;
+  successorWorkItemId: string;
+  dependencyType?: string;
+  lagDays?: number;
+  isEnforced?: boolean;
+}
+
+export interface ProjectInterdependencyDto {
+  id: string;
+  sourceProjectId: string;
+  sourceProjectCode: string;
+  sourceProjectTitle: string;
+  targetProjectId: string;
+  targetProjectCode: string;
+  targetProjectTitle: string;
+  dependencyType: string;
+  status: string;
+  impactLevel: string;
+  ownerId?: string;
+  dueDate?: string;
+  title: string;
+  description?: string;
+  mitigationPlan?: string;
+}
+
+export interface CreateProjectInterdependencyDto {
+  sourceProjectId: string;
+  targetProjectId: string;
+  dependencyType: string;
+  status: string;
+  impactLevel: string;
+  ownerId?: string;
+  dueDate?: string;
+  title: string;
+  description?: string;
+  mitigationPlan?: string;
+}
+
+export interface ProjectBaselineDto {
+  id: string;
+  projectId: string;
+  name: string;
+  notes?: string;
+  isLocked: boolean;
+  createdOn: string;
+  snapshotProgressPercent: number;
+  snapshotApprovedBudget?: number;
+  snapshotFinishDate?: string;
+}
+
+export interface CreateProjectBaselineDto {
+  name: string;
+  notes?: string;
+}
+
+export interface ProjectBaselineComparisonDto {
+  baselineId: string;
+  baselineName: string;
+  baselineCreatedOn?: string;
+  baselineProgressPercent: number;
+  currentProgressPercent: number;
+  baselineFinishDate?: string;
+  currentFinishDate?: string;
+  scheduleVarianceDays: number;
+  budgetVariance: number;
+  changedWorkItemCount: number;
+  changedMilestoneCount: number;
+  workItemChanges: ProjectBaselineWorkItemChangeDto[];
+  milestoneChanges: ProjectBaselineMilestoneChangeDto[];
+}
+
+export interface ProjectBaselineWorkItemChangeDto {
+  workItemId: string;
+  workItemTitle: string;
+  baselinePlannedStartDate?: string;
+  currentPlannedStartDate?: string;
+  baselinePlannedEndDate?: string;
+  currentPlannedEndDate?: string;
+  baselinePercentComplete: number;
+  currentPercentComplete: number;
+  scheduleVarianceDays: number;
+}
+
+export interface ProjectBaselineMilestoneChangeDto {
+  milestoneId: string;
+  milestoneTitle: string;
+  baselineTargetDate: string;
+  currentTargetDate: string;
+  baselineStatus: string;
+  currentStatus: string;
+  scheduleVarianceDays: number;
+}
+
+export interface ProjectTimesheetEntryDto {
+  id: string;
+  projectId: string;
+  projectCode?: string;
+  projectTitle?: string;
+  workItemId?: string;
+  workItemTitle?: string;
+  userId: string;
+  entryDate: string;
+  hours: number;
+  isBillable: boolean;
+  hourlyRate: number;
+  costAmount: number;
+  workType: string;
+  notes?: string;
+  status: string;
+  approvedById?: string;
+  approvedAt?: string;
+  canEdit: boolean;
+  canDelete: boolean;
+}
+
+export interface CreateProjectTimesheetEntryDto {
+  workItemId?: string;
+  userId: string;
+  entryDate?: string;
+  hours: number;
+  isBillable?: boolean;
+  hourlyRate?: number;
+  workType?: string;
+  notes?: string;
+  status?: string;
+}
+
+export interface ProjectExpenseDto {
+  id: string;
+  projectId: string;
+  projectCode?: string;
+  projectTitle?: string;
+  workItemId?: string;
+  workItemTitle?: string;
+  userId: string;
+  expenseDate: string;
+  category: string;
+  currency: string;
+  amount: number;
+  taxAmount: number;
+  isBillable: boolean;
+  status: string;
+  receiptDocumentId?: string;
+  notes?: string;
+  approvedById?: string;
+  approvedAt?: string;
+  canEdit: boolean;
+  canDelete: boolean;
+}
+
+export interface CreateProjectExpenseDto {
+  workItemId?: string;
+  userId: string;
+  expenseDate?: string;
+  category?: string;
+  currency?: string;
+  amount: number;
+  taxAmount?: number;
+  isBillable?: boolean;
+  receiptDocumentId?: string;
+  notes?: string;
+  status?: string;
+}
+
+export interface ProjectApprovalQueueSummaryDto {
+  draftCount: number;
+  submittedCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  totalHours: number;
+  totalAmount: number;
+}
+
+export interface ProjectTimesheetApprovalQueueItemDto {
+  entryId: string;
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  userId: string;
+  workItemId?: string;
+  workItemTitle?: string;
+  entryDate: string;
+  hours: number;
+  hourlyRate: number;
+  costAmount: number;
+  isBillable: boolean;
+  workType: string;
+  status: string;
+  queueStage: string;
+  daysOpen: number;
+  notes?: string;
+}
+
+export interface ProjectExpenseApprovalQueueItemDto {
+  expenseId: string;
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  userId: string;
+  workItemId?: string;
+  workItemTitle?: string;
+  expenseDate: string;
+  category: string;
+  currency: string;
+  amount: number;
+  taxAmount: number;
+  totalAmount: number;
+  isBillable: boolean;
+  status: string;
+  queueStage: string;
+  daysOpen: number;
+  notes?: string;
+}
+
+export interface ProjectRevenueRecognitionDto {
+  id: string;
+  projectId: string;
+  invoiceRequestId?: string;
+  recognitionPeriod: string;
+  recognizedRevenue: number;
+  recognizedCost: number;
+  grossMargin: number;
+  cashCollected: number;
+  status: string;
+  notes?: string;
+}
+
+export interface ProjectAssetLinkDto {
+  id: string;
+  projectId: string;
+  maintenanceAssetId?: string;
+  companyAssetId?: string;
+  jobCardId?: string;
+  linkType: string;
+  status: string;
+  notes?: string;
+  assetName?: string;
+  jobCardNumber?: string;
+}
+
+export interface CreateProjectAssetLinkDto {
+  maintenanceAssetId?: string;
+  companyAssetId?: string;
+  jobCardId?: string;
+  linkType?: string;
+  status?: string;
+  notes?: string;
+}
+
+export interface ProjectExternalAccessPolicyDto {
+  id: string;
+  projectId: string;
+  businessPartnerId: string;
+  businessPartnerName?: string;
+  artifactType: string;
+  artifactId?: string;
+  artifactLabel?: string;
+  accessLevel: string;
+  canComment: boolean;
+  canUpload: boolean;
+  canApprove: boolean;
+  notes?: string;
+}
+
+export interface CreateProjectExternalAccessPolicyDto {
+  businessPartnerId: string;
+  artifactType: string;
+  artifactId?: string;
+  accessLevel?: string;
+  canComment?: boolean;
+  canUpload?: boolean;
+  canApprove?: boolean;
+  notes?: string;
+}
+
+export interface ProjectDecisionDto {
+  id: string;
+  projectId: string;
+  title: string;
+  decisionDate: string;
+  approverId?: string;
+  rationale?: string;
+  alternativesConsidered?: string;
+  impactSummary?: string;
+  status: string;
+  approvedAt?: string;
+}
+
+export interface CreateProjectDecisionDto {
+  title: string;
+  decisionDate?: string;
+  approverId?: string;
+  rationale?: string;
+  alternativesConsidered?: string;
+  impactSummary?: string;
+  status?: string;
+}
+
+export interface ProjectMeetingMinuteDto {
+  id: string;
+  projectId: string;
+  title: string;
+  meetingDate: string;
+  facilitatorId?: string;
+  meetingType: string;
+  minutes?: string;
+  attendeesJson?: string;
+}
+
+export interface CreateProjectMeetingMinuteDto {
+  title: string;
+  meetingDate?: string;
+  facilitatorId?: string;
+  meetingType?: string;
+  minutes?: string;
+  attendeesJson?: string;
+}
+
+export interface ProjectActionItemDto {
+  id: string;
+  projectId: string;
+  meetingMinuteId?: string;
+  workItemId?: string;
+  title: string;
+  description?: string;
+  ownerId?: string;
+  dueDate?: string;
+  completedAt?: string;
+  status: string;
+  priority: string;
+  meetingTitle?: string;
+  workItemTitle?: string;
+}
+
+export interface CreateProjectActionItemDto {
+  meetingMinuteId?: string;
+  workItemId?: string;
+  title: string;
+  description?: string;
+  ownerId?: string;
+  dueDate?: string;
+  status?: string;
+  priority?: string;
+}
+
+export interface ProjectLessonLearnedDto {
+  id: string;
+  projectId: string;
+  title: string;
+  category: string;
+  description?: string;
+  recommendation?: string;
+  appliedPhase?: string;
+  visibility: string;
+}
+
+export interface CreateProjectLessonLearnedDto {
+  title: string;
+  category?: string;
+  description?: string;
+  recommendation?: string;
+  appliedPhase?: string;
+  visibility?: string;
+}
+
+export interface ProjectClosureDto {
+  id: string;
+  projectId: string;
+  status: string;
+  submittedAt?: string;
+  approvedAt?: string;
+  approvedById?: string;
+  finalBudget?: number;
+  finalCost?: number;
+  deliverablesAccepted: boolean;
+  tasksCompletedOrWaived: boolean;
+  assetsReconciled: boolean;
+  openItemsDisposed: boolean;
+  closureChecklistJson?: string;
+  openItemsDisposition?: string;
+  assetReconciliationNotes?: string;
+  lessonsLearnedSummary?: string;
+  postImplementationReview?: string;
+  overrideReason?: string;
+  rejectionReason?: string;
+}
+
+export interface UpsertProjectClosureDto {
+  finalBudget?: number;
+  finalCost?: number;
+  deliverablesAccepted?: boolean;
+  tasksCompletedOrWaived?: boolean;
+  assetsReconciled?: boolean;
+  openItemsDisposed?: boolean;
+  closureChecklistJson?: string;
+  openItemsDisposition?: string;
+  assetReconciliationNotes?: string;
+  lessonsLearnedSummary?: string;
+  postImplementationReview?: string;
+  overrideReason?: string;
+}
+
+export interface ProjectAiInsightDto {
+  category: string;
+  severity: string;
+  title: string;
+  recommendation: string;
+}
+
+export interface ProjectScheduleAnalysisDto {
+  projectId: string;
+  dependencyCount: number;
+  criticalPathTaskCount: number;
+  criticalPathWorkItemIds: string[];
+  forecastFinishDate?: string;
+  totalSlackDays: number;
+  hasCircularDependencies: boolean;
+  recalculatedItemCount: number;
+  violations: ProjectScheduleViolationDto[];
+}
+
+export interface ProjectScheduleViolationDto {
+  workItemId: string;
+  workItemTitle: string;
+  blockingWorkItemId?: string;
+  blockingWorkItemTitle?: string;
+  dependencyType: string;
+  severity: string;
+  message: string;
+  expectedDate?: string;
+}
+
+export interface ProjectMobileAssignmentDto {
+  projectId: string;
+  workItemId: string;
+  projectCode: string;
+  projectTitle: string;
+  workItemTitle: string;
+  status: string;
+  percentComplete: number;
+  plannedEndDate?: string;
+}
+
+export interface ProjectMobileSummaryDto {
+  assignmentCount: number;
+  overdueCount: number;
+  pendingHours: number;
+  pendingExpenses: number;
+  assignments: ProjectMobileAssignmentDto[];
+}
+
+export interface ProjectDetailDto extends ProjectDto {
+  projectTypeId?: string;
+  projectPriorityId?: string;
+  templateId?: string;
+  portfolioId?: string;
+  programId?: string;
+  businessCase?: string;
+  objectives?: string;
+  strategicAlignment?: string;
+  methodology?: string;
+  departmentId?: string;
+  locationId?: string;
+  customerId?: string;
+  businessPartnerId?: string;
+  contractId?: string;
+  tenderId?: string;
+  actualStartDate?: string;
+  actualEndDate?: string;
+  budgetStatus?: string;
+  approvalRequired: boolean;
+  submittedAt?: string;
+  approvedAt?: string;
+  scopeStatement?: string;
+  assumptions?: string;
+  constraints?: string;
+  expectedBenefits?: string;
+  fundingSource?: string;
+  statusRemarks?: string;
+  externalPortalAccessEnabled: boolean;
+  externalCollaborationEnabled: boolean;
+  activeBaselineId?: string;
+  activeBaselineName?: string;
+  activeBaselineCreatedOn?: string;
+  hasLockedBaseline: boolean;
+  members: ProjectMemberDto[];
+  workItems: ProjectWorkItemDto[];
+  milestones: ProjectMilestoneDto[];
+  resourceAllocations: ProjectResourceAllocationDto[];
+  risks: ProjectRiskDto[];
+  issues: ProjectIssueDto[];
+  qualityCheckpoints: ProjectQualityCheckpointDto[];
+  nonConformances: ProjectNonConformanceDto[];
+  changeRequests: ProjectChangeRequestDto[];
+  billingSchedules: ProjectBillingScheduleDto[];
+  invoiceRequests: ProjectInvoiceRequestDto[];
+  deliverables: ProjectDeliverableDto[];
+  taskDependencies: ProjectTaskDependencyDto[];
+  baselines: ProjectBaselineDto[];
+  timesheetEntries: ProjectTimesheetEntryDto[];
+  expenses: ProjectExpenseDto[];
+  revenueRecognitions: ProjectRevenueRecognitionDto[];
+  assetLinks: ProjectAssetLinkDto[];
+  externalAccessPolicies: ProjectExternalAccessPolicyDto[];
+  decisions: ProjectDecisionDto[];
+  meetings: ProjectMeetingMinuteDto[];
+  actionItems: ProjectActionItemDto[];
+  lessonsLearned: ProjectLessonLearnedDto[];
+  documents: ProjectDocumentDto[];
+  comments: ProjectCommentDto[];
+  initiationVersions: ProjectInitiationVersionDto[];
+  closure?: ProjectClosureDto;
+}
+
+export interface CreateProjectDto {
+  projectCode?: string;
+  title: string;
+  summary?: string;
+  businessCase?: string;
+  objectives?: string;
+  strategicAlignment?: string;
+  projectTypeId?: string;
+  projectPriorityId?: string;
+  templateId?: string;
+  portfolioId?: string;
+  programId?: string;
+  methodology?: string;
+  sponsorId?: string;
+  projectManagerId?: string;
+  departmentId?: string;
+  locationId?: string;
+  customerId?: string;
+  businessPartnerId?: string;
+  contractId?: string;
+  tenderId?: string;
+  startDate?: string;
+  targetEndDate?: string;
+  estimatedBudget?: number;
+  scopeStatement?: string;
+  assumptions?: string;
+  constraints?: string;
+  expectedBenefits?: string;
+  fundingSource?: string;
+  approvalRequired?: boolean;
+  externalPortalAccessEnabled?: boolean;
+  externalCollaborationEnabled?: boolean;
+}
+
+export interface UpdateProjectDto extends CreateProjectDto {
+  approvedBudget?: number;
+  actualCost?: number;
+  budgetStatus?: string;
+  statusRemarks?: string;
+}
+
+export interface AddProjectMemberDto {
+  userId: string;
+  role: string;
+}
+
+export interface CreateProjectWorkItemDto {
+  parentId?: string;
+  nodeType: string;
+  title: string;
+  description?: string;
+  status: string;
+  priority?: string;
+  assignedToUserId?: string;
+  plannedStartDate?: string;
+  plannedEndDate?: string;
+  actualStartDate?: string;
+  actualEndDate?: string;
+  percentComplete?: number;
+  isRollupEnabled?: boolean;
+  effortEstimateHours?: number;
+  actualEffortHours?: number;
+  scheduleChangeReason?: string;
+}
+
+export interface ReorderProjectWorkItemsDto {
+  orderedIds: string[];
+}
+
+export interface UpdateProjectWorkItemProgressDto {
+  status: string;
+  percentComplete: number;
+  actualStartDate?: string;
+  actualEndDate?: string;
+  notes?: string;
+}
+
+export interface CreateProjectMilestoneDto {
+  workItemId?: string;
+  title: string;
+  description?: string;
+  targetDate: string;
+  actualDate?: string;
+  status?: string;
+  requiresApproval?: boolean;
+}
+
+export interface CreateProjectResourceAllocationDto {
+  workItemId?: string;
+  userId: string;
+  allocationRole: string;
+  allocationType: string;
+  allocationValue: number;
+  plannedHours?: number;
+  startDate: string;
+  endDate: string;
+  bookingType: string;
+  status: string;
+  notes?: string;
+}
+
+export interface SubstituteProjectResourceAllocationDto {
+  replacementUserId: string;
+  workItemId?: string;
+  transferAllocationValue?: number;
+  transferPlannedHours?: number;
+  startDate?: string;
+  endDate?: string;
+  fullReplacement?: boolean;
+  approveReplacement?: boolean;
+  bookingType?: string;
+  reason?: string;
+}
+
+export interface ProjectResourceSubstitutionResultDto {
+  sourceAllocation: ProjectResourceAllocationDto;
+  replacementAllocation: ProjectResourceAllocationDto;
+}
+
+export interface CreateProjectRiskDto {
+  title: string;
+  description?: string;
+  ownerId?: string;
+  status?: string;
+  category?: string;
+  probability?: number;
+  impact?: number;
+  responseStrategy?: string;
+  mitigationPlan?: string;
+  dueDate?: string;
+}
+
+export interface CreateProjectIssueDto {
+  title: string;
+  description?: string;
+  ownerId?: string;
+  status?: string;
+  severity?: string;
+  targetResolutionDate?: string;
+  rootCause?: string;
+  correctiveAction?: string;
+}
+
+export interface CreateProjectQualityCheckpointDto {
+  workItemId?: string;
+  deliverableId?: string;
+  qaOwnerId?: string;
+  title: string;
+  description?: string;
+  status?: string;
+  dueDate?: string;
+  requiresQaSignOff?: boolean;
+}
+
+export interface CreateProjectNonConformanceDto {
+  qualityCheckpointId?: string;
+  deliverableId?: string;
+  ownerId?: string;
+  title: string;
+  description?: string;
+  severity?: string;
+  status?: string;
+  targetResolutionDate?: string;
+  correctiveAction?: string;
+  preventiveAction?: string;
+}
+
+export interface CreateProjectChangeRequestDto {
+  title: string;
+  description?: string;
+  changeType?: string;
+  status?: string;
+  businessImpact?: string;
+  riskImpact?: string;
+  costImpact?: number;
+  scheduleImpactDays?: number;
+}
+
+export interface CreateProjectBillingScheduleDto {
+  contractId?: string;
+  contractMilestoneId?: string;
+  milestoneId?: string;
+  name: string;
+  billingType: string;
+  amount: number;
+  billingPercentage?: number;
+  billingDate: string;
+  status?: string;
+  description?: string;
+  isBillable?: boolean;
+}
+
+export interface CreateProjectInvoiceRequestDto {
+  billingScheduleId?: string;
+  contractId?: string;
+  requestedAmount: number;
+  currency?: string;
+  status?: string;
+  externalReference?: string;
+  notes?: string;
+}
+
+export interface UpdateProjectInvoiceRequestWorkflowDto {
+  externalReference?: string;
+  comments?: string;
+}
+
+export interface AttachProjectDocumentDto {
+  documentName: string;
+  category?: string;
+  documentType?: string;
+  filePath: string;
+  publicUrl?: string;
+  fileType?: string;
+  fileSize?: number;
+  versionLabel?: string;
+  status?: string;
+  effectiveDate?: string;
+  isExternalVisible?: boolean;
+}
+
+export interface CreateProjectCommentDto {
+  workItemId?: string;
+  commentType?: string;
+  body: string;
+  mentionedUsersJson?: string;
+}
+
+export interface ProjectTypeDto {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+  requiresSponsor: boolean;
+  requiresApproval: boolean;
+  mandatoryFieldsJson?: string;
+}
+
+export interface CreateProjectTypeDto {
+  code: string;
+  name: string;
+  description?: string;
+  isActive?: boolean;
+  requiresSponsor?: boolean;
+  requiresApproval?: boolean;
+  mandatoryFieldsJson?: string;
+}
+
+export interface ProjectPriorityDto {
+  id: string;
+  code: string;
+  name: string;
+  colorHex?: string;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface CreateProjectPriorityDto {
+  code: string;
+  name: string;
+  colorHex?: string;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export interface ProjectTemplateDto {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  projectTypeId?: string;
+  projectTypeName?: string;
+  versionLabel: string;
+  templateDefinitionJson?: string;
+  isActive: boolean;
+}
+
+export interface CreateProjectTemplateDto {
+  code: string;
+  name: string;
+  description?: string;
+  projectTypeId?: string;
+  versionLabel?: string;
+  templateDefinitionJson?: string;
+  isActive?: boolean;
+}
+
+export interface ProjectManagementSettingsDto {
+  id: string;
+  tenantId: string;
+  projectNumberFormat: string;
+  requireSponsor: boolean;
+  defaultApprovalRequired: boolean;
+  defaultProjectTypeId?: string;
+  defaultProjectPriorityId?: string;
+  defaultTemplateId?: string;
+  mandatoryFieldsByTypeJson?: string;
+  notes?: string;
+}
+
+export interface ProjectCatalogItemDto {
+  code: string;
+  name: string;
+}
+
+export interface ProjectCatalogGroupDto {
+  key: string;
+  displayName: string;
+  items: ProjectCatalogItemDto[];
+}
+
+export interface ProjectCatalogTypeSummaryDto {
+  catalogType: string;
+  displayName: string;
+  configuredCount: number;
+  recommendedCount: number;
+}
+
+export interface ProjectMasterDataOverviewDto {
+  projectTypeCount: number;
+  projectPriorityCount: number;
+  projectTemplateCount: number;
+  portfolioCount: number;
+  programCount: number;
+  recommendedCatalogs: ProjectCatalogGroupDto[];
+  catalogCoverage: ProjectCatalogTypeSummaryDto[];
+}
+
+export interface ProjectCatalogEntryDto {
+  id: string;
+  catalogType: string;
+  code: string;
+  name: string;
+  description?: string;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface CreateProjectCatalogEntryDto {
+  catalogType: string;
+  code: string;
+  name: string;
+  description?: string;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export interface ProjectFinancialAlertDto {
+  severity: string;
+  message: string;
+}
+
+export interface ProjectFinancialControlSummaryDto {
+  projectId: string;
+  estimatedBudget: number;
+  approvedBudget: number;
+  budgetBaseline: number;
+  actualCost: number;
+  committedCost: number;
+  pendingCost: number;
+  forecastCost: number;
+  estimateAtCompletion: number;
+  remainingBudget: number;
+  budgetVariance: number;
+  budgetConsumptionPercent: number;
+  thresholdWarningPercent: number;
+  thresholdCriticalPercent: number;
+  procurementRequestedAmount: number;
+  procurementCommittedAmount: number;
+  procurementOpenCommitmentAmount: number;
+  procurementReceivedAmount: number;
+  procurementPendingInspectionAmount: number;
+  totalExposureAmount: number;
+  scheduledBillingAmount: number;
+  invoiceRequestedAmount: number;
+  recognizedRevenue: number;
+  grossMargin: number;
+  plannedValue: number;
+  earnedValue: number;
+  scheduleVariance: number;
+  costVariance: number;
+  costPerformanceIndex?: number;
+  schedulePerformanceIndex?: number;
+  toCompletePerformanceIndex?: number;
+  profitabilityPercent: number;
+  healthStatus: string;
+  budgetRevisionCount: number;
+  forecastVersionCount: number;
+  currentBudgetRevisionName?: string;
+  activeForecastVersionName?: string;
+  thresholdExceeded: boolean;
+  alerts: ProjectFinancialAlertDto[];
+}
+
+export interface ProjectBudgetRevisionDto {
+  id: string;
+  projectId: string;
+  versionNumber: number;
+  revisionName: string;
+  revisionType: string;
+  estimatedBudget: number;
+  approvedBudget: number;
+  committedCost: number;
+  forecastCost: number;
+  thresholdWarningPercent: number;
+  thresholdCriticalPercent: number;
+  status: string;
+  effectiveDate: string;
+  submittedAt?: string;
+  approvedAt?: string;
+  approvedById?: string;
+  changeReason?: string;
+  notes?: string;
+  rejectionReason?: string;
+}
+
+export interface CreateProjectBudgetRevisionDto {
+  revisionName: string;
+  revisionType?: string;
+  estimatedBudget: number;
+  approvedBudget: number;
+  committedCost: number;
+  forecastCost: number;
+  thresholdWarningPercent?: number;
+  thresholdCriticalPercent?: number;
+  effectiveDate?: string;
+  changeReason?: string;
+  notes?: string;
+}
+
+export interface ProjectForecastVersionDto {
+  id: string;
+  projectId: string;
+  versionNumber: number;
+  versionName: string;
+  asOfDate: string;
+  forecastCost: number;
+  estimateAtCompletion: number;
+  forecastRevenue: number;
+  forecastMargin: number;
+  isActive: boolean;
+  notes?: string;
+}
+
+export interface CreateProjectForecastVersionDto {
+  versionName: string;
+  asOfDate?: string;
+  forecastCost: number;
+  estimateAtCompletion: number;
+  forecastRevenue: number;
+  forecastMargin: number;
+  isActive?: boolean;
+  notes?: string;
+}
+
+export interface ProjectIntegrationLinkDto {
+  linkType: string;
+  status: string;
+  reference: string;
+}
+
+export interface ProjectIntegrationSummaryDto {
+  projectId: string;
+  hasBusinessPartner: boolean;
+  hasContract: boolean;
+  hasTender: boolean;
+  hasPortfolio: boolean;
+  hasProgram: boolean;
+  linkedAssetCount: number;
+  resourceAllocationCount: number;
+  sharedExternalPolicyCount: number;
+  purchaseRequisitionCount: number;
+  pendingPurchaseRequisitionCount: number;
+  purchaseRequisitionAmount: number;
+  purchaseOrderCount: number;
+  openPurchaseOrderCount: number;
+  purchaseOrderAmount: number;
+  purchaseReceiptCount: number;
+  pendingPurchaseReceiptInspectionCount: number;
+  inventoryRequisitionCount: number;
+  pendingInventoryRequisitionCount: number;
+  inventoryRequisitionValue: number;
+  issuedInventoryRequisitionCount: number;
+  issuedInventoryValue: number;
+  returnedInventoryValue: number;
+  netIssuedInventoryValue: number;
+  invoiceRequestCount: number;
+  revenueRecognitionCount: number;
+  links: ProjectIntegrationLinkDto[];
+  warnings: string[];
+}
+
+export interface ProjectPolicyViolationDto {
+  area: string;
+  severity: string;
+  message: string;
+}
+
+export interface ProjectGovernanceSummaryDto {
+  projectId: string;
+  openRiskCount: number;
+  openIssueCount: number;
+  openChangeRequestCount: number;
+  pendingDeliverableApprovalCount: number;
+  pendingTimesheetApprovalCount: number;
+  pendingExpenseApprovalCount: number;
+  openActionItemCount: number;
+  hasClosureDraft: boolean;
+  hasApprovedClosure: boolean;
+  hasLockedBaseline: boolean;
+  violations: ProjectPolicyViolationDto[];
+}
+
+export interface ProjectPortfolioDto {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  status: string;
+  strategicObjective?: string;
+  ownerId?: string;
+  sponsorId?: string;
+  startDate?: string;
+  targetEndDate?: string;
+  budgetCap?: number;
+  programCount: number;
+  projectCount: number;
+  activeProjectCount: number;
+  totalEstimatedBudget: number;
+  totalActualCost: number;
+}
+
+export interface CreateProjectPortfolioDto {
+  code: string;
+  name: string;
+  description?: string;
+  status?: string;
+  strategicObjective?: string;
+  ownerId?: string;
+  sponsorId?: string;
+  startDate?: string;
+  targetEndDate?: string;
+  budgetCap?: number;
+}
+
+export interface ProjectProgramDto {
+  id: string;
+  portfolioId?: string;
+  portfolioName?: string;
+  code: string;
+  name: string;
+  description?: string;
+  status: string;
+  programManagerId?: string;
+  sponsorId?: string;
+  startDate?: string;
+  targetEndDate?: string;
+  budgetCap?: number;
+  projectCount: number;
+  activeProjectCount: number;
+  totalEstimatedBudget: number;
+  totalActualCost: number;
+}
+
+export interface CreateProjectProgramDto {
+  code: string;
+  name: string;
+  description?: string;
+  portfolioId?: string;
+  status?: string;
+  programManagerId?: string;
+  sponsorId?: string;
+  startDate?: string;
+  targetEndDate?: string;
+  budgetCap?: number;
+}
+
+export interface UpdateProjectManagementSettingsDto {
+  projectNumberFormat: string;
+  requireSponsor: boolean;
+  defaultApprovalRequired: boolean;
+  defaultProjectTypeId?: string;
+  defaultProjectPriorityId?: string;
+  defaultTemplateId?: string;
+  mandatoryFieldsByTypeJson?: string;
+  notes?: string;
+}
+
+export interface ProjectDashboardDto {
+  totalProjects: number;
+  draftProjects: number;
+  activeProjects: number;
+  pendingApprovalProjects: number;
+  completedProjects: number;
+  overdueTasks: number;
+  dueMilestonesThisMonth: number;
+  overdueMilestones: number;
+  openRisks: number;
+  openIssues: number;
+  totalEstimatedBudget: number;
+  totalApprovedBudget: number;
+  totalActualCost: number;
+  atRiskProjects: ProjectDto[];
+}
+
+export interface ProjectTaskAgingReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  workItemId: string;
+  workItemTitle: string;
+  status: string;
+  priority: string;
+  plannedEndDate?: string;
+  daysOverdue: number;
+}
+
+export interface ProjectMilestoneTrackerReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  milestoneId: string;
+  milestoneTitle: string;
+  status: string;
+  targetDate: string;
+  isOverdue: boolean;
+  daysFromToday: number;
+}
+
+export interface ProjectBudgetActualReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  status: string;
+  budgetStatus: string;
+  estimatedBudget?: number;
+  approvedBudget?: number;
+  actualCost?: number;
+  budgetVariance: number;
+  progressPercent: number;
+}
+
+export interface ProjectRiskIssueSummaryReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  openRiskCount: number;
+  highRiskCount: number;
+  openIssueCount: number;
+}
+
+export interface ProjectPortfolioSummaryReportItemDto {
+  portfolioId: string;
+  portfolioCode: string;
+  portfolioName: string;
+  programCount: number;
+  projectCount: number;
+  activeProjectCount: number;
+  totalEstimatedBudget: number;
+  totalActualCost: number;
+  highRiskProjectCount: number;
+}
+
+export interface ProjectProgramSummaryReportItemDto {
+  programId: string;
+  portfolioId?: string;
+  programCode: string;
+  programName: string;
+  portfolioName?: string;
+  projectCount: number;
+  activeProjectCount: number;
+  totalEstimatedBudget: number;
+  totalActualCost: number;
+  averageProgressPercent: number;
+}
+
+export interface ProjectPerformanceAnalyticsReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  status: string;
+  budgetBaseline: number;
+  progressPercent: number;
+  earnedValue: number;
+  plannedValue: number;
+  actualCost: number;
+  costPerformanceIndex?: number;
+  estimateAtCompletion: number;
+  estimateToComplete: number;
+  projectedVariance: number;
+  healthStatus: string;
+}
+
+export interface ProjectPortfolioPrioritizationReportItemDto {
+  projectId: string;
+  portfolioId?: string;
+  programId?: string;
+  projectCode: string;
+  projectTitle: string;
+  status: string;
+  portfolioName?: string;
+  programName?: string;
+  healthStatus: string;
+  budgetBaseline: number;
+  actualCost: number;
+  projectedVariance: number;
+  openRiskCount: number;
+  openIssueCount: number;
+  overdueMilestoneCount: number;
+  priorityScore: number;
+  priorityBand: string;
+  recommendedAction: string;
+}
+
+export interface ProjectDependencyWatchReportItemDto {
+  interdependencyId: string;
+  sourceProjectId: string;
+  targetProjectId: string;
+  sourceProjectCode: string;
+  sourceProjectTitle: string;
+  targetProjectCode: string;
+  targetProjectTitle: string;
+  portfolioId?: string;
+  portfolioName?: string;
+  programId?: string;
+  programName?: string;
+  dependencyType: string;
+  status: string;
+  impactLevel: string;
+  title: string;
+  dueDate?: string;
+  daysToDue: number;
+  coordinationState: string;
+}
+
+export interface ProjectStrategicInitiativeReportItemDto {
+  initiative: string;
+  projectCount: number;
+  activeProjectCount: number;
+  atRiskProjectCount: number;
+  delayedProjectCount: number;
+  highRiskItemCount: number;
+  totalEstimatedBudget: number;
+  totalActualCost: number;
+  averageProgressPercent: number;
+  portfolioNames: string[];
+  programNames: string[];
+}
+
+export interface ProjectMaterialReconciliationReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  status: string;
+  requisitionCount: number;
+  pendingRequisitionCount: number;
+  issuedRequisitionCount: number;
+  requestedValue: number;
+  issuedValue: number;
+  returnedValue: number;
+  netIssuedValue: number;
+  trackedMaterialCost: number;
+  materialCostVariance: number;
+  reconciliationStatus: string;
+}
+
+export interface ProjectProcurementReconciliationReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  status: string;
+  purchaseRequisitionCount: number;
+  openPurchaseRequisitionCount: number;
+  purchaseRequisitionAmount: number;
+  purchaseOrderCount: number;
+  openPurchaseOrderCount: number;
+  purchaseOrderAmount: number;
+  purchaseReceiptCount: number;
+  receivedAmount: number;
+  acceptedReceiptAmount: number;
+  pendingInspectionAmount: number;
+  issuedInventoryValue: number;
+  netIssuedInventoryValue: number;
+  postedMaterialCost: number;
+  receiptToIssueVariance: number;
+  issueToPostingVariance: number;
+  reconciliationStatus: string;
+}
+
+export interface ProjectResourceCapacityReportItemDto {
+  userId: string;
+  userDisplayName?: string;
+  allocationCount: number;
+  totalAllocatedHours: number;
+  totalAllocatedPercent: number;
+  standardCapacityHours: number;
+  effectiveCapacityHours: number;
+  approvedLeaveHours: number;
+  approvedLeaveDays: number;
+  leaveRequestCount: number;
+  capacityUtilizationPercent: number;
+  conflictCount: number;
+  verifiedSkillCount: number;
+  certifiedSkillCount: number;
+  expiringCertificationCount: number;
+  expiredCertificationCount: number;
+  qualificationRisk: string;
+  allocationIds: string[];
+}
+
+export interface ProjectResourceCapacityRecommendationDto {
+  userId: string;
+  userDisplayName?: string;
+  capacityUtilizationPercent: number;
+  effectiveCapacityHours: number;
+  approvedLeaveHours: number;
+  approvedLeaveDays: number;
+  leaveRequestCount: number;
+  conflictCount: number;
+  verifiedSkillCount: number;
+  certifiedSkillCount: number;
+  expiringCertificationCount: number;
+  expiredCertificationCount: number;
+  qualificationRisk: string;
+  severity: string;
+  recommendation: string;
+  suggestedReductionHours: number;
+  projectCodes: string[];
+  suggestedReplacementUserId?: string;
+  suggestedReplacementUserDisplayName?: string;
+  matchedSkills: string[];
+  affectedAllocationIds: string[];
+}
+
+export interface ProjectResourceOptimizationSuggestionDto {
+  userId: string;
+  userDisplayName?: string;
+  suggestedReplacementUserId?: string;
+  suggestedReplacementUserDisplayName?: string;
+  severity: string;
+  recommendation: string;
+  matchedSkills: string[];
+  matchedSkillCount: number;
+  matchedCertifiedSkillCount: number;
+  replacementVerifiedSkillCount: number;
+  replacementCertifiedSkillCount: number;
+  replacementExpiringCertificationCount: number;
+  replacementExpiredCertificationCount: number;
+  replacementQualificationRisk: string;
+  affectedAllocationIds: string[];
+}
+
+export interface ProjectBillingSummaryReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  contractId?: string;
+  readyBillingScheduleCount: number;
+  overdueBillingScheduleCount: number;
+  draftInvoiceRequestCount: number;
+  submittedInvoiceRequestCount: number;
+  sentToFinanceInvoiceRequestCount: number;
+  invoicedInvoiceRequestCount: number;
+  paidInvoiceRequestCount: number;
+  scheduledBillingAmount: number;
+  invoiceRequestedAmount: number;
+  collectedCashAmount: number;
+  unbilledAmount: number;
+  billingCoveragePercent: number;
+  recognizedRevenue: number;
+  revenueCoveragePercent: number;
+  revenueGapAmount: number;
+  actualCost: number;
+  marginAmount: number;
+  marginPercent: number;
+}
+
+export interface ProjectInvoiceRequestQueueItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  invoiceRequestId: string;
+  requestNumber: string;
+  billingScheduleId?: string;
+  billingScheduleName?: string;
+  billingDate?: string;
+  contractId?: string;
+  status: string;
+  requestedAmount: number;
+  currency: string;
+  requestedAt: string;
+  submittedAt?: string;
+  externalReference?: string;
+  notes?: string;
+  daysOutstanding: number;
+  queueStage: string;
+  canMarkInvoiced: boolean;
+  canMarkPaid: boolean;
+}
+
+export interface ProjectWorkflowApprovalQueueItemDto {
+  entityType: string;
+  entityId: string;
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  itemTitle: string;
+  status: string;
+  submittedAt?: string;
+  approvedAt?: string;
+  daysPending: number;
+  queueStage: string;
+}
+
+export interface ProjectExternalCollaborationReportItemDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  status: string;
+  externalPortalAccessEnabled: boolean;
+  externalCollaborationEnabled: boolean;
+  policyCount: number;
+  externalVisibleDocumentCount: number;
+  externalVisibleDeliverableCount: number;
+  pendingExternalSubmissionCount: number;
+  pendingExternalSignOffCount: number;
+  externalCommentCount: number;
+  lastExternalCommentAt?: string;
+  collaborationState: string;
+}
+
+export interface ProjectContractLookupDto {
+  id: string;
+  contractNumber: string;
+  contractTitle: string;
+  businessPartnerId: string;
+  businessPartnerName: string;
+  status: string;
+  contractValue: number;
+  currency: string;
+}
+
+export interface ProjectContractMilestoneLookupDto {
+  id: string;
+  contractId: string;
+  milestoneName: string;
+  paymentPercentage: number;
+  paymentAmount: number;
+  plannedDate?: string;
+  status: string;
+  invoiceNumber?: string;
+}
+
+export interface ProjectExternalSummaryDto {
+  id: string;
+  projectCode: string;
+  title: string;
+  status: string;
+  summary?: string;
+  startDate?: string;
+  targetEndDate?: string;
+  progressPercent: number;
+  externalCollaborationEnabled: boolean;
+  openMilestoneCount: number;
+}
+
+export interface ProjectExternalDetailDto extends ProjectExternalSummaryDto {
+  methodology: string;
+  statusRemarks?: string;
+  canCollaborate: boolean;
+  canComment: boolean;
+  canUploadDocuments: boolean;
+  actionableWorkItemCount: number;
+  blockedWorkItemCount: number;
+  pendingExternalSubmissionCount: number;
+  pendingExternalSignOffCount: number;
+  workItems: ProjectWorkItemDto[];
+  milestones: ProjectMilestoneDto[];
+  deliverables: ProjectDeliverableDto[];
+  documents: ProjectDocumentDto[];
+  comments: ProjectCommentDto[];
+}
+
+export interface FileUploadResult {
+  success: boolean;
+  fileName: string;
+  originalFileName: string;
+  filePath: string;
+  publicUrl?: string;
+  fileSize: number;
+  contentType?: string;
+  category: string;
+  tenantId?: string;
+  uploadedAt: string;
+}
+
+class ProjectService {
+  async getProjects(params?: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    status?: string;
+    projectTypeId?: string;
+    portfolioId?: string;
+    programId?: string;
+  }): Promise<PagedResult<ProjectDto>> {
+    const queryParams = new URLSearchParams();
+    if (params?.page) queryParams.append('page', String(params.page));
+    if (params?.pageSize) queryParams.append('pageSize', String(params.pageSize));
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.projectTypeId) queryParams.append('projectTypeId', params.projectTypeId);
+    if (params?.portfolioId) queryParams.append('portfolioId', params.portfolioId);
+    if (params?.programId) queryParams.append('programId', params.programId);
+
+    const response = await fetch(`${API_BASE_URL}/projects?${queryParams.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch projects');
+    return response.json();
+  }
+
+  async getDashboard(): Promise<ProjectDashboardDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/dashboard`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project dashboard');
+    return response.json();
+  }
+
+  async getProjectRegisterReport(params?: {
+    search?: string;
+    status?: string;
+    projectTypeId?: string;
+    take?: number;
+  }): Promise<ProjectDto[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.projectTypeId) queryParams.append('projectTypeId', params.projectTypeId);
+    if (params?.take) queryParams.append('take', String(params.take));
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/register?${queryParams.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project register report');
+    return response.json();
+  }
+
+  async getTaskAgingReport(projectId?: string, take: number = 100): Promise<ProjectTaskAgingReportItemDto[]> {
+    const queryParams = new URLSearchParams();
+    if (projectId) queryParams.append('projectId', projectId);
+    queryParams.append('take', String(take));
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/task-aging?${queryParams.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch task aging report');
+    return response.json();
+  }
+
+  async getMilestoneTrackerReport(projectId?: string, take: number = 100): Promise<ProjectMilestoneTrackerReportItemDto[]> {
+    const queryParams = new URLSearchParams();
+    if (projectId) queryParams.append('projectId', projectId);
+    queryParams.append('take', String(take));
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/milestones?${queryParams.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch milestone tracker report');
+    return response.json();
+  }
+
+  async getBudgetActualReport(take: number = 200): Promise<ProjectBudgetActualReportItemDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/reports/budget-vs-actual?take=${take}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch budget vs actual report');
+    return response.json();
+  }
+
+  async getRiskIssueSummaryReport(take: number = 200): Promise<ProjectRiskIssueSummaryReportItemDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/reports/risk-issue-summary?take=${take}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch risk and issue summary report');
+    return response.json();
+  }
+
+  async getPortfolioSummaryReport(take: number = 100): Promise<ProjectPortfolioSummaryReportItemDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/reports/portfolio-summary?take=${take}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch portfolio summary report');
+    return response.json();
+  }
+
+  async getProgramSummaryReport(portfolioId?: string, take: number = 100): Promise<ProjectProgramSummaryReportItemDto[]> {
+    const queryParams = new URLSearchParams();
+    if (portfolioId) queryParams.append('portfolioId', portfolioId);
+    queryParams.append('take', String(take));
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/program-summary?${queryParams.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch program summary report');
+    return response.json();
+  }
+
+  async getPerformanceAnalyticsReport(take: number = 200): Promise<ProjectPerformanceAnalyticsReportItemDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/reports/performance-analytics?take=${take}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch performance analytics report');
+    return response.json();
+  }
+
+  async getPortfolioPrioritizationReport(portfolioId?: string, take: number = 100): Promise<ProjectPortfolioPrioritizationReportItemDto[]> {
+    const params = new URLSearchParams();
+    params.set('take', String(take));
+    if (portfolioId) params.set('portfolioId', portfolioId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/portfolio-prioritization?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch portfolio prioritization report');
+    return response.json();
+  }
+
+  async getDependencyWatchReport(portfolioId?: string, programId?: string, take: number = 100): Promise<ProjectDependencyWatchReportItemDto[]> {
+    const params = new URLSearchParams();
+    params.set('take', String(take));
+    if (portfolioId) params.set('portfolioId', portfolioId);
+    if (programId) params.set('programId', programId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/dependency-watch?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch dependency watch report');
+    return response.json();
+  }
+
+  async getStrategicInitiativeReport(portfolioId?: string, take: number = 100): Promise<ProjectStrategicInitiativeReportItemDto[]> {
+    const params = new URLSearchParams();
+    params.set('take', String(take));
+    if (portfolioId) params.set('portfolioId', portfolioId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/strategic-initiatives?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch strategic initiative report');
+    return response.json();
+  }
+
+  async getMaterialReconciliationReport(take: number = 200, reconciliationStatus?: string): Promise<ProjectMaterialReconciliationReportItemDto[]> {
+    const params = new URLSearchParams();
+    params.set('take', String(take));
+    if (reconciliationStatus) params.set('reconciliationStatus', reconciliationStatus);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/material-reconciliation?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch material reconciliation report');
+    return response.json();
+  }
+
+  async getProcurementReconciliationReport(take: number = 200, reconciliationStatus?: string): Promise<ProjectProcurementReconciliationReportItemDto[]> {
+    const params = new URLSearchParams();
+    params.set('take', String(take));
+    if (reconciliationStatus) params.set('reconciliationStatus', reconciliationStatus);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/procurement-reconciliation?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch procurement reconciliation report');
+    return response.json();
+  }
+
+  async getResourceCapacityReport(startDate?: string, endDate?: string, userId?: string): Promise<ProjectResourceCapacityReportItemDto[]> {
+    const queryParams = new URLSearchParams();
+    if (startDate) queryParams.append('startDate', startDate);
+    if (endDate) queryParams.append('endDate', endDate);
+    if (userId) queryParams.append('userId', userId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/resource-capacity?${queryParams.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch resource capacity report');
+    return response.json();
+  }
+
+  async getResourceCapacityRecommendations(startDate?: string, endDate?: string, userId?: string): Promise<ProjectResourceCapacityRecommendationDto[]> {
+    const params = new URLSearchParams();
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
+    if (userId) params.set('userId', userId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/resource-capacity-recommendations?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch resource capacity recommendations');
+    return response.json();
+  }
+
+  async getResourceOptimizationSuggestions(startDate?: string, endDate?: string): Promise<ProjectResourceOptimizationSuggestionDto[]> {
+    const params = new URLSearchParams();
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/resource-optimization?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch resource optimization suggestions');
+    return response.json();
+  }
+
+  async getBillingSummaryReport(take: number = 200): Promise<ProjectBillingSummaryReportItemDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/reports/billing-summary?take=${take}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch billing summary report');
+    return response.json();
+  }
+
+  async getInvoiceRequestQueueReport(take: number = 200, status?: string): Promise<ProjectInvoiceRequestQueueItemDto[]> {
+    const params = new URLSearchParams({ take: take.toString() });
+    if (status) params.set('status', status);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/invoice-request-queue?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch invoice request queue');
+    return response.json();
+  }
+
+  async getWorkflowApprovalQueueReport(take: number = 200, entityType?: string): Promise<ProjectWorkflowApprovalQueueItemDto[]> {
+    const params = new URLSearchParams({ take: take.toString() });
+    if (entityType) params.set('entityType', entityType);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/workflow-approval-queue?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch workflow approval queue');
+    return response.json();
+  }
+
+  async getExternalCollaborationReport(take: number = 200, collaborationState?: string): Promise<ProjectExternalCollaborationReportItemDto[]> {
+    const params = new URLSearchParams({ take: take.toString() });
+    if (collaborationState) params.set('collaborationState', collaborationState);
+
+    const response = await fetch(`${API_BASE_URL}/projects/reports/external-collaboration?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch external collaboration report');
+    return response.json();
+  }
+
+  async getContractLookup(businessPartnerId?: string, search?: string): Promise<ProjectContractLookupDto[]> {
+    const queryParams = new URLSearchParams();
+    if (businessPartnerId) queryParams.append('businessPartnerId', businessPartnerId);
+    if (search) queryParams.append('search', search);
+
+    const response = await fetch(`${API_BASE_URL}/projects/contracts/lookup?${queryParams.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch contract lookup');
+    return response.json();
+  }
+
+  async getContractMilestones(contractId: string): Promise<ProjectContractMilestoneLookupDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/contracts/${contractId}/milestones`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch contract milestones');
+    return response.json();
+  }
+
+  async lookupProjects(search?: string, status?: string, projectTypeId?: string, portfolioId?: string, programId?: string): Promise<ProjectLookupDto[]> {
+    const queryParams = new URLSearchParams();
+    if (search) queryParams.append('search', search);
+    if (status) queryParams.append('status', status);
+    if (projectTypeId) queryParams.append('projectTypeId', projectTypeId);
+    if (portfolioId) queryParams.append('portfolioId', portfolioId);
+    if (programId) queryParams.append('programId', programId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/lookup?${queryParams.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to lookup projects');
+    return response.json();
+  }
+
+  async lookupResources(search?: string, take: number = 50): Promise<ProjectResourceLookupDto[]> {
+    const queryParams = new URLSearchParams();
+    if (search) queryParams.append('search', search);
+    queryParams.append('take', String(take));
+
+    const response = await fetch(`${API_BASE_URL}/projects/resources/lookup?${queryParams.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to lookup resources');
+    return response.json();
+  }
+
+  async getProjectById(id: string): Promise<ProjectDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${id}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project');
+    return response.json();
+  }
+
+  async getFinancialControlSummary(projectId: string): Promise<ProjectFinancialControlSummaryDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/financial-control-summary`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project financial control summary');
+    return response.json();
+  }
+
+  async getIntegrationSummary(projectId: string): Promise<ProjectIntegrationSummaryDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/integration-summary`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project integration summary');
+    return response.json();
+  }
+
+  async getGovernanceSummary(projectId: string): Promise<ProjectGovernanceSummaryDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/governance-summary`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project governance summary');
+    return response.json();
+  }
+
+  async createProject(dto: CreateProjectDto): Promise<ProjectDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/projects`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create project');
+    }
+
+    return response.json();
+  }
+
+  async updateProject(id: string, dto: UpdateProjectDto): Promise<ProjectDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project');
+    }
+
+    return response.json();
+  }
+
+  async submitProject(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/${id}/submit`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to submit project for approval');
+    }
+  }
+
+  async approveProject(id: string, comments?: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/${id}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to approve project');
+    }
+  }
+
+  async rejectProject(id: string, reason: string, comments?: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/${id}/reject`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ reason, comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to reject project');
+    }
+  }
+
+  async getMembers(projectId: string): Promise<ProjectMemberDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/members`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project members');
+    return response.json();
+  }
+
+  async addMember(projectId: string, dto: AddProjectMemberDto): Promise<ProjectMemberDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/members`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project member');
+    }
+
+    return response.json();
+  }
+
+  async removeMember(memberId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/members/${memberId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to remove project member');
+    }
+  }
+
+  async addWorkItem(projectId: string, dto: CreateProjectWorkItemDto): Promise<ProjectWorkItemDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/work-items`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add work item');
+    }
+
+    return response.json();
+  }
+
+  async updateWorkItem(workItemId: string, dto: CreateProjectWorkItemDto): Promise<ProjectWorkItemDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/work-items/${workItemId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update work item');
+    }
+
+    return response.json();
+  }
+
+  async deleteWorkItem(workItemId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/work-items/${workItemId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete work item');
+    }
+  }
+
+  async reorderWorkItems(projectId: string, dto: ReorderProjectWorkItemsDto): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/work-items/reorder`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to reorder work items');
+    }
+  }
+
+  async addMilestone(projectId: string, dto: CreateProjectMilestoneDto): Promise<ProjectMilestoneDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/milestones`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add milestone');
+    }
+
+    return response.json();
+  }
+
+  async updateMilestone(milestoneId: string, dto: CreateProjectMilestoneDto): Promise<ProjectMilestoneDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/milestones/${milestoneId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update milestone');
+    }
+
+    return response.json();
+  }
+
+  async deleteMilestone(milestoneId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/milestones/${milestoneId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete milestone');
+    }
+  }
+
+  async getResourceAllocations(projectId: string): Promise<ProjectResourceAllocationDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/resource-allocations`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project resource allocations');
+    return response.json();
+  }
+
+  async addResourceAllocation(projectId: string, dto: CreateProjectResourceAllocationDto): Promise<ProjectResourceAllocationDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/resource-allocations`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add resource allocation');
+    }
+
+    return response.json();
+  }
+
+  async updateResourceAllocation(allocationId: string, dto: CreateProjectResourceAllocationDto): Promise<ProjectResourceAllocationDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/resource-allocations/${allocationId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update resource allocation');
+    }
+
+    return response.json();
+  }
+
+  async approveResourceAllocation(allocationId: string): Promise<ProjectResourceAllocationDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/resource-allocations/${allocationId}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to approve resource allocation');
+    }
+
+    return response.json();
+  }
+
+  async substituteResourceAllocation(allocationId: string, dto: SubstituteProjectResourceAllocationDto): Promise<ProjectResourceSubstitutionResultDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/resource-allocations/${allocationId}/substitute`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to substitute resource allocation');
+    }
+
+    return response.json();
+  }
+
+  async deleteResourceAllocation(allocationId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/resource-allocations/${allocationId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete resource allocation');
+    }
+  }
+
+  async addRisk(projectId: string, dto: CreateProjectRiskDto): Promise<ProjectRiskDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/risks`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add risk');
+    }
+
+    return response.json();
+  }
+
+  async updateRisk(riskId: string, dto: CreateProjectRiskDto): Promise<ProjectRiskDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/risks/${riskId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update risk');
+    }
+
+    return response.json();
+  }
+
+  async deleteRisk(riskId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/risks/${riskId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete risk');
+    }
+  }
+
+  async addIssue(projectId: string, dto: CreateProjectIssueDto): Promise<ProjectIssueDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/issues`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add issue');
+    }
+
+    return response.json();
+  }
+
+  async updateIssue(issueId: string, dto: CreateProjectIssueDto): Promise<ProjectIssueDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/issues/${issueId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update issue');
+    }
+
+    return response.json();
+  }
+
+  async deleteIssue(issueId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/issues/${issueId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete issue');
+    }
+  }
+
+  async addQualityCheckpoint(projectId: string, dto: CreateProjectQualityCheckpointDto): Promise<ProjectQualityCheckpointDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/quality-checkpoints`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add quality checkpoint');
+    }
+
+    return response.json();
+  }
+
+  async signOffQualityCheckpoint(checkpointId: string, comments?: string): Promise<ProjectQualityCheckpointDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/quality-checkpoints/${checkpointId}/sign-off`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to sign off quality checkpoint');
+    }
+
+    return response.json();
+  }
+
+  async deleteQualityCheckpoint(checkpointId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/quality-checkpoints/${checkpointId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete quality checkpoint');
+    }
+  }
+
+  async addNonConformance(projectId: string, dto: CreateProjectNonConformanceDto): Promise<ProjectNonConformanceDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/non-conformances`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add non-conformance');
+    }
+
+    return response.json();
+  }
+
+  async resolveNonConformance(nonConformanceId: string, comments?: string): Promise<ProjectNonConformanceDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/non-conformances/${nonConformanceId}/resolve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to resolve non-conformance');
+    }
+
+    return response.json();
+  }
+
+  async deleteNonConformance(nonConformanceId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/non-conformances/${nonConformanceId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete non-conformance');
+    }
+  }
+
+  async addChangeRequest(projectId: string, dto: CreateProjectChangeRequestDto): Promise<ProjectChangeRequestDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/changes`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add change request');
+    }
+
+    return response.json();
+  }
+
+  async updateChangeRequest(changeId: string, dto: CreateProjectChangeRequestDto): Promise<ProjectChangeRequestDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/changes/${changeId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update change request');
+    }
+
+    return response.json();
+  }
+
+  async deleteChangeRequest(changeId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/changes/${changeId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete change request');
+    }
+  }
+
+  async getBillingSchedules(projectId: string): Promise<ProjectBillingScheduleDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/billing-schedules`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch billing schedules');
+    return response.json();
+  }
+
+  async addBillingSchedule(projectId: string, dto: CreateProjectBillingScheduleDto): Promise<ProjectBillingScheduleDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/billing-schedules`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add billing schedule');
+    }
+
+    return response.json();
+  }
+
+  async updateBillingSchedule(billingScheduleId: string, dto: CreateProjectBillingScheduleDto): Promise<ProjectBillingScheduleDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/billing-schedules/${billingScheduleId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update billing schedule');
+    }
+
+    return response.json();
+  }
+
+  async deleteBillingSchedule(billingScheduleId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/billing-schedules/${billingScheduleId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete billing schedule');
+    }
+  }
+
+  async getInvoiceRequests(projectId: string): Promise<ProjectInvoiceRequestDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/invoice-requests`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch invoice requests');
+    return response.json();
+  }
+
+  async createInvoiceRequest(projectId: string, dto: CreateProjectInvoiceRequestDto): Promise<ProjectInvoiceRequestDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/invoice-requests`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create invoice request');
+    }
+
+    return response.json();
+  }
+
+  async submitInvoiceRequest(invoiceRequestId: string, comments?: string): Promise<ProjectInvoiceRequestDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/invoice-requests/${invoiceRequestId}/submit`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to submit invoice request');
+    }
+
+    return response.json();
+  }
+
+  async sendInvoiceRequestToFinance(
+    invoiceRequestId: string,
+    dto: UpdateProjectInvoiceRequestWorkflowDto = {},
+  ): Promise<ProjectInvoiceRequestDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/invoice-requests/${invoiceRequestId}/send-to-finance`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to send invoice request to finance');
+    }
+
+    return response.json();
+  }
+
+  async markInvoiceRequestInvoiced(
+    invoiceRequestId: string,
+    dto: UpdateProjectInvoiceRequestWorkflowDto = {},
+  ): Promise<ProjectInvoiceRequestDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/invoice-requests/${invoiceRequestId}/mark-invoiced`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to mark invoice request as invoiced');
+    }
+
+    return response.json();
+  }
+
+  async markInvoiceRequestPaid(
+    invoiceRequestId: string,
+    dto: UpdateProjectInvoiceRequestWorkflowDto = {},
+  ): Promise<ProjectInvoiceRequestDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/invoice-requests/${invoiceRequestId}/mark-paid`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to mark invoice request as paid');
+    }
+
+    return response.json();
+  }
+
+  async generateInvoiceRequestFromSchedule(billingScheduleId: string, notes?: string): Promise<ProjectInvoiceRequestDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/billing-schedules/${billingScheduleId}/generate-invoice-request`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ notes }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to generate invoice request');
+    }
+
+    return response.json();
+  }
+
+  async getDeliverables(projectId: string): Promise<ProjectDeliverableDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/deliverables`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch deliverables');
+    return response.json();
+  }
+
+  async addDeliverable(projectId: string, dto: CreateProjectDeliverableDto): Promise<ProjectDeliverableDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/deliverables`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add deliverable');
+    }
+
+    return response.json();
+  }
+
+  async updateDeliverable(deliverableId: string, dto: CreateProjectDeliverableDto): Promise<ProjectDeliverableDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/deliverables/${deliverableId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update deliverable');
+    }
+
+    return response.json();
+  }
+
+  async submitDeliverable(deliverableId: string, dto: SubmitProjectDeliverableDto): Promise<ProjectDeliverableDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/deliverables/${deliverableId}/submit`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to submit deliverable');
+    }
+
+    return response.json();
+  }
+
+  async approveDeliverable(deliverableId: string, comments?: string): Promise<ProjectDeliverableDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/deliverables/${deliverableId}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to approve deliverable');
+    }
+
+    return response.json();
+  }
+
+  async rejectDeliverable(deliverableId: string, comments?: string): Promise<ProjectDeliverableDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/deliverables/${deliverableId}/reject`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to reject deliverable');
+    }
+
+    return response.json();
+  }
+
+  async getTaskDependencies(projectId: string): Promise<ProjectTaskDependencyDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/task-dependencies`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch task dependencies');
+    return response.json();
+  }
+
+  async addTaskDependency(projectId: string, dto: CreateProjectTaskDependencyDto): Promise<ProjectTaskDependencyDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/task-dependencies`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add task dependency');
+    }
+
+    return response.json();
+  }
+
+  async deleteTaskDependency(dependencyId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/task-dependencies/${dependencyId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete task dependency');
+    }
+  }
+
+  async getInterdependencies(projectId?: string, portfolioId?: string, programId?: string): Promise<ProjectInterdependencyDto[]> {
+    const params = new URLSearchParams();
+    if (projectId) params.set('projectId', projectId);
+    if (portfolioId) params.set('portfolioId', portfolioId);
+    if (programId) params.set('programId', programId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/interdependencies?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch interdependencies');
+    return response.json();
+  }
+
+  async createInterdependency(dto: CreateProjectInterdependencyDto): Promise<ProjectInterdependencyDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/interdependencies`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create interdependency');
+    }
+
+    return response.json();
+  }
+
+  async updateInterdependency(id: string, dto: CreateProjectInterdependencyDto): Promise<ProjectInterdependencyDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/interdependencies/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update interdependency');
+    }
+
+    return response.json();
+  }
+
+  async deleteInterdependency(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/interdependencies/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete interdependency');
+    }
+  }
+
+  async getBaselines(projectId: string): Promise<ProjectBaselineDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/baselines`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project baselines');
+    return response.json();
+  }
+
+  async createBaseline(projectId: string, dto: CreateProjectBaselineDto): Promise<ProjectBaselineDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/baselines`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create project baseline');
+    }
+
+    return response.json();
+  }
+
+  async compareBaseline(baselineId: string): Promise<ProjectBaselineComparisonDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/baselines/${baselineId}/compare`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to compare project baseline');
+    return response.json();
+  }
+
+  async analyzeSchedule(projectId: string): Promise<ProjectScheduleAnalysisDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/schedule-analysis`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to analyze project schedule');
+    return response.json();
+  }
+
+  async recalculateSchedule(projectId: string): Promise<ProjectScheduleAnalysisDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/schedule-analysis/recalculate`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to recalculate project schedule');
+    }
+
+    return response.json();
+  }
+
+  async getTimesheets(projectId: string): Promise<ProjectTimesheetEntryDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/timesheets`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project timesheets');
+    return response.json();
+  }
+
+  async getMyTimesheets(status?: string): Promise<ProjectTimesheetEntryDto[]> {
+    const query = status ? `?status=${encodeURIComponent(status)}` : '';
+    const response = await fetch(`${API_BASE_URL}/projects/my/timesheets${query}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch my timesheets');
+    return response.json();
+  }
+
+  async getTimesheetApprovalSummary(projectId?: string): Promise<ProjectApprovalQueueSummaryDto> {
+    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    const response = await fetch(`${API_BASE_URL}/projects/timesheets/approval-summary${query}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch timesheet approval summary');
+    return response.json();
+  }
+
+  async getTimesheetApprovalQueue(projectId?: string, status?: string, userId?: string, take: number = 200): Promise<ProjectTimesheetApprovalQueueItemDto[]> {
+    const params = new URLSearchParams({ take: take.toString() });
+    if (projectId) params.set('projectId', projectId);
+    if (status) params.set('status', status);
+    if (userId) params.set('userId', userId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/timesheets/approval-queue?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch timesheet approval queue');
+    return response.json();
+  }
+
+  async addTimesheet(projectId: string, dto: CreateProjectTimesheetEntryDto): Promise<ProjectTimesheetEntryDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/timesheets`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add timesheet entry');
+    }
+
+    return response.json();
+  }
+
+  async updateTimesheet(entryId: string, dto: CreateProjectTimesheetEntryDto): Promise<ProjectTimesheetEntryDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/timesheets/${entryId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update timesheet entry');
+    }
+
+    return response.json();
+  }
+
+  async submitTimesheet(entryId: string): Promise<ProjectTimesheetEntryDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/timesheets/${entryId}/submit`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to submit timesheet entry');
+    }
+
+    return response.json();
+  }
+
+  async approveTimesheet(entryId: string, comments?: string): Promise<ProjectTimesheetEntryDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/timesheets/${entryId}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to approve timesheet entry');
+    }
+
+    return response.json();
+  }
+
+  async rejectTimesheet(entryId: string, comments?: string): Promise<ProjectTimesheetEntryDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/timesheets/${entryId}/reject`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to reject timesheet entry');
+    }
+
+    return response.json();
+  }
+
+  async deleteTimesheet(entryId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/timesheets/${entryId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete timesheet entry');
+    }
+  }
+
+  async getExpenses(projectId: string): Promise<ProjectExpenseDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/expenses`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project expenses');
+    return response.json();
+  }
+
+  async getMyExpenses(status?: string): Promise<ProjectExpenseDto[]> {
+    const query = status ? `?status=${encodeURIComponent(status)}` : '';
+    const response = await fetch(`${API_BASE_URL}/projects/my/expenses${query}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch my project expenses');
+    return response.json();
+  }
+
+  async getExpenseApprovalSummary(projectId?: string): Promise<ProjectApprovalQueueSummaryDto> {
+    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    const response = await fetch(`${API_BASE_URL}/projects/expenses/approval-summary${query}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch expense approval summary');
+    return response.json();
+  }
+
+  async getExpenseApprovalQueue(projectId?: string, status?: string, userId?: string, take: number = 200): Promise<ProjectExpenseApprovalQueueItemDto[]> {
+    const params = new URLSearchParams({ take: take.toString() });
+    if (projectId) params.set('projectId', projectId);
+    if (status) params.set('status', status);
+    if (userId) params.set('userId', userId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/expenses/approval-queue?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch expense approval queue');
+    return response.json();
+  }
+
+  async addExpense(projectId: string, dto: CreateProjectExpenseDto): Promise<ProjectExpenseDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/expenses`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project expense');
+    }
+
+    return response.json();
+  }
+
+  async updateExpense(expenseId: string, dto: CreateProjectExpenseDto): Promise<ProjectExpenseDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/expenses/${expenseId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update expense');
+    }
+
+    return response.json();
+  }
+
+  async submitExpense(expenseId: string): Promise<ProjectExpenseDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/expenses/${expenseId}/submit`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to submit expense');
+    }
+
+    return response.json();
+  }
+
+  async approveExpense(expenseId: string, comments?: string): Promise<ProjectExpenseDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/expenses/${expenseId}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to approve project expense');
+    }
+
+    return response.json();
+  }
+
+  async rejectExpense(expenseId: string, comments?: string): Promise<ProjectExpenseDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/expenses/${expenseId}/reject`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to reject expense');
+    }
+
+    return response.json();
+  }
+
+  async deleteExpense(expenseId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/expenses/${expenseId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete expense');
+    }
+  }
+
+  async getRevenueRecognition(projectId: string): Promise<ProjectRevenueRecognitionDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/revenue-recognition`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch revenue recognition');
+    return response.json();
+  }
+
+  async generateRevenueRecognition(projectId: string): Promise<ProjectRevenueRecognitionDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/revenue-recognition/generate`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to generate revenue recognition');
+    }
+
+    return response.json();
+  }
+
+  async getBudgetRevisions(projectId: string): Promise<ProjectBudgetRevisionDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/budget-revisions`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project budget revisions');
+    return response.json();
+  }
+
+  async createBudgetRevision(projectId: string, dto: CreateProjectBudgetRevisionDto): Promise<ProjectBudgetRevisionDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/budget-revisions`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create project budget revision');
+    }
+
+    return response.json();
+  }
+
+  async submitBudgetRevision(revisionId: string): Promise<ProjectBudgetRevisionDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/budget-revisions/${revisionId}/submit`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to submit project budget revision');
+    }
+
+    return response.json();
+  }
+
+  async approveBudgetRevision(revisionId: string, comments?: string): Promise<ProjectBudgetRevisionDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/budget-revisions/${revisionId}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to approve project budget revision');
+    }
+
+    return response.json();
+  }
+
+  async rejectBudgetRevision(revisionId: string, reason: string, comments?: string): Promise<ProjectBudgetRevisionDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/budget-revisions/${revisionId}/reject`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ reason, comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to reject project budget revision');
+    }
+
+    return response.json();
+  }
+
+  async getForecastVersions(projectId: string): Promise<ProjectForecastVersionDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/forecast-versions`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project forecast versions');
+    return response.json();
+  }
+
+  async createForecastVersion(projectId: string, dto: CreateProjectForecastVersionDto): Promise<ProjectForecastVersionDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/forecast-versions`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create project forecast version');
+    }
+
+    return response.json();
+  }
+
+  async activateForecastVersion(forecastVersionId: string): Promise<ProjectForecastVersionDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/forecast-versions/${forecastVersionId}/activate`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to activate project forecast version');
+    }
+
+    return response.json();
+  }
+
+  async getAssetLinks(projectId: string): Promise<ProjectAssetLinkDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/asset-links`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project asset links');
+    return response.json();
+  }
+
+  async addAssetLink(projectId: string, dto: CreateProjectAssetLinkDto): Promise<ProjectAssetLinkDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/asset-links`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project asset link');
+    }
+
+    return response.json();
+  }
+
+  async getExternalAccessPolicies(projectId: string): Promise<ProjectExternalAccessPolicyDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/external-access-policies`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch external access policies');
+    return response.json();
+  }
+
+  async upsertExternalAccessPolicy(projectId: string, dto: CreateProjectExternalAccessPolicyDto): Promise<ProjectExternalAccessPolicyDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/external-access-policies`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to save external access policy');
+    }
+
+    return response.json();
+  }
+
+  async deleteExternalAccessPolicy(policyId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/external-access-policies/${policyId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete external access policy');
+    }
+  }
+
+  async getDecisions(projectId: string): Promise<ProjectDecisionDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/decisions`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch project decisions');
+    return response.json();
+  }
+
+  async addDecision(projectId: string, dto: CreateProjectDecisionDto): Promise<ProjectDecisionDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/decisions`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to add project decision');
+    return response.json();
+  }
+
+  async updateDecision(decisionId: string, dto: CreateProjectDecisionDto): Promise<ProjectDecisionDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/decisions/${decisionId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to update project decision');
+    return response.json();
+  }
+
+  async deleteDecision(decisionId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/decisions/${decisionId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to delete project decision');
+  }
+
+  async getMeetings(projectId: string): Promise<ProjectMeetingMinuteDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/meetings`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch project meetings');
+    return response.json();
+  }
+
+  async addMeeting(projectId: string, dto: CreateProjectMeetingMinuteDto): Promise<ProjectMeetingMinuteDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/meetings`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to add project meeting');
+    return response.json();
+  }
+
+  async updateMeeting(meetingId: string, dto: CreateProjectMeetingMinuteDto): Promise<ProjectMeetingMinuteDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/meetings/${meetingId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to update project meeting');
+    return response.json();
+  }
+
+  async deleteMeeting(meetingId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/meetings/${meetingId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to delete project meeting');
+  }
+
+  async getActionItems(projectId: string): Promise<ProjectActionItemDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/action-items`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch project action items');
+    return response.json();
+  }
+
+  async addActionItem(projectId: string, dto: CreateProjectActionItemDto): Promise<ProjectActionItemDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/action-items`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to add project action item');
+    return response.json();
+  }
+
+  async updateActionItem(actionItemId: string, dto: CreateProjectActionItemDto): Promise<ProjectActionItemDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/action-items/${actionItemId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to update project action item');
+    return response.json();
+  }
+
+  async deleteActionItem(actionItemId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/action-items/${actionItemId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to delete project action item');
+  }
+
+  async getLessonsLearned(projectId: string): Promise<ProjectLessonLearnedDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/lessons-learned`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch project lessons learned');
+    return response.json();
+  }
+
+  async addLessonLearned(projectId: string, dto: CreateProjectLessonLearnedDto): Promise<ProjectLessonLearnedDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/lessons-learned`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to add lesson learned');
+    return response.json();
+  }
+
+  async updateLessonLearned(lessonId: string, dto: CreateProjectLessonLearnedDto): Promise<ProjectLessonLearnedDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/lessons-learned/${lessonId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to update lesson learned');
+    return response.json();
+  }
+
+  async deleteLessonLearned(lessonId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/lessons-learned/${lessonId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to delete lesson learned');
+  }
+
+  async getClosure(projectId: string): Promise<ProjectClosureDto | null> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/closure`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch project closure');
+    return response.json();
+  }
+
+  async upsertClosure(projectId: string, dto: UpsertProjectClosureDto): Promise<ProjectClosureDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/closure`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to save project closure');
+    return response.json();
+  }
+
+  async submitClosure(projectId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/closure/submit`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to submit project closure');
+  }
+
+  async approveClosure(closureId: string, comments?: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/closure/${closureId}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments }),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to approve project closure');
+  }
+
+  async rejectClosure(closureId: string, reason: string, comments?: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/closure/${closureId}/reject`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ reason, comments }),
+    });
+    if (!response.ok) throw new Error(await response.text() || 'Failed to reject project closure');
+  }
+
+  async getAiInsights(projectId: string): Promise<ProjectAiInsightDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/ai-insights`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch AI insights');
+    return response.json();
+  }
+
+  async attachDocument(projectId: string, dto: AttachProjectDocumentDto): Promise<ProjectDocumentDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/documents`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to attach project document');
+    }
+
+    return response.json();
+  }
+
+  async uploadProjectDocument(
+    projectId: string,
+    file: File,
+    metadata: Omit<AttachProjectDocumentDto, 'filePath' | 'publicUrl' | 'fileType' | 'fileSize'>,
+  ): Promise<ProjectDocumentDto> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('category', 'project-documents');
+
+    const uploadResponse = await fetch(`${API_BASE_URL}/FileUpload/single`, {
+      method: 'POST',
+      headers: getAuthHeaders(false),
+      body: formData,
+    });
+
+    if (!uploadResponse.ok) {
+      const error = await uploadResponse.text();
+      throw new Error(error || 'Failed to upload file');
+    }
+
+    const upload = (await uploadResponse.json()) as FileUploadResult;
+    return this.attachDocument(projectId, {
+      ...metadata,
+      filePath: upload.filePath,
+      publicUrl: upload.publicUrl,
+      fileType: upload.contentType,
+      fileSize: upload.fileSize,
+    });
+  }
+
+  async deleteDocument(documentId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/documents/${documentId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project document');
+    }
+  }
+
+  async addComment(projectId: string, dto: CreateProjectCommentDto): Promise<ProjectCommentDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/comments`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project comment');
+    }
+
+    return response.json();
+  }
+
+  async getExternalProjects(): Promise<ProjectExternalSummaryDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch external projects');
+    return response.json();
+  }
+
+  async getExternalProjectById(projectId: string): Promise<ProjectExternalDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects/${projectId}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch external project');
+    return response.json();
+  }
+
+  async addExternalProjectComment(projectId: string, dto: CreateProjectCommentDto): Promise<ProjectCommentDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects/${projectId}/comments`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to add project update');
+    }
+
+    return response.json();
+  }
+
+  async updateExternalProjectWorkItemProgress(
+    projectId: string,
+    workItemId: string,
+    dto: UpdateProjectWorkItemProgressDto,
+  ): Promise<ProjectWorkItemDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects/${projectId}/work-items/${workItemId}/progress`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update shared work item progress');
+    }
+
+    return response.json();
+  }
+
+  async submitExternalDeliverable(projectId: string, deliverableId: string, dto: SubmitProjectDeliverableDto): Promise<ProjectDeliverableDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects/${projectId}/deliverables/${deliverableId}/submit`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to submit external deliverable');
+    }
+
+    return response.json();
+  }
+
+  async approveExternalDeliverable(projectId: string, deliverableId: string, comments?: string): Promise<ProjectDeliverableDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects/${projectId}/deliverables/${deliverableId}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ comments }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to approve external deliverable');
+    }
+
+    return response.json();
+  }
+
+  async attachExternalProjectDocument(projectId: string, dto: AttachProjectDocumentDto): Promise<ProjectDocumentDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects/${projectId}/documents`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to attach external project document');
+    }
+
+    return response.json();
+  }
+
+  async uploadExternalProjectDocument(
+    projectId: string,
+    file: File,
+    metadata: Omit<AttachProjectDocumentDto, 'filePath' | 'publicUrl' | 'fileType' | 'fileSize'>,
+  ): Promise<ProjectDocumentDto> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('category', 'project-documents');
+
+    const uploadResponse = await fetch(`${API_BASE_URL}/FileUpload/single`, {
+      method: 'POST',
+      headers: getAuthHeaders(false),
+      body: formData,
+    });
+
+    if (!uploadResponse.ok) {
+      const error = await uploadResponse.text();
+      throw new Error(error || 'Failed to upload file');
+    }
+
+    const upload = (await uploadResponse.json()) as FileUploadResult;
+    return this.attachExternalProjectDocument(projectId, {
+      ...metadata,
+      filePath: upload.filePath,
+      publicUrl: upload.publicUrl,
+      fileType: upload.contentType,
+      fileSize: upload.fileSize,
+      isExternalVisible: true,
+    });
+  }
+
+  async getMobileSummary(): Promise<ProjectMobileSummaryDto> {
+    const response = await fetch(`${API_BASE_URL.replace('/api', '')}/api/mobile/projects/summary`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch mobile project summary');
+    return response.json();
+  }
+
+  async submitMobileTimesheet(projectId: string, dto: CreateProjectTimesheetEntryDto): Promise<ProjectTimesheetEntryDto> {
+    const response = await fetch(`${API_BASE_URL.replace('/api', '')}/api/mobile/projects/${projectId}/timesheets`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to submit mobile timesheet');
+    }
+
+    return response.json();
+  }
+
+  async submitMobileExpense(projectId: string, dto: CreateProjectExpenseDto): Promise<ProjectExpenseDto> {
+    const response = await fetch(`${API_BASE_URL.replace('/api', '')}/api/mobile/projects/${projectId}/expenses`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to submit mobile expense');
+    }
+
+    return response.json();
+  }
+
+  async updateMobileWorkItemProgress(projectId: string, workItemId: string, dto: UpdateProjectWorkItemProgressDto): Promise<ProjectWorkItemDto> {
+    const response = await fetch(`${API_BASE_URL.replace('/api', '')}/api/mobile/projects/${projectId}/work-items/${workItemId}/progress`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update mobile work item progress');
+    }
+
+    return response.json();
+  }
+
+  async getProjectTypes(): Promise<ProjectTypeDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/types`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project types');
+    return response.json();
+  }
+
+  async getMasterDataOverview(): Promise<ProjectMasterDataOverviewDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/master-data-overview`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project master data overview');
+    return response.json();
+  }
+
+  async getCatalogEntries(catalogType: string): Promise<ProjectCatalogEntryDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/catalogs?catalogType=${encodeURIComponent(catalogType)}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project catalog entries');
+    return response.json();
+  }
+
+  async createCatalogEntry(dto: CreateProjectCatalogEntryDto): Promise<ProjectCatalogEntryDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/catalogs`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create project catalog entry');
+    }
+
+    return response.json();
+  }
+
+  async updateCatalogEntry(id: string, dto: CreateProjectCatalogEntryDto): Promise<ProjectCatalogEntryDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/catalogs/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project catalog entry');
+    }
+
+    return response.json();
+  }
+
+  async deleteCatalogEntry(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/catalogs/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project catalog entry');
+    }
+  }
+
+  async seedCatalogDefaults(catalogType?: string): Promise<void> {
+    const query = catalogType ? `?catalogType=${encodeURIComponent(catalogType)}` : '';
+    const response = await fetch(`${API_BASE_URL}/projects/admin/catalogs/seed-defaults${query}`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to seed project catalog defaults');
+    }
+  }
+
+  async createProjectType(dto: CreateProjectTypeDto): Promise<ProjectTypeDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/types`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create project type');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectType(id: string, dto: CreateProjectTypeDto): Promise<ProjectTypeDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/types/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project type');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectType(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/types/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project type');
+    }
+  }
+
+  async getProjectPriorities(): Promise<ProjectPriorityDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/priorities`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project priorities');
+    return response.json();
+  }
+
+  async createProjectPriority(dto: CreateProjectPriorityDto): Promise<ProjectPriorityDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/priorities`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create project priority');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectPriority(id: string, dto: CreateProjectPriorityDto): Promise<ProjectPriorityDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/priorities/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project priority');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectPriority(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/priorities/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project priority');
+    }
+  }
+
+  async getProjectTemplates(projectTypeId?: string): Promise<ProjectTemplateDto[]> {
+    const query = projectTypeId ? `?projectTypeId=${encodeURIComponent(projectTypeId)}` : '';
+    const response = await fetch(`${API_BASE_URL}/projects/admin/templates${query}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project templates');
+    return response.json();
+  }
+
+  async createProjectTemplate(dto: CreateProjectTemplateDto): Promise<ProjectTemplateDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/templates`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create project template');
+    }
+
+    return response.json();
+  }
+
+  async updateProjectTemplate(id: string, dto: CreateProjectTemplateDto): Promise<ProjectTemplateDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/templates/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project template');
+    }
+
+    return response.json();
+  }
+
+  async deleteProjectTemplate(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/templates/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project template');
+    }
+  }
+
+  async getPortfolios(): Promise<ProjectPortfolioDto[]> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/portfolios`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project portfolios');
+    return response.json();
+  }
+
+  async createPortfolio(dto: CreateProjectPortfolioDto): Promise<ProjectPortfolioDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/portfolios`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create project portfolio');
+    }
+
+    return response.json();
+  }
+
+  async updatePortfolio(id: string, dto: CreateProjectPortfolioDto): Promise<ProjectPortfolioDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/portfolios/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project portfolio');
+    }
+
+    return response.json();
+  }
+
+  async deletePortfolio(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/portfolios/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project portfolio');
+    }
+  }
+
+  async getPrograms(portfolioId?: string): Promise<ProjectProgramDto[]> {
+    const queryParams = new URLSearchParams();
+    if (portfolioId) queryParams.append('portfolioId', portfolioId);
+
+    const response = await fetch(`${API_BASE_URL}/projects/admin/programs?${queryParams.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project programs');
+    return response.json();
+  }
+
+  async createProgram(dto: CreateProjectProgramDto): Promise<ProjectProgramDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/programs`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to create project program');
+    }
+
+    return response.json();
+  }
+
+  async updateProgram(id: string, dto: CreateProjectProgramDto): Promise<ProjectProgramDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/programs/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project program');
+    }
+
+    return response.json();
+  }
+
+  async deleteProgram(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/programs/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to delete project program');
+    }
+  }
+
+  async getSettings(): Promise<ProjectManagementSettingsDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/settings`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch project settings');
+    return response.json();
+  }
+
+  async updateSettings(dto: UpdateProjectManagementSettingsDto): Promise<ProjectManagementSettingsDto> {
+    const response = await fetch(`${API_BASE_URL}/projects/admin/settings`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(dto),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to update project settings');
+    }
+
+    return response.json();
+  }
+}
+
+export const projectService = new ProjectService();

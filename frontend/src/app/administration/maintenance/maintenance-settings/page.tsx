@@ -17,7 +17,8 @@ export default function MaintenanceSettingsPage() {
   const [settings, setSettings] = useState<MaintenanceSettingsDto | null>(null);
   const [formData, setFormData] = useState<UpdateMaintenanceSettingsDto>({
     fleetComplianceDueSoonDays: 7,
-    blockFleetDispatchWhenComplianceDueSoon: true
+    blockFleetDispatchWhenComplianceDueSoon: true,
+    requirePredefinedFleetTripDestinationOnDispatch: false,
   });
 
   useEffect(() => {
@@ -31,7 +32,8 @@ export default function MaintenanceSettingsPage() {
       setSettings(data);
       setFormData({
         fleetComplianceDueSoonDays: data.fleetComplianceDueSoonDays ?? 7,
-        blockFleetDispatchWhenComplianceDueSoon: !!data.blockFleetDispatchWhenComplianceDueSoon
+        blockFleetDispatchWhenComplianceDueSoon: !!data.blockFleetDispatchWhenComplianceDueSoon,
+        requirePredefinedFleetTripDestinationOnDispatch: !!data.requirePredefinedFleetTripDestinationOnDispatch,
       });
     } catch (error: any) {
       toast({
@@ -152,6 +154,22 @@ export default function MaintenanceSettingsPage() {
             />
           </div>
 
+          <div className="flex items-center justify-between space-x-4">
+            <div className="flex-1 space-y-1">
+              <Label htmlFor="requirePredefinedFleetTripDestinationOnDispatch">Require predefined trip destination on dispatch</Label>
+              <p className="text-sm text-muted-foreground">
+                When enabled, dispatch requires selecting a predefined Trip Destination (route template) from Fleet settings.
+              </p>
+            </div>
+            <Switch
+              id="requirePredefinedFleetTripDestinationOnDispatch"
+              checked={formData.requirePredefinedFleetTripDestinationOnDispatch}
+              onCheckedChange={(checked) =>
+                setFormData(prev => ({ ...prev, requirePredefinedFleetTripDestinationOnDispatch: checked }))
+              }
+            />
+          </div>
+
           {settings ? (
             <div className="text-xs text-muted-foreground">
               Last updated: {settings.updatedAt ? new Date(settings.updatedAt).toLocaleString() : 'Never'}
@@ -162,4 +180,3 @@ export default function MaintenanceSettingsPage() {
     </div>
   );
 }
-

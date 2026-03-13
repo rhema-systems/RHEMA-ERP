@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ticket, Eye } from 'lucide-react';
 
@@ -12,6 +12,13 @@ import { Label } from '@/components/ui/label';
 import { DataTable, type DataTableColumn, type DataTableAction } from '@/components/ui/DataTable';
 import { useSignalR } from '@/hooks/useSignalR';
 import { useToast } from '@/hooks/use-toast';
+import {
+  buildScopedHelpdeskDetailPath,
+  buildScopedHelpdeskNewPath,
+  getHelpdeskScopeConfig,
+  isExternalTicketSource,
+  isTicketInHelpdeskScope,
+} from '@/lib/helpdesk-scope';
 import { ehcInternalTicketService } from '@/services/ehcInternalTicketService';
 import type { EhcTicketListItem, EhcTicketPriority, EhcTicketSource, EhcTicketStatus, EhcTicketType } from '@/services/ehcTicketService';
 
@@ -53,19 +60,54 @@ const priorityBadgeClassName = (p: EhcTicketPriority) => {
   }
 };
 
+const isTerminalStatus = (s: EhcTicketStatus) => s === 'Resolved' || s === 'Closed';
+
 export default function HelpdeskTicketsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const qc = useQueryClient();
   const { toast } = useToast();
   const seenNotificationIdsRef = useRef<Set<string>>(new Set());
+  const scopeParam = searchParams.get('scope');
+  const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
   const [status, setStatus] = useState<EhcTicketStatus | ''>('');
-  const [ticketType, setTicketType] = useState<EhcTicketType | ''>('');
+  const [ticketType, setTicketType] = useState<EhcTicketType | ''>(
+    scopeConfig.allowedTicketTypes.length === 1 ? scopeConfig.defaultTicketType : '',
+  );
   const [priority, setPriority] = useState<EhcTicketPriority | ''>('');
-  const [source, setSource] = useState<EhcTicketSource | ''>('');
+  const [source, setSource] = useState<EhcTicketSource | ''>(scopeConfig.internalOnly ? 'Internal' : '');
   const [categoryId, setCategoryId] = useState<string>('');
   const [assignedDepartmentId, setAssignedDepartmentId] = useState<string>('');
   const [createdFrom, setCreatedFrom] = useState<string>('');
   const [createdTo, setCreatedTo] = useState<string>('');
+
+  const typeFilterLocked = scopeConfig.allowedTicketTypes.length === 1;
+  const ticketTypeQueryFilter = typeFilterLocked ? scopeConfig.defaultTicketType : ticketType || null;
+  const sourceQueryFilter = scopeConfig.internalOnly ? 'Internal' : source || null;
+
+  const scopedSourceOptions = useMemo<Array<{ value: EhcTicketSource | ''; label: string }>>(() => {
+    if (scopeConfig.internalOnly) return [{ value: 'Internal', label: 'Internal' }];
+    return [
+      { value: '', label: 'All external' },
+      { value: 'Web', label: 'Website' },
+      { value: 'Mobile', label: 'Mobile App' },
+      { value: 'Email', label: 'Email' },
+      { value: 'PhoneCall', label: 'Phone Call' },
+      { value: 'Sms', label: 'SMS' },
+      { value: 'WhatsApp', label: 'WhatsApp' },
+    ];
+  }, [scopeConfig.internalOnly]);
+
+  useEffect(() => {
+    setTicketType(typeFilterLocked ? scopeConfig.defaultTicketType : '');
+    setSource(scopeConfig.internalOnly ? 'Internal' : '');
+    setStatus('');
+    setPriority('');
+    setCategoryId('');
+    setAssignedDepartmentId('');
+    setCreatedFrom('');
+    setCreatedTo('');
+  }, [scopeConfig.defaultTicketType, scopeConfig.internalOnly, scopeConfig.scope, typeFilterLocked]);
 
   const createdAtFormatter = useMemo(() => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }), []);
   const formatCreatedAt = useCallback((iso: string | null | undefined) => {
@@ -76,19 +118,29 @@ export default function HelpdeskTicketsPage() {
   }, [createdAtFormatter]);
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['ehc', 'internal', 'tickets', { status, ticketType, priority, source, categoryId, assignedDepartmentId, createdFrom, createdTo }],
+    queryKey: ['ehc', 'internal', 'tickets', scopeConfig.scope, { status, ticketTypeQueryFilter, priority, sourceQueryFilter, categoryId, assignedDepartmentId, createdFrom, createdTo }],
     queryFn: () =>
       ehcInternalTicketService.listTickets(1, 500, {
         status: status || null,
-        ticketType: ticketType || null,
+        ticketType: ticketTypeQueryFilter,
         priority: priority || null,
-        source: source || null,
+        source: sourceQueryFilter,
         categoryId: categoryId || null,
         assignedDepartmentId: assignedDepartmentId || null,
         createdFrom: createdFrom || null,
         createdTo: createdTo || null,
       }),
   });
+
+  const scopedData = useMemo(
+    () =>
+      (data || []).filter((ticket) => {
+        if (!isTicketInHelpdeskScope(ticket, scopeConfig.scope)) return false;
+        if (!scopeConfig.internalOnly && !source && !isExternalTicketSource(ticket.source)) return false;
+        return true;
+      }),
+    [data, scopeConfig.scope, scopeConfig.internalOnly, source],
+  );
 
   const handleRealtimeNotification = useCallback(
     (n: any) => {
@@ -132,6 +184,21 @@ export default function HelpdeskTicketsPage() {
     queryKey: ['ehc', 'internal', 'departments'],
     queryFn: () => ehcInternalTicketService.listDepartments(),
   });
+
+  const { data: priorityLevels } = useQuery({
+    queryKey: ['ehc', 'internal', 'priorities'],
+    queryFn: () => ehcInternalTicketService.listPriorityLevels(),
+  });
+
+  const activePriorityLevels = useMemo(() => {
+    return (priorityLevels ?? [])
+      .filter((p) => p.isActive)
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  }, [priorityLevels]);
+
+  const priorityLabelByValue = useMemo(() => {
+    return new Map((priorityLevels ?? []).map((p) => [p.priority, p.displayName] as const));
+  }, [priorityLevels]);
 
   const { data: categories } = useQuery({
     queryKey: ['ehc', 'admin', 'categories'],
@@ -209,7 +276,12 @@ export default function HelpdeskTicketsPage() {
       {
         id: 'source',
         header: 'Channel',
-        accessorFn: (r) => (r.source === 'Web' ? 'Website' : r.source),
+        accessorFn: (r) => {
+          if (r.source === 'Web') return 'Website';
+          if (r.source === 'PhoneCall') return 'Phone Call';
+          if (r.source === 'Sms') return 'SMS';
+          return r.source;
+        },
       },
       {
         id: 'ticketType',
@@ -220,7 +292,11 @@ export default function HelpdeskTicketsPage() {
         id: 'priority',
         header: 'Priority',
         accessorFn: (r) => r.priority,
-        cell: ({ row }) => <Badge className={priorityBadgeClassName(row.original.priority)}>{row.original.priority}</Badge>,
+        cell: ({ row }) => (
+          <Badge className={priorityBadgeClassName(row.original.priority)}>
+            {priorityLabelByValue.get(row.original.priority) ?? row.original.priority}
+          </Badge>
+        ),
       },
       {
         id: 'status',
@@ -243,6 +319,62 @@ export default function HelpdeskTicketsPage() {
         header: 'Assignee',
         accessorFn: (r) => r.assignedToName || '—',
       },
+      {
+        id: 'sla',
+        header: 'SLA',
+        accessorFn: (r) => {
+          const now = Date.now();
+          const firstResponseDueAt = r.firstResponseDueAt ? Date.parse(r.firstResponseDueAt) : Number.NaN;
+          const resolutionDueAt = r.resolutionDueAt ? Date.parse(r.resolutionDueAt) : Number.NaN;
+          const firstRespondedAt = r.firstRespondedAt ? Date.parse(r.firstRespondedAt) : Number.NaN;
+          const resolvedAt = r.resolvedAt ? Date.parse(r.resolvedAt) : Number.NaN;
+          const closedAt = r.closedAt ? Date.parse(r.closedAt) : Number.NaN;
+
+          const firstResponseOverdue = !isTerminalStatus(r.status) && !Number.isNaN(firstResponseDueAt) && now > firstResponseDueAt && Number.isNaN(firstRespondedAt);
+          const resolutionOverdue = !isTerminalStatus(r.status) && !Number.isNaN(resolutionDueAt) && now > resolutionDueAt && Number.isNaN(resolvedAt) && Number.isNaN(closedAt);
+
+          if (resolutionOverdue) return 'ResolutionOverdue';
+          if (firstResponseOverdue) return 'FirstResponseOverdue';
+          return '';
+        },
+        cell: ({ row }) => {
+          const t = row.original;
+          if (isTerminalStatus(t.status)) return <span className="text-slate-500">—</span>;
+
+          const now = Date.now();
+          const firstResponseDueAt = t.firstResponseDueAt ? Date.parse(t.firstResponseDueAt) : Number.NaN;
+          const resolutionDueAt = t.resolutionDueAt ? Date.parse(t.resolutionDueAt) : Number.NaN;
+          const firstRespondedAt = t.firstRespondedAt ? Date.parse(t.firstRespondedAt) : Number.NaN;
+          const resolvedAt = t.resolvedAt ? Date.parse(t.resolvedAt) : Number.NaN;
+          const closedAt = t.closedAt ? Date.parse(t.closedAt) : Number.NaN;
+
+          const firstResponseOverdue = !Number.isNaN(firstResponseDueAt) && now > firstResponseDueAt && Number.isNaN(firstRespondedAt);
+          const resolutionOverdue = !Number.isNaN(resolutionDueAt) && now > resolutionDueAt && Number.isNaN(resolvedAt) && Number.isNaN(closedAt);
+
+          if (!firstResponseOverdue && !resolutionOverdue) return <span className="text-slate-500">—</span>;
+
+          return (
+            <div className="flex flex-col gap-1">
+              {firstResponseOverdue ? (
+                <Badge
+                  className="bg-orange-600 text-white hover:bg-orange-600/90 dark:bg-orange-500 dark:hover:bg-orange-500/90 w-fit"
+                  title={t.firstResponseDueAt ? `First response was due: ${formatCreatedAt(t.firstResponseDueAt)}` : 'First response overdue'}
+                >
+                  Response overdue
+                </Badge>
+              ) : null}
+              {resolutionOverdue ? (
+                <Badge
+                  className="bg-red-600 text-white hover:bg-red-600/90 dark:bg-red-500 dark:hover:bg-red-500/90 w-fit"
+                  title={t.resolutionDueAt ? `Resolution was due: ${formatCreatedAt(t.resolutionDueAt)}` : 'Resolution overdue'}
+                >
+                  Resolution overdue
+                </Badge>
+              ) : null}
+            </div>
+          );
+        },
+      },
     ];
   }, [formatCreatedAt]);
 
@@ -252,12 +384,12 @@ export default function HelpdeskTicketsPage() {
         id: 'view',
         label: 'View',
         icon: Eye,
-        onClick: (row) => router.push(`/helpdesk/tickets/${row.original.id}`),
+        onClick: (row) => router.push(buildScopedHelpdeskDetailPath(scopeConfig.scope, row.original.id)),
         variant: 'outline',
         size: 'sm',
       },
     ];
-  }, [router]);
+  }, [router, scopeConfig.scope]);
 
   return (
     <div className="space-y-4">
@@ -265,12 +397,12 @@ export default function HelpdeskTicketsPage() {
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
             <Ticket className="h-7 w-7" />
-            Helpdesk Tickets
+            {scopeConfig.listTitle}
           </h1>
-          <p className="text-slate-600 mt-1">Assign, transition, and communicate with requesters.</p>
+          <p className="text-slate-600 mt-1">{scopeConfig.listDescription}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={() => router.push('/helpdesk/tickets/new')}>Create Ticket</Button>
+          <Button onClick={() => router.push(buildScopedHelpdeskNewPath(scopeConfig.scope))}>{scopeConfig.createButtonLabel}</Button>
           <Button variant="outline" onClick={() => refetch()}>
             Refresh
           </Button>
@@ -280,7 +412,7 @@ export default function HelpdeskTicketsPage() {
       <Card>
         <CardHeader className="p-4 pb-2">
           <CardTitle>Filters</CardTitle>
-          <CardDescription className="text-xs">Filter tickets by type, priority, status, category, department, and date.</CardDescription>
+          <CardDescription className="text-xs">Filter records by ticket type, channel, priority, status, category, department, and date.</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-3 p-4 pt-0">
           <div className="space-y-1">
@@ -296,22 +428,31 @@ export default function HelpdeskTicketsPage() {
 
           <div className="space-y-1">
             <Label className="text-xs text-slate-600">Type</Label>
-            <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={ticketType} onChange={(e) => setTicketType(e.target.value as any)}>
-              <option value="">All</option>
-              <option value="Enquiry">Enquiry</option>
-              <option value="Complaint">Complaint</option>
-              <option value="Helpdesk">Helpdesk</option>
-            </select>
+            {typeFilterLocked ? (
+              <div className="flex h-10 items-center rounded-md border border-input bg-slate-50 px-3 text-sm text-slate-700">
+                {scopeConfig.ticketTypeLabel}
+              </div>
+            ) : (
+              <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={ticketType} onChange={(e) => setTicketType(e.target.value as any)}>
+                <option value="">All</option>
+                {scopeConfig.allowedTicketTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="space-y-1">
             <Label className="text-xs text-slate-600">Priority</Label>
             <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={priority} onChange={(e) => setPriority(e.target.value as any)}>
               <option value="">All</option>
-              <option value="Low">Low</option>
-              <option value="Medium">Medium</option>
-              <option value="High">High</option>
-              <option value="Critical">Critical</option>
+              {activePriorityLevels.map((p) => (
+                <option key={p.priority} value={p.priority}>
+                  {p.displayName}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -341,16 +482,19 @@ export default function HelpdeskTicketsPage() {
 
           <div className="space-y-1">
             <Label className="text-xs text-slate-600">Channel</Label>
-            <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={source} onChange={(e) => setSource(e.target.value as any)}>
-              <option value="">All</option>
-              <option value="Internal">Internal</option>
-              <option value="Web">Website</option>
-              <option value="Mobile">Mobile App</option>
-              <option value="Email">Email</option>
-              <option value="PhoneCall">Phone Call</option>
-              <option value="Sms">SMS</option>
-              <option value="WhatsApp">WhatsApp</option>
-            </select>
+            {scopeConfig.internalOnly ? (
+              <div className="flex h-10 items-center rounded-md border border-input bg-slate-50 px-3 text-sm text-slate-700">
+                Internal
+              </div>
+            ) : (
+              <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={source} onChange={(e) => setSource(e.target.value as any)}>
+                {scopedSourceOptions.map((option) => (
+                  <option key={option.label} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="space-y-1">
@@ -368,9 +512,9 @@ export default function HelpdeskTicketsPage() {
               variant="outline"
               onClick={() => {
                 setStatus('');
-                setTicketType('');
+                setTicketType(typeFilterLocked ? scopeConfig.defaultTicketType : '');
                 setPriority('');
-                setSource('');
+                setSource(scopeConfig.internalOnly ? 'Internal' : '');
                 setCategoryId('');
                 setAssignedDepartmentId('');
                 setCreatedFrom('');
@@ -385,21 +529,21 @@ export default function HelpdeskTicketsPage() {
 
       <DataTable
         compact
-        data={data || []}
+        data={scopedData}
         columns={columns}
         loading={isLoading}
         error={error ? 'Failed to load tickets.' : null}
         enableColumnFilters={false}
         enableExport={true}
-        exportFileName={`helpdesk-tickets-${new Date().toISOString().slice(0, 10)}`}
+        exportFileName={`${scopeConfig.scope}-tickets-${new Date().toISOString().slice(0, 10)}`}
         exportFormats={['csv', 'excel']}
         rowActions={rowActions}
         initialColumnVisibility={{ categoryName: false, assignedDepartmentName: false, assignedToName: false }}
-        onRowDoubleClick={(row) => router.push(`/helpdesk/tickets/${row.original.id}`)}
+        onRowDoubleClick={(row) => router.push(buildScopedHelpdeskDetailPath(scopeConfig.scope, row.original.id))}
         emptyStateMessage="No tickets match the current filter."
         toolbarActions={{
           refresh: () => refetch(),
-          create: () => router.push('/helpdesk/tickets/new'),
+          create: () => router.push(buildScopedHelpdeskNewPath(scopeConfig.scope)),
         }}
       />
     </div>

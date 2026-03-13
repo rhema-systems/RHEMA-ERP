@@ -140,6 +140,15 @@ export default function PurchaseRequisitionDetailPage() {
     }
   };
 
+  const handleCreateTender = async () => {
+    try {
+      router.push(`/procurement/tenders/new?fromRequisitionId=${id}`);
+    } catch (error: any) {
+      console.error('Error navigating to tender creation:', error);
+      toast.error(error.message || 'Failed to start Tender process');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -174,6 +183,7 @@ export default function PurchaseRequisitionDetailPage() {
   const canApprove = requisition.status === 'Pending Approval' || requisition.status === 'Submitted';
   const canConvertToPO = requisition.status === 'Approved';
   const canCreateRfq = requisition.status === 'Approved';
+  const canCreateTender = requisition.status === 'Approved';
 
   return (
     <div className="space-y-6">
@@ -239,6 +249,13 @@ export default function PurchaseRequisitionDetailPage() {
             onOpenWorkflows={() => router.push('/administration/workflow')}
           />
           
+          {canCreateTender && (
+            <Button variant="outline" onClick={handleCreateTender}>
+              <FileText className="h-4 w-4 mr-2" />
+              Create Tender
+            </Button>
+          )}
+
           {canConvertToPO && (
             <Button onClick={handleConvertToPO}>
               <ShoppingCart className="h-4 w-4 mr-2" />

@@ -362,6 +362,32 @@ public class InventoryRequisitionsController : ControllerBase
     }
 
     /// <summary>
+    /// Returns previously issued items back to stock
+    /// </summary>
+    [HttpPost("{id}/return")]
+    public async Task<ActionResult> Return(Guid id, [FromBody] ReturnRequisitionDto dto)
+    {
+        try
+        {
+            await _requisitionService.ReturnAsync(id, dto);
+            return Ok(new { message = "Items returned successfully" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error returning items for requisition {Id}", id);
+            return StatusCode(500, "An error occurred while returning items");
+        }
+    }
+
+    /// <summary>
     /// Completes a requisition
     /// </summary>
     [HttpPost("{id}/complete")]

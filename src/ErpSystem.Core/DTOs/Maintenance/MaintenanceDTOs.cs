@@ -1965,6 +1965,9 @@ public class MaintenanceAssetDto
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
     public string? SerialNumber { get; set; }
+    public string? LicensePlate { get; set; }
+    public string? VIN { get; set; }
+    public string? FuelType { get; set; }
     public DateTime? PurchaseDate { get; set; }
     public decimal? PurchasePrice { get; set; }
     public decimal? CurrentValue { get; set; }
@@ -1979,6 +1982,7 @@ public class MaintenanceAssetDto
     public DateTime? LastOperatingHoursUpdate { get; set; }
     public double? Mileage { get; set; }
     public DateTime? LastMileageUpdate { get; set; }
+    public bool IsFleetAsset { get; set; } = false;
 
     // Navigation properties
     public MaintenanceAssetCategoryDto? AssetCategory { get; set; }
@@ -2010,6 +2014,7 @@ public class MaintenanceAssetListDto
     public string? OwnershipType { get; set; }
     public string? LicensePlate { get; set; }
     public string? VIN { get; set; }
+    public string? FuelType { get; set; }
     public string Status { get; set; } = string.Empty;
     public string Criticality { get; set; } = string.Empty;
     public string? Location { get; set; }
@@ -2021,6 +2026,7 @@ public class MaintenanceAssetListDto
     public DateTime? WarrantyEndDate { get; set; }
     public DateTime? WarrantyStartDate { get; set; }
     public string? SerialNumber { get; set; }
+    public bool IsFleetAsset { get; set; } = false;
 }
 
 public class CreateMaintenanceAssetDto
@@ -2053,6 +2059,9 @@ public class CreateMaintenanceAssetDto
     [StringLength(50)]
     public string? VIN { get; set; }
 
+    [StringLength(20)]
+    public string? FuelType { get; set; }
+
     public DateTime? PurchaseDate { get; set; }
     public decimal? PurchasePrice { get; set; }
     public decimal? CurrentValue { get; set; }
@@ -2080,6 +2089,7 @@ public class CreateMaintenanceAssetDto
     public string? Specifications { get; set; }
     public string? DocumentLinks { get; set; }
     public string? Images { get; set; }
+    public bool IsFleetAsset { get; set; } = false;
 }
 
 public class UpdateMaintenanceAssetDto
@@ -2109,6 +2119,9 @@ public class UpdateMaintenanceAssetDto
     [StringLength(50)]
     public string? VIN { get; set; }
 
+    [StringLength(20)]
+    public string? FuelType { get; set; }
+
     public DateTime? PurchaseDate { get; set; }
     public decimal? PurchasePrice { get; set; }
     public decimal? CurrentValue { get; set; }
@@ -2134,6 +2147,7 @@ public class UpdateMaintenanceAssetDto
     public string? Specifications { get; set; }
     public string? DocumentLinks { get; set; }
     public string? Images { get; set; }
+    public bool IsFleetAsset { get; set; } = false;
 }
 
 // MaintenanceAssetCategory DTOs

@@ -30,6 +30,7 @@ type AssetCategoryDto = {
 };
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const FUEL_TYPE_OPTIONS = ['Petrol', 'Diesel', 'Electric', 'Hybrid'] as const;
 
 function getAuthHeaders(): HeadersInit {
   const token = localStorage.getItem('token') || localStorage.getItem('authToken');
@@ -88,6 +89,7 @@ export default function FleetVehiclesPage() {
     status: 'Active',
     licensePlate: '',
     vin: '',
+    fuelType: '',
     manufacturer: '',
     model: '',
     serialNumber: '',
@@ -142,6 +144,14 @@ export default function FleetVehiclesPage() {
   }, [loadVehicles]);
 
   const openEdit = (v: FleetVehicleListDto) => {
+    if ((v.assetType || '').toLowerCase() !== 'vehicle') {
+      toast({
+        title: 'Not a vehicle',
+        description: 'This fleet asset is not a Vehicle-type asset. Edit it from the Maintenance Assets screen.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setEditing(v);
     setEditForm({
       name: v.name,
@@ -149,6 +159,7 @@ export default function FleetVehiclesPage() {
       status: v.status || 'Active',
       licensePlate: v.licensePlate || '',
       vin: v.vin || '',
+      fuelType: v.fuelType || '',
       manufacturer: v.manufacturer || '',
       model: v.model || '',
       serialNumber: '',
@@ -191,6 +202,14 @@ export default function FleetVehiclesPage() {
   }, [toast]);
 
   const openAssign = async (v: FleetVehicleListDto) => {
+    if ((v.assetType || '').toLowerCase() !== 'vehicle') {
+      toast({
+        title: 'Not a vehicle',
+        description: 'Driver assignment is only available for Vehicle-type assets.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setSelectedVehicle(v);
     setSelectedEmployeeId('none');
     setAssignOpen(true);
@@ -212,6 +231,14 @@ export default function FleetVehiclesPage() {
   };
 
   const openHistory = async (v: FleetVehicleListDto) => {
+    if ((v.assetType || '').toLowerCase() !== 'vehicle') {
+      toast({
+        title: 'Not a vehicle',
+        description: 'Driver assignment history is only available for Vehicle-type assets.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setSelectedVehicle(v);
     setHistoryOpen(true);
     try {
@@ -227,11 +254,11 @@ export default function FleetVehiclesPage() {
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Fleet Vehicles</h1>
-          <p className="text-muted-foreground">Vehicles are created as Maintenance Assets (Vehicle type) and managed here.</p>
+          <h1 className="text-2xl font-semibold">Fleets</h1>
+          <p className="text-muted-foreground">Fleet vehicles are created as Maintenance Assets (Vehicle type) and managed here.</p>
         </div>
 
-        <Button onClick={() => window.open('/maintenance/assets?assetType=Vehicle&create=1', '_blank')} title="Create vehicles from the Maintenance Assets screen">
+        <Button onClick={() => window.open('/maintenance/assets?assetType=Vehicle&create=1&addToFleet=1', '_blank')} title="Create vehicles from the Maintenance Assets screen">
           <Plus className="mr-2 h-4 w-4" />
           Create in Assets
         </Button>
@@ -239,7 +266,7 @@ export default function FleetVehiclesPage() {
 
       <Card>
         <CardHeader className="space-y-4">
-          <CardTitle>Vehicles</CardTitle>
+          <CardTitle>Fleets</CardTitle>
           <div className="flex flex-col gap-3 md:flex-row md:items-center">
             <div className="relative flex-1">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -492,6 +519,22 @@ export default function FleetVehiclesPage() {
             <div className="space-y-2">
               <Label>VIN</Label>
               <Input value={editForm.vin || ''} onChange={(e) => setEditForm((p) => ({ ...p, vin: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Fuel Type</Label>
+              <Select value={editForm.fuelType || 'none'} onValueChange={(value) => setEditForm((p) => ({ ...p, fuelType: value === 'none' ? null : value }))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select fuel type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Select fuel type</SelectItem>
+                  {FUEL_TYPE_OPTIONS.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">

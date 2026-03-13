@@ -8,8 +8,10 @@ public class FleetVehicleListDto
     public string Name { get; set; } = string.Empty;
     public string AssetNumber { get; set; } = string.Empty;
     public Guid AssetCategoryId { get; set; }
+    public string? AssetType { get; set; }
     public string? LicensePlate { get; set; }
     public string? Vin { get; set; }
+    public string? FuelType { get; set; }
     public string Status { get; set; } = string.Empty;
     public string CategoryName { get; set; } = string.Empty;
     public string? Manufacturer { get; set; }
@@ -35,6 +37,9 @@ public class CreateFleetVehicleDto
 
     [StringLength(50)]
     public string? Vin { get; set; }
+
+    [StringLength(20)]
+    public string? FuelType { get; set; }
 
     [StringLength(100)]
     public string? Manufacturer { get; set; }
@@ -66,6 +71,7 @@ public class FleetTripDto
     public string VehicleName { get; set; } = string.Empty;
     public string? VehicleAssetNumber { get; set; }
     public string? VehicleLicensePlate { get; set; }
+    public string? VehicleFuelType { get; set; }
 
     public Guid RequestedByUserId { get; set; }
     public Guid? DriverEmployeeId { get; set; }
@@ -75,6 +81,10 @@ public class FleetTripDto
     public string? Purpose { get; set; }
     public string? Origin { get; set; }
     public string? Destination { get; set; }
+    public Guid? FleetTripDestinationId { get; set; }
+    public string? FleetTripDestinationName { get; set; }
+    public double? ExpectedHours { get; set; }
+    public double? ExpectedMileage { get; set; }
     public string? Notes { get; set; }
 
     public DateTime? PlannedStartAt { get; set; }
@@ -117,6 +127,8 @@ public class CreateFleetTripDto
     [StringLength(200)]
     public string? Destination { get; set; }
 
+    public Guid? FleetTripDestinationId { get; set; }
+
     [StringLength(2000)]
     public string? Notes { get; set; }
 
@@ -133,6 +145,7 @@ public class DispatchFleetTripDto
     public DateTime? DispatchedAt { get; set; }
     public double? StartMileage { get; set; }
     public double? StartOperatingHours { get; set; }
+    public Guid? FleetTripDestinationId { get; set; }
 }
 
 public class CompleteFleetTripDto
@@ -151,7 +164,7 @@ public class FleetComplianceItemDto
     public string ComplianceType { get; set; } = string.Empty;
     public string? ReferenceNumber { get; set; }
     public DateTime? IssueDate { get; set; }
-    public DateTime ExpiryDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
     public bool IsCritical { get; set; }
     public string? Notes { get; set; }
     public string? DocumentLinks { get; set; }
@@ -187,6 +200,61 @@ public class CreateFleetComplianceItemDto
 
 public class UpdateFleetComplianceItemDto : CreateFleetComplianceItemDto
 {
+}
+
+public class FleetComplianceTemplateItemDto
+{
+    public Guid Id { get; set; }
+    public Guid TemplateId { get; set; }
+    public string ComplianceType { get; set; } = string.Empty;
+    public bool IsCritical { get; set; }
+    public int SortOrder { get; set; }
+}
+
+public class FleetComplianceTemplateDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public bool IsActive { get; set; }
+    public List<FleetComplianceTemplateItemDto> Items { get; set; } = new();
+}
+
+public class CreateFleetComplianceTemplateItemDto
+{
+    [Required]
+    [StringLength(100)]
+    public string ComplianceType { get; set; } = string.Empty;
+
+    public bool IsCritical { get; set; } = true;
+
+    public int SortOrder { get; set; } = 0;
+}
+
+public class CreateFleetComplianceTemplateDto
+{
+    [Required]
+    [StringLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [StringLength(2000)]
+    public string? Description { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    public List<CreateFleetComplianceTemplateItemDto> Items { get; set; } = new();
+}
+
+public class UpdateFleetComplianceTemplateDto : CreateFleetComplianceTemplateDto
+{
+}
+
+public class FleetVehicleComplianceTemplateDto
+{
+    public Guid VehicleAssetId { get; set; }
+    public Guid TemplateId { get; set; }
+    public string TemplateName { get; set; } = string.Empty;
+    public DateTime AppliedAt { get; set; }
 }
 
 public class FleetFuelTransactionDto
@@ -236,6 +304,39 @@ public class CreateFleetFuelTransactionDto
 
     [StringLength(2000)]
     public string? Notes { get; set; }
+}
+
+public class FleetTripDestinationDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Origin { get; set; }
+    public string? Destination { get; set; }
+    public double? ExpectedHours { get; set; }
+    public double? ExpectedMileage { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public class CreateFleetTripDestinationDto
+{
+    [Required]
+    [StringLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [StringLength(200)]
+    public string? Origin { get; set; }
+
+    [StringLength(200)]
+    public string? Destination { get; set; }
+
+    public double? ExpectedHours { get; set; }
+    public double? ExpectedMileage { get; set; }
+
+    public bool IsActive { get; set; } = true;
+}
+
+public class UpdateFleetTripDestinationDto : CreateFleetTripDestinationDto
+{
 }
 
 public class UpdateFleetFuelTransactionDto : CreateFleetFuelTransactionDto
@@ -696,13 +797,27 @@ public class FleetCostEntryDto
 
 public class CreateFleetCostEntryDto
 {
-    [Required]
-    public Guid VehicleAssetId { get; set; }
+    /// <summary>
+    /// Preferred linkage: costs should be attributed to a specific trip.
+    /// When provided, VehicleAssetId will be derived from the trip.
+    /// </summary>
+    public Guid? FleetTripId { get; set; }
+
+    /// <summary>
+    /// Legacy/optional linkage. If FleetTripId is not provided, VehicleAssetId must be provided.
+    /// </summary>
+    public Guid? VehicleAssetId { get; set; }
 
     public DateTime? CostDateUtc { get; set; }
 
     [Required, StringLength(50)]
     public string CostType { get; set; } = "Other";
+
+    /// <summary>
+    /// Optional origin label (e.g. TripExpense). Defaults to Manual.
+    /// </summary>
+    [StringLength(50)]
+    public string? Source { get; set; }
 
     [Range(0.01, 999999999)]
     public decimal Amount { get; set; }

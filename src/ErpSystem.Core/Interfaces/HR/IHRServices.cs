@@ -1,3 +1,4 @@
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
@@ -21,10 +22,14 @@ public interface IEmployeeService
     Task<bool> DeleteEmployeeAsync(Guid id);
     Task<bool> DeactivateEmployeeAsync(Guid id);
     Task<bool> ActivateEmployeeAsync(Guid id);
+    Task<bool> TerminateEmployeeAsync(Guid id, TerminateEmployeeDto dto);
 
     // Employee filtering and grouping
+    Task<IEnumerable<EmployeeDto>> GetByStationAsync(Guid stationId);
+    Task<IEnumerable<EmployeeDto>> GetByDivisionAsync(Guid divisionId);
     Task<IEnumerable<EmployeeDto>> GetByDepartmentAsync(Guid departmentId);
     Task<IEnumerable<EmployeeDto>> GetBySectionAsync(Guid sectionId);
+    Task<IEnumerable<EmployeeDto>> GetByUnitAsync(Guid unitId);
     Task<IEnumerable<EmployeeDto>> GetByPositionAsync(Guid positionId);
     Task<IEnumerable<EmployeeDto>> GetByStatusAsync(StaffStatus status);
     Task<IEnumerable<EmployeeDto>> GetByContractTypeAsync(ContractType contractType);
@@ -46,6 +51,195 @@ public interface IEmployeeService
     Task<int> GetActiveEmployeeCountAsync();
     Task<Dictionary<StaffStatus, int>> GetEmployeeCountByStatusAsync();
     Task<Dictionary<string, int>> GetEmployeeCountByDepartmentAsync();
+
+        #region 1) Core Employee Lifecycle (writes - transactional)
+
+    Task<EmployeeDetailDto> CreateEmployeeAsync(CreateEmployeeDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeeDetailDto> UpdateEmployeeAsync(Guid employeeId, UpdateEmployeeDto dto, CancellationToken cancellationToken = default);
+
+    Task<EmployeeDetailDto> ActivateEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeeDetailDto> DeactivateEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    Task<EmployeeDetailDto> TerminateEmployeeAsync(Guid employeeId, TerminateEmployeeDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeeDetailDto> ReinstateEmployeeAsync(Guid employeeId, string? notes = null, CancellationToken cancellationToken = default);
+
+    Task<bool> DeleteEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    #endregion
+
+    #region 2) Employee Retrieval (intent-based reads)
+
+    Task<EmployeeDto?> GetEmployeeSummaryByIdAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeeDetailDto?> GetEmployeeDetailsByIdAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeeFullProfileDto?> GetEmployeeFullProfileByIdAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    Task<EmployeeDto?> GetEmployeeSummaryByEmployeeNumberAsync(string employeeNumber, CancellationToken cancellationToken = default);
+    Task<EmployeeDetailDto?> GetEmployeeDetailsByEmployeeNumberAsync(string employeeNumber, CancellationToken cancellationToken = default);
+    Task<EmployeeFullProfileDto?> GetEmployeeFullProfileByEmployeeNumberAsync(string employeeNumber, CancellationToken cancellationToken = default);
+
+    Task<EmployeeDto?> GetEmployeeSummaryByEmailAsync(string email, CancellationToken cancellationToken = default);
+
+    Task<PagedResult<EmployeeDto>> GetEmployeesPagedAsync(EmployeeSearchDto searchCriteria, int page, int pageSize, CancellationToken cancellationToken = default);
+
+    Task<IEnumerable<EmployeeDto>> GetEmployeesByOrganizationUnitAsync(Guid organizationUnitId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<EmployeeDto>> GetEmployeesByOrganizationLevelAsync(Guid organizationLevelId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<EmployeeDto>> GetEmployeesByPositionAsync(Guid positionId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<EmployeeDto>> GetEmployeesByLocationAsync(Guid locationId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<EmployeeDto>> GetEmployeesByManagerAsync(Guid managerId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<EmployeeDto>> GetEmployeesByStatusAsync(StaffStatus status, CancellationToken cancellationToken = default);
+
+    #endregion
+
+    #region 3) Relationship Management (subresources)
+
+    // Emergency contacts
+    Task<IEnumerable<EmployeeEmergencyContactDto>> GetEmergencyContactsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeeEmergencyContactDto> AddEmergencyContactAsync(CreateEmployeeEmergencyContactDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeeEmergencyContactDto> UpdateEmergencyContactAsync(UpdateEmployeeEmergencyContactDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemoveEmergencyContactAsync(Guid emergencyContactId, CancellationToken cancellationToken = default);
+    Task<EmployeeEmergencyContactDto> SetPrimaryEmergencyContactAsync(Guid emergencyContactId, CancellationToken cancellationToken = default);
+    Task<EmployeeEmergencyContactDto> ActivateEmergencyContactAsync(Guid emergencyContactId, CancellationToken cancellationToken = default);
+    Task<EmployeeEmergencyContactDto> DeactivateEmergencyContactAsync(Guid emergencyContactId, CancellationToken cancellationToken = default);
+    Task<EmployeeEmergencyContactDto?> GetEmergencyContactByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Dependents
+    Task<IEnumerable<EmployeeDependentReadDto>> GetDependentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeeDependentReadDto> AddDependentAsync(EmployeeDependentCreateDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeeDependentReadDto> UpdateDependentAsync(EmployeeDependentUpdateDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemoveDependentAsync(Guid dependentId, CancellationToken cancellationToken = default);
+    Task<EmployeeDependentReadDto?> GetDependentAsync(Guid dependentId, CancellationToken cancellationToken = default);
+
+    // Dependent benefits
+    Task<IEnumerable<EmployeeDependentBenefitDto>> GetDependentBenefitsAsync(Guid employeeDependentId, CancellationToken cancellationToken = default);
+    Task<EmployeeDependentBenefitDto> AddDependentBenefitAsync(CreateEmployeeDependentBenefitDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeeDependentBenefitDto> UpdateDependentBenefitAsync(UpdateEmployeeDependentBenefitDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemoveDependentBenefitAsync(Guid dependentBenefitId, CancellationToken cancellationToken = default);
+    Task<EmployeeDependentBenefitDto> ActivateDependentBenefitAsync(Guid dependentBenefitId, CancellationToken cancellationToken = default);
+    Task<EmployeeDependentBenefitDto> DeactivateDependentBenefitAsync(Guid dependentBenefitId, CancellationToken cancellationToken = default);
+    Task<EmployeeDependentBenefitDto?> GetDependentBenefitByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Qualifications
+    Task<IEnumerable<EmployeeQualificationDto>> GetQualificationsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeeQualificationDto> AddQualificationAsync(CreateEmployeeQualificationDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeeQualificationDto> UpdateQualificationAsync(UpdateEmployeeQualificationDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemoveQualificationAsync(Guid qualificationId, CancellationToken cancellationToken = default);
+    Task<EmployeeQualificationDto> VerifyQualificationAsync(Guid qualificationId, CancellationToken cancellationToken = default);
+    Task<EmployeeQualificationDto> UnverifyQualificationAsync(Guid qualificationId, CancellationToken cancellationToken = default);
+    Task<EmployeeQualificationDto?> GetQualificationByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Skills & certifications
+    Task<IEnumerable<EmployeeSkillDto>> GetSkillsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeeSkillDto> AddSkillAsync(CreateEmployeeSkillDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeeSkillDto> UpdateSkillAsync(UpdateEmployeeSkillDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemoveSkillAsync(Guid employeeSkillId, CancellationToken cancellationToken = default);
+    Task<EmployeeSkillDto> VerifySkillAsync(Guid employeeSkillId, CancellationToken cancellationToken = default);
+    Task<EmployeeSkillDto> UnverifySkillAsync(Guid employeeSkillId, CancellationToken cancellationToken = default);
+    Task<EmployeeSkillDto?> GetSkillByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Identification cards
+    Task<IEnumerable<EmployeeIdentificationCardListDto>> GetIdentificationCardsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeeIdentificationCardDetailDto?> GetIdentificationCardByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<EmployeeIdentificationCardDetailDto> AddIdentificationCardAsync(CreateEmployeeIdentificationCardDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeeIdentificationCardDetailDto> UpdateIdentificationCardAsync(UpdateEmployeeIdentificationCardDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemoveIdentificationCardAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<EmployeeIdentificationCardDetailDto> VerifyIdentificationCardAsync(Guid id, DateTime verifiedDate, CancellationToken cancellationToken = default);
+    Task<EmployeeIdentificationCardDetailDto> UnverifyIdentificationCardAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Work history
+    Task<IEnumerable<EmployeeWorkHistoryListDto>> GetWorkHistoriesAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeeWorkHistoryDetailDto?> GetWorkHistoryByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<EmployeeWorkHistoryDetailDto> AddWorkHistoryAsync(CreateEmployeeWorkHistoryDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeeWorkHistoryDetailDto> UpdateWorkHistoryAsync(UpdateEmployeeWorkHistoryDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemoveWorkHistoryAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Contracts
+    Task<IEnumerable<EmployeeContractDetailDto>> GetContractsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeeContractDetailDto?> GetActiveContractAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeeContractDetailDto> AddContractAsync(CreateEmployeeContractDetailDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeeContractDetailDto> UpdateContractAsync(UpdateEmployeeContractDetailDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemoveContractAsync(Guid contractId, CancellationToken cancellationToken = default);
+    Task<EmployeeContractDetailDto> ActivateContractAsync(Guid contractId, CancellationToken cancellationToken = default);
+    Task<EmployeeContractDetailDto> DeactivateContractAsync(Guid contractId, CancellationToken cancellationToken = default);
+    Task<EmployeeContractDetailDto> TerminateContractAsync(Guid contractId, DateOnly terminationDate, string reason, CancellationToken cancellationToken = default);
+    Task<EmployeeContractDetailDto?> GetContractByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Expatriate assignments
+    Task<IEnumerable<ExpatriateAssignmentListDto>> GetExpatriateAssignmentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<ExpatriateAssignmentDetailDto?> GetExpatriateAssignmentByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<ExpatriateAssignmentDetailDto> AddExpatriateAssignmentAsync(CreateExpatriateAssignmentDto dto, CancellationToken cancellationToken = default);
+    Task<ExpatriateAssignmentDetailDto> UpdateExpatriateAssignmentAsync(UpdateExpatriateAssignmentDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemoveExpatriateAssignmentAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Position history
+    Task<IEnumerable<EmployeePositionHistoryListDto>> GetPositionHistoryAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeePositionHistoryDetailDto?> GetPositionHistoryByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<EmployeePositionHistoryDetailDto> AddPositionHistoryAsync(CreateEmployeePositionHistoryDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeePositionHistoryDetailDto> UpdatePositionHistoryAsync(UpdateEmployeePositionHistoryDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemovePositionHistoryAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Salary assignments
+    Task<IEnumerable<EmployeeSalaryAssignmentListDto>> GetSalaryAssignmentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeeSalaryAssignmentDetailDto?> GetSalaryAssignmentByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<EmployeeSalaryAssignmentDetailDto> AssignSalaryAsync(CreateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeeSalaryAssignmentDetailDto> UpdateSalaryAssignmentAsync(UpdateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemoveSalaryAssignmentAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Referees
+    Task<IEnumerable<EmployeeRefereeListDto>> GetRefereesAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeeRefereeDetailDto?> GetRefereeByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<EmployeeRefereeDetailDto> AddRefereeAsync(CreateEmployeeRefereeDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeeRefereeDetailDto> UpdateRefereeAsync(UpdateEmployeeRefereeDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemoveRefereeAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<EmployeeRefereeDetailDto> SetPrimaryRefereeAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<EmployeeRefereeDetailDto> ActivateRefereeAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<EmployeeRefereeDetailDto> DeactivateRefereeAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Guarantors
+    Task<IEnumerable<EmployeeGuarantorListDto>> GetGuarantorsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<EmployeeGuarantorDetailDto?> GetGuarantorByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<EmployeeGuarantorDetailDto> AddGuarantorAsync(CreateEmployeeGuarantorDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeeGuarantorDetailDto> UpdateGuarantorAsync(UpdateEmployeeGuarantorDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RemoveGuarantorAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<EmployeeGuarantorDetailDto> SetPrimaryGuarantorAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<EmployeeGuarantorDetailDto> VerifyGuarantorAsync(Guid id, Guid verifiedByEmployeeId, DateTime verifiedDate, CancellationToken cancellationToken = default);
+    Task<EmployeeGuarantorDetailDto> UnverifyGuarantorAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<EmployeeGuarantorDetailDto> ActivateGuarantorAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<EmployeeGuarantorDetailDto> DeactivateGuarantorAsync(Guid id, CancellationToken cancellationToken = default);
+
+    #endregion
+
+    #region 4) Manager & Hierarchy Operations
+
+    Task<EmployeeDetailDto> AssignManagerAsync(Guid employeeId, Guid managerId, CancellationToken cancellationToken = default);
+    Task<EmployeeDetailDto> RemoveManagerAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<EmployeeDto>> GetDirectReportsAsync(Guid managerId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<EmployeeDto>> GetManagementChainAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<bool> WouldCreateCircularReportingAsync(Guid employeeId, Guid proposedManagerId, CancellationToken cancellationToken = default);
+
+    #endregion
+
+    #region 5) Payroll, Tax & Contract Logic
+
+    Task ValidatePayrollFlagsAsync(bool payTax, bool ssFund, bool grossUp, bool tier2Only, bool overtime, CancellationToken cancellationToken = default);
+
+    #endregion
+
+    #region 6) Validation & Business Rules
+
+    Task<bool> IsEmployeeNumberUniqueAsync(string employeeNumber, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
+    Task<bool> IsEmailUniqueAsync(string email, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
+    Task<bool> IsBadgeNumberUniqueAsync(string badgeNumber, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
+    Task<bool> IsTaxNumberUniqueAsync(string taxNumber, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
+    Task<bool> IsSocialSecurityNumberUniqueAsync(string socialSecurityNumber, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
+    Task<bool> IsTinNumberUniqueAsync(string tinNumber, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default);
+
+    Task<bool> HasActiveContractAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<bool> HasActiveDependentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<bool> HasActiveGuarantorsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<bool> IsEligibleForExpatriateAssignmentAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    Task<bool> CanTerminateEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    #endregion
 }
 
 /// <summary>
@@ -89,10 +283,11 @@ public interface IEmployeePositionService
     Task<EmployeePositionDto?> GetByIdAsync(Guid id);
     Task<IEnumerable<EmployeePositionDto>> GetAllAsync();
     Task<IEnumerable<EmployeePositionDto>> GetActivePositionsAsync();
+    Task<IEnumerable<EmployeePositionDto>> GetByOrganizationUnitAsync(Guid organizationUnitId);
     Task<IEnumerable<EmployeePositionDto>> GetByDepartmentAsync(Guid departmentId);
     Task<EmployeePositionDto?> GetByCodeAsync(string code);
     Task<EmployeePositionDto> CreatePositionAsync(CreateEmployeePositionDto createDto);
-    Task<EmployeePositionDto> UpdatePositionAsync(Guid id, CreateEmployeePositionDto updateDto);
+    Task<EmployeePositionDto> UpdatePositionAsync(Guid id, UpdateEmployeePositionDto updateDto);
     Task<bool> DeletePositionAsync(Guid id);
     Task<bool> CodeExistsAsync(string code);
 }

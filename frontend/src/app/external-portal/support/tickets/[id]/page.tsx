@@ -3,20 +3,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Paperclip, Send, Ticket } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Eye, Link2, Paperclip, Send, Ticket } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useSignalR } from '@/hooks/useSignalR';
-import { ehcTicketService, type EhcTicketAttachment } from '@/services/ehcTicketService';
+import { ehcTicketService, type EhcExternalTicketLink, type EhcTicketAttachment, type EhcTicketPriority, type EhcTicketSource, type EhcTicketStatus } from '@/services/ehcTicketService';
 import { fileUploadService } from '@/services/fileUploadService';
-import type { EhcTicketPriority, EhcTicketSource, EhcTicketStatus } from '@/services/ehcTicketService';
 
 const statusBadgeClassName = (s: EhcTicketStatus) => {
   switch (s) {
@@ -105,12 +105,30 @@ export default function ExternalPortalSupportTicketDetailPage() {
   const [nowTs, setNowTs] = useState(() => Date.now());
   const [messageBody, setMessageBody] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [feedbackRating, setFeedbackRating] = useState<number>(0);
+  const [feedbackComment, setFeedbackComment] = useState('');
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [preview, setPreview] = useState<{ name: string; url: string; kind: 'image' | 'pdf' | 'other' } | null>(null);
 
   const { data: ticket, isLoading, error } = useQuery({
     queryKey: ['ehc', 'ticket', ticketId],
     queryFn: () => ehcTicketService.getMyTicket(ticketId),
     enabled: Boolean(ticketId),
   });
+
+  const { data: links } = useQuery({
+    queryKey: ['ehc', 'ticket', ticketId, 'links'],
+    queryFn: () => ehcTicketService.listMyTicketLinks(ticketId),
+    enabled: Boolean(ticketId),
+  });
+
+  useEffect(() => {
+    if (!ticket) return;
+    if (ticket.feedbackRating) {
+      setFeedbackRating(ticket.feedbackRating);
+      setFeedbackComment(ticket.feedbackComment || '');
+    }
+  }, [ticket?.id, ticket?.feedbackRating, ticket?.feedbackComment]);
 
   const handleRealtimeNotification = useCallback(
     (n: any) => {
@@ -131,6 +149,7 @@ export default function ExternalPortalSupportTicketDetailPage() {
 
       toast({ title: 'Ticket updated', description: n?.title || n?.Title || 'An update was received.', variant: 'success' });
       qc.invalidateQueries({ queryKey: ['ehc', 'ticket', ticketId] });
+      qc.invalidateQueries({ queryKey: ['ehc', 'ticket', ticketId, 'links'] });
     },
     [qc, ticketId, toast]
   );
@@ -138,6 +157,30 @@ export default function ExternalPortalSupportTicketDetailPage() {
   useSignalR({
     autoConnect: true,
     onNotification: handleRealtimeNotification,
+  });
+
+  const canSubmitFeedback = useMemo(() => {
+    if (!ticket) return false;
+    if (ticket.status !== 'Resolved' && ticket.status !== 'Closed') return false;
+    return !ticket.feedbackRating;
+  }, [ticket?.status, ticket?.feedbackRating]);
+
+  const submitFeedback = useMutation({
+    mutationFn: async () => {
+      if (!ticketId) throw new Error('Ticket id is required');
+      if (feedbackRating < 1 || feedbackRating > 5) throw new Error('Select a rating from 1 to 5');
+      return ehcTicketService.submitFeedback(ticketId, {
+        rating: feedbackRating,
+        comment: (feedbackComment || '').trim() || null,
+      });
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['ehc', 'ticket', ticketId] });
+      toast({ title: 'Thank you', description: 'Your feedback has been submitted.', variant: 'success' });
+    },
+    onError: (err: any) => {
+      toast({ title: 'Error', description: err?.message || 'Failed to submit feedback', variant: 'destructive' });
+    },
   });
 
   const statusHistory = useMemo(() => ticket?.statusHistory ?? [], [ticket?.statusHistory]);
@@ -153,6 +196,23 @@ export default function ExternalPortalSupportTicketDetailPage() {
     const dt = new Date(iso);
     if (Number.isNaN(dt.getTime())) return iso;
     return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(dt);
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (!bytes || bytes < 0) return '—';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round((bytes / 1024) * 10) / 10} KB`;
+    return `${Math.round((bytes / 1024 / 1024) * 10) / 10} MB`;
+  };
+
+  const guessKind = (a: EhcTicketAttachment): 'image' | 'pdf' | 'other' => {
+    const ct = (a.contentType || '').toLowerCase();
+    const name = (a.fileName || '').toLowerCase();
+    if (ct.startsWith('image/')) return 'image';
+    if (ct === 'application/pdf') return 'pdf';
+    if (name.endsWith('.pdf')) return 'pdf';
+    if (name.match(/\.(png|jpg|jpeg|gif|webp|bmp|svg)$/)) return 'image';
+    return 'other';
   };
 
   const now = useMemo(() => new Date(nowTs), [nowTs]);
@@ -353,13 +413,15 @@ export default function ExternalPortalSupportTicketDetailPage() {
           <CardDescription>Created {formatDateTime(ticket.createdAt)}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Tabs defaultValue="details">
-            <TabsList>
-              <TabsTrigger value="details">Details</TabsTrigger>
-              <TabsTrigger value="sla">SLA</TabsTrigger>
-              <TabsTrigger value="timeline">Timeline</TabsTrigger>
-              <TabsTrigger value="audit">Audit</TabsTrigger>
-            </TabsList>
+            <Tabs defaultValue="details">
+              <TabsList>
+                <TabsTrigger value="details">Details</TabsTrigger>
+                <TabsTrigger value="sla">SLA</TabsTrigger>
+                <TabsTrigger value="links">Linked tickets</TabsTrigger>
+                <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                <TabsTrigger value="audit">Audit</TabsTrigger>
+                {ticket.status === 'Resolved' || ticket.status === 'Closed' ? <TabsTrigger value="feedback">Feedback</TabsTrigger> : null}
+              </TabsList>
 
             <TabsContent value="details" className="space-y-4">
               <div className="rounded-lg border bg-slate-50/80 p-4">
@@ -406,17 +468,40 @@ export default function ExternalPortalSupportTicketDetailPage() {
                   <div className="space-y-1">
                     {attachments.map((a) => {
                       const url = toDisplayUrl(a);
+                      const kind = guessKind(a);
                       return (
-                        <div key={a.id} className="text-sm">
-                          {url ? (
-                            <a className="text-blue-700 hover:underline" href={url} target="_blank" rel="noreferrer">
-                              {a.fileName}
-                            </a>
-                          ) : (
-                            <span>{a.fileName}</span>
-                          )}
-                          <span className="text-slate-500 ml-2">({Math.round((a.fileSize / 1024) * 10) / 10} KB)</span>
-                          <span className="text-slate-500 ml-2">• {formatDateTime(a.createdAt)}</span>
+                        <div key={a.id} className="text-sm flex items-center justify-between gap-3 rounded-md border bg-slate-50/60 px-3 py-2">
+                          <div className="min-w-0">
+                            <div className="truncate">
+                              {url ? (
+                                <a className="text-blue-700 hover:underline" href={url} target="_blank" rel="noreferrer" title={a.fileName}>
+                                  {a.fileName}
+                                </a>
+                              ) : (
+                                <span title={a.fileName}>{a.fileName}</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              {formatBytes(a.fileSize)} • {formatDateTime(a.createdAt)}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {url ? (
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="outline"
+                                title="Preview"
+                                onClick={() => {
+                                  setPreview({ name: a.fileName, url, kind });
+                                  setPreviewOpen(true);
+                                }}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            ) : null}
+                          </div>
                         </div>
                       );
                     })}
@@ -475,6 +560,59 @@ export default function ExternalPortalSupportTicketDetailPage() {
               </div>
             </TabsContent>
 
+            <TabsContent value="links" className="space-y-4">
+              <div className="rounded-lg border bg-slate-50/80 p-4">
+                <div className="text-sm text-slate-700">Linked tickets help you track related or duplicate cases.</div>
+              </div>
+
+              <div className="rounded-lg border bg-white p-4">
+                {(links ?? []).length ? (
+                  <div className="space-y-2">
+                    {(links ?? []).map((l: EhcExternalTicketLink) => (
+                      <div key={l.id} className="rounded-md border bg-slate-50/60 px-3 py-2 flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className="bg-white">
+                              <span className="inline-flex items-center gap-1.5">
+                                <Link2 className="h-3.5 w-3.5" />
+                                {l.relationshipLabel}
+                              </span>
+                            </Badge>
+                            <button
+                              type="button"
+                              className="text-sm font-semibold text-slate-900 hover:underline"
+                              onClick={() => router.push(`/support/tickets/${l.linkedTicketId}`)}
+                              title="Open linked ticket"
+                            >
+                              {l.linkedTicketNumber}
+                            </button>
+                            <Badge className={statusBadgeClassName(l.linkedStatus)}>{l.linkedStatus}</Badge>
+                            <Badge className={priorityBadgeClassName(l.linkedPriority)}>{l.linkedPriority}</Badge>
+                          </div>
+                          {l.linkedSubject ? <div className="mt-1 text-sm text-slate-700 line-clamp-2">{l.linkedSubject}</div> : null}
+                          <div className="mt-1 text-xs text-slate-500">
+                            Created: {formatDateTime(l.linkedCreatedAt)} • Linked: {formatDateTime(l.createdAt)}
+                          </div>
+                        </div>
+
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="outline"
+                          title="Open"
+                          onClick={() => router.push(`/support/tickets/${l.linkedTicketId}`)}
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-600">No linked tickets.</div>
+                )}
+              </div>
+            </TabsContent>
+
             <TabsContent value="timeline" className="space-y-2">
               {statusHistory.length ? (
                 <div className="space-y-2">
@@ -509,6 +647,51 @@ export default function ExternalPortalSupportTicketDetailPage() {
               ) : (
                 <div className="text-sm text-slate-600">No audit events yet.</div>
               )}
+            </TabsContent>
+
+            <TabsContent value="feedback" className="space-y-4">
+              <div className="rounded-lg border bg-white p-4 space-y-3">
+                <div className="font-medium text-slate-900">How was your experience?</div>
+                <div className="text-sm text-slate-600">Rate our support for this ticket.</div>
+
+                <div className="flex flex-wrap gap-2">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className={`h-9 w-9 rounded-md border text-sm font-medium ${
+                        (ticket.feedbackRating || feedbackRating) >= n ? 'bg-yellow-400 text-slate-900 border-yellow-400' : 'bg-background hover:bg-muted'
+                      } ${ticket.feedbackRating ? 'opacity-80 cursor-not-allowed' : ''}`}
+                      onClick={() => (!ticket.feedbackRating ? setFeedbackRating(n) : null)}
+                      disabled={Boolean(ticket.feedbackRating)}
+                      aria-label={`Rate ${n}`}
+                      title={`${n}/5`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Comment (optional)</Label>
+                  <Textarea
+                    value={ticket.feedbackRating ? ticket.feedbackComment || '' : feedbackComment}
+                    onChange={(e) => (ticket.feedbackRating ? null : setFeedbackComment(e.target.value))}
+                    placeholder="Tell us what went well or what we can improve..."
+                    disabled={Boolean(ticket.feedbackRating)}
+                    rows={4}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs text-slate-500">
+                    {ticket.feedbackRating ? `Submitted ${ticket.feedbackSubmittedAt ? formatDateTime(ticket.feedbackSubmittedAt) : ''}` : 'You can submit feedback once.'}
+                  </div>
+                  <Button onClick={() => submitFeedback.mutate()} disabled={!canSubmitFeedback || submitFeedback.isPending}>
+                    {submitFeedback.isPending ? 'Submitting…' : ticket.feedbackRating ? 'Submitted' : 'Submit feedback'}
+                  </Button>
+                </div>
+              </div>
             </TabsContent>
           </Tabs>
         </CardContent>
@@ -564,6 +747,38 @@ export default function ExternalPortalSupportTicketDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle className="truncate">{preview?.name || 'Attachment'}</DialogTitle>
+            <DialogDescription>
+              {preview?.url ? (
+                <a className="text-blue-700 hover:underline" href={preview.url} target="_blank" rel="noreferrer">
+                  Open in new tab
+                </a>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+
+          {preview?.url ? (
+            preview.kind === 'image' ? (
+              <div className="rounded-md border bg-white p-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={preview.url} alt={preview.name} className="max-h-[70vh] w-full object-contain" />
+              </div>
+            ) : preview.kind === 'pdf' ? (
+              <div className="rounded-md border bg-white overflow-hidden">
+                <iframe title={preview.name} src={preview.url} className="w-full h-[70vh]" />
+              </div>
+            ) : (
+              <div className="text-sm text-slate-600">
+                Preview not available for this file type. Use “Open in new tab” to download/view.
+              </div>
+            )
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

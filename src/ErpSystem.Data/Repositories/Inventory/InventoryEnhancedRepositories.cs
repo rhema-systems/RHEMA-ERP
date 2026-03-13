@@ -935,6 +935,17 @@ public class InventoryRequisitionRepository : GenericRepository<InventoryRequisi
             .ToListAsync();
     }
 
+    public async Task<IEnumerable<InventoryRequisition>> GetByProjectAsync(Guid projectId)
+    {
+        if (projectId == Guid.Empty) return new List<InventoryRequisition>();
+        return await _dbSet
+            .Where(r => r.ProjectId == projectId && !r.IsDeleted)
+            .Include(r => r.Warehouse)
+            .Include(r => r.RequestedBy)
+            .OrderByDescending(r => r.RequestDate)
+            .ToListAsync();
+    }
+
     public async Task<IEnumerable<InventoryRequisition>> GetByWarehouseAsync(Guid warehouseId)
     {
         if (warehouseId == Guid.Empty) return new List<InventoryRequisition>();

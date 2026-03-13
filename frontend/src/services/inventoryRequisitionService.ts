@@ -152,6 +152,19 @@ export interface IssueRequisitionDto {
   notes?: string;
 }
 
+export interface ReturnRequisitionItemDto {
+  itemId: string;
+  returnedQuantity: number;
+  locationId?: string;
+  lotNumber?: string;
+  serialNumber?: string;
+}
+
+export interface ReturnRequisitionDto {
+  items: ReturnRequisitionItemDto[];
+  notes?: string;
+}
+
 export interface DepartmentDto {
   id: string;
   name: string;
@@ -194,6 +207,12 @@ export const inventoryRequisitionService = {
   // Get requisitions by warehouse
   getByWarehouse: async (warehouseId: string): Promise<InventoryRequisitionDto[]> => {
     const response = await axios.get(`${API_URL}/inventory/requisitions/by-warehouse/${warehouseId}`, { headers: getAuthHeaders() });
+    return response.data;
+  },
+
+  // Get requisitions by project
+  getByProject: async (projectId: string): Promise<InventoryRequisitionDto[]> => {
+    const response = await axios.get(`${API_URL}/projects/${projectId}/materials/requisitions`, { headers: getAuthHeaders() });
     return response.data;
   },
 
@@ -245,6 +264,11 @@ export const inventoryRequisitionService = {
   // Issue requisition
   issue: async (id: string, dto: IssueRequisitionDto): Promise<void> => {
     await axios.post(`${API_URL}/inventory/requisitions/${id}/issue`, dto, { headers: getAuthHeaders() });
+  },
+
+  // Return requisition items to stock
+  returnItems: async (id: string, dto: ReturnRequisitionDto): Promise<void> => {
+    await axios.post(`${API_URL}/inventory/requisitions/${id}/return`, dto, { headers: getAuthHeaders() });
   },
 
   // Complete requisition

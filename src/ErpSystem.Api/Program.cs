@@ -108,6 +108,20 @@ if (args.Length > 0 && args[0] == "seed-db")
 
 var builder = WebApplication.CreateBuilder(args);
 
+if (builder.Environment.IsEnvironment("Testing")
+    && string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("DefaultConnection")))
+{
+    builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+    {
+        ["ConnectionStrings:DefaultConnection"] = "Server=(localdb)\\MSSQLLocalDB;Database=ErpSystem_TestHost;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true",
+        ["Database:Provider"] = "SqlServer",
+        ["SkipStartupInitialization"] = "true",
+        ["JwtSettings:SecretKey"] = "TestingOnlySecretKeyForApiHost1234567890",
+        ["JwtSettings:Issuer"] = "ErpSystem.Api.Tests",
+        ["JwtSettings:Audience"] = "ErpSystem.Api.Tests.Client"
+    });
+}
+
 // Configure host shutdown timeout
 builder.Host.ConfigureServices((context, services) =>
 {
@@ -247,21 +261,35 @@ app.MapControllers();
 // SignalR Hubs
 app.MapHub<ErpSystem.Api.Hubs.DashboardHub>("/api/hubs/dashboard");
 
-// Initialize database and seed data
-Console.WriteLine("🔄 Starting database initialization...");
-try
-{
-    await InitializeDatabaseAsync(app);
-    Console.WriteLine("✅ Database initialization completed");
-}
-catch (Exception ex)
-{
-    Console.WriteLine($"❌ Database initialization failed: {ex.Message}");
-    Console.WriteLine($"   Stack trace: {ex.StackTrace}");
-}
+var skipStartupInitialization = app.Environment.IsEnvironment("Testing")
+    || app.Configuration.GetValue<bool>("SkipStartupInitialization");
 
-// Seed database (finance, HR, maintenance, etc.)
-await SeedDatabaseAsync(app);
+if (!skipStartupInitialization)
+{
+    // Initialize database and seed data
+    app.Logger.LogInformation("Starting database initialization...");
+    try
+    {
+        await InitializeDatabaseAsync(app);
+        app.Logger.LogInformation("Database initialization completed");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Database initialization failed");
+    }
+
+    // Seed demo/basic data in Development to make local testing easier.
+    if (app.Environment.IsDevelopment())
+    {
+        app.Logger.LogInformation("Starting Development data seeding...");
+        await SeedDatabaseAsync(app);
+        app.Logger.LogInformation("Development data seeding completed");
+    }
+}
+else
+{
+    app.Logger.LogInformation("Skipping startup database initialization for environment {EnvironmentName}", app.Environment.EnvironmentName);
+}
 
 // Workflow automation trigger - comprehensive testing active
 // Version: 2.0.0 - Full CI/CD Pipeline Integration
@@ -275,7 +303,7 @@ async Task InitializeDatabaseAsync(WebApplication app)
 
     try
     {
-        Console.WriteLine("   → Testing database connection...");
+        logger.LogDebug("Testing database connection...");
 
         // Test connection first with a longer timeout
         using var testCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -288,8 +316,7 @@ async Task InitializeDatabaseAsync(WebApplication app)
             return;
         }
 
-        Console.WriteLine("   ✅ Database connection successful");
-        Console.WriteLine("   → Running migrations...");
+        logger.LogInformation("Database connection successful. Running migrations...");
 
         // ── TEMPORARY HOTFIX: Mark already-applied migrations & add missing columns ──
         // The FixRuntimeSchemaIssues migration was deleted (it tried to drop non-existent FKs).
@@ -346,21 +373,15 @@ async Task InitializeDatabaseAsync(WebApplication app)
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await context.Database.MigrateAsync(cts.Token);
 
-        Console.WriteLine("   ✅ Database migration completed successfully");
+        logger.LogInformation("Database migration completed successfully");
     }
-    catch (OperationCanceledException)
+    catch (OperationCanceledException ex)
     {
-        logger.LogError("Database operation timed out");
-        Console.WriteLine("   ❌ Database operation timed out - check if SQL Server is running");
+        logger.LogError(ex, "Database operation timed out. Check if SQL Server is running and reachable.");
     }
     catch (Exception ex)
     {
         logger.LogError(ex, "An error occurred while migrating the database");
-        Console.WriteLine($"   ❌ Database error: {ex.Message}");
-        if (ex.InnerException != null)
-        {
-            Console.WriteLine($"   ❌ Inner error: {ex.InnerException.Message}");
-        }
     }
 }
 
@@ -376,3 +397,5 @@ async Task SeedDatabaseAsync(WebApplication app)
         logger.LogError(ex, "An error occurred while seeding the database");
     }
 }
+
+public partial class Program;

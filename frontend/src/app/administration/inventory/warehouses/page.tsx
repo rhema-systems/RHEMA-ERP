@@ -19,7 +19,7 @@ import {
 import { 
   inventoryManagementService, 
   WarehouseDto, CreateWarehouseDto, UpdateWarehouseDto,
-  WarehouseLocationDto, CreateWarehouseLocationDto
+  WarehouseLocationDto, CreateWarehouseLocationDto, UpdateWarehouseLocationDto
 } from '@/services/inventoryManagementService';
 import { toast } from 'sonner';
 
@@ -37,6 +37,10 @@ export default function WarehousesPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isLocationDialogOpen, setIsLocationDialogOpen] = useState(false);
+  const [isEditLocationDialogOpen, setIsEditLocationDialogOpen] = useState(false);
+  const [editingLocation, setEditingLocation] = useState<WarehouseLocationDto | null>(null);
+  const [locationEditForm, setLocationEditForm] = useState<UpdateWarehouseLocationDto | null>(null);
+  const [reclassifyingLocationId, setReclassifyingLocationId] = useState<string | null>(null);
   
   const [formData, setFormData] = useState<CreateWarehouseDto>({
     name: '', code: '', description: '', address: '', city: '', state: '', 
@@ -46,7 +50,8 @@ export default function WarehousesPage() {
 
   const [locationForm, setLocationForm] = useState<CreateWarehouseLocationDto>({
     warehouseId: '', locationCode: '', name: '', description: '',
-    locationType: 'Bin', isPickingLocation: true, isReceivingLocation: true
+    locationType: 'Bin', isPickingLocation: true, isReceivingLocation: true,
+    isConsignmentBin: false, consignmentWarehouseId: null
   });
 
   const warehouseTypes = ['Standard', 'Distribution', 'Manufacturing', 'Quarantine', 'Transit'];
@@ -150,6 +155,57 @@ export default function WarehousesPage() {
     } catch (err) {
       console.error('Error creating location:', err);
       toast.error('Failed to create location');
+    }
+  };
+
+  const openEditLocation = (loc: WarehouseLocationDto) => {
+    setEditingLocation(loc);
+    setLocationEditForm({
+      warehouseId: loc.warehouseId,
+      locationCode: loc.locationCode,
+      name: loc.name ?? '',
+      description: loc.description ?? '',
+      locationType: loc.locationType,
+      parentLocationId: loc.parentLocationId,
+      isPickingLocation: loc.isPickingLocation,
+      isReceivingLocation: loc.isReceivingLocation,
+      isConsignmentBin: !!loc.isConsignmentBin,
+      consignmentWarehouseId: loc.consignmentWarehouseId ?? null,
+      maxWeight: loc.maxWeight,
+      maxVolume: loc.maxVolume,
+      maxItems: loc.maxItems,
+      isActive: loc.isActive
+    });
+    setIsEditLocationDialogOpen(true);
+  };
+
+  const handleUpdateLocation = async () => {
+    if (!editingLocation || !locationEditForm) return;
+    try {
+      const updated = await inventoryManagementService.updateWarehouseLocation(editingLocation.id, locationEditForm);
+      setLocations(prev => prev.map(l => (l.id === updated.id ? updated : l)));
+      setIsEditLocationDialogOpen(false);
+      setEditingLocation(null);
+      setLocationEditForm(null);
+      toast.success('Location updated');
+    } catch (err: any) {
+      console.error('Error updating location:', err);
+      toast.error(err?.response?.data || err?.message || 'Failed to update location');
+    }
+  };
+
+  const handleReclassify = async (locationId: string) => {
+    try {
+      setReclassifyingLocationId(locationId);
+      const res = await inventoryManagementService.reclassifyExistingStockToConsignment(locationId);
+      const movedLines = Number(res?.movedLines ?? 0);
+      const totalQty = Number(res?.totalQuantityMoved ?? 0);
+      toast.success(`Reclassified ${totalQty} across ${movedLines} item(s).`);
+    } catch (err: any) {
+      console.error('Error reclassifying stock:', err);
+      toast.error(err?.response?.data || err?.message || 'Failed to reclassify stock');
+    } finally {
+      setReclassifyingLocationId(null);
     }
   };
 
@@ -464,14 +520,173 @@ export default function WarehousesPage() {
                       <Badge variant="outline">{loc.locationType}</Badge>
                       <span className="font-medium">{loc.locationCode}</span>
                       <span className="text-muted-foreground">{loc.name}</span>
+                      {loc.isConsignmentBin && (
+                        <Badge className="bg-amber-100 text-amber-900">Consignment Bin</Badge>
+                      )}
                     </div>
-                    <Button size="sm" variant="ghost" className="text-red-600" onClick={() => inventoryManagementService.deleteWarehouseLocation(loc.id).then(() => setLocations(prev => prev.filter(l => l.id !== loc.id)))}><Trash2 className="h-4 w-4" /></Button>
+                    <div className="flex items-center gap-2">
+                      {loc.isConsignmentBin && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={reclassifyingLocationId === loc.id}
+                          onClick={() => handleReclassify(loc.id)}
+                        >
+                          Reclassify stock
+                        </Button>
+                      )}
+                      <Button size="sm" variant="ghost" onClick={() => openEditLocation(loc)}><Edit className="h-4 w-4" /></Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-red-600"
+                        onClick={() =>
+                          inventoryManagementService
+                            .deleteWarehouseLocation(loc.id)
+                            .then(() => setLocations(prev => prev.filter(l => l.id !== loc.id)))
+                        }
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 ))
               )}
             </div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setIsLocationDialogOpen(false)}>Close</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Location Dialog */}
+      <Dialog
+        open={isEditLocationDialogOpen}
+        onOpenChange={(o) => {
+          setIsEditLocationDialogOpen(o);
+          if (!o) {
+            setEditingLocation(null);
+            setLocationEditForm(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Location</DialogTitle>
+            <DialogDescription>{editingLocation?.locationCode}</DialogDescription>
+          </DialogHeader>
+
+          {locationEditForm && (
+            <div className="grid gap-4 py-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Code</Label>
+                  <Input value={locationEditForm.locationCode} disabled className="bg-muted" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Type</Label>
+                  <Select value={locationEditForm.locationType} onValueChange={(v) => setLocationEditForm({ ...locationEditForm, locationType: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{locationTypes.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Name</Label>
+                  <Input value={locationEditForm.name ?? ''} onChange={(e) => setLocationEditForm({ ...locationEditForm, name: e.target.value })} />
+                </div>
+                <div className="flex items-center space-x-2 pt-7">
+                  <Switch checked={locationEditForm.isActive} onCheckedChange={(v) => setLocationEditForm({ ...locationEditForm, isActive: v })} />
+                  <Label>Active</Label>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Textarea value={locationEditForm.description ?? ''} onChange={(e) => setLocationEditForm({ ...locationEditForm, description: e.target.value })} rows={3} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex items-center space-x-2">
+                  <Switch checked={locationEditForm.isPickingLocation} onCheckedChange={(v) => setLocationEditForm({ ...locationEditForm, isPickingLocation: v })} />
+                  <Label>Picking Location</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Switch checked={locationEditForm.isReceivingLocation} onCheckedChange={(v) => setLocationEditForm({ ...locationEditForm, isReceivingLocation: v })} />
+                  <Label>Receiving Location</Label>
+                </div>
+              </div>
+
+              <div className="border rounded-md p-3 space-y-3">
+                <div className="flex items-start space-x-2">
+                  <Switch
+                    checked={!!locationEditForm.isConsignmentBin}
+                    onCheckedChange={(v) => setLocationEditForm({
+                      ...locationEditForm,
+                      isConsignmentBin: v,
+                      consignmentWarehouseId: v ? (locationEditForm.consignmentWarehouseId ?? null) : null
+                    })}
+                  />
+                  <div className="space-y-1">
+                    <Label>Consignment Bin</Label>
+                    <p className="text-xs text-muted-foreground">
+                      When enabled, stock in this bin is attributed to the selected consignment warehouse and excluded from owned/main inventory.
+                    </p>
+                  </div>
+                </div>
+
+                {locationEditForm.isConsignmentBin && (
+                  <div className="grid gap-2">
+                    <Label>Consignment Warehouse</Label>
+                    <Select
+                      value={locationEditForm.consignmentWarehouseId ?? 'none'}
+                      onValueChange={(v) => setLocationEditForm({ ...locationEditForm, consignmentWarehouseId: v === 'none' ? null : v })}
+                    >
+                      <SelectTrigger><SelectValue placeholder="Select consignment warehouse" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Select consignment warehouse</SelectItem>
+                        {warehouses.filter(w => w.isConsignmentWarehouse).map(w => (
+                          <SelectItem key={w.id} value={w.id}>
+                            {w.name} ({w.code})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <p className="text-xs text-muted-foreground">
+                        If this bin already had stock before toggling, use the reclassify action to convert ownership.
+                      </p>
+                      {editingLocation?.isConsignmentBin && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={reclassifyingLocationId === editingLocation.id}
+                          onClick={() => handleReclassify(editingLocation.id)}
+                        >
+                          Reclassify existing stock
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditLocationDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={handleUpdateLocation}
+              disabled={
+                !locationEditForm ||
+                (locationEditForm.isConsignmentBin && (!locationEditForm.consignmentWarehouseId || locationEditForm.consignmentWarehouseId === 'none'))
+              }
+            >
+              Save Changes
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

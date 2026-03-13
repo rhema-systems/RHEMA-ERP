@@ -15,6 +15,7 @@ namespace ErpSystem.Api.Controllers.Procurement;
 public class RfqsController : ControllerBase
 {
     private readonly IRfqService _rfqService;
+    private readonly IRfqInvitationDocumentService _rfqInvitationDocumentService;
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
     private readonly IBusinessPartnerUserRepository _businessPartnerUserRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -22,12 +23,14 @@ public class RfqsController : ControllerBase
 
     public RfqsController(
         IRfqService rfqService,
+        IRfqInvitationDocumentService rfqInvitationDocumentService,
         IBusinessPartnerRepository businessPartnerRepository,
         IBusinessPartnerUserRepository businessPartnerUserRepository,
         ICurrentUserProvider currentUserProvider,
         ILogger<RfqsController> logger)
     {
         _rfqService = rfqService;
+        _rfqInvitationDocumentService = rfqInvitationDocumentService;
         _businessPartnerRepository = businessPartnerRepository;
         _businessPartnerUserRepository = businessPartnerUserRepository;
         _currentUserProvider = currentUserProvider;
@@ -73,6 +76,29 @@ public class RfqsController : ControllerBase
         {
             _logger.LogError(ex, "Error getting RFQ {RfqId}", id);
             return StatusCode(500, "An error occurred while retrieving the RFQ");
+        }
+    }
+
+    /// <summary>
+    /// Generates an RFQ PDF (for printing / emailing) even before sending it to suppliers.
+    /// </summary>
+    [HttpGet("{id:guid}/pdf")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    public async Task<IActionResult> GetRfqPdf(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var (content, fileName) = await _rfqInvitationDocumentService.GenerateRfqInvitationPdfAsync(id, cancellationToken);
+            return File(content, "application/pdf", fileName);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating RFQ PDF for {RfqId}", id);
+            return StatusCode(500, "An error occurred while generating the RFQ PDF");
         }
     }
 

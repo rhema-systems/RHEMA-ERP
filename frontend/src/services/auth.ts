@@ -1,5 +1,5 @@
 import { apiService } from './api.service';
-import type { LoginRequest, LoginResponse, User, Tenant } from '../types';
+import type { LoginRequest, LoginResponse, RequestLoginOtpRequest, RequestLoginOtpResponse, VerifyLoginOtpRequest, User, Tenant } from '../types';
 
 export class AuthService {
   async login(credentials: LoginRequest): Promise<LoginResponse> {
@@ -8,6 +8,22 @@ export class AuthService {
     // Store tokens and user info
     if (response.token) {
       console.log('AuthService: Saving user to localStorage', response.user);
+      localStorage.setItem('authToken', response.token);
+      localStorage.setItem('refreshToken', response.refreshToken);
+      localStorage.setItem('user', JSON.stringify(response.user));
+    }
+
+    return response;
+  }
+
+  async requestLoginOtp(request: RequestLoginOtpRequest): Promise<RequestLoginOtpResponse> {
+    return apiService.requestLoginOtp(request);
+  }
+
+  async loginWithOtp(request: VerifyLoginOtpRequest): Promise<LoginResponse> {
+    const response = await apiService.verifyLoginOtp(request);
+
+    if (response.token) {
       localStorage.setItem('authToken', response.token);
       localStorage.setItem('refreshToken', response.refreshToken);
       localStorage.setItem('user', JSON.stringify(response.user));
@@ -34,19 +50,26 @@ export class AuthService {
 
   async getCurrentUser(): Promise<User> {
     const userInfo = await apiService.getCurrentUser();
-    return {
+    const mappedUser = {
       id: userInfo.id,
       username: userInfo.username,
       email: userInfo.email,
       firstName: userInfo.firstName,
       lastName: userInfo.lastName,
       roles: userInfo.roles,
+      permissions: userInfo.permissions,
       isActive: userInfo.isActive,
       lastLoginAt: userInfo.lastLoginAt,
       createdAt: userInfo.createdAt,
       phoneNumber: userInfo.phoneNumber,
       tenantId: userInfo.tenantId,
     } as User;
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('user', JSON.stringify(mappedUser));
+    }
+
+    return mappedUser;
   }
 
   async refreshToken(): Promise<LoginResponse> {
@@ -141,6 +164,25 @@ export class AuthService {
     if (!user?.roles) return false;
 
     return roles.every(role => user.roles.includes(role));
+  }
+
+  hasPermission(permission: string): boolean {
+    const user = this.getStoredUser();
+    return user?.permissions?.includes(permission) ?? false;
+  }
+
+  hasAnyPermission(permissions: string[]): boolean {
+    const user = this.getStoredUser();
+    if (!user?.permissions) return false;
+
+    return permissions.some(permission => user.permissions?.includes(permission));
+  }
+
+  hasAllPermissions(permissions: string[]): boolean {
+    const user = this.getStoredUser();
+    if (!user?.permissions) return false;
+
+    return permissions.every(permission => user.permissions?.includes(permission));
   }
 }
 

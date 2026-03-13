@@ -1,6 +1,8 @@
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 
@@ -456,6 +458,228 @@ public sealed class TenderWorkflowStatusAdapter : IWorkflowStatusAdapter
         => entity as Tender ?? throw new InvalidOperationException("Expected Tender entity.");
 }
 
+public sealed class ProjectWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "Project",
+        "PROJECT"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+    {
+        var project = RequireProject(entity);
+        project.Status = outcome switch
+        {
+            WorkflowOutcome.Approved => ProjectStatuses.Planned,
+            WorkflowOutcome.Rejected => ProjectStatuses.Draft,
+            _ => ProjectStatuses.PendingApproval
+        };
+    }
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+    {
+        var project = RequireProject(entity);
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                project.Status = ProjectStatuses.Planned;
+                project.ApprovedAt = DateTime.UtcNow;
+                break;
+            case WorkflowOutcome.Rejected:
+                project.Status = ProjectStatuses.Draft;
+                project.StatusRemarks = rejectionReason;
+                break;
+            default:
+                project.Status = ProjectStatuses.PendingApproval;
+                break;
+        }
+    }
+
+    private static Project RequireProject(object entity)
+        => entity as Project ?? throw new InvalidOperationException("Expected Project entity.");
+}
+
+public sealed class ProjectDeliverableWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "ProjectDeliverable",
+        "Project Deliverable",
+        "PROJECT_DELIVERABLE"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+    {
+        var deliverable = RequireDeliverable(entity);
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                deliverable.Status = "Approved";
+                deliverable.ApprovedAt = DateTime.UtcNow;
+                deliverable.ApprovedById = userId;
+                break;
+            case WorkflowOutcome.Rejected:
+                deliverable.Status = "Rejected";
+                deliverable.ApprovedAt = null;
+                deliverable.ApprovedById = null;
+                break;
+            default:
+                deliverable.Status = "PendingApproval";
+                deliverable.ApprovedAt = null;
+                deliverable.ApprovedById = null;
+                break;
+        }
+    }
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+    {
+        var deliverable = RequireDeliverable(entity);
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                deliverable.Status = "Approved";
+                deliverable.ApprovedAt = DateTime.UtcNow;
+                deliverable.ApprovedById = userId;
+                break;
+            case WorkflowOutcome.Rejected:
+                deliverable.Status = "Rejected";
+                deliverable.ApprovedAt = null;
+                deliverable.ApprovedById = null;
+                if (!string.IsNullOrWhiteSpace(rejectionReason))
+                {
+                    deliverable.AcceptanceNotes = rejectionReason;
+                }
+                break;
+            default:
+                deliverable.Status = "PendingApproval";
+                break;
+        }
+    }
+
+    private static ProjectDeliverable RequireDeliverable(object entity)
+        => entity as ProjectDeliverable ?? throw new InvalidOperationException("Expected ProjectDeliverable entity.");
+}
+
+public sealed class ProjectClosureWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "ProjectClosure",
+        "Project Closure",
+        "PROJECT_CLOSURE"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+    {
+        var closure = RequireClosure(entity);
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                closure.Status = ProjectStatuses.Closed;
+                closure.ApprovedAt = DateTime.UtcNow;
+                closure.ApprovedById = userId;
+                break;
+            case WorkflowOutcome.Rejected:
+                closure.Status = "Draft";
+                closure.ApprovedAt = null;
+                closure.ApprovedById = null;
+                break;
+            default:
+                closure.Status = "PendingApproval";
+                closure.ApprovedAt = null;
+                closure.ApprovedById = null;
+                break;
+        }
+    }
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+    {
+        var closure = RequireClosure(entity);
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                closure.Status = ProjectStatuses.Closed;
+                closure.ApprovedAt = DateTime.UtcNow;
+                closure.ApprovedById = userId;
+                closure.RejectionReason = null;
+                break;
+            case WorkflowOutcome.Rejected:
+                closure.Status = "Draft";
+                closure.ApprovedAt = null;
+                closure.ApprovedById = null;
+                closure.RejectionReason = rejectionReason;
+                break;
+            default:
+                closure.Status = "PendingApproval";
+                break;
+        }
+    }
+
+    private static ProjectClosure RequireClosure(object entity)
+        => entity as ProjectClosure ?? throw new InvalidOperationException("Expected ProjectClosure entity.");
+}
+
+public sealed class ProjectBudgetRevisionWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "ProjectBudgetRevision",
+        "Project Budget Revision",
+        "PROJECT_BUDGET_REVISION"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+    {
+        var revision = RequireRevision(entity);
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                revision.Status = "Approved";
+                revision.ApprovedAt = DateTime.UtcNow;
+                revision.ApprovedById = userId;
+                revision.RejectionReason = null;
+                break;
+            case WorkflowOutcome.Rejected:
+                revision.Status = "Rejected";
+                revision.ApprovedAt = null;
+                revision.ApprovedById = null;
+                break;
+            default:
+                revision.Status = "PendingApproval";
+                revision.ApprovedAt = null;
+                revision.ApprovedById = null;
+                break;
+        }
+    }
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+    {
+        var revision = RequireRevision(entity);
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                revision.Status = "Approved";
+                revision.ApprovedAt = DateTime.UtcNow;
+                revision.ApprovedById = userId;
+                revision.RejectionReason = null;
+                break;
+            case WorkflowOutcome.Rejected:
+                revision.Status = "Rejected";
+                revision.ApprovedAt = null;
+                revision.ApprovedById = null;
+                revision.RejectionReason = rejectionReason;
+                break;
+            default:
+                revision.Status = "PendingApproval";
+                break;
+        }
+    }
+
+    private static ProjectBudgetRevision RequireRevision(object entity)
+        => entity as ProjectBudgetRevision ?? throw new InvalidOperationException("Expected ProjectBudgetRevision entity.");
+}
+
 public sealed class BusinessPartnerWorkflowStatusAdapter : IWorkflowStatusAdapter
 {
     public IReadOnlyCollection<string> EntityTypes { get; } = new[]
@@ -533,4 +757,59 @@ public sealed class BusinessPartnerWorkflowStatusAdapter : IWorkflowStatusAdapte
 
     private static BusinessPartner RequirePartner(object entity)
         => entity as BusinessPartner ?? throw new InvalidOperationException("Expected BusinessPartner entity.");
+}
+
+public sealed class ServiceRequestWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "ServiceRequest",
+        "Service Request",
+        "SERVICE_REQUEST"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+    {
+        var req = RequireServiceRequest(entity);
+        req.SubmittedAtUtc ??= DateTime.UtcNow;
+
+        req.Status = outcome switch
+        {
+            WorkflowOutcome.Approved => EhcServiceRequestStatus.Approved,
+            WorkflowOutcome.Rejected => EhcServiceRequestStatus.Rejected,
+            _ => EhcServiceRequestStatus.PendingApproval
+        };
+    }
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+    {
+        var req = RequireServiceRequest(entity);
+        req.SubmittedAtUtc ??= DateTime.UtcNow;
+
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                req.Status = EhcServiceRequestStatus.Approved;
+                req.ApprovedAtUtc = DateTime.UtcNow;
+                req.ApprovedByUserId = userId;
+                req.RejectedAtUtc = null;
+                req.RejectedByUserId = null;
+                req.RejectionReason = null;
+                break;
+            case WorkflowOutcome.Rejected:
+                req.Status = EhcServiceRequestStatus.Rejected;
+                req.RejectedAtUtc = DateTime.UtcNow;
+                req.RejectedByUserId = userId;
+                req.RejectionReason = rejectionReason;
+                req.ApprovedAtUtc = null;
+                req.ApprovedByUserId = null;
+                break;
+            default:
+                req.Status = EhcServiceRequestStatus.PendingApproval;
+                break;
+        }
+    }
+
+    private static EhcServiceRequest RequireServiceRequest(object entity)
+        => entity as EhcServiceRequest ?? throw new InvalidOperationException("Expected EhcServiceRequest entity.");
 }

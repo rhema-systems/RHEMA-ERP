@@ -414,6 +414,81 @@ public class WarehouseLocation : TenantEntity
     public bool IsPickingLocation { get; set; } = true;
     public bool IsReceivingLocation { get; set; } = true;
 
+    /// <summary>
+    /// When true, inventory stored in this bin/location is treated as consignment stock and is excluded from owned/main inventory totals.
+    /// The stock is attributed to <see cref="ConsignmentWarehouseId"/> for warehouse-level reporting and settlement triggers.
+    /// </summary>
+    public bool IsConsignmentBin { get; set; } = false;
+
+    /// <summary>
+    /// The consignment warehouse that "owns" the inventory in this location (optional unless <see cref="IsConsignmentBin"/> is true).
+    /// </summary>
+    public Guid? ConsignmentWarehouseId { get; set; }
+
+    [NotMapped]
+    public Guid InventoryWarehouseId =>
+        IsConsignmentBin && ConsignmentWarehouseId.HasValue && ConsignmentWarehouseId.Value != Guid.Empty
+            ? ConsignmentWarehouseId.Value
+            : WarehouseId;
+
+    // === ENHANCED FIELDS ===
+
+    // Special Location Types
+    public bool IsQuarantineLocation { get; set; } = false;
+    public bool IsInspectionLocation { get; set; } = false;
+    public bool IsInTransitLocation { get; set; } = false;
+    public bool IsShippingLocation { get; set; } = false;
+    public bool IsStagingLocation { get; set; } = false;
+    public bool IsReturnLocation { get; set; } = false;
+    public bool IsDamageLocation { get; set; } = false;
+
+    // Location Hierarchy Type (using enum)
+    public WarehouseLocationType? LocationHierarchyType { get; set; }
+
+    // Zone Information (for multi-zone warehouses)
+    [MaxLength(50)]
+    public string? Zone { get; set; }
+
+    [MaxLength(50)]
+    public string? Aisle { get; set; }
+
+    [MaxLength(50)]
+    public string? Rack { get; set; }
+
+    [MaxLength(50)]
+    public string? Shelf { get; set; }
+
+    [MaxLength(50)]
+    public string? Bin { get; set; }
+
+    // Physical Position (for warehouse mapping)
+    public int? RowNumber { get; set; }
+    public int? ColumnNumber { get; set; }
+    public int? LevelNumber { get; set; }
+
+    // Picking Sequence (for optimized picking routes)
+    public int PickSequence { get; set; } = 0;
+
+    // ABC Classification for location
+    [MaxLength(10)]
+    public string? ABCClass { get; set; } // A (Fast-moving), B (Medium), C (Slow)
+
+    // Temperature Zone (for controlled storage)
+    [MaxLength(50)]
+    public string? TemperatureZone { get; set; } // Ambient, Chilled, Frozen, etc.
+
+    // Dedicated Item (if location is dedicated to specific item)
+    public Guid? DedicatedItemId { get; set; }
+
+    [MaxLength(100)]
+    public string? DedicatedItemCode { get; set; }
+
+    // Barcode/Label
+    [MaxLength(100)]
+    public string? LocationBarcode { get; set; }
+
+    // === END ENHANCED FIELDS ===
+
     // Physical Constraints
     public decimal? MaxWeight { get; set; }
     public decimal? MaxVolume { get; set; }
@@ -426,6 +501,7 @@ public class WarehouseLocation : TenantEntity
 
     // Navigation Properties
     public virtual Warehouse Warehouse { get; set; } = null!;
+    public virtual Warehouse? ConsignmentWarehouse { get; set; }
     public virtual WarehouseLocation? ParentLocation { get; set; }
     public virtual ICollection<WarehouseLocation> ChildLocations { get; set; } = new List<WarehouseLocation>();
     public virtual ICollection<InventoryLocation> InventoryLocations { get; set; } = new List<InventoryLocation>();

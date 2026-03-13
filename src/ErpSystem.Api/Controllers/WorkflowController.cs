@@ -1,8 +1,10 @@
 using System.Security.Claims;
 using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Workflow;
 using Microsoft.AspNetCore.Authorization;
@@ -33,6 +35,9 @@ public class WorkflowController : ControllerBase
     private readonly IWorkflowStepInstanceRepository _workflowStepInstanceRepository;
     private readonly IWorkflowApprovalRepository _workflowApprovalRepository;
     private readonly IWorkflowEntityTypeRepository _workflowEntityTypeRepository;
+    private readonly ErpSystem.Data.ApplicationDbContext _db;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
+    private readonly IAppEventBus _appEventBus;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<WorkflowController> _logger;
 
@@ -50,6 +55,9 @@ public class WorkflowController : ControllerBase
         IWorkflowStepInstanceRepository workflowStepInstanceRepository,
         IWorkflowApprovalRepository workflowApprovalRepository,
         IWorkflowEntityTypeRepository workflowEntityTypeRepository,
+        ErpSystem.Data.ApplicationDbContext db,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
+        IAppEventBus appEventBus,
         ICurrentUserService currentUserService,
         ILogger<WorkflowController> logger)
     {
@@ -66,6 +74,9 @@ public class WorkflowController : ControllerBase
         _workflowStepInstanceRepository = workflowStepInstanceRepository;
         _workflowApprovalRepository = workflowApprovalRepository;
         _workflowEntityTypeRepository = workflowEntityTypeRepository;
+        _db = db;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
+        _appEventBus = appEventBus;
         _currentUserService = currentUserService;
         _logger = logger;
     }
@@ -1265,10 +1276,13 @@ public class WorkflowController : ControllerBase
             new("InventoryRequisition", "Inventory requisitions", "ClipboardList", "#0EA5E9", 68),
             new("Employee", "Human resources employees", "Users", "#6366F1", 70),
             new("Project", "Project management items", "CheckCircle", "#22C55E", 80),
+            new("ProjectDeliverable", "Project deliverable approvals and external sign-off", "PackageCheck", "#16A34A", 82),
+            new("ProjectClosure", "Project closure approval and close-out governance", "Flag", "#15803D", 84),
             new("Customer", "Sales customers", "User", "#0EA5E9", 90),
             new("BusinessPartner", "Business partner onboarding/approvals (suppliers/contractors/customers)", "Building", "#64748B", 95),
             new("Vendor", "Business partners and vendors", "Building", "#64748B", 100),
-            new("Quality", "Quality inspections", "CheckCircle", "#EF4444", 110)
+            new("Quality", "Quality inspections", "CheckCircle", "#EF4444", 110),
+            new("ServiceRequest", "Service catalog requests", "ClipboardList", "#10B981", 115)
         };
 
         return defaults
@@ -1570,7 +1584,37 @@ public class WorkflowController : ControllerBase
                 return Unauthorized();
             }
 
-            var approval = await _workflowApprovalService.ProcessApprovalAsync(id, currentUserId.Value, request.Action, request.Comments);
+            var approval = await _workflowApprovalRepository.GetByIdAsync(id);
+            if (approval == null)
+            {
+                return NotFound();
+            }
+
+            // Enforce that the current user can act on this approval (direct assignment or matching role).
+            var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            var isDirect = approval.ApproverId.HasValue && approval.ApproverId.Value == currentUserId.Value;
+            var isRole = !string.IsNullOrWhiteSpace(approval.ApproverRole) && roleSet.Contains(approval.ApproverRole);
+            if (!isDirect && !isRole)
+            {
+                return Forbid();
+            }
+
+            var stepAction = request.Action switch
+            {
+                ErpSystem.Core.Enums.WorkflowApprovalAction.Approve => ErpSystem.Core.Enums.WorkflowStepAction.Complete,
+                ErpSystem.Core.Enums.WorkflowApprovalAction.Reject => ErpSystem.Core.Enums.WorkflowStepAction.Reject,
+                ErpSystem.Core.Enums.WorkflowApprovalAction.RequestMoreInfo => ErpSystem.Core.Enums.WorkflowStepAction.RequestInformation,
+                ErpSystem.Core.Enums.WorkflowApprovalAction.Delegate => ErpSystem.Core.Enums.WorkflowStepAction.Delegate,
+                _ => ErpSystem.Core.Enums.WorkflowStepAction.Complete
+            };
+
+            // Progress the workflow via the engine (this records the approval + advances the step when satisfied).
+            await _workflowEngine.ProcessStepAsync(approval.StepInstanceId, currentUserId.Value, stepAction, comments: request.Comments);
+
+            await TryApplyPostApprovalIntegrationAsync(approval.StepInstanceId, currentUserId.Value, request, HttpContext.RequestAborted);
+
+            // Reload for response (best-effort).
+            approval = await _workflowApprovalRepository.GetByIdAsync(id) ?? approval;
             return Ok(new
             {
                 success = true,
@@ -1581,6 +1625,151 @@ public class WorkflowController : ControllerBase
         {
             _logger.LogError(ex, "Error processing approval {ApprovalId}", id);
             return StatusCode(500, "An error occurred while processing approval");
+        }
+    }
+
+    private async Task TryApplyPostApprovalIntegrationAsync(Guid stepInstanceId, Guid actorUserId, ProcessApprovalRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var stepInstance = await _db.WorkflowStepInstances
+                .AsNoTracking()
+                .Include(si => si.WorkflowInstance)
+                .ThenInclude(wi => wi!.EntityType)
+                .FirstOrDefaultAsync(si => si.Id == stepInstanceId && !si.IsDeleted, cancellationToken);
+
+            var instance = stepInstance?.WorkflowInstance;
+            var entityType = instance?.EntityType;
+            if (instance == null || entityType == null)
+            {
+                return;
+            }
+
+            var isServiceRequest =
+                string.Equals(entityType.Code, "SERVICE_REQUEST", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(entityType.Name, "ServiceRequest", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(entityType.Name, "Service Request", StringComparison.OrdinalIgnoreCase);
+            if (!isServiceRequest)
+            {
+                return;
+            }
+
+            var outcome = instance.Status switch
+            {
+                WorkflowInstanceStatus.Completed => WorkflowOutcome.Approved,
+                WorkflowInstanceStatus.Cancelled => WorkflowOutcome.Rejected,
+                WorkflowInstanceStatus.Failed => WorkflowOutcome.Rejected,
+                _ => WorkflowOutcome.Pending
+            };
+
+            if (outcome == WorkflowOutcome.Pending)
+            {
+                return;
+            }
+
+            var sr = await _db.EhcServiceRequests
+                .Include(r => r.RequestType)
+                .FirstOrDefaultAsync(r => r.TenantId == instance.TenantId && r.Id == instance.EntityId && !r.IsDeleted, cancellationToken);
+            if (sr == null)
+            {
+                return;
+            }
+
+            var rejectionReason = request.Action == WorkflowApprovalAction.Reject
+                ? (string.IsNullOrWhiteSpace(request.Comments) ? "Rejected" : request.Comments.Trim())
+                : null;
+
+            var adapter = _workflowStatusAdapterRegistry.GetAdapter("ServiceRequest");
+            adapter.ApplyApprovalOutcome(sr, outcome, actorUserId, rejectionReason);
+
+            sr.WorkflowInstanceId ??= instance.Id;
+            sr.UpdatedAt = DateTime.UtcNow;
+            sr.UpdatedBy = _currentUserService.UserName ?? "System";
+
+            var now = DateTime.UtcNow;
+            if (outcome == WorkflowOutcome.Approved)
+            {
+                _db.EhcServiceRequestAuditEvents.Add(new EhcServiceRequestAuditEvent
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = sr.TenantId,
+                    ServiceRequestId = sr.Id,
+                    EventType = "Approved",
+                    Title = "Request approved",
+                    Body = string.IsNullOrWhiteSpace(request.Comments) ? null : request.Comments.Trim(),
+                    IsInternal = false,
+                    ActorUserId = actorUserId,
+                    CreatedAt = now,
+                    CreatedBy = _currentUserService.UserName ?? "System",
+                    CreatedById = actorUserId
+                });
+            }
+            else if (outcome == WorkflowOutcome.Rejected)
+            {
+                _db.EhcServiceRequestAuditEvents.Add(new EhcServiceRequestAuditEvent
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = sr.TenantId,
+                    ServiceRequestId = sr.Id,
+                    EventType = "Rejected",
+                    Title = "Request rejected",
+                    Body = rejectionReason,
+                    IsInternal = false,
+                    ActorUserId = actorUserId,
+                    CreatedAt = now,
+                    CreatedBy = _currentUserService.UserName ?? "System",
+                    CreatedById = actorUserId
+                });
+            }
+
+            await _db.SaveChangesAsync(cancellationToken);
+
+            var activity = outcome == WorkflowOutcome.Approved ? "Approved" : "Rejected";
+            var actionUrl = $"/external-portal/support/requests/{sr.Id}";
+            try
+            {
+                var provider = await _db.Users
+                    .AsNoTracking()
+                    .Where(u => u.TenantId == sr.TenantId && u.Id == sr.RequesterUserId && u.IsActive)
+                    .Select(u => u.AuthenticationProvider)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (provider != ErpSystem.Shared.AuthenticationProvider.Local)
+                {
+                    actionUrl = $"/helpdesk/requests/{sr.Id}";
+                }
+            }
+            catch
+            {
+                actionUrl = $"/helpdesk/requests/{sr.Id}";
+            }
+
+            var data = new Dictionary<string, object>
+            {
+                ["serviceRequestId"] = sr.Id,
+                ["requestNumber"] = sr.RequestNumber,
+                ["TargetUserId"] = sr.RequesterUserId,
+                ["ActionUrl"] = actionUrl
+            };
+            if (outcome == WorkflowOutcome.Rejected && !string.IsNullOrWhiteSpace(rejectionReason))
+            {
+                data["reason"] = rejectionReason;
+            }
+
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = sr.TenantId,
+                EntityType = "EhcServiceRequest",
+                EntityId = sr.Id,
+                Activity = activity,
+                Audience = "Customer",
+                TriggeredByUserId = actorUserId,
+                Data = data
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Post-approval integration hook failed for step {StepInstanceId}", stepInstanceId);
         }
     }
 

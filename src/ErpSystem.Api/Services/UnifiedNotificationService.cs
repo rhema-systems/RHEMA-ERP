@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using System.Text.Json;
+using ErpSystem.Api.Services.Sms;
 using EmailAttachmentInfo = ErpSystem.Core.Interfaces.EmailAttachmentInfo;
 using CreateEmailCampaignDto = ErpSystem.Core.DTOs.Notifications.CreateEmailCampaignDto;
 using CreateNotificationDto = ErpSystem.Core.DTOs.Notifications.CreateNotificationDto;
@@ -36,6 +37,8 @@ public class UnifiedNotificationService : INotificationService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly IEmailService _emailService;
+    private readonly ISmsSender _smsSender;
+    private readonly ITenantSmsSender _tenantSmsSender;
     private readonly ICurrentUserService _currentUserService;
     private readonly IHubNotificationService _hubNotificationService;
     private readonly ApplicationDbContext _dbContext;
@@ -45,6 +48,8 @@ public class UnifiedNotificationService : INotificationService
     public UnifiedNotificationService(
         IUnitOfWork unitOfWork,
         IEmailService emailService,
+        ISmsSender smsSender,
+        ITenantSmsSender tenantSmsSender,
         ICurrentUserService currentUserService,
         IHubNotificationService hubNotificationService,
         ApplicationDbContext dbContext,
@@ -53,6 +58,8 @@ public class UnifiedNotificationService : INotificationService
     {
         _unitOfWork = unitOfWork;
         _emailService = emailService;
+        _smsSender = smsSender;
+        _tenantSmsSender = tenantSmsSender;
         _currentUserService = currentUserService;
         _hubNotificationService = hubNotificationService;
         _dbContext = dbContext;
@@ -139,9 +146,16 @@ public class UnifiedNotificationService : INotificationService
                 "[SMS] Send requested to {Phone} - Message length: {Length} chars",
                 MaskPhoneNumber(phoneNumber), message?.Length ?? 0);
 
-            // TODO: Implement real SMS provider integration (Twilio, AWS SNS, etc.)
-            // For now, log as audit trail
-            await Task.CompletedTask;
+            var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+            if (tenantId != Guid.Empty)
+            {
+                await _tenantSmsSender.SendAsync(tenantId, phoneNumber, message ?? string.Empty);
+            }
+            else
+            {
+                // Anonymous contexts may not have a tenant yet; fall back to global appsettings providers.
+                await _smsSender.SendAsync(phoneNumber, message ?? string.Empty);
+            }
         }
         catch (Exception ex)
         {
@@ -1372,7 +1386,14 @@ public class UnifiedNotificationService : INotificationService
                             throw new InvalidOperationException("Missing recipient phone number");
                         }
 
-                        await SendSmsAsync(notification.PhoneNumber, notification.Message ?? string.Empty);
+                        if (notification.TenantId != Guid.Empty)
+                        {
+                            await _tenantSmsSender.SendAsync(notification.TenantId, notification.PhoneNumber, notification.Message ?? string.Empty);
+                        }
+                        else
+                        {
+                            await _smsSender.SendAsync(notification.PhoneNumber, notification.Message ?? string.Empty);
+                        }
                         notification.Status = "Sent";
                         notification.SentAt = sentAt;
                         notification.ScheduledFor = sentAt;

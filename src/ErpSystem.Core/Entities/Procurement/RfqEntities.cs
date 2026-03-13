@@ -183,6 +183,12 @@ public class RequestForQuotationAwardLine : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal LineTotal { get; set; }
 
+    /// <summary>
+    /// Optional justification entered during split-award decision.
+    /// </summary>
+    [MaxLength(500)]
+    public string? AwardReason { get; set; }
+
     // Navigation
     public virtual RequestForQuotation Rfq { get; set; } = null!;
     public virtual RequestForQuotationItem RfqItem { get; set; } = null!;

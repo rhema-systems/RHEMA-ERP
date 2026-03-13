@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.Entities;
@@ -9,6 +10,7 @@ using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Ehc;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Workflow;
+using ErpSystem.Core.Services.Ehc.Sla;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
@@ -20,6 +22,7 @@ public sealed class EhcTicketService : IEhcTicketService
 {
     private const string DefaultWorkflowName = "EHC Ticket";
     private const string ExternalPortalTicketPathPrefix = "/support/tickets";
+    private const string EhcUploadCategory = "ehc-ticket";
 
     private readonly IEhcTicketRepository _ticketRepository;
     private readonly IUnitOfWork _unitOfWork;
@@ -99,6 +102,11 @@ public sealed class EhcTicketService : IEhcTicketService
 
         try
         {
+            if (string.Equals(audience, "Internal", StringComparison.OrdinalIgnoreCase))
+            {
+                await EnrichDataWithWatchersAsync(tenantId, ticketId, data, cancellationToken);
+            }
+
             await _appEventBus.PublishAsync(new EntityActivityEvent
             {
                 TenantId = tenantId,
@@ -114,6 +122,131 @@ public sealed class EhcTicketService : IEhcTicketService
         {
             _logger.LogDebug(ex, "Failed to publish EHC ticket topic event {Activity}.{Audience} for ticket {TicketId}", activity, audience, ticketId);
         }
+    }
+
+    private async Task EnrichDataWithWatchersAsync(Guid tenantId, Guid ticketId, Dictionary<string, object> data, CancellationToken cancellationToken)
+    {
+        if (tenantId == Guid.Empty || ticketId == Guid.Empty) return;
+        if (data == null) return;
+        if (data.ContainsKey("watcherUserIds")) return;
+
+        try
+        {
+            var watcherIds = await _unitOfWork.Repository<EhcTicketWatcher>()
+                .GetQueryable(w => w.TenantId == tenantId && !w.IsDeleted && w.TicketId == ticketId)
+                .Select(w => w.UserId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            if (watcherIds.Count > 0)
+            {
+                data["watcherUserIds"] = watcherIds;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to enrich EHC event data with watchers for ticket {TicketId}", ticketId);
+        }
+    }
+
+    private static readonly Regex MentionBracedRegex = new(@"@\{(?<token>[^}]{1,200})\}", RegexOptions.Compiled);
+
+    // Lightweight email mention support: "please check @someone@example.com"
+    private static readonly Regex MentionEmailRegex = new(
+        @"(?<![A-Za-z0-9_])@(?<email>[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static string BuildMessagePreview(string body, int maxLen = 140)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return string.Empty;
+        var s = body.Trim();
+        s = Regex.Replace(s, "\\s+", " ");
+        if (s.Length <= maxLen) return s;
+        return s[..maxLen].TrimEnd() + "…";
+    }
+
+    private static readonly Regex DoubleBraceTokenRegex = new(@"\{\{\s*(?<name>[A-Za-z][A-Za-z0-9_]*)\s*\}\}", RegexOptions.Compiled);
+    private static readonly Regex SingleBraceTokenRegex = new(@"\{\s*(?<name>[A-Za-z][A-Za-z0-9_]*)\s*\}", RegexOptions.Compiled);
+
+    private static string ExpandReplyTokens(string text, Dictionary<string, string> tokens)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return text;
+        if (tokens.Count == 0) return text;
+
+        string Replace(Match m)
+        {
+            var name = (m.Groups["name"]?.Value ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(name)) return m.Value;
+            return tokens.TryGetValue(name, out var v) ? v : m.Value;
+        }
+
+        // First expand {{Token}} style (preferred), then {Token}.
+        var outText = DoubleBraceTokenRegex.Replace(text, Replace);
+        outText = SingleBraceTokenRegex.Replace(outText, Replace);
+        return outText;
+    }
+
+    private async Task<IReadOnlyList<Guid>> ResolveMentionedUserIdsAsync(Guid tenantId, string body, CancellationToken cancellationToken)
+    {
+        if (tenantId == Guid.Empty) return Array.Empty<Guid>();
+        if (string.IsNullOrWhiteSpace(body)) return Array.Empty<Guid>();
+
+        var guidCandidates = new HashSet<Guid>();
+        var normalizedEmailCandidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (Match m in MentionBracedRegex.Matches(body))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var token = (m.Groups["token"]?.Value ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(token)) continue;
+
+            if (Guid.TryParse(token, out var gid) && gid != Guid.Empty)
+            {
+                guidCandidates.Add(gid);
+                continue;
+            }
+
+            if (token.Contains('@'))
+            {
+                normalizedEmailCandidates.Add(token.Trim().ToUpperInvariant());
+            }
+        }
+
+        foreach (Match m in MentionEmailRegex.Matches(body))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var email = (m.Groups["email"]?.Value ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(email)) continue;
+            normalizedEmailCandidates.Add(email.ToUpperInvariant());
+        }
+
+        if (guidCandidates.Count == 0 && normalizedEmailCandidates.Count == 0) return Array.Empty<Guid>();
+
+        var mentioned = new HashSet<Guid>();
+
+        if (guidCandidates.Count > 0)
+        {
+            var ids = await _userManager.Users
+                .AsNoTracking()
+                .Where(u => u.TenantId == tenantId && u.IsActive && guidCandidates.Contains(u.Id))
+                .Select(u => u.Id)
+                .ToListAsync(cancellationToken);
+
+            foreach (var id in ids) mentioned.Add(id);
+        }
+
+        if (normalizedEmailCandidates.Count > 0)
+        {
+            var ids = await _userManager.Users
+                .AsNoTracking()
+                .Where(u => u.TenantId == tenantId && u.IsActive && u.NormalizedEmail != null && normalizedEmailCandidates.Contains(u.NormalizedEmail))
+                .Select(u => u.Id)
+                .ToListAsync(cancellationToken);
+
+            foreach (var id in ids) mentioned.Add(id);
+        }
+
+        return mentioned.Count == 0 ? Array.Empty<Guid>() : mentioned.ToList();
     }
 
     private async Task<string> ResolveRequesterActionUrlAsync(EhcTicket ticket, CancellationToken cancellationToken)
@@ -278,8 +411,12 @@ public sealed class EhcTicketService : IEhcTicketService
         var sla = await ResolveSlaTemplateAsync(tenantId, request, cancellationToken);
         if (sla != null)
         {
-            ticket.FirstResponseDueAt = now.AddMinutes(Math.Max(1, sla.FirstResponseMinutes));
-            ticket.ResolutionDueAt = now.AddMinutes(Math.Max(1, sla.ResolutionMinutes));
+            ticket.FirstResponseDueAt = EhcSlaTimeCalculator.CalculateDueAtUtc(now, Math.Max(1, sla.FirstResponseMinutes), sla.CalendarConfigurationJson);
+            ticket.ResolutionDueAt = EhcSlaTimeCalculator.CalculateDueAtUtc(now, Math.Max(1, sla.ResolutionMinutes), sla.CalendarConfigurationJson);
+            ticket.AppliedSlaTemplateId = sla.Id;
+            ticket.AppliedFirstResponseMinutes = sla.FirstResponseMinutes;
+            ticket.AppliedResolutionMinutes = sla.ResolutionMinutes;
+            ticket.AppliedSlaCalendarConfigurationJson = sla.CalendarConfigurationJson;
         }
 
         var ticketRepo = _unitOfWork.Repository<EhcTicket>();
@@ -499,8 +636,12 @@ public sealed class EhcTicketService : IEhcTicketService
         var sla = await ResolveSlaTemplateAsync(tenantId, request, cancellationToken);
         if (sla != null)
         {
-            ticket.FirstResponseDueAt = now.AddMinutes(Math.Max(1, sla.FirstResponseMinutes));
-            ticket.ResolutionDueAt = now.AddMinutes(Math.Max(1, sla.ResolutionMinutes));
+            ticket.FirstResponseDueAt = EhcSlaTimeCalculator.CalculateDueAtUtc(now, Math.Max(1, sla.FirstResponseMinutes), sla.CalendarConfigurationJson);
+            ticket.ResolutionDueAt = EhcSlaTimeCalculator.CalculateDueAtUtc(now, Math.Max(1, sla.ResolutionMinutes), sla.CalendarConfigurationJson);
+            ticket.AppliedSlaTemplateId = sla.Id;
+            ticket.AppliedFirstResponseMinutes = sla.FirstResponseMinutes;
+            ticket.AppliedResolutionMinutes = sla.ResolutionMinutes;
+            ticket.AppliedSlaCalendarConfigurationJson = sla.CalendarConfigurationJson;
         }
 
         var ticketRepo = _unitOfWork.Repository<EhcTicket>();
@@ -623,7 +764,13 @@ public sealed class EhcTicketService : IEhcTicketService
             createdFrom: createdFrom,
             createdTo: createdTo,
             cancellationToken: cancellationToken);
-        return tickets.Select(MapToExternalListItemDto).ToList();
+
+        var feedbackByTicketId = await GetLatestFeedbackByTicketIdsAsync(tenantId, tickets.Select(t => t.Id).ToList(), cancellationToken);
+        return tickets.Select(t =>
+        {
+            feedbackByTicketId.TryGetValue(t.Id, out var f);
+            return MapToExternalListItemDto(t, f?.Rating, f?.SubmittedAtUtc);
+        }).ToList();
     }
 
     public async Task<EhcTicketDetailDto?> GetMyTicketByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -641,6 +788,180 @@ public sealed class EhcTicketService : IEhcTicketService
 
         var ticket = await _ticketRepository.GetByIdForRequesterAsync(id, tenantId, requesterUserId, cancellationToken);
         return ticket == null ? null : await MapToDetailDtoAsync(ticket, includeInternal: false, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<EhcExternalTicketLinkDto>> GetMyTicketLinksAsync(Guid ticketId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty || ticketId == Guid.Empty)
+            return Array.Empty<EhcExternalTicketLinkDto>();
+
+        if (!Guid.TryParse(_currentUserService.UserId, out var requesterUserId) || requesterUserId == Guid.Empty)
+            return Array.Empty<EhcExternalTicketLinkDto>();
+
+        var ownsTicket = await _ticketRepository.Query()
+            .AsNoTracking()
+            .AnyAsync(t => t.TenantId == tenantId && !t.IsDeleted && t.Id == ticketId && t.RequesterUserId == requesterUserId, cancellationToken);
+        if (!ownsTicket)
+            throw new KeyNotFoundException("Ticket not found.");
+
+        var linkRepo = _unitOfWork.Repository<EhcTicketLink>();
+        var links = (await linkRepo.FindAsync(l =>
+                l.TenantId == tenantId &&
+                (l.TicketId == ticketId || l.RelatedTicketId == ticketId)))
+            .OrderByDescending(l => l.CreatedAt)
+            .ToList();
+
+        if (links.Count == 0)
+            return Array.Empty<EhcExternalTicketLinkDto>();
+
+        var otherIds = links
+            .Select(l => l.TicketId == ticketId ? l.RelatedTicketId : l.TicketId)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        if (otherIds.Count == 0)
+            return Array.Empty<EhcExternalTicketLinkDto>();
+
+        // Only return linked tickets owned by the same requester (external portal isolation).
+        var otherTickets = await _ticketRepository.Query()
+            .AsNoTracking()
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted && otherIds.Contains(t.Id) && t.RequesterUserId == requesterUserId)
+            .Select(t => new
+            {
+                t.Id,
+                t.TicketNumber,
+                t.Subject,
+                t.Status,
+                t.Priority,
+                t.CreatedAt
+            })
+            .ToListAsync(cancellationToken);
+
+        if (otherTickets.Count == 0)
+            return Array.Empty<EhcExternalTicketLinkDto>();
+
+        var byId = otherTickets.ToDictionary(x => x.Id, x => x);
+
+        static string RelationshipLabel(EhcTicketLink link, Guid currentTicketId)
+        {
+            var forward = link.TicketId == currentTicketId;
+            return link.LinkType switch
+            {
+                EhcTicketLinkType.Related => "Related to",
+                EhcTicketLinkType.ParentOf => forward ? "Parent of" : "Child of",
+                EhcTicketLinkType.DuplicateOf => forward ? "Duplicate of" : "Duplicate ticket",
+                _ => "Related to"
+            };
+        }
+
+        var outList = new List<EhcExternalTicketLinkDto>(links.Count);
+        foreach (var link in links)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var otherId = link.TicketId == ticketId ? link.RelatedTicketId : link.TicketId;
+            if (otherId == Guid.Empty) continue;
+            if (!byId.TryGetValue(otherId, out var other)) continue;
+
+            outList.Add(new EhcExternalTicketLinkDto
+            {
+                Id = link.Id,
+                LinkType = link.LinkType,
+                RelationshipLabel = RelationshipLabel(link, ticketId),
+                LinkedTicketId = other.Id,
+                LinkedTicketNumber = other.TicketNumber,
+                LinkedSubject = other.Subject,
+                LinkedStatus = other.Status,
+                LinkedPriority = other.Priority,
+                LinkedCreatedAt = other.CreatedAt,
+                CreatedAt = link.CreatedAt
+            });
+        }
+
+        return outList;
+    }
+
+    public async Task<EhcTicketDetailDto> SubmitMyTicketFeedbackAsync(Guid ticketId, SubmitEhcTicketFeedbackRequestDto request, CancellationToken cancellationToken = default)
+    {
+        if (ticketId == Guid.Empty)
+            throw new ArgumentException("Ticket id is required.", nameof(ticketId));
+
+        request ??= new SubmitEhcTicketFeedbackRequestDto();
+        if (request.Rating < 1 || request.Rating > 5)
+            throw new ArgumentException("Rating must be between 1 and 5.");
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("Tenant context is required.");
+
+        if (!Guid.TryParse(_currentUserService.UserId, out var requesterUserId) || requesterUserId == Guid.Empty)
+            throw new InvalidOperationException("Authenticated user context is required.");
+
+        var ticket = await _ticketRepository.GetByIdForRequesterAsync(ticketId, tenantId, requesterUserId, cancellationToken);
+        if (ticket == null)
+            throw new KeyNotFoundException("Ticket not found.");
+
+        if (ticket.Status is not (EhcTicketStatus.Resolved or EhcTicketStatus.Closed))
+            throw new InvalidOperationException("Feedback can only be submitted after the ticket is resolved or closed.");
+
+        var feedbackRepo = _unitOfWork.Repository<EhcTicketFeedback>();
+        var existing = await feedbackRepo
+            .GetQueryable(f => f.TenantId == tenantId && !f.IsDeleted && f.TicketId == ticket.Id && f.SubmittedByUserId == requesterUserId)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (existing != null)
+            throw new InvalidOperationException("Feedback was already submitted for this ticket.");
+
+        var now = DateTime.UtcNow;
+        var feedback = new EhcTicketFeedback
+        {
+            TenantId = tenantId,
+            TicketId = ticket.Id,
+            SubmittedByUserId = requesterUserId,
+            Rating = request.Rating,
+            Comment = string.IsNullOrWhiteSpace(request.Comment) ? null : request.Comment.Trim(),
+            CreatedAt = now,
+            CreatedBy = _currentUserService.UserName,
+            CreatedById = requesterUserId
+        };
+
+        await feedbackRepo.AddAsync(feedback);
+
+        await AddAuditEventAsync(
+            ticket,
+            eventType: "FeedbackSubmitted",
+            title: "Feedback submitted",
+            body: $"Rating: {feedback.Rating}/5",
+            isInternal: false,
+            actorUserId: requesterUserId,
+            data: new { rating = feedback.Rating });
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        await PublishTicketTopicAsync(
+            tenantId,
+            activity: "FeedbackSubmitted",
+            audience: "Internal",
+            ticketId: ticket.Id,
+            triggeredByUserId: requesterUserId,
+            data: new Dictionary<string, object>
+            {
+                ["ticketId"] = ticket.Id,
+                ["ticketNumber"] = ticket.TicketNumber,
+                ["rating"] = feedback.Rating,
+                ["ActionUrl"] = $"/helpdesk/tickets/{ticket.Id}"
+            },
+            cancellationToken);
+
+        var refreshed = await _ticketRepository.GetByIdForRequesterAsync(ticketId, tenantId, requesterUserId, cancellationToken);
+        if (refreshed == null)
+            throw new KeyNotFoundException("Ticket not found.");
+
+        return await MapToDetailDtoAsync(refreshed, includeInternal: false, cancellationToken);
     }
 
     public async Task<EhcTicketMessageDto> AddExternalMessageAsync(Guid ticketId, AddEhcTicketMessageRequestDto request, CancellationToken cancellationToken = default)
@@ -789,16 +1110,34 @@ public sealed class EhcTicketService : IEhcTicketService
             throw new KeyNotFoundException("Ticket not found.");
         }
 
+        var uploadRecord = await _unitOfWork.Repository<FileUploadRecord>()
+            .FirstOrDefaultAsync(r => r.TenantId == tenantId && !r.IsDeleted && r.FilePath == request.FilePath.Trim());
+
+        if (uploadRecord == null)
+        {
+            throw new ArgumentException("Invalid file reference. Please upload the file again.", nameof(request.FilePath));
+        }
+
+        if (!string.Equals(uploadRecord.Category, EhcUploadCategory, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Invalid upload category for ticket attachments.", nameof(request.FilePath));
+        }
+
+        if (uploadRecord.UploadedByUserId != requesterUserId)
+        {
+            throw new UnauthorizedAccessException("You can only attach files you uploaded.");
+        }
+
         var now = DateTime.UtcNow;
         var attachment = new EhcTicketAttachment
         {
             TenantId = tenantId,
             TicketId = ticketId,
             MessageId = request.MessageId,
-            FilePath = request.FilePath.Trim(),
-            FileName = request.FileName.Trim(),
-            ContentType = request.ContentType,
-            FileSize = request.FileSize,
+            FilePath = uploadRecord.FilePath,
+            FileName = string.IsNullOrWhiteSpace(uploadRecord.OriginalFileName) ? request.FileName.Trim() : uploadRecord.OriginalFileName,
+            ContentType = uploadRecord.ContentType ?? request.ContentType,
+            FileSize = uploadRecord.FileSize > 0 ? uploadRecord.FileSize : request.FileSize,
             IsInternal = false,
             CreatedAt = now,
             CreatedBy = _currentUserService.UserName,
@@ -864,11 +1203,39 @@ public sealed class EhcTicketService : IEhcTicketService
         }
 
         var now = DateTime.UtcNow;
+        var requesterActionUrl = await ResolveRequesterActionUrlAsync(ticket, cancellationToken);
+
+        var requester = await _userManager.FindByIdAsync(ticket.RequesterUserId.ToString());
+        var tokens = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["TicketNumber"] = ticket.TicketNumber,
+            ["ticketNumber"] = ticket.TicketNumber,
+            ["Status"] = ticket.Status.ToString(),
+            ["status"] = ticket.Status.ToString(),
+            ["RequesterName"] = requester == null ? string.Empty : $"{requester.FirstName} {requester.LastName}".Trim(),
+            ["requesterName"] = requester == null ? string.Empty : $"{requester.FirstName} {requester.LastName}".Trim(),
+            ["PortalUrl"] = requesterActionUrl,
+            ["portalUrl"] = requesterActionUrl,
+        };
+
+        var body = ExpandReplyTokens(request.Body.Trim(), tokens);
+
+        // Optional signature appended for requester-facing replies.
+        var profile = await _unitOfWork.Repository<EhcAgentReplyProfile>()
+            .GetQueryable(p => p.TenantId == tenantId && !p.IsDeleted && p.UserId == authorUserId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (profile?.IsSignatureEnabled == true && profile.AppendSignatureToReplies && !string.IsNullOrWhiteSpace(profile.Signature))
+        {
+            var sig = ExpandReplyTokens(profile.Signature.Trim(), tokens);
+            body = $"{body}\n\n--\n{sig}";
+        }
+
         var message = new EhcTicketMessage
         {
             TenantId = tenantId,
             TicketId = ticketId,
-            Body = request.Body.Trim(),
+            Body = body,
             IsInternal = false,
             AuthorUserId = authorUserId,
             CreatedAt = now,
@@ -896,8 +1263,6 @@ public sealed class EhcTicketService : IEhcTicketService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var requesterActionUrl = await ResolveRequesterActionUrlAsync(ticket, cancellationToken);
-
         await PublishTicketTopicAsync(
             tenantId,
             activity: "Message",
@@ -912,6 +1277,47 @@ public sealed class EhcTicketService : IEhcTicketService
                 ["ActionUrl"] = requesterActionUrl
             },
             cancellationToken);
+
+        await PublishTicketTopicAsync(
+            tenantId,
+            activity: "AgentMessage",
+            audience: "Internal",
+            ticketId: ticket.Id,
+            triggeredByUserId: authorUserId,
+            data: new Dictionary<string, object>
+            {
+                ["ticketId"] = ticket.Id,
+                ["ticketNumber"] = ticket.TicketNumber,
+                ["assignedToUserId"] = ticket.AssignedToUserId ?? Guid.Empty,
+                ["messageId"] = message.Id,
+                ["messagePreview"] = BuildMessagePreview(message.Body),
+                ["ActionUrl"] = $"/helpdesk/tickets/{ticket.Id}"
+            },
+            cancellationToken);
+
+        var mentionIds = await ResolveMentionedUserIdsAsync(tenantId, message.Body, cancellationToken);
+        var filteredMentionIds = mentionIds.Where(id => id != Guid.Empty && id != authorUserId).Distinct().ToList();
+        if (filteredMentionIds.Count > 0)
+        {
+            await PublishTicketTopicAsync(
+                tenantId,
+                activity: "Mention",
+                audience: "Internal",
+                ticketId: ticket.Id,
+                triggeredByUserId: authorUserId,
+                data: new Dictionary<string, object>
+                {
+                    ["ticketId"] = ticket.Id,
+                    ["ticketNumber"] = ticket.TicketNumber,
+                    ["assignedToUserId"] = ticket.AssignedToUserId ?? Guid.Empty,
+                    ["mentionedUserIds"] = filteredMentionIds,
+                    ["mentionedByName"] = _currentUserService.UserName ?? "Someone",
+                    ["messageId"] = message.Id,
+                    ["messagePreview"] = BuildMessagePreview(message.Body),
+                    ["ActionUrl"] = $"/helpdesk/tickets/{ticket.Id}"
+                },
+                cancellationToken);
+        }
 
         return new EhcTicketMessageDto
         {
@@ -949,6 +1355,24 @@ public sealed class EhcTicketService : IEhcTicketService
             throw new KeyNotFoundException("Ticket not found.");
         }
 
+        var uploadRecord = await _unitOfWork.Repository<FileUploadRecord>()
+            .FirstOrDefaultAsync(r => r.TenantId == tenantId && !r.IsDeleted && r.FilePath == request.FilePath.Trim());
+
+        if (uploadRecord == null)
+        {
+            throw new ArgumentException("Invalid file reference. Please upload the file again.", nameof(request.FilePath));
+        }
+
+        if (!string.Equals(uploadRecord.Category, EhcUploadCategory, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Invalid upload category for ticket attachments.", nameof(request.FilePath));
+        }
+
+        if (uploadRecord.UploadedByUserId != actorUserId)
+        {
+            throw new UnauthorizedAccessException("You can only attach files you uploaded.");
+        }
+
         EhcTicketMessage? message = null;
         if (request.MessageId.HasValue && request.MessageId.Value != Guid.Empty)
         {
@@ -967,10 +1391,10 @@ public sealed class EhcTicketService : IEhcTicketService
             TenantId = tenantId,
             TicketId = ticketId,
             MessageId = request.MessageId,
-            FilePath = request.FilePath.Trim(),
-            FileName = request.FileName.Trim(),
-            ContentType = request.ContentType,
-            FileSize = request.FileSize,
+            FilePath = uploadRecord.FilePath,
+            FileName = string.IsNullOrWhiteSpace(uploadRecord.OriginalFileName) ? request.FileName.Trim() : uploadRecord.OriginalFileName,
+            ContentType = uploadRecord.ContentType ?? request.ContentType,
+            FileSize = uploadRecord.FileSize > 0 ? uploadRecord.FileSize : request.FileSize,
             IsInternal = isInternal,
             CreatedAt = now,
             CreatedBy = _currentUserService.UserName,
@@ -1048,7 +1472,12 @@ public sealed class EhcTicketService : IEhcTicketService
             createdTo: createdTo,
             cancellationToken: cancellationToken);
 
-        return tickets.Select(MapToInternalListItemDto).ToList();
+        var feedbackByTicketId = await GetLatestFeedbackByTicketIdsAsync(tenantId, tickets.Select(t => t.Id).ToList(), cancellationToken);
+        return tickets.Select(t =>
+        {
+            feedbackByTicketId.TryGetValue(t.Id, out var f);
+            return MapToInternalListItemDto(t, f?.Rating, f?.SubmittedAtUtc);
+        }).ToList();
     }
 
     public async Task<EhcTicketDetailDto?> GetTicketByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -1189,6 +1618,11 @@ public sealed class EhcTicketService : IEhcTicketService
 
         var now = DateTime.UtcNow;
         var requesterActionUrl = await ResolveRequesterActionUrlAsync(ticket, cancellationToken);
+
+        if (IsSlaPausedStatus(fromStatus) && !IsSlaPausedStatus(targetStatus))
+        {
+            await ExtendSlaDueDatesForPendingAsync(tenantId, ticket, now, cancellationToken);
+        }
 
         // Pending statuses are represented as a workflow "RequestInformation" pause in phase 1.
         if (targetStatus is EhcTicketStatus.PendingUser or EhcTicketStatus.PendingThirdParty)
@@ -1556,6 +1990,48 @@ public sealed class EhcTicketService : IEhcTicketService
             },
             cancellationToken);
 
+        if (targetStatus is EhcTicketStatus.Resolved or EhcTicketStatus.Closed)
+        {
+            try
+            {
+                var requester = await _userManager.FindByIdAsync(ticket.RequesterUserId.ToString());
+                // Phase 2: request CSAT only for external-portal (local-auth) requesters.
+                if (requester?.AuthenticationProvider == AuthenticationProvider.Local)
+                {
+                    var alreadyHasFeedback = await _unitOfWork.Repository<EhcTicketFeedback>()
+                        .GetQueryable(f => f.TenantId == tenantId && !f.IsDeleted && f.TicketId == ticket.Id)
+                        .AnyAsync(cancellationToken);
+
+                    if (!alreadyHasFeedback)
+                    {
+                        await PublishTicketTopicAsync(
+                            tenantId,
+                            activity: "FeedbackRequested",
+                            audience: "Requester",
+                            ticketId: ticket.Id,
+                            triggeredByUserId: actorUserId,
+                            data: new Dictionary<string, object>
+                            {
+                                ["ticketId"] = ticket.Id,
+                                ["ticketNumber"] = ticket.TicketNumber,
+                                ["status"] = targetStatus.ToString(),
+                                ["requesterUserId"] = ticket.RequesterUserId,
+                                ["ActionUrl"] = requesterActionUrl
+                            },
+                            cancellationToken);
+                    }
+                }
+                else
+                {
+                    // No CSAT prompt for internal ERP requesters.
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to publish feedback-requested event for ticket {TicketId}", ticket.Id);
+            }
+        }
+
         await PublishTicketTopicAsync(
             tenantId,
             activity: "StatusChanged",
@@ -1670,6 +2146,105 @@ public sealed class EhcTicketService : IEhcTicketService
             .ToList();
     }
 
+    public async Task<EhcTicketDetailDto> UpdateTicketRcaAsync(Guid ticketId, UpdateEhcTicketRcaRequestDto request, CancellationToken cancellationToken = default)
+    {
+        request ??= new UpdateEhcTicketRcaRequestDto();
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            throw new InvalidOperationException("Tenant context is required.");
+        }
+
+        if (!Guid.TryParse(_currentUserService.UserId, out var actorUserId) || actorUserId == Guid.Empty)
+        {
+            throw new InvalidOperationException("Authenticated user context is required.");
+        }
+
+        var ticketRepo = _unitOfWork.Repository<EhcTicket>();
+        var ticket = await ticketRepo.FirstOrDefaultAsync(
+            t => t.Id == ticketId && t.TenantId == tenantId && !t.IsDeleted,
+            t => t.RootCause,
+            t => t.Category,
+            t => t.Subcategory,
+            t => t.AssignedDepartment,
+            t => t.AssignedToUser,
+            t => t.RequesterUser,
+            t => t.Messages!,
+            t => t.Attachments!,
+            t => t.StatusHistory!,
+            t => t.AuditEvents!);
+
+        if (ticket == null)
+        {
+            throw new KeyNotFoundException("Ticket not found.");
+        }
+
+        if (ticket.TicketType != EhcTicketType.Complaint)
+        {
+            throw new InvalidOperationException("RCA fields are only applicable to Complaint tickets.");
+        }
+
+        Guid? rootCauseId = request.RootCauseId.HasValue && request.RootCauseId.Value == Guid.Empty
+            ? (Guid?)null
+            : request.RootCauseId;
+
+        EhcRootCauseCode? rootCause = null;
+        if (rootCauseId.HasValue)
+        {
+            rootCause = await _unitOfWork.Repository<EhcRootCauseCode>().FirstOrDefaultAsync(
+                r => r.Id == rootCauseId.Value && r.TenantId == tenantId && !r.IsDeleted && r.IsActive);
+
+            if (rootCause == null)
+            {
+                throw new ArgumentException("Selected root cause does not exist.");
+            }
+        }
+
+        ticket.RootCauseId = rootCauseId;
+        ticket.RootCause = rootCause;
+        ticket.RootCauseDetails = string.IsNullOrWhiteSpace(request.RootCauseDetails) ? null : request.RootCauseDetails.Trim();
+        ticket.ResolutionSummary = string.IsNullOrWhiteSpace(request.ResolutionSummary) ? null : request.ResolutionSummary.Trim();
+        ticket.UpdatedAt = DateTime.UtcNow;
+        ticket.UpdatedBy = _currentUserService.UserName;
+        ticket.LastModifiedById = actorUserId;
+
+        await ticketRepo.UpdateAsync(ticket);
+
+        await AddAuditEventAsync(
+            ticket,
+            eventType: "RcaUpdated",
+            title: "RCA updated",
+            body: $"Root cause: {(rootCause == null ? "—" : $"{rootCause.Code} - {rootCause.Name}")}",
+            isInternal: true,
+            actorUserId: actorUserId,
+            data: new
+            {
+                rootCauseId = rootCauseId,
+                rootCauseCode = rootCause?.Code,
+                rootCauseName = rootCause?.Name
+            });
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        await PublishTicketTopicAsync(
+            tenantId,
+            activity: "Updated",
+            audience: "Internal",
+            ticketId: ticket.Id,
+            triggeredByUserId: actorUserId,
+            data: new Dictionary<string, object>
+            {
+                ["ticketId"] = ticket.Id,
+                ["ticketNumber"] = ticket.TicketNumber,
+                ["ActionUrl"] = $"/helpdesk/tickets/{ticket.Id}"
+            },
+            cancellationToken);
+
+        // Return full internal view.
+        return await MapToDetailDtoAsync(ticket, includeInternal: true, cancellationToken);
+    }
+
     private async Task<HashSet<EhcTicketStatus>> GetAllowedTransitionsInternalAsync(EhcTicket ticket, CancellationToken cancellationToken)
     {
         var statuses = new HashSet<EhcTicketStatus>();
@@ -1769,6 +2344,47 @@ public sealed class EhcTicketService : IEhcTicketService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        await PublishTicketTopicAsync(
+            tenantId,
+            activity: "InternalComment",
+            audience: "Internal",
+            ticketId: ticket.Id,
+            triggeredByUserId: authorUserId,
+            data: new Dictionary<string, object>
+            {
+                ["ticketId"] = ticket.Id,
+                ["ticketNumber"] = ticket.TicketNumber,
+                ["assignedToUserId"] = ticket.AssignedToUserId ?? Guid.Empty,
+                ["messageId"] = message.Id,
+                ["messagePreview"] = BuildMessagePreview(message.Body),
+                ["ActionUrl"] = $"/helpdesk/tickets/{ticket.Id}"
+            },
+            cancellationToken);
+
+        var mentionIds = await ResolveMentionedUserIdsAsync(tenantId, message.Body, cancellationToken);
+        var filteredMentionIds = mentionIds.Where(id => id != Guid.Empty && id != authorUserId).Distinct().ToList();
+        if (filteredMentionIds.Count > 0)
+        {
+            await PublishTicketTopicAsync(
+                tenantId,
+                activity: "Mention",
+                audience: "Internal",
+                ticketId: ticket.Id,
+                triggeredByUserId: authorUserId,
+                data: new Dictionary<string, object>
+                {
+                    ["ticketId"] = ticket.Id,
+                    ["ticketNumber"] = ticket.TicketNumber,
+                    ["assignedToUserId"] = ticket.AssignedToUserId ?? Guid.Empty,
+                    ["mentionedUserIds"] = filteredMentionIds,
+                    ["mentionedByName"] = _currentUserService.UserName ?? "Someone",
+                    ["messageId"] = message.Id,
+                    ["messagePreview"] = BuildMessagePreview(message.Body),
+                    ["ActionUrl"] = $"/helpdesk/tickets/{ticket.Id}"
+                },
+                cancellationToken);
+        }
+
         return new EhcTicketMessageDto
         {
             Id = message.Id,
@@ -1783,7 +2399,7 @@ public sealed class EhcTicketService : IEhcTicketService
     private async Task<EhcSlaTemplate?> ResolveSlaTemplateAsync(Guid tenantId, CreateEhcTicketRequestDto request, CancellationToken cancellationToken)
     {
         var templates = (await _unitOfWork.Repository<EhcSlaTemplate>()
-                .FindAsync(t => t.TenantId == tenantId && t.IsActive))
+                .FindAsync(t => t.TenantId == tenantId && t.IsActive && !t.IsDeleted))
             .ToList();
 
         if (templates.Count == 0)
@@ -1791,8 +2407,20 @@ public sealed class EhcTicketService : IEhcTicketService
             return null;
         }
 
+        var candidates = templates
+            .Where(t =>
+                (!t.CategoryId.HasValue || t.CategoryId == request.CategoryId) &&
+                (!t.TicketType.HasValue || t.TicketType == request.TicketType) &&
+                (!t.Priority.HasValue || t.Priority == request.Priority))
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
         // Phase 1 scoring: prioritize most specific match.
-        var best = templates
+        var best = candidates
             .Select(t => new
             {
                 Template = t,
@@ -1806,6 +2434,84 @@ public sealed class EhcTicketService : IEhcTicketService
             .FirstOrDefault();
 
         return best?.Template;
+    }
+
+    private static bool IsSlaPausedStatus(EhcTicketStatus status) =>
+        status is EhcTicketStatus.PendingUser or EhcTicketStatus.PendingThirdParty;
+
+    private async Task ExtendSlaDueDatesForPendingAsync(Guid tenantId, EhcTicket ticket, DateTime pauseEndUtc, CancellationToken cancellationToken)
+    {
+        var statusRepo = _unitOfWork.Repository<EhcTicketStatusHistory>();
+        var pendingStart = await statusRepo
+            .GetQueryable(h =>
+                h.TenantId == tenantId &&
+                !h.IsDeleted &&
+                h.TicketId == ticket.Id &&
+                (h.ToStatus == EhcTicketStatus.PendingUser || h.ToStatus == EhcTicketStatus.PendingThirdParty) &&
+                (!h.FromStatus.HasValue || (h.FromStatus.Value != EhcTicketStatus.PendingUser && h.FromStatus.Value != EhcTicketStatus.PendingThirdParty)))
+            .AsNoTracking()
+            .OrderByDescending(h => h.CreatedAt)
+            .Select(h => (DateTime?)h.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (!pendingStart.HasValue) return;
+        if (pauseEndUtc <= pendingStart.Value) return;
+
+        var calendarJson = ticket.AppliedSlaCalendarConfigurationJson;
+        if (string.IsNullOrWhiteSpace(calendarJson))
+        {
+            // Best-effort fallback for older tickets created before SLA snapshot fields existed.
+            var best = await ResolveSlaTemplateAsync(tenantId, new CreateEhcTicketRequestDto
+            {
+                TicketType = ticket.TicketType,
+                CategoryId = ticket.CategoryId,
+                SubcategoryId = ticket.SubcategoryId,
+                Priority = ticket.Priority,
+                Source = ticket.Source,
+                Subject = ticket.Subject,
+                Description = ticket.Description
+            }, cancellationToken);
+
+            calendarJson = best?.CalendarConfigurationJson;
+        }
+
+        if (string.IsNullOrWhiteSpace(calendarJson))
+        {
+            var pauseDuration = pauseEndUtc - pendingStart.Value;
+            if (pauseDuration <= TimeSpan.Zero) return;
+
+            if (ticket.FirstRespondedAt == null &&
+                ticket.FirstResponseDueAt.HasValue &&
+                ticket.FirstResponseDueAt.Value > pendingStart.Value)
+            {
+                ticket.FirstResponseDueAt = ticket.FirstResponseDueAt.Value.Add(pauseDuration);
+            }
+
+            if (ticket.ResolvedAt == null &&
+                ticket.ResolutionDueAt.HasValue &&
+                ticket.ResolutionDueAt.Value > pendingStart.Value)
+            {
+                ticket.ResolutionDueAt = ticket.ResolutionDueAt.Value.Add(pauseDuration);
+            }
+            return;
+        }
+
+        var pausedBusinessMinutes = EhcSlaTimeCalculator.CalculateBusinessMinutesBetweenUtc(pendingStart.Value, pauseEndUtc, calendarJson);
+        if (pausedBusinessMinutes <= 0) return;
+
+        if (ticket.FirstRespondedAt == null &&
+            ticket.FirstResponseDueAt.HasValue &&
+            ticket.FirstResponseDueAt.Value > pendingStart.Value)
+        {
+            ticket.FirstResponseDueAt = EhcSlaTimeCalculator.CalculateDueAtUtc(ticket.FirstResponseDueAt.Value, pausedBusinessMinutes, calendarJson);
+        }
+
+        if (ticket.ResolvedAt == null &&
+            ticket.ResolutionDueAt.HasValue &&
+            ticket.ResolutionDueAt.Value > pendingStart.Value)
+        {
+            ticket.ResolutionDueAt = EhcSlaTimeCalculator.CalculateDueAtUtc(ticket.ResolutionDueAt.Value, pausedBusinessMinutes, calendarJson);
+        }
     }
 
     private async Task AddStatusHistoryAsync(EhcTicket ticket, EhcTicketStatus? from, EhcTicketStatus to, string? notes, Guid actorUserId)
@@ -1876,7 +2582,7 @@ public sealed class EhcTicketService : IEhcTicketService
         }
     }
 
-    private static EhcTicketListItemDto MapToExternalListItemDto(EhcTicket ticket)
+    private static EhcTicketListItemDto MapToExternalListItemDto(EhcTicket ticket, int? feedbackRating, DateTime? feedbackSubmittedAtUtc)
     {
         return new EhcTicketListItemDto
         {
@@ -1890,6 +2596,13 @@ public sealed class EhcTicketService : IEhcTicketService
             CategoryName = ticket.Category?.Name,
             CreatedAt = ticket.CreatedAt,
             UpdatedAt = ticket.UpdatedAt,
+            FirstResponseDueAt = ticket.FirstResponseDueAt,
+            ResolutionDueAt = ticket.ResolutionDueAt,
+            FirstRespondedAt = ticket.FirstRespondedAt,
+            ResolvedAt = ticket.ResolvedAt,
+            ClosedAt = ticket.ClosedAt,
+            FeedbackRating = feedbackRating,
+            FeedbackSubmittedAt = feedbackSubmittedAtUtc,
             AssignedDepartmentName = null,
             AssignedToName = null,
             RequesterName = null,
@@ -1897,7 +2610,7 @@ public sealed class EhcTicketService : IEhcTicketService
         };
     }
 
-    private static EhcTicketListItemDto MapToInternalListItemDto(EhcTicket ticket)
+    private static EhcTicketListItemDto MapToInternalListItemDto(EhcTicket ticket, int? feedbackRating, DateTime? feedbackSubmittedAtUtc)
     {
         var requesterName = ticket.RequesterUser != null
             ? $"{ticket.RequesterUser.FirstName} {ticket.RequesterUser.LastName}".Trim()
@@ -1915,6 +2628,13 @@ public sealed class EhcTicketService : IEhcTicketService
             CategoryName = ticket.Category?.Name,
             CreatedAt = ticket.CreatedAt,
             UpdatedAt = ticket.UpdatedAt,
+            FirstResponseDueAt = ticket.FirstResponseDueAt,
+            ResolutionDueAt = ticket.ResolutionDueAt,
+            FirstRespondedAt = ticket.FirstRespondedAt,
+            ResolvedAt = ticket.ResolvedAt,
+            ClosedAt = ticket.ClosedAt,
+            FeedbackRating = feedbackRating,
+            FeedbackSubmittedAt = feedbackSubmittedAtUtc,
             AssignedDepartmentName = ticket.AssignedDepartment?.Name,
             AssignedToName = ticket.AssignedToUser != null
                 ? $"{ticket.AssignedToUser.FirstName} {ticket.AssignedToUser.LastName}".Trim()
@@ -1924,8 +2644,52 @@ public sealed class EhcTicketService : IEhcTicketService
         };
     }
 
+    private sealed record FeedbackSnapshot(int Rating, DateTime SubmittedAtUtc);
+
+    private async Task<Dictionary<Guid, FeedbackSnapshot>> GetLatestFeedbackByTicketIdsAsync(Guid tenantId, List<Guid> ticketIds, CancellationToken cancellationToken)
+    {
+        if (tenantId == Guid.Empty || ticketIds.Count == 0)
+        {
+            return new Dictionary<Guid, FeedbackSnapshot>();
+        }
+
+        var distinct = ticketIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (distinct.Count == 0)
+        {
+            return new Dictionary<Guid, FeedbackSnapshot>();
+        }
+
+        var feedbackRepo = _unitOfWork.Repository<EhcTicketFeedback>();
+        var rows = await feedbackRepo
+            .GetQueryable(f => f.TenantId == tenantId && !f.IsDeleted && distinct.Contains(f.TicketId))
+            .AsNoTracking()
+            .GroupBy(f => f.TicketId)
+            .Select(g => g
+                .OrderByDescending(x => x.CreatedAt)
+                .Select(x => new { x.TicketId, x.Rating, x.CreatedAt })
+                .FirstOrDefault())
+            .ToListAsync(cancellationToken);
+
+        var dict = new Dictionary<Guid, FeedbackSnapshot>();
+        foreach (var r in rows)
+        {
+            if (r == null) continue;
+            if (r.TicketId == Guid.Empty) continue;
+            dict[r.TicketId] = new FeedbackSnapshot(r.Rating, r.CreatedAt);
+        }
+
+        return dict;
+    }
+
     private async Task<EhcTicketDetailDto> MapToDetailDtoAsync(EhcTicket ticket, bool includeInternal, CancellationToken cancellationToken)
     {
+        var feedbackRepo = _unitOfWork.Repository<EhcTicketFeedback>();
+        var feedback = await feedbackRepo
+            .GetQueryable(f => f.TenantId == ticket.TenantId && !f.IsDeleted && f.TicketId == ticket.Id)
+            .OrderByDescending(f => f.CreatedAt)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(cancellationToken);
+
         var audit = (ticket.AuditEvents ?? new List<EhcTicketAuditEvent>())
             .Where(e => includeInternal || !e.IsInternal)
             .OrderBy(e => e.CreatedAt)
@@ -2033,11 +2797,419 @@ public sealed class EhcTicketService : IEhcTicketService
                 : null,
             RequesterEmail = includeInternal ? ticket.RequesterUser?.Email : null,
             RequesterAuthenticationProvider = includeInternal ? ticket.RequesterUser?.AuthenticationProvider.ToString() : null,
+            RootCauseId = includeInternal ? ticket.RootCauseId : null,
+            RootCauseCode = includeInternal ? ticket.RootCause?.Code : null,
+            RootCauseName = includeInternal ? ticket.RootCause?.Name : null,
+            RootCauseDetails = includeInternal ? ticket.RootCauseDetails : null,
+            ResolutionSummary = includeInternal ? ticket.ResolutionSummary : null,
+            FeedbackRating = feedback?.Rating,
+            FeedbackComment = feedback?.Comment,
+            FeedbackSubmittedAt = feedback?.CreatedAt,
             Messages = messages,
             Attachments = attachments,
             StatusHistory = history,
             AuditTrail = audit
         };
+    }
+
+    public async Task<IReadOnlyList<EhcTicketLinkDto>> GetTicketLinksAsync(Guid ticketId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty || ticketId == Guid.Empty)
+            return Array.Empty<EhcTicketLinkDto>();
+
+        var exists = await _ticketRepository.Query()
+            .AsNoTracking()
+            .AnyAsync(t => t.TenantId == tenantId && !t.IsDeleted && t.Id == ticketId, cancellationToken);
+        if (!exists)
+            return Array.Empty<EhcTicketLinkDto>();
+
+        var linkRepo = _unitOfWork.Repository<EhcTicketLink>();
+        var links = (await linkRepo.FindAsync(l =>
+                l.TenantId == tenantId &&
+                (l.TicketId == ticketId || l.RelatedTicketId == ticketId)))
+            .OrderByDescending(l => l.CreatedAt)
+            .ToList();
+
+        if (links.Count == 0)
+            return Array.Empty<EhcTicketLinkDto>();
+
+        var otherIds = links
+            .Select(l => l.TicketId == ticketId ? l.RelatedTicketId : l.TicketId)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        if (otherIds.Count == 0)
+            return Array.Empty<EhcTicketLinkDto>();
+
+        var otherTickets = await _ticketRepository.Query()
+            .AsNoTracking()
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted && otherIds.Contains(t.Id))
+            .Select(t => new
+            {
+                t.Id,
+                t.TicketNumber,
+                t.Subject,
+                t.Status,
+                t.Priority,
+                t.CreatedAt
+            })
+            .ToListAsync(cancellationToken);
+
+        var byId = otherTickets.ToDictionary(x => x.Id, x => x);
+
+        static string RelationshipLabel(EhcTicketLink link, Guid currentTicketId)
+        {
+            var forward = link.TicketId == currentTicketId;
+            return link.LinkType switch
+            {
+                EhcTicketLinkType.Related => "Related to",
+                EhcTicketLinkType.ParentOf => forward ? "Parent of" : "Child of",
+                EhcTicketLinkType.DuplicateOf => forward ? "Duplicate of" : "Duplicate ticket",
+                _ => "Related to"
+            };
+        }
+
+        var outList = new List<EhcTicketLinkDto>(links.Count);
+        foreach (var link in links)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var otherId = link.TicketId == ticketId ? link.RelatedTicketId : link.TicketId;
+            if (otherId == Guid.Empty) continue;
+            if (!byId.TryGetValue(otherId, out var other)) continue;
+
+            outList.Add(new EhcTicketLinkDto
+            {
+                Id = link.Id,
+                LinkType = link.LinkType,
+                RelationshipLabel = RelationshipLabel(link, ticketId),
+                LinkedTicketId = other.Id,
+                LinkedTicketNumber = other.TicketNumber,
+                LinkedSubject = other.Subject,
+                LinkedStatus = other.Status,
+                LinkedPriority = other.Priority,
+                LinkedCreatedAt = other.CreatedAt,
+                CreatedAt = link.CreatedAt,
+                CreatedBy = link.CreatedBy
+            });
+        }
+
+        return outList;
+    }
+
+    public async Task<EhcTicketLinkDto> CreateTicketLinkAsync(Guid ticketId, CreateEhcTicketLinkRequestDto request, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant context is required.");
+        if (ticketId == Guid.Empty)
+            throw new ArgumentException("TicketId is required.");
+
+        request ??= new CreateEhcTicketLinkRequestDto();
+        if (request.RelatedTicketId == Guid.Empty)
+            throw new ArgumentException("RelatedTicketId is required.");
+        if (request.RelatedTicketId == ticketId)
+            throw new ArgumentException("A ticket cannot be linked to itself.");
+
+        var actorUserId = Guid.TryParse(_currentUserService.UserId, out var uid) ? uid : (Guid?)null;
+
+        var type = request.LinkType;
+        var reverseDirection = request.ReverseDirection && type != EhcTicketLinkType.Related;
+        var fromId = reverseDirection ? request.RelatedTicketId : ticketId;
+        var toId = reverseDirection ? ticketId : request.RelatedTicketId;
+
+        var fromTicket = await _ticketRepository.Query()
+            .FirstOrDefaultAsync(t => t.TenantId == tenantId && !t.IsDeleted && t.Id == fromId, cancellationToken);
+        if (fromTicket == null)
+            throw new ArgumentException("Ticket not found.");
+
+        var toTicket = await _ticketRepository.Query()
+            .FirstOrDefaultAsync(t => t.TenantId == tenantId && !t.IsDeleted && t.Id == toId, cancellationToken);
+        if (toTicket == null)
+            throw new ArgumentException("Related ticket not found.");
+
+        var currentTicket = ticketId == fromId ? fromTicket : toTicket;
+        var linkedTicket = ticketId == fromId ? toTicket : fromTicket;
+
+        var linkRepo = _unitOfWork.Repository<EhcTicketLink>();
+
+        if (type == EhcTicketLinkType.Related)
+        {
+            var exists = await linkRepo.ExistsAsync(l =>
+                l.TenantId == tenantId &&
+                l.LinkType == EhcTicketLinkType.Related &&
+                ((l.TicketId == fromId && l.RelatedTicketId == toId) ||
+                 (l.TicketId == toId && l.RelatedTicketId == fromId)));
+            if (exists)
+                throw new ArgumentException("A related-ticket link already exists.");
+        }
+        else
+        {
+            var exists = await linkRepo.ExistsAsync(l =>
+                l.TenantId == tenantId &&
+                l.LinkType == type &&
+                l.TicketId == fromId &&
+                l.RelatedTicketId == toId);
+            if (exists)
+                throw new ArgumentException("This ticket link already exists.");
+
+            if (type == EhcTicketLinkType.ParentOf)
+            {
+                var inverseExists = await linkRepo.ExistsAsync(l =>
+                    l.TenantId == tenantId &&
+                    l.LinkType == EhcTicketLinkType.ParentOf &&
+                    l.TicketId == toId &&
+                    l.RelatedTicketId == fromId);
+                if (inverseExists)
+                    throw new ArgumentException("A parent/child link in the opposite direction already exists.");
+            }
+        }
+
+        var entity = new EhcTicketLink
+        {
+            TenantId = tenantId,
+            TicketId = fromId,
+            RelatedTicketId = toId,
+            LinkType = type,
+            Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUserService.UserName ?? "System",
+            CreatedById = actorUserId
+        };
+
+        await linkRepo.AddAsync(entity);
+
+        static string Describe(EhcTicketLinkType t, bool forward) => t switch
+        {
+            EhcTicketLinkType.Related => "Related to",
+            EhcTicketLinkType.ParentOf => forward ? "Parent of" : "Child of",
+            EhcTicketLinkType.DuplicateOf => forward ? "Duplicate of" : "Duplicate ticket",
+            _ => "Related to"
+        };
+
+        var currentForward = entity.TicketId == currentTicket.Id;
+        var linkedForward = entity.TicketId == linkedTicket.Id;
+        var currentLabel = Describe(type, currentForward);
+        var linkedLabel = Describe(type, linkedForward);
+
+        await AddAuditEventAsync(
+            currentTicket,
+            eventType: "TicketLinkCreated",
+            title: "Ticket link added",
+            body: $"{currentLabel} {linkedTicket.TicketNumber}",
+            isInternal: true,
+            actorUserId: actorUserId,
+            data: new
+            {
+                linkId = entity.Id,
+                linkType = type.ToString(),
+                relatedTicketId = linkedTicket.Id,
+                relatedTicketNumber = linkedTicket.TicketNumber,
+                notes = entity.Notes,
+                reverseDirection = request.ReverseDirection
+            });
+
+        await AddAuditEventAsync(
+            linkedTicket,
+            eventType: "TicketLinkCreated",
+            title: "Ticket link added",
+            body: $"{linkedLabel} {currentTicket.TicketNumber}",
+            isInternal: true,
+            actorUserId: actorUserId,
+            data: new
+            {
+                linkId = entity.Id,
+                linkType = type.ToString(),
+                relatedTicketId = currentTicket.Id,
+                relatedTicketNumber = currentTicket.TicketNumber,
+                notes = entity.Notes,
+                reverseDirection = request.ReverseDirection
+            });
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        await PublishTicketTopicAsync(
+            tenantId,
+            activity: "TicketLinkCreated",
+            audience: "Internal",
+            ticketId: ticketId,
+            triggeredByUserId: actorUserId,
+            data: new Dictionary<string, object>
+            {
+                ["ticketId"] = ticketId,
+                ["ticketNumber"] = currentTicket.TicketNumber,
+                ["linkType"] = type.ToString(),
+                ["relationshipLabel"] = currentLabel,
+                ["linkedTicketId"] = linkedTicket.Id,
+                ["linkedTicketNumber"] = linkedTicket.TicketNumber
+            },
+            cancellationToken);
+
+        return new EhcTicketLinkDto
+        {
+            Id = entity.Id,
+            LinkType = type,
+            RelationshipLabel = currentLabel,
+            LinkedTicketId = linkedTicket.Id,
+            LinkedTicketNumber = linkedTicket.TicketNumber,
+            LinkedSubject = linkedTicket.Subject,
+            LinkedStatus = linkedTicket.Status,
+            LinkedPriority = linkedTicket.Priority,
+            LinkedCreatedAt = linkedTicket.CreatedAt,
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy
+        };
+    }
+
+    public async Task DeleteTicketLinkAsync(Guid ticketId, Guid linkId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant context is required.");
+        if (ticketId == Guid.Empty || linkId == Guid.Empty)
+            throw new ArgumentException("TicketId and LinkId are required.");
+
+        var actorUserId = Guid.TryParse(_currentUserService.UserId, out var uid) ? uid : (Guid?)null;
+
+        var linkRepo = _unitOfWork.Repository<EhcTicketLink>();
+        var link = await linkRepo.GetByIdAsync(linkId);
+        if (link == null || link.TenantId != tenantId)
+            throw new ArgumentException("Ticket link not found.");
+
+        if (link.TicketId != ticketId && link.RelatedTicketId != ticketId)
+            throw new ArgumentException("Ticket link does not belong to this ticket.");
+
+        link.IsDeleted = true;
+        link.DeletedAt = DateTime.UtcNow;
+        link.DeletedBy = _currentUserService.UserName ?? "System";
+        link.UpdatedAt = DateTime.UtcNow;
+        link.UpdatedBy = _currentUserService.UserName ?? "System";
+        link.LastModifiedById = actorUserId;
+
+        await linkRepo.UpdateAsync(link);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        await PublishTicketTopicAsync(
+            tenantId,
+            activity: "TicketLinkDeleted",
+            audience: "Internal",
+            ticketId: ticketId,
+            triggeredByUserId: actorUserId,
+            data: new Dictionary<string, object>
+            {
+                ["ticketId"] = ticketId,
+                ["linkId"] = linkId,
+                ["linkType"] = link.LinkType.ToString()
+            },
+            cancellationToken);
+    }
+
+    public async Task<CloseEhcDuplicateTicketsResultDto> CloseDuplicateTicketsAsync(Guid ticketId, CloseEhcDuplicateTicketsRequestDto request, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant context is required.");
+        if (ticketId == Guid.Empty)
+            throw new ArgumentException("TicketId is required.");
+
+        var targetStatus = request?.TargetStatus ?? EhcTicketStatus.Closed;
+        if (targetStatus != EhcTicketStatus.Closed && targetStatus != EhcTicketStatus.Resolved)
+            throw new ArgumentException("TargetStatus must be Closed or Resolved.");
+
+        var master = await _ticketRepository.Query()
+            .AsNoTracking()
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted && t.Id == ticketId)
+            .Select(t => new { t.Id, t.TicketNumber })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (master == null)
+            throw new KeyNotFoundException("Ticket not found.");
+
+        var linkRepo = _unitOfWork.Repository<EhcTicketLink>();
+        var duplicateLinks = (await linkRepo.FindAsync(l =>
+                l.TenantId == tenantId &&
+                !l.IsDeleted &&
+                l.RelatedTicketId == ticketId &&
+                l.LinkType == EhcTicketLinkType.DuplicateOf))
+            .ToList();
+
+        var duplicateIds = duplicateLinks
+            .Select(l => l.TicketId)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        var result = new CloseEhcDuplicateTicketsResultDto
+        {
+            TotalDuplicates = duplicateIds.Count
+        };
+
+        if (duplicateIds.Count == 0)
+            return result;
+
+        var dupTickets = await _ticketRepository.Query()
+            .AsNoTracking()
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted && duplicateIds.Contains(t.Id))
+            .Select(t => new { t.Id, t.TicketNumber, t.Status })
+            .ToListAsync(cancellationToken);
+
+        var byId = dupTickets.ToDictionary(x => x.Id, x => x);
+
+        foreach (var id in duplicateIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!byId.TryGetValue(id, out var t))
+            {
+                result.Failed.Add(new CloseEhcDuplicateTicketFailureDto
+                {
+                    TicketId = id,
+                    TicketNumber = null,
+                    Reason = "Ticket not found."
+                });
+                continue;
+            }
+
+            if (t.Status == EhcTicketStatus.Closed || (targetStatus == EhcTicketStatus.Resolved && t.Status == EhcTicketStatus.Resolved))
+            {
+                result.SkippedCount++;
+                continue;
+            }
+
+            var baseNote = targetStatus == EhcTicketStatus.Closed
+                ? $"Closed as duplicate of {master.TicketNumber}."
+                : $"Resolved as duplicate of {master.TicketNumber}.";
+
+            var extra = (request?.Notes ?? string.Empty).Trim();
+            var notes = string.IsNullOrWhiteSpace(extra) ? baseNote : $"{baseNote} {extra}";
+
+            try
+            {
+                await TransitionTicketAsync(id, targetStatus, notes, workflowTransitionId: null, workflowTransitionName: null, cancellationToken: cancellationToken);
+                result.ClosedCount++;
+            }
+            catch (Exception ex)
+            {
+                result.Failed.Add(new CloseEhcDuplicateTicketFailureDto
+                {
+                    TicketId = id,
+                    TicketNumber = t.TicketNumber,
+                    Reason = ex.Message
+                });
+            }
+        }
+
+        return result;
     }
 
     private async Task<EhcTicketAttachmentDto> MapToAttachmentDtoAsync(EhcTicketAttachment attachment)

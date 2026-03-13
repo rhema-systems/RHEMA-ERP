@@ -1,5 +1,6 @@
 'use client';
 
+import { usePathname } from 'next/navigation';
 import { DashboardLayout } from '../../components/layout/dashboard-layout';
 import { AuthGuard } from '../../components/auth/auth-guard';
 
@@ -8,8 +9,13 @@ interface MaintenanceLayoutProps {
 }
 
 export default function MaintenanceLayout({ children }: MaintenanceLayoutProps) {
+  const pathname = usePathname();
+  const requiredPermissions = pathname.startsWith('/maintenance/fleet')
+    ? ['fleet.access']
+    : ['maintenance.access'];
+
   return (
-    <AuthGuard>
+    <AuthGuard requiredPermissions={requiredPermissions}>
       <DashboardLayout>{children}</DashboardLayout>
     </AuthGuard>
   );

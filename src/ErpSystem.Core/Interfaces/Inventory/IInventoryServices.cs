@@ -243,7 +243,9 @@ public interface ILandedCostService
     Task<IEnumerable<LandedCostDto>> GetByGRNAsync(Guid grnId);
     Task<LandedCostDetailDto?> GetByIdAsync(Guid id);
     Task<LandedCostDto> CreateAsync(CreateLandedCostDto dto, Guid userId);
-    Task<bool> AllocateCostsAsync(Guid landedCostId, string allocationMethod, Guid userId);
+    Task<LandedCostDto> InitializeFromPurchaseOrderPlanAsync(Guid goodsReceiptNoteId, Guid userId);
+    Task<bool> AllocateCostsAsync(Guid landedCostId, Guid userId);
+    Task<bool> SetManualAllocationsAsync(Guid landedCostId, Guid landedCostItemId, SetManualLandedCostAllocationsDto dto, Guid userId);
     Task<bool> ApproveAsync(Guid landedCostId, Guid userId);
     Task<bool> PostToInventoryAsync(Guid landedCostId, Guid userId);
     Task<bool> CancelAsync(Guid landedCostId, string reason, Guid userId);
@@ -289,6 +291,7 @@ public interface IItemSupplierService
 public interface IInventoryRequisitionService
 {
     Task<IEnumerable<InventoryRequisitionDto>> GetAllAsync(DateTime? fromDate = null, DateTime? toDate = null);
+    Task<IEnumerable<InventoryRequisitionDto>> GetByProjectAsync(Guid projectId);
     Task<IEnumerable<InventoryRequisitionDto>> GetByWarehouseAsync(Guid warehouseId);
     Task<IEnumerable<InventoryRequisitionDto>> GetByDepartmentAsync(Guid departmentId);
     Task<IEnumerable<InventoryRequisitionDto>> GetPendingApprovalAsync();
@@ -301,6 +304,7 @@ public interface IInventoryRequisitionService
     Task<bool> ApproveAsync(Guid id, string? notes = null);
     Task<bool> RejectAsync(Guid id, string reason);
     Task<bool> IssueAsync(Guid id, IssueRequisitionDto dto);
+    Task<bool> ReturnAsync(Guid id, ReturnRequisitionDto dto);
     Task<bool> CompleteAsync(Guid id);
     Task<bool> CancelAsync(Guid id, string reason);
     Task<InventoryRequisitionItemDto> AddItemAsync(Guid requisitionId, AddRequisitionItemDto dto);

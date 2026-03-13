@@ -113,6 +113,16 @@ const tenantSchema = z.object({
 
 type TenantFormData = z.infer<typeof tenantSchema>;
 
+type LdapDirectoryUser = {
+  username: string;
+  userPrincipalName: string;
+  distinguishedName: string;
+  displayName: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+};
+
 // Helper function to validate default tenant settings
 const validateDefaultSettings = (formData: TenantFormData, tenants: Tenant[], editingTenant: Tenant | null): string | null => {
   if (formData.isDefaultForPublicUsers) {
@@ -145,6 +155,11 @@ export default function TenantManagementPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [ldapEnabled, setLdapEnabled] = useState(false);
+  const [isLdapUsersDialogOpen, setIsLdapUsersDialogOpen] = useState(false);
+  const [ldapUsers, setLdapUsers] = useState<LdapDirectoryUser[]>([]);
+  const [ldapUsersLoading, setLdapUsersLoading] = useState(false);
+  const [ldapUsersQuery, setLdapUsersQuery] = useState('');
+  const [ldapUsersMessage, setLdapUsersMessage] = useState<string>('');
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [faviconFile, setFaviconFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
@@ -551,6 +566,70 @@ export default function TenantManagementPage() {
         variant: 'destructive',
       });
     }
+  };
+
+  const loadLdapUsers = async (query: string, limit = 200) => {
+    const formData = form.getValues();
+
+    if (!formData.ldapServer) {
+      toast({
+        title: 'LDAP Users',
+        description: 'LDAP server must be specified',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!formData.ldapBaseDn) {
+      toast({
+        title: 'LDAP Users',
+        description: 'Base DN must be specified',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setLdapUsersLoading(true);
+      setLdapUsersMessage('Loading...');
+
+      const response = await adminApiService.listLdapUsers({
+        ldapServer: formData.ldapServer,
+        ldapPort: formData.ldapPort || 389,
+        ldapBaseDn: formData.ldapBaseDn,
+        ldapBindDn: formData.ldapBindDn || '',
+        ldapBindPassword: formData.ldapBindPassword || '',
+        query,
+        limit
+      });
+
+      setLdapUsers((response.users || []) as LdapDirectoryUser[]);
+      setLdapUsersMessage(response.message || `Found ${(response.users || []).length} user(s)`);
+
+      if (!response.success) {
+        toast({
+          title: 'LDAP Users',
+          description: response.message || 'Failed to list LDAP users',
+          variant: 'destructive',
+        });
+      }
+    } catch (error: any) {
+      setLdapUsers([]);
+      setLdapUsersMessage('');
+      toast({
+        title: 'LDAP Users',
+        description: error.message || 'Failed to list LDAP users',
+        variant: 'destructive',
+      });
+    } finally {
+      setLdapUsersLoading(false);
+    }
+  };
+
+  const openLdapUsersDialog = async () => {
+    setIsLdapUsersDialogOpen(true);
+    setLdapUsersQuery('');
+    await loadLdapUsers('', 200);
   };
   
   const onSubmit = (data: TenantFormData) => {
@@ -1432,7 +1511,97 @@ export default function TenantManagementPage() {
                                   <TestTube className="h-4 w-4 mr-2" />
                                   Test Connection
                                 </Button>
+
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={openLdapUsersDialog}
+                                  disabled={!form.getValues('ldapServer') || !form.getValues('ldapBaseDn')}
+                                >
+                                  <Users className="h-4 w-4 mr-2" />
+                                  Browse Users
+                                </Button>
                               </div>
+
+                              <Dialog open={isLdapUsersDialogOpen} onOpenChange={setIsLdapUsersDialogOpen}>
+                                <DialogContent className="w-[1100px] max-w-[95vw] max-h-[90vh] overflow-hidden flex flex-col">
+                                  <DialogHeader>
+                                    <DialogTitle>Directory Users</DialogTitle>
+                                    <DialogDescription>
+                                      Lists users from the configured Active Directory/LDAP base DN. Showing up to 200 results per search.
+                                    </DialogDescription>
+                                  </DialogHeader>
+
+                                  <div className="flex items-end gap-2">
+                                    <div className="flex-1">
+                                      <FormLabel>Search</FormLabel>
+                                      <Input
+                                        value={ldapUsersQuery}
+                                        onChange={(e) => setLdapUsersQuery(e.target.value)}
+                                        placeholder="Search by username, name, email..."
+                                      />
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      onClick={() => loadLdapUsers(ldapUsersQuery, 200)}
+                                      disabled={ldapUsersLoading}
+                                    >
+                                      <Search className="h-4 w-4 mr-2" />
+                                      Search
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      onClick={() => loadLdapUsers('', 200)}
+                                      disabled={ldapUsersLoading}
+                                    >
+                                      Refresh
+                                    </Button>
+                                  </div>
+
+                                  <div className="text-sm text-muted-foreground">
+                                    {ldapUsersMessage}{ldapUsersMessage ? ' • ' : ''}{ldapUsers.length} user(s)
+                                  </div>
+
+                                  <div className="flex-1 border rounded-md overflow-auto">
+                                    <table className="w-full text-sm">
+                                      <thead className="sticky top-0 bg-background">
+                                        <tr className="border-b">
+                                          <th className="text-left p-2 w-[180px]">Username</th>
+                                          <th className="text-left p-2 w-[260px]">Display Name</th>
+                                          <th className="text-left p-2 w-[260px]">Email</th>
+                                          <th className="text-left p-2">UPN</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {ldapUsers.length === 0 ? (
+                                          <tr>
+                                            <td colSpan={4} className="p-4 text-center text-muted-foreground">
+                                              {ldapUsersLoading ? 'Loading users...' : 'No users found'}
+                                            </td>
+                                          </tr>
+                                        ) : (
+                                          ldapUsers.map((u, idx) => (
+                                            <tr key={`${u.distinguishedName || u.username}-${idx}`} className="border-b hover:bg-muted/30">
+                                              <td className="p-2 font-medium">{u.username || '-'}</td>
+                                              <td className="p-2">{u.displayName || '-'}</td>
+                                              <td className="p-2">{u.email || '-'}</td>
+                                              <td className="p-2">{u.userPrincipalName || '-'}</td>
+                                            </tr>
+                                          ))
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+
+                                  <DialogFooter>
+                                    <Button type="button" variant="outline" onClick={() => setIsLdapUsersDialogOpen(false)}>
+                                      Close
+                                    </Button>
+                                  </DialogFooter>
+                                </DialogContent>
+                              </Dialog>
                             </div>
                           )}
                         </div>

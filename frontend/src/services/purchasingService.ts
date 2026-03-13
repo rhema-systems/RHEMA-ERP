@@ -217,6 +217,96 @@ export interface PurchaseOrderItemDto {
   notes?: string;
 }
 
+// ============================================================================
+// PURCHASE ORDER LANDED COST PLAN (PLANNED LANDED COSTS AT PO STAGE)
+// ============================================================================
+
+export type LandedCostAllocationMethod =
+  | 'ByValue'
+  | 'ByQuantity'
+  | 'ByWeight'
+  | 'ByVolume'
+  | 'Equal'
+  | 'Manual';
+
+export interface PurchaseOrderLandedCostPlanItemDto {
+  id: string;
+  costType: number; // matches backend LandedCostType enum values
+  description: string;
+  amount: number;
+  currency: string;
+  exchangeRate: number;
+  amountInPlanCurrency: number;
+  allocationMethod: LandedCostAllocationMethod;
+  supplierId?: string;
+  supplierName?: string;
+  referenceNumber?: string;
+  notes?: string;
+}
+
+export interface PurchaseOrderLandedCostPlanDto {
+  id: string;
+  purchaseOrderId: string;
+  currency: string;
+  status: string;
+  totalPlannedCost: number;
+  notes?: string;
+  items: PurchaseOrderLandedCostPlanItemDto[];
+}
+
+export interface UpsertPurchaseOrderLandedCostPlanItemDto {
+  costType: number;
+  description: string;
+  amount: number;
+  currency?: string;
+  exchangeRate?: number;
+  allocationMethod?: LandedCostAllocationMethod;
+  supplierId?: string;
+  referenceNumber?: string;
+  notes?: string;
+}
+
+export interface UpsertPurchaseOrderLandedCostPlanDto {
+  currency?: string;
+  notes?: string;
+  items: UpsertPurchaseOrderLandedCostPlanItemDto[];
+}
+
+const LANDED_COST_TYPE_NAME_TO_VALUE: Record<string, number> = {
+  Freight: 1,
+  CustomsDuty: 2,
+  Insurance: 3,
+  Handling: 4,
+  Brokerage: 5,
+  Storage: 6,
+  Other: 7
+};
+
+const normalizeLandedCostType = (value: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed in LANDED_COST_TYPE_NAME_TO_VALUE) return LANDED_COST_TYPE_NAME_TO_VALUE[trimmed];
+    const numeric = parseInt(trimmed, 10);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return 7;
+};
+
+const normalizePurchaseOrderLandedCostPlanDto = (plan: any): PurchaseOrderLandedCostPlanDto => {
+  const items: PurchaseOrderLandedCostPlanItemDto[] = Array.isArray(plan?.items)
+    ? plan.items.map((i: any) => ({
+        ...i,
+        costType: normalizeLandedCostType(i?.costType)
+      }))
+    : [];
+
+  return {
+    ...plan,
+    items
+  } as PurchaseOrderLandedCostPlanDto;
+};
+
 export interface CreatePurchaseOrderDto {
   supplierId: string; // Maps to BusinessPartnerId
   orderType?: string;
@@ -648,6 +738,48 @@ export const purchasingService = {
     });
 
     if (!response.ok) throw new Error('Failed to update purchase order status');
+  },
+
+  /**
+   * Get planned landed cost plan for a purchase order (optional)
+   */
+  async getPurchaseOrderLandedCostPlan(purchaseOrderId: string): Promise<PurchaseOrderLandedCostPlanDto | null> {
+    const response = await fetch(`${API_BASE_URL}/procurement/purchase-orders/${purchaseOrderId}/landed-cost-plan`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) {
+      const msg = await getFriendlyErrorMessage(response);
+      throw new Error(msg || 'Failed to fetch landed cost plan');
+    }
+
+    const text = await response.text();
+    if (!text) return null;
+    const parsed = JSON.parse(text);
+    if (!parsed) return null;
+    return normalizePurchaseOrderLandedCostPlanDto(parsed);
+  },
+
+  /**
+   * Create/update planned landed cost plan for a purchase order
+   */
+  async upsertPurchaseOrderLandedCostPlan(
+    purchaseOrderId: string,
+    data: UpsertPurchaseOrderLandedCostPlanDto
+  ): Promise<PurchaseOrderLandedCostPlanDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/purchase-orders/${purchaseOrderId}/landed-cost-plan`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) {
+      const msg = await getFriendlyErrorMessage(response);
+      throw new Error(msg || 'Failed to save landed cost plan');
+    }
+
+    const json = await response.json();
+    return normalizePurchaseOrderLandedCostPlanDto(json);
   },
 
   /**

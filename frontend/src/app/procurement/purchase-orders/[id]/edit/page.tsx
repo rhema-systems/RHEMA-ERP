@@ -42,7 +42,8 @@ import {
   purchasingService,
   PurchaseOrderDetailDto,
   CreatePurchaseOrderDto,
-  CreatePurchaseOrderItemDto
+  CreatePurchaseOrderItemDto,
+  LandedCostAllocationMethod
 } from '@/services/purchasingService';
 import { inventoryManagementService, InventoryItemDto, WarehouseDto, ItemUnitOfMeasureDto, WarehouseItemDto } from '@/services/inventoryManagementService';
 import { businessPartnerService, BusinessPartnerDto } from '@/services/businessPartnerService';
@@ -57,6 +58,40 @@ interface POItemFormData extends CreatePurchaseOrderItemDto {
   warehouseId?: string;
   warehouseName?: string;
 }
+
+interface POLandedCostPlanLineFormData {
+  tempId: string;
+  costType: number;
+  description: string;
+  amount: number;
+  currency: string;
+  exchangeRate: number;
+  allocationMethod: LandedCostAllocationMethod;
+  supplierId?: string;
+  referenceNumber?: string;
+}
+
+const LANDED_COST_TYPES: Array<{ value: number; label: string }> = [
+  { value: 1, label: 'Freight / Shipping' },
+  { value: 2, label: 'Customs Duty' },
+  { value: 3, label: 'Insurance' },
+  { value: 4, label: 'Handling' },
+  { value: 5, label: 'Brokerage' },
+  { value: 6, label: 'Storage / Warehousing' },
+  { value: 7, label: 'Other' },
+];
+
+const LANDED_COST_METHODS: Array<{ value: LandedCostAllocationMethod; label: string }> = [
+  { value: 'ByValue', label: 'By value' },
+  { value: 'ByQuantity', label: 'By qty' },
+  { value: 'ByWeight', label: 'By weight' },
+  { value: 'ByVolume', label: 'By volume' },
+  { value: 'Equal', label: 'Equal' },
+  { value: 'Manual', label: 'Manual (amounts later on GRN)' },
+];
+
+const getLandedCostTypeLabel = (costType: number) =>
+  LANDED_COST_TYPES.find(t => t.value === costType)?.label || 'Other';
 
 export default function EditPurchaseOrderPage() {
   const router = useRouter();
@@ -92,6 +127,11 @@ export default function EditPurchaseOrderPage() {
   const [costApportionmentBasis, setCostApportionmentBasis] = useState<'Value' | 'Weight' | 'Quantity'>('Value');
   const [expenseGLAccount, setExpenseGLAccount] = useState('');
   const [discountAmount, setDiscountAmount] = useState(0);
+
+  // Planned landed cost plan (captured at PO stage, carried to GRN LC voucher)
+  const [landedCostPlanCurrency, setLandedCostPlanCurrency] = useState('USD');
+  const [landedCostPlanNotes, setLandedCostPlanNotes] = useState('');
+  const [landedCostPlanItems, setLandedCostPlanItems] = useState<POLandedCostPlanLineFormData[]>([]);
   
   // Reference data
   const [inventoryItems, setInventoryItems] = useState<InventoryItemDto[]>([]);
@@ -197,6 +237,31 @@ export default function EditPurchaseOrderPage() {
         }));
         
         setItems(loadedItems);
+
+        try {
+          const plan = await purchasingService.getPurchaseOrderLandedCostPlan(id);
+          if (plan) {
+            setLandedCostPlanCurrency(plan.currency || 'USD');
+            setLandedCostPlanNotes(plan.notes || '');
+            setLandedCostPlanItems(
+              (plan.items || []).map((i) => ({
+                tempId: i.id || crypto.randomUUID(),
+                costType: i.costType,
+                description: i.description || '',
+                amount: i.amount || 0,
+                currency: i.currency || plan.currency || 'USD',
+                exchangeRate: i.exchangeRate || 1,
+                allocationMethod: (i.allocationMethod as LandedCostAllocationMethod) || 'ByValue',
+                supplierId: i.supplierId,
+                referenceNumber: i.referenceNumber || ''
+              }))
+            );
+          } else {
+            setLandedCostPlanItems([]);
+          }
+        } catch {
+          // ignore plan load errors; user can still edit PO
+        }
       } catch (error: any) {
         console.error('Error loading purchase order:', error);
         toast.error('Failed to load purchase order');
@@ -247,6 +312,7 @@ export default function EditPurchaseOrderPage() {
   
   const totalAdditionalCost = shippingCost + miscellaneousCost;
   const totalAmount = subTotal + taxAmount + totalAdditionalCost - discountAmount;
+  const showLegacyAllocationAndAdditionalCosts = totalAdditionalCost > 0 || costAllocationMethod === 'GLExpense';
 
   const getApportionmentWeight = (item: POItemFormData) => {
     const inventoryItem = inventoryItems.find(invItem => invItem.id === item.inventoryItemId);
@@ -593,6 +659,64 @@ export default function EditPurchaseOrderPage() {
     }
   };
 
+  const addLandedCostPlanLine = () => {
+    setLandedCostPlanItems(prev => ([
+      ...prev,
+      {
+        tempId: crypto.randomUUID(),
+        costType: 1,
+        description: getLandedCostTypeLabel(1),
+        amount: 0,
+        currency: landedCostPlanCurrency || 'USD',
+        exchangeRate: 1,
+        allocationMethod: 'ByValue',
+        supplierId: undefined,
+        referenceNumber: ''
+      }
+    ]));
+  };
+
+  const updateLandedCostPlanLine = (tempId: string, patch: Partial<POLandedCostPlanLineFormData>) => {
+    setLandedCostPlanItems(prev => prev.map(l => (l.tempId === tempId ? { ...l, ...patch } : l)));
+  };
+
+  const removeLandedCostPlanLine = (tempId: string) => {
+    setLandedCostPlanItems(prev => prev.filter(l => l.tempId !== tempId));
+  };
+
+  const upsertLandedCostPlanIfAny = async (purchaseOrderId: string) => {
+    if (landedCostPlanItems.length === 0) return;
+
+    const normalizedItems = landedCostPlanItems
+      .map(i => ({
+        ...i,
+        description: ((i.description || '').trim() || getLandedCostTypeLabel(i.costType)).trim(),
+        referenceNumber: (i.referenceNumber || '').trim(),
+        currency: (i.currency || landedCostPlanCurrency || 'USD').trim().toUpperCase(),
+        exchangeRate: Number.isFinite(i.exchangeRate) && i.exchangeRate > 0 ? i.exchangeRate : 1,
+        amount: Number.isFinite(i.amount) ? i.amount : 0
+      }));
+
+    const invalidLines = normalizedItems.filter(i => i.amount <= 0);
+    if (invalidLines.length > 0)
+      throw new Error('Please enter an Amount for every planned landed cost line (or delete the empty lines).');
+
+    await purchasingService.upsertPurchaseOrderLandedCostPlan(purchaseOrderId, {
+      currency: (landedCostPlanCurrency || '').trim().toUpperCase() || undefined,
+      notes: (landedCostPlanNotes || '').trim() || undefined,
+      items: normalizedItems.map(i => ({
+        costType: i.costType,
+        description: i.description,
+        amount: i.amount,
+        currency: i.currency,
+        exchangeRate: i.exchangeRate,
+        allocationMethod: i.allocationMethod,
+        supplierId: i.supplierId || undefined,
+        referenceNumber: i.referenceNumber || undefined
+      }))
+    });
+  };
+
   // Save changes
   const handleSave = async () => {
     if (!supplierId) {
@@ -676,7 +800,20 @@ export default function EditPurchaseOrderPage() {
 
       // Use the update endpoint for existing purchase orders
       await purchasingService.updatePurchaseOrder(id, updateData);
+      let plannedLandedCostsSaved = true;
+      try {
+        await upsertLandedCostPlanIfAny(id);
+      } catch (e: any) {
+        console.error('Failed to save planned landed costs:', e);
+        plannedLandedCostsSaved = false;
+        toast.error(e?.message || 'Failed to save planned landed costs');
+      }
       
+      if (!plannedLandedCostsSaved) {
+        toast.error('Purchase order updated, but planned landed costs were not saved. Fix the errors and click Save Changes again.');
+        return;
+      }
+
       toast.success('Purchase order updated');
       router.push(`/procurement/purchase-orders/${id}`);
     } catch (error: any) {
@@ -966,8 +1103,12 @@ export default function EditPurchaseOrderPage() {
                     <TableHead className="min-w-[100px]">UOM *</TableHead>
                     <TableHead className="min-w-[120px]">Unit Cost *</TableHead>
                     <TableHead className="min-w-[120px]">Line Total</TableHead>
-                    <TableHead className="min-w-[130px]">Alloc. Shipping</TableHead>
-                    <TableHead className="min-w-[130px]">Landed Unit</TableHead>
+                    {showLegacyAllocationAndAdditionalCosts && (
+                      <TableHead className="min-w-[130px]">Alloc. Shipping</TableHead>
+                    )}
+                    {showLegacyAllocationAndAdditionalCosts && (
+                      <TableHead className="min-w-[130px]">Landed Unit</TableHead>
+                    )}
                     <TableHead className="min-w-[120px]">Delivery Date</TableHead>
                     <TableHead className="w-[120px]">Actions</TableHead>
                   </TableRow>
@@ -1081,16 +1222,20 @@ export default function EditPurchaseOrderPage() {
                           <TableCell className="font-medium">
                             ${calculateLineTotal(editingItem?.orderedQuantity || 0, editingItem?.unitPrice || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                           </TableCell>
-                          <TableCell className="font-medium">
-                            {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[editingItem?.tempId || '']
-                              ? `$${allocationPreview[editingItem?.tempId || ''].allocated.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                              : '-'}
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[editingItem?.tempId || '']
-                              ? `$${allocationPreview[editingItem?.tempId || ''].landedUnit.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
-                              : '-'}
-                          </TableCell>
+                          {showLegacyAllocationAndAdditionalCosts && (
+                            <TableCell className="font-medium">
+                              {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[editingItem?.tempId || '']
+                                ? `$${allocationPreview[editingItem?.tempId || ''].allocated.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : '-'}
+                            </TableCell>
+                          )}
+                          {showLegacyAllocationAndAdditionalCosts && (
+                            <TableCell className="font-medium">
+                              {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[editingItem?.tempId || '']
+                                ? `$${allocationPreview[editingItem?.tempId || ''].landedUnit.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
+                                : '-'}
+                            </TableCell>
+                          )}
                           <TableCell>
                             <Input
                               type="date"
@@ -1139,16 +1284,20 @@ export default function EditPurchaseOrderPage() {
                           <TableCell className="font-medium">
                             ${calculateLineTotal(item.orderedQuantity, item.unitPrice).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                           </TableCell>
-                          <TableCell className="font-medium">
-                            {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[item.tempId]
-                              ? `$${allocationPreview[item.tempId].allocated.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                              : '-'}
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[item.tempId]
-                              ? `$${allocationPreview[item.tempId].landedUnit.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
-                              : '-'}
-                          </TableCell>
+                          {showLegacyAllocationAndAdditionalCosts && (
+                            <TableCell className="font-medium">
+                              {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[item.tempId]
+                                ? `$${allocationPreview[item.tempId].allocated.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : '-'}
+                            </TableCell>
+                          )}
+                          {showLegacyAllocationAndAdditionalCosts && (
+                            <TableCell className="font-medium">
+                              {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[item.tempId]
+                                ? `$${allocationPreview[item.tempId].landedUnit.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
+                                : '-'}
+                            </TableCell>
+                          )}
                           <TableCell>
                             {item.expectedDeliveryDate ? format(new Date(item.expectedDeliveryDate), 'MMM dd, yyyy') : '-'}
                           </TableCell>
@@ -1283,16 +1432,20 @@ export default function EditPurchaseOrderPage() {
                       <TableCell className="font-medium">
                         ${calculateLineTotal(editingItem.orderedQuantity || 0, editingItem.unitPrice || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </TableCell>
-                      <TableCell className="font-medium">
-                        {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[editingItem.tempId]
-                          ? `$${allocationPreview[editingItem.tempId].allocated.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : '-'}
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[editingItem.tempId]
-                          ? `$${allocationPreview[editingItem.tempId].landedUnit.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
-                          : '-'}
-                      </TableCell>
+                      {showLegacyAllocationAndAdditionalCosts && (
+                        <TableCell className="font-medium">
+                          {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[editingItem.tempId]
+                            ? `$${allocationPreview[editingItem.tempId].allocated.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : '-'}
+                        </TableCell>
+                      )}
+                      {showLegacyAllocationAndAdditionalCosts && (
+                        <TableCell className="font-medium">
+                          {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && allocationPreview[editingItem.tempId]
+                            ? `$${allocationPreview[editingItem.tempId].landedUnit.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
+                            : '-'}
+                        </TableCell>
+                      )}
                       <TableCell>
                         <Input
                           type="date"
@@ -1326,7 +1479,7 @@ export default function EditPurchaseOrderPage() {
                   {/* Empty State */}
                   {items.length === 0 && !isAddingNewRow && (
                     <TableRow>
-                      <TableCell colSpan={13} className="text-center py-12">
+                      <TableCell colSpan={showLegacyAllocationAndAdditionalCosts ? 13 : 11} className="text-center py-12">
                         <Package className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                         <p className="text-muted-foreground mb-4">No items added yet</p>
                         <Button onClick={handleAddNewRow}>
@@ -1339,105 +1492,111 @@ export default function EditPurchaseOrderPage() {
                 </TableBody>
               </Table>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Landed Unit formula: Unit Cost + (Allocated Additional Cost / Ordered Qty). Allocated Additional Cost is each line&apos;s share of (Shipping + Misc. Cost) based on the selected spread basis.
-            </p>
+            {showLegacyAllocationAndAdditionalCosts && (
+              <p className="text-xs text-muted-foreground">
+                Landed Unit formula: Unit Cost + (Allocated Additional Cost / Ordered Qty). Allocated Additional Cost is each line&apos;s share of (Shipping + Misc. Cost) based on the selected spread basis.
+              </p>
+            )}
             
             {/* Financial Summary */}
             {items.length > 0 && (
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <Card className="w-full lg:max-w-xl">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Allocation & Additional Costs</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex justify-between text-sm items-center gap-4">
-                      <span className="text-muted-foreground">Shipping:</span>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={shippingCost}
-                        onChange={(e) => setShippingCost(parseFloat(e.target.value) || 0)}
-                        className="w-32 h-8 text-right"
-                      />
-                    </div>
-
-                    <div className="flex justify-between text-sm items-center gap-4">
-                      <span className="text-muted-foreground">Misc. Cost:</span>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={miscellaneousCost}
-                        onChange={(e) => setMiscellaneousCost(parseFloat(e.target.value) || 0)}
-                        className="w-32 h-8 text-right"
-                      />
-                    </div>
-
-                    <div className="flex justify-between text-sm items-center gap-4">
-                      <span className="text-muted-foreground">Allocation:</span>
-                      <Select
-                        value={costAllocationMethod}
-                        onValueChange={(value: 'SpreadToItemCost' | 'GLExpense') => setCostAllocationMethod(value)}
-                      >
-                        <SelectTrigger className="w-44 h-8">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="SpreadToItemCost">Spread to item cost</SelectItem>
-                          <SelectItem value="GLExpense">Post to GL expense</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {costAllocationMethod === 'SpreadToItemCost' && (
+                {showLegacyAllocationAndAdditionalCosts && (
+                  <Card className="w-full lg:max-w-xl">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">Allocation & Additional Costs</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
                       <div className="flex justify-between text-sm items-center gap-4">
-                        <span className="text-muted-foreground">Spread Basis:</span>
+                        <span className="text-muted-foreground">Shipping:</span>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={shippingCost}
+                          onChange={(e) => setShippingCost(parseFloat(e.target.value) || 0)}
+                          className="w-32 h-8 text-right"
+                        />
+                      </div>
+
+                      <div className="flex justify-between text-sm items-center gap-4">
+                        <span className="text-muted-foreground">Misc. Cost:</span>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={miscellaneousCost}
+                          onChange={(e) => setMiscellaneousCost(parseFloat(e.target.value) || 0)}
+                          className="w-32 h-8 text-right"
+                        />
+                      </div>
+
+                      <div className="flex justify-between text-sm items-center gap-4">
+                        <span className="text-muted-foreground">Allocation:</span>
                         <Select
-                          value={costApportionmentBasis}
-                          onValueChange={(value: 'Value' | 'Weight' | 'Quantity') => setCostApportionmentBasis(value)}
+                          value={costAllocationMethod}
+                          onValueChange={(value: 'SpreadToItemCost' | 'GLExpense') => setCostAllocationMethod(value)}
                         >
                           <SelectTrigger className="w-44 h-8">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="Value">By value</SelectItem>
-                            <SelectItem value="Weight">By weight</SelectItem>
-                            <SelectItem value="Quantity">By quantity</SelectItem>
+                            <SelectItem value="SpreadToItemCost">Spread to item cost</SelectItem>
+                            <SelectItem value="GLExpense">Post to GL expense</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
-                    )}
 
-                    {costAllocationMethod === 'GLExpense' && (
-                      <div className="flex justify-between text-sm items-center gap-4">
-                        <span className="text-muted-foreground">GL Account:</span>
-                        <Input
-                          value={expenseGLAccount}
-                          onChange={(e) => setExpenseGLAccount(e.target.value)}
-                          placeholder="Expense account"
-                          className="w-44 h-8 text-right"
-                        />
+                      {costAllocationMethod === 'SpreadToItemCost' && (
+                        <div className="flex justify-between text-sm items-center gap-4">
+                          <span className="text-muted-foreground">Spread Basis:</span>
+                          <Select
+                            value={costApportionmentBasis}
+                            onValueChange={(value: 'Value' | 'Weight' | 'Quantity') => setCostApportionmentBasis(value)}
+                          >
+                            <SelectTrigger className="w-44 h-8">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Value">By value</SelectItem>
+                              <SelectItem value="Weight">By weight</SelectItem>
+                              <SelectItem value="Quantity">By quantity</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {costAllocationMethod === 'GLExpense' && (
+                        <div className="flex justify-between text-sm items-center gap-4">
+                          <span className="text-muted-foreground">GL Account:</span>
+                          <Input
+                            value={expenseGLAccount}
+                            onChange={(e) => setExpenseGLAccount(e.target.value)}
+                            placeholder="Expense account"
+                            className="w-44 h-8 text-right"
+                          />
+                        </div>
+                      )}
+
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Total Additional:</span>
+                        <span className="font-medium">
+                          ${totalAdditionalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
                       </div>
-                    )}
 
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Total Additional:</span>
-                      <span className="font-medium">
-                        ${totalAdditionalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </span>
-                    </div>
+                      {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          Additional costs will be apportioned by {costApportionmentBasis.toLowerCase()} (basis total: {apportionmentBasisTotal.toFixed(2)}).
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
 
-                    {costAllocationMethod === 'SpreadToItemCost' && totalAdditionalCost > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        Additional costs will be apportioned by {costApportionmentBasis.toLowerCase()} (basis total: {apportionmentBasisTotal.toFixed(2)}).
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-
-                <Card className="w-full lg:ml-auto lg:max-w-md">
+                <Card
+                  className={`w-full lg:ml-auto lg:max-w-md ${!showLegacyAllocationAndAdditionalCosts ? 'lg:col-start-2' : ''}`}
+                >
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base">Financial Summary</CardTitle>
                   </CardHeader>
@@ -1482,6 +1641,195 @@ export default function EditPurchaseOrderPage() {
                       </span>
                       <span className="text-xl font-bold text-primary">
                         ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="w-full lg:col-span-2">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Planned Landed Costs (carried to GRN)</CardTitle>
+                    <CardDescription className="text-xs">
+                      Optional. Capture freight/duty/insurance/handling etc now, then copy into the GRN landed cost voucher when receiving.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Plan Currency</Label>
+                        <Input
+                          value={landedCostPlanCurrency}
+                          onChange={(e) => setLandedCostPlanCurrency(e.target.value)}
+                          className="w-28 h-8 uppercase"
+                          placeholder="USD"
+                        />
+                      </div>
+                      <div className="flex-1 min-w-[240px] space-y-1">
+                        <Label className="text-xs">Notes</Label>
+                        <Input
+                          value={landedCostPlanNotes}
+                          onChange={(e) => setLandedCostPlanNotes(e.target.value)}
+                          className="h-8"
+                          placeholder="Optional notes"
+                        />
+                      </div>
+                      <Button type="button" variant="outline" className="h-8" onClick={addLandedCostPlanLine}>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add line
+                      </Button>
+                    </div>
+
+                    <div className="rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="min-w-[180px]">Type</TableHead>
+                            <TableHead className="min-w-[220px]">Description</TableHead>
+                            <TableHead className="min-w-[220px]">Service Supplier</TableHead>
+                            <TableHead className="min-w-[150px]">Allocation</TableHead>
+                            <TableHead className="min-w-[140px] text-right">Amount</TableHead>
+                            <TableHead className="min-w-[90px]">Curr</TableHead>
+                            <TableHead className="min-w-[110px] text-right">Rate</TableHead>
+                            <TableHead className="min-w-[160px]">Ref</TableHead>
+                            <TableHead className="w-[60px]"></TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {landedCostPlanItems.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={9} className="text-center py-6 text-sm text-muted-foreground">
+                                No planned landed cost lines
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            landedCostPlanItems.map((line) => (
+                              <TableRow key={line.tempId}>
+                                <TableCell>
+                                  <Select
+                                    value={String(line.costType)}
+                                    onValueChange={(v) => {
+                                      const nextCostType = parseInt(v, 10);
+                                      const currentDescription = (line.description || '').trim();
+                                      const previousAutoDescription = getLandedCostTypeLabel(line.costType);
+
+                                      const shouldAutoUpdateDescription =
+                                        !currentDescription || currentDescription === previousAutoDescription;
+
+                                      updateLandedCostPlanLine(line.tempId, {
+                                        costType: nextCostType,
+                                        ...(shouldAutoUpdateDescription
+                                          ? { description: getLandedCostTypeLabel(nextCostType) }
+                                          : {})
+                                      });
+                                    }}
+                                  >
+                                    <SelectTrigger className="h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {LANDED_COST_TYPES.map(t => (
+                                        <SelectItem key={t.value} value={String(t.value)}>{t.label}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    value={line.description}
+                                    onChange={(e) => updateLandedCostPlanLine(line.tempId, { description: e.target.value })}
+                                    className="h-8"
+                                    placeholder="e.g. Freight invoice estimate"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Select
+                                    value={line.supplierId || '__none__'}
+                                    onValueChange={(v) => updateLandedCostPlanLine(line.tempId, { supplierId: v === '__none__' ? undefined : v })}
+                                  >
+                                    <SelectTrigger className="h-8">
+                                      <SelectValue placeholder="Select supplier" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__none__">None</SelectItem>
+                                      {suppliers.map(s => (
+                                        <SelectItem key={s.id} value={s.id}>{s.partnerName}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </TableCell>
+                                <TableCell>
+                                  <Select
+                                    value={line.allocationMethod}
+                                    onValueChange={(v: LandedCostAllocationMethod) => updateLandedCostPlanLine(line.tempId, { allocationMethod: v })}
+                                  >
+                                    <SelectTrigger className="h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {LANDED_COST_METHODS.map(m => (
+                                        <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Input
+                                    type="number"
+                                    min="0.01"
+                                    step="0.01"
+                                    value={line.amount}
+                                    onChange={(e) => updateLandedCostPlanLine(line.tempId, { amount: parseFloat(e.target.value) || 0 })}
+                                    className="h-8 text-right"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    value={line.currency}
+                                    onChange={(e) => updateLandedCostPlanLine(line.tempId, { currency: e.target.value })}
+                                    className="h-8 uppercase"
+                                    placeholder={landedCostPlanCurrency}
+                                  />
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    step="0.0001"
+                                    value={line.exchangeRate}
+                                    onChange={(e) => updateLandedCostPlanLine(line.tempId, { exchangeRate: parseFloat(e.target.value) || 1 })}
+                                    className="h-8 text-right"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    value={line.referenceNumber || ''}
+                                    onChange={(e) => updateLandedCostPlanLine(line.tempId, { referenceNumber: e.target.value })}
+                                    className="h-8"
+                                    placeholder="Invoice/Ref"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="text-red-600 hover:text-red-700"
+                                    onClick={() => removeLandedCostPlanLine(line.tempId)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Planned landed cost total ({(landedCostPlanCurrency || 'USD').toUpperCase()}):</span>
+                      <span className="font-medium">
+                        ${landedCostPlanItems.reduce((sum, i) => sum + ((i.amount || 0) * (i.exchangeRate || 1)), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                     </div>
                   </CardContent>

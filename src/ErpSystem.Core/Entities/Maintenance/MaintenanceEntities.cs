@@ -97,6 +97,15 @@ public class MaintenanceAsset : TenantEntity
     [MaxLength(50)]
     public string? VIN { get; set; } // Vehicle Identification Number
 
+    [MaxLength(20)]
+    public string? FuelType { get; set; } // Petrol, Diesel, Electric, Hybrid
+
+    /// <summary>
+    /// When true, this asset is included in Fleet Management screens/flows.
+    /// Vehicle-category assets are not automatically included unless explicitly flagged.
+    /// </summary>
+    public bool IsFleetAsset { get; set; } = false;
+
     public DateTime? LastServiceDate { get; set; }
     public DateTime? NextServiceDue { get; set; }
 

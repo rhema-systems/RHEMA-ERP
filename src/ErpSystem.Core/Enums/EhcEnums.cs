@@ -37,3 +37,26 @@ public enum EhcTicketStatus
     Closed = 7,
     Reopened = 8
 }
+
+public enum EhcTicketLinkType
+{
+    Related = 1,
+    ParentOf = 2,
+    DuplicateOf = 3
+}
+
+public enum EhcProblemStatus
+{
+    Open = 1,
+    InProgress = 2,
+    Resolved = 3,
+    Closed = 4
+}
+
+public enum EhcCapaTaskStatus
+{
+    Open = 1,
+    InProgress = 2,
+    Done = 3,
+    Cancelled = 4
+}

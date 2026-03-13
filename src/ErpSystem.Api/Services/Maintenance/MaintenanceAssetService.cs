@@ -311,6 +311,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
                 OwnershipType = a.OwnershipType.ToString(),
                 LicensePlate = a.LicensePlate,
                 VIN = a.VIN,
+                FuelType = a.FuelType,
                 Status = a.Status.ToString(),
                 Criticality = a.Criticality.ToString(),
                 Location = a.Location,
@@ -319,6 +320,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
                 PurchaseDate = a.PurchaseDate,
                 WarrantyEndDate = a.WarrantyEndDate,
                 WarrantyStartDate = a.WarrantyStartDate,
+                IsFleetAsset = a.IsFleetAsset,
                 // These would need additional queries or joins
                 ActiveWorkOrdersCount = 0, // TODO: Implement
                 LastMaintenanceDate = null, // TODO: Implement

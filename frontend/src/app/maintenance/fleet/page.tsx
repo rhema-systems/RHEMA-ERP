@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 export default function FleetPage() {
   const tiles = [
     { title: 'Dashboard', href: '/maintenance/fleet/dashboard', description: 'KPIs and fleet analytics overview' },
-    { title: 'Vehicles', href: '/maintenance/fleet/vehicles', description: 'Manage fleet vehicles (assets)' },
+    { title: 'Fleets', href: '/maintenance/fleet/vehicles', description: 'Manage fleet vehicles (assets)' },
     { title: 'Trips', href: '/maintenance/fleet/trips', description: 'Trip requests, approvals and dispatch' },
     { title: 'Compliance', href: '/maintenance/fleet/compliance', description: 'Registrations, insurance, permits and reminders' },
     { title: 'Fuel', href: '/maintenance/fleet/fuel', description: 'Fuel transactions and consumption tracking' },
@@ -23,7 +23,7 @@ export default function FleetPage() {
     <div className="space-y-6 p-6">
       <div>
         <h1 className="text-2xl font-semibold">Fleet Management</h1>
-        <p className="text-muted-foreground">Vehicles-only fleet operations under Maintenance</p>
+        <p className="text-muted-foreground">Fleet operations under Maintenance</p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
