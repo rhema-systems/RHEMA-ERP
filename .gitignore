@@ -27,6 +27,7 @@ publish/
 !.vscode/extensions.json
 
 # Visual Studio
+.vs/
 *.suo
 *.user
 *.userosscache
@@ -262,6 +263,7 @@ tools/
 api_crash*.txt
 startup_error.txt
 last_error.txt
+test_account_create.txt
 
 # Token/auth files (security)
 token_output*.txt
@@ -302,3 +304,7 @@ DEV-SERVERS.md
 
 # API HTTP request logs
 src/ErpSystem.Api/http-logs/
+
+# Runtime uploads / generated content
+src/ErpSystem.Api/uploads/
+src/ErpSystem.Api/wwwroot/uploads/
