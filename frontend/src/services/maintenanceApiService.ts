@@ -391,10 +391,10 @@ class MaintenanceApiService {
       console.warn('Failed to load priority levels, using fallback data:', error);
       // Fallback mock data for testing
       return [
-        { id: '1', name: 'Low', level: 1, description: 'Low priority maintenance', color: '#22c55e', responseTimeHours: 168, isActive: true },
-        { id: '2', name: 'Medium', level: 2, description: 'Medium priority maintenance', color: '#3b82f6', responseTimeHours: 48, isActive: true },
-        { id: '3', name: 'High', level: 3, description: 'High priority maintenance', color: '#f59e0b', responseTimeHours: 12, isActive: true },
-        { id: '4', name: 'Critical', level: 4, description: 'Critical emergency maintenance', color: '#ef4444', responseTimeHours: 2, isActive: true }
+        { id: '1', name: 'Low', code: 'LOW', level: 1, description: 'Low priority maintenance', color: '#22c55e', responseTime: 168, escalationTime: 192, slaHours: 168, autoAssign: false, isActive: true },
+        { id: '2', name: 'Medium', code: 'MED', level: 2, description: 'Medium priority maintenance', color: '#3b82f6', responseTime: 48, escalationTime: 72, slaHours: 48, autoAssign: false, isActive: true },
+        { id: '3', name: 'High', code: 'HIGH', level: 3, description: 'High priority maintenance', color: '#f59e0b', responseTime: 12, escalationTime: 24, slaHours: 12, autoAssign: true, isActive: true },
+        { id: '4', name: 'Critical', code: 'CRIT', level: 4, description: 'Critical emergency maintenance', color: '#ef4444', responseTime: 2, escalationTime: 4, slaHours: 2, autoAssign: true, isActive: true }
       ];
     }
   }

@@ -86,7 +86,7 @@ public class Contract : TenantEntity
     public string? Notes { get; set; }
 
     // Audit
-    public Guid? CreatedById { get; set; }
+    public new Guid? CreatedById { get; set; }
 
     public DateTime? ActivatedAt { get; set; }
 
@@ -103,7 +103,7 @@ public class Contract : TenantEntity
     public virtual BusinessPartner BusinessPartner { get; set; } = null!;
     public virtual TenderBid? TenderBid { get; set; }
     public virtual ApplicationUser? SignedBy { get; set; }
-    public virtual ApplicationUser? CreatedBy { get; set; }
+    public new virtual ApplicationUser? CreatedBy { get; set; }
 
     public virtual ICollection<ContractMilestone> Milestones { get; set; } = new List<ContractMilestone>();
     public virtual ICollection<ContractAmendment> Amendments { get; set; } = new List<ContractAmendment>();
@@ -256,4 +256,3 @@ public class ContractDocument : TenantEntity
     public virtual Contract Contract { get; set; } = null!;
     public virtual ApplicationUser? UploadedBy { get; set; }
 }
-

@@ -152,9 +152,9 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
         return await _dbSet.FirstOrDefaultAsync(predicate, cancellationToken);
     }
 
-    public async Task<T> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate)
+    public async Task<T?> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate)
     {
-        return await _dbSet.FirstOrDefaultAsync(predicate) ?? throw new InvalidOperationException("Entity not found");
+        return await _dbSet.FirstOrDefaultAsync(predicate);
     }
 
     public async Task<bool> ExistsAsync(
@@ -342,19 +342,19 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
 
     #region IGenericRepository Implementation
 
-    public async Task<T> GetByIdAsync(Guid id)
+    public async Task<T?> GetByIdAsync(Guid id)
     {
-        return await _dbSet.FindAsync(id) ?? throw new InvalidOperationException($"Entity with id {id} not found");
+        return await _dbSet.FindAsync(id);
     }
 
-    public async Task<T> GetByIdAsync(Guid id, params Expression<Func<T, object>>[] includes)
+    public async Task<T?> GetByIdAsync(Guid id, params Expression<Func<T, object>>[] includes)
     {
         IQueryable<T> query = _dbSet;
         foreach (var include in includes)
         {
             query = query.Include(include);
         }
-        return await query.FirstOrDefaultAsync(x => x.Id == id) ?? throw new InvalidOperationException($"Entity with id {id} not found");
+        return await query.FirstOrDefaultAsync(x => x.Id == id);
     }
 
     public async Task<IEnumerable<T>> GetAllAsync(params Expression<Func<T, object>>[] includes)
@@ -377,14 +377,14 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
         return await query.Where(predicate).ToListAsync();
     }
 
-    public async Task<T> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate, params Expression<Func<T, object>>[] includes)
+    public async Task<T?> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate, params Expression<Func<T, object>>[] includes)
     {
         IQueryable<T> query = _dbSet;
         foreach (var include in includes)
         {
             query = query.Include(include);
         }
-        return await query.FirstOrDefaultAsync(predicate) ?? throw new InvalidOperationException("Entity not found");
+        return await query.FirstOrDefaultAsync(predicate);
     }
 
     public async Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate)

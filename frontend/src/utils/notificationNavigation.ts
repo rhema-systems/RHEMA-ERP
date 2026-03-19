@@ -270,7 +270,7 @@ export function getEntityConfiguration(): Record<string, EntityConfig> {
   return { ...ENTITY_CONFIG };
 }
 
-export default {
+const notificationNavigation = {
   getEntityNavigationUrl,
   getEntityDisplayName,
   getEntityIconName,
@@ -281,3 +281,5 @@ export default {
   registerEntity,
   getEntityConfiguration
 };
+
+export default notificationNavigation;

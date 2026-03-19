@@ -1,5 +1,4 @@
 'use client';
-'use client';
 
 import * as React from 'react';
 import { fleetService, FleetCostEntryDto, FleetTripDto } from '@/services/fleetService';
@@ -16,8 +15,8 @@ import { useSearchParams } from 'next/navigation';
 
 export default function FleetCostsPage() {
   const searchParams = useSearchParams();
-  const vehicleAssetIdFilter = searchParams.get('vehicleAssetId') ?? undefined;
-  const initialTripId = searchParams.get('fleetTripId') ?? undefined;
+  const vehicleAssetIdFilter = searchParams?.get('vehicleAssetId') ?? undefined;
+  const initialTripId = searchParams?.get('fleetTripId') ?? undefined;
 
   const [trips, setTrips] = React.useState<FleetTripDto[]>([]);
   const [tripId, setTripId] = React.useState<string>(initialTripId ?? 'none');

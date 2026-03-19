@@ -6,11 +6,8 @@ namespace ErpSystem.Data.Repositories.Procurement;
 
 public class RequestForQuotationRepository : GenericRepository<RequestForQuotation>, IRequestForQuotationRepository
 {
-    private readonly ApplicationDbContext _context;
-
     public RequestForQuotationRepository(ApplicationDbContext context) : base(context)
     {
-        _context = context;
     }
 
     public async Task<RequestForQuotation?> GetByRfqNumberAsync(string rfqNumber)

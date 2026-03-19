@@ -118,7 +118,7 @@ const menuItems: MenuItem[] = [
 ];
 
 export function ExternalSidebar() {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '';
   const router = useRouter();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const user = authService.getStoredUser();

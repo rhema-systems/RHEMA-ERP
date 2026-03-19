@@ -104,7 +104,7 @@ public class Tender : TenantEntity
     public string? AcceptanceDeclarationDocumentName { get; set; }
 
     // Metadata
-    public Guid? CreatedById { get; set; }
+    public new Guid? CreatedById { get; set; }
     public Guid? PublishedById { get; set; }
     public Guid? AwardedById { get; set; }
 
@@ -112,7 +112,7 @@ public class Tender : TenantEntity
     public string? TermsAndConditions { get; set; }
 
     // Navigation Properties
-    public virtual ApplicationUser? CreatedBy { get; set; }
+    public new virtual ApplicationUser? CreatedBy { get; set; }
     public virtual ApplicationUser? PublishedBy { get; set; }
     public virtual ApplicationUser? AwardedBy { get; set; }
     public virtual EvaluationTemplate? EvaluationTemplate { get; set; }
@@ -1048,10 +1048,10 @@ public class TenderTemplate : TenantEntity
 
     public bool IsActive { get; set; } = true;
 
-    public Guid? CreatedById { get; set; }
+    public new Guid? CreatedById { get; set; }
 
     // Navigation Properties
-    public virtual ApplicationUser? CreatedBy { get; set; }
+    public new virtual ApplicationUser? CreatedBy { get; set; }
 }
 
 /// <summary>
@@ -1129,10 +1129,10 @@ public class EvaluationCriterion : TenantEntity
 
     public int DisplayOrder { get; set; } = 0;
 
-    public Guid? CreatedById { get; set; }
+    public new Guid? CreatedById { get; set; }
 
     // Navigation Properties
-    public virtual ApplicationUser? CreatedBy { get; set; }
+    public new virtual ApplicationUser? CreatedBy { get; set; }
     public virtual ICollection<EvaluationTemplateCriterion> TemplateCriteria { get; set; } = new List<EvaluationTemplateCriterion>();
 }
 
@@ -1207,10 +1207,10 @@ public class EvaluationTemplate : TenantEntity
     [Column(TypeName = "decimal(5,2)")]
     public decimal MinimumTechnicalScore { get; set; } = 70;
 
-    public Guid? CreatedById { get; set; }
+    public new Guid? CreatedById { get; set; }
 
     // Navigation Properties
-    public virtual ApplicationUser? CreatedBy { get; set; }
+    public new virtual ApplicationUser? CreatedBy { get; set; }
     public virtual ICollection<EvaluationTemplateCriterion> TemplateCriteria { get; set; } = new List<EvaluationTemplateCriterion>();
     public virtual ICollection<Tender> Tenders { get; set; } = new List<Tender>();
 }
@@ -1295,10 +1295,10 @@ public class TenderDocumentType : TenantEntity
 
     public int DisplayOrder { get; set; } = 0;
 
-    public Guid? CreatedById { get; set; }
+    public new Guid? CreatedById { get; set; }
 
     // Navigation Properties
-    public virtual ApplicationUser? CreatedBy { get; set; }
+    public new virtual ApplicationUser? CreatedBy { get; set; }
 }
 
 /// <summary>

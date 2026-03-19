@@ -21,7 +21,8 @@ import { SecurityPolicies } from '../../../../components/security/SecurityPolici
 import { SessionManagementTab } from '@/components/admin/SessionManagementTab';
 import { useToast } from '../../../../hooks/use-toast'
 import { settingsService } from '../../../../services/settings'
-import { securityService, type SecurityMetrics, type SecurityAlert, type SecurityHealthScore } from '../../../../services/security'
+import { securityService, type SecurityMetrics, type SecurityAlert } from '../../../../services/security'
+import { authService } from '../../../../services/auth'
 import type { SecuritySettings as SecuritySettingsDto } from '../../../../services/settings'
 import { 
   Shield, 
@@ -82,25 +83,101 @@ const lockoutSchema = z.object({
 const recaptchaSchema = z.object({
   captchaEnabled: z.boolean(),
   captchaProvider: z.enum(['recaptcha', 'hcaptcha']),
-  recaptchaSiteKey: z.string().optional().nullable().or(z.literal('')),
-  recaptchaSecretKey: z.string().optional().nullable().or(z.literal('')),
-  hCaptchaSiteKey: z.string().optional().nullable().or(z.literal('')),
-  hCaptchaSecretKey: z.string().optional().nullable().or(z.literal('')),
+  recaptchaSiteKey: z.string().nullable(),
+  recaptchaSecretKey: z.string().nullable(),
+  hCaptchaSiteKey: z.string().nullable(),
+  hCaptchaSecretKey: z.string().nullable(),
 });
 
 const legalSchema = z.object({
-  termsOfServiceUrl: z.string().url('Must be a valid URL').optional().nullable().or(z.literal('')),
-  privacyPolicyUrl: z.string().url('Must be a valid URL').optional().nullable().or(z.literal('')),
+  termsOfServiceUrl: z.union([z.string().url('Must be a valid URL'), z.literal(''), z.null()]),
+  privacyPolicyUrl: z.union([z.string().url('Must be a valid URL'), z.literal(''), z.null()]),
 });
 
+const securitySettingsSchema = z.object({
+  ...passwordPolicySchema.shape,
+  ...sessionSchema.shape,
+  ...lockoutSchema.shape,
+  ...recaptchaSchema.shape,
+  ...legalSchema.shape,
+});
+
+type SecuritySettingsFormValues = z.input<typeof securitySettingsSchema>
+
+const defaultSecuritySettingsFormValues = (): SecuritySettingsFormValues => ({
+  passwordMinLength: 8,
+  passwordRequireUppercase: true,
+  passwordRequireLowercase: true,
+  passwordRequireDigits: true,
+  passwordRequireSpecialChars: true,
+  passwordMaxAge: 90,
+  passwordPreventReuse: 5,
+  sessionTimeoutMinutes: 30,
+  jwtTokenLifetimeMinutes: 60,
+  preventConcurrentLogin: 'Disabled',
+  maxFailedLoginAttempts: 5,
+  accountLockoutMinutes: 30,
+  rateLimitLoginMaxAttempts: 5,
+  rateLimitLoginWindowMinutes: 15,
+  rateLimitLoginBlockDurationMinutes: 30,
+  captchaEnabled: false,
+  captchaProvider: 'recaptcha',
+  recaptchaSiteKey: '',
+  recaptchaSecretKey: '',
+  hCaptchaSiteKey: '',
+  hCaptchaSecretKey: '',
+  termsOfServiceUrl: '',
+  privacyPolicyUrl: '',
+})
+
+const toSecuritySettingsFormValues = (
+  settings?: SecuritySettingsDto | null
+): SecuritySettingsFormValues => ({
+  passwordMinLength: settings?.passwordMinLength ?? 8,
+  passwordRequireUppercase: Boolean(settings?.passwordRequireUppercase),
+  passwordRequireLowercase: Boolean(settings?.passwordRequireLowercase),
+  passwordRequireDigits: Boolean(settings?.passwordRequireDigits),
+  passwordRequireSpecialChars: Boolean(settings?.passwordRequireSpecialChars),
+  passwordMaxAge: settings?.passwordMaxAge ?? null,
+  passwordPreventReuse: settings?.passwordPreventReuse ?? null,
+  sessionTimeoutMinutes: settings?.sessionTimeoutMinutes ?? 30,
+  jwtTokenLifetimeMinutes: settings?.jwtTokenLifetimeMinutes ?? 60,
+  preventConcurrentLogin: settings?.preventConcurrentLogin ?? 'Disabled',
+  maxFailedLoginAttempts: settings?.maxFailedLoginAttempts ?? 5,
+  accountLockoutMinutes: settings?.accountLockoutMinutes ?? 30,
+  rateLimitLoginMaxAttempts: settings?.rateLimitLoginMaxAttempts ?? 5,
+  rateLimitLoginWindowMinutes: settings?.rateLimitLoginWindowMinutes ?? 15,
+  rateLimitLoginBlockDurationMinutes:
+    settings?.rateLimitLoginBlockDurationMinutes ?? 30,
+  captchaEnabled: Boolean(settings?.captchaEnabled),
+  captchaProvider: settings?.captchaProvider ?? 'recaptcha',
+  recaptchaSiteKey: settings?.recaptchaSiteKey ?? '',
+  recaptchaSecretKey: settings?.recaptchaSecretKey ?? '',
+  hCaptchaSiteKey: settings?.hCaptchaSiteKey ?? '',
+  hCaptchaSecretKey: settings?.hCaptchaSecretKey ?? '',
+  termsOfServiceUrl: settings?.termsOfServiceUrl ?? '',
+  privacyPolicyUrl: settings?.privacyPolicyUrl ?? '',
+})
+
+const toSecuritySettingsDto = (
+  data: SecuritySettingsFormValues
+): SecuritySettingsDto => ({
+  ...data,
+  recaptchaSiteKey: data.recaptchaSiteKey?.trim() || null,
+  recaptchaSecretKey: data.recaptchaSecretKey?.trim() || null,
+  hCaptchaSiteKey: data.hCaptchaSiteKey?.trim() || null,
+  hCaptchaSecretKey: data.hCaptchaSecretKey?.trim() || null,
+  termsOfServiceUrl: data.termsOfServiceUrl?.trim() || null,
+  privacyPolicyUrl: data.privacyPolicyUrl?.trim() || null,
+})
+
 export default function SecurityDashboardPage() {
-  console.log('🔥 SecurityDashboardPage rendering');
   const [activeTab, setActiveTab] = useState('overview')
   const [realTimeAlerts, setRealTimeAlerts] = useState<SecurityAlert[]>([])
   const [realTimeMetrics, setRealTimeMetrics] = useState<SecurityMetrics | null>(null)
-  const [healthScore, setHealthScore] = useState<SecurityHealthScore | null>(null)
   const { toast } = useToast()
   const queryClient = useQueryClient()
+  const currentUser = authService.getStoredUser()
 
   // Fetch current security settings
   const { data: settings, isLoading: settingsLoading, error: settingsError } = useQuery({
@@ -109,24 +186,38 @@ export default function SecurityDashboardPage() {
   })
 
   // Fetch security metrics
-  const { data: securityMetrics, isLoading: metricsLoading } = useQuery({
+  const { data: securityMetrics, isLoading: metricsLoading, error: metricsError } = useQuery({
     queryKey: ['securityMetrics'],
     queryFn: () => securityService.getSecurityMetrics(),
     refetchInterval: 30000, // Refresh every 30 seconds
   })
 
   // Fetch security alerts
-  const { data: securityAlerts, isLoading: alertsLoading, refetch: refetchAlerts } = useQuery({
+  const { data: securityAlerts, isLoading: alertsLoading, error: alertsError, refetch: refetchAlerts } = useQuery({
     queryKey: ['securityAlerts'],
     queryFn: () => securityService.getSecurityAlerts(false),
     refetchInterval: 15000, // Refresh every 15 seconds
   })
 
   // Fetch security health score
-  const { data: securityHealth, isLoading: healthLoading } = useQuery({
+  const { data: securityHealth, isLoading: healthLoading, error: healthError } = useQuery({
     queryKey: ['securityHealthScore'],
     queryFn: () => securityService.getSecurityHealthScore(),
     refetchInterval: 60000, // Refresh every minute
+  })
+
+  // Fetch live threat detections
+  const { data: threatDetections, isLoading: threatsLoading, error: threatsError } = useQuery({
+    queryKey: ['securityThreats'],
+    queryFn: () => securityService.getThreatDetections(),
+    refetchInterval: 30000,
+  })
+
+  // Fetch current user's 2FA state
+  const { data: twoFactorSettings, error: twoFactorError } = useQuery({
+    queryKey: ['securityTwoFactorSettings'],
+    queryFn: () => securityService.getTwoFactorSettings(),
+    staleTime: 30000,
   })
 
   // Form for security settings
@@ -137,84 +228,16 @@ export default function SecurityDashboardPage() {
     watch,
     setValue,
     reset,
-  } = useForm<SecuritySettingsDto>({
-    resolver: zodResolver(
-      z.object({
-        ...passwordPolicySchema.shape,
-        ...sessionSchema.shape,
-        ...lockoutSchema.shape,
-        ...recaptchaSchema.shape,
-        ...legalSchema.shape,
-      })
-    ),
-    defaultValues: {
-      // Password Policy
-      passwordMinLength: 8,
-      passwordRequireUppercase: true,
-      passwordRequireLowercase: true,
-      passwordRequireDigits: true,
-      passwordRequireSpecialChars: true,
-      passwordMaxAge: 90,
-      passwordPreventReuse: 5,
-      // Session Settings
-      sessionTimeoutMinutes: 30,
-      jwtTokenLifetimeMinutes: 60,
-      preventConcurrentLogin: 'Disabled' as const,
-      // Lockout Settings
-      maxFailedLoginAttempts: 5,
-      accountLockoutMinutes: 30,
-      rateLimitLoginMaxAttempts: 5,
-      rateLimitLoginWindowMinutes: 15,
-      rateLimitLoginBlockDurationMinutes: 30,
-      // CAPTCHA Settings
-      captchaEnabled: false,
-      captchaProvider: 'recaptcha' as const,
-      recaptchaSiteKey: null,
-      recaptchaSecretKey: null,
-      hCaptchaSiteKey: null,
-      hCaptchaSecretKey: null,
-      // Legal URLs
-      termsOfServiceUrl: null,
-      privacyPolicyUrl: null,
-    },
+  } = useForm<SecuritySettingsFormValues>({
+    resolver: zodResolver(securitySettingsSchema),
+    defaultValues: defaultSecuritySettingsFormValues(),
   })
 
   // Update form when settings are loaded
   useEffect(() => {
     if (!settings) return
-    
-    const cleanSettings = {
-      // Password Policy
-      passwordMinLength: settings.passwordMinLength || 8,
-      passwordRequireUppercase: Boolean(settings.passwordRequireUppercase),
-      passwordRequireLowercase: Boolean(settings.passwordRequireLowercase),
-      passwordRequireDigits: Boolean(settings.passwordRequireDigits),
-      passwordRequireSpecialChars: Boolean(settings.passwordRequireSpecialChars),
-      passwordMaxAge: settings.passwordMaxAge,
-      passwordPreventReuse: settings.passwordPreventReuse,
-      // Session Settings
-      sessionTimeoutMinutes: settings.sessionTimeoutMinutes || 30,
-      jwtTokenLifetimeMinutes: settings.jwtTokenLifetimeMinutes || 60,
-      preventConcurrentLogin: settings.preventConcurrentLogin || 'Disabled',
-      // Lockout Settings
-      maxFailedLoginAttempts: settings.maxFailedLoginAttempts || 5,
-      accountLockoutMinutes: settings.accountLockoutMinutes || 30,
-      rateLimitLoginMaxAttempts: settings.rateLimitLoginMaxAttempts || 5,
-      rateLimitLoginWindowMinutes: settings.rateLimitLoginWindowMinutes || 15,
-      rateLimitLoginBlockDurationMinutes: settings.rateLimitLoginBlockDurationMinutes || 30,
-      // CAPTCHA Settings
-      captchaEnabled: Boolean(settings.captchaEnabled),
-      captchaProvider: settings.captchaProvider || 'recaptcha',
-      recaptchaSiteKey: settings.recaptchaSiteKey || '',
-      recaptchaSecretKey: settings.recaptchaSecretKey || '',
-      hCaptchaSiteKey: settings.hCaptchaSiteKey || '',
-      hCaptchaSecretKey: settings.hCaptchaSecretKey || '',
-      // Legal URLs
-      termsOfServiceUrl: settings.termsOfServiceUrl || '',
-      privacyPolicyUrl: settings.privacyPolicyUrl || '',
-    } as SecuritySettingsDto
-    
-    reset(cleanSettings)
+
+    reset(toSecuritySettingsFormValues(settings))
   }, [settings, reset])
 
   // Setup real-time security data subscriptions
@@ -264,17 +287,8 @@ export default function SecurityDashboardPage() {
     },
   })
 
-  const onSubmit = (data: SecuritySettingsDto) => {
-    const cleanData: SecuritySettingsDto = {
-      ...data,
-      recaptchaSiteKey: data.recaptchaSiteKey?.trim() || null,
-      recaptchaSecretKey: data.recaptchaSecretKey?.trim() || null,
-      hCaptchaSiteKey: data.hCaptchaSiteKey?.trim() || null,
-      hCaptchaSecretKey: data.hCaptchaSecretKey?.trim() || null,
-      termsOfServiceUrl: data.termsOfServiceUrl?.trim() || null,
-      privacyPolicyUrl: data.privacyPolicyUrl?.trim() || null,
-    }
-    updateMutation.mutate(cleanData)
+  const onSubmit = (data: SecuritySettingsFormValues) => {
+    updateMutation.mutate(toSecuritySettingsDto(data))
   }
 
   // Alert dismiss functionality
@@ -402,7 +416,81 @@ export default function SecurityDashboardPage() {
     }
   }
 
-  if (settingsLoading || metricsLoading || alertsLoading) {
+  const activeAlerts = alertsData.filter((alert) => !alert.dismissed)
+  const activeThreats = (threatDetections || []).filter((threat) => threat.status === 'active' || threat.status === 'investigating')
+  const criticalThreats = activeThreats.filter((threat) => threat.severity === 'critical' || threat.severity === 'high')
+  const weakestCategoryEntry = securityHealth
+    ? Object.entries(securityHealth.categories).sort(([, left], [, right]) => Number(left) - Number(right))[0]
+    : null
+  const weakestCategoryLabel = weakestCategoryEntry
+    ? weakestCategoryEntry[0]
+        .replace(/([A-Z])/g, ' $1')
+        .replace(/^./, (value) => value.toUpperCase())
+    : 'Unknown'
+  const overallHealthScore = securityHealth?.overall ?? 0
+  const healthRingCircumference = 351.86
+  const healthRingOffset = healthRingCircumference * (1 - Math.max(0, Math.min(overallHealthScore, 100)) / 100)
+  const securityPosture = criticalThreats.length > 0 || activeAlerts.some((alert) => alert.type === 'critical')
+    ? {
+        label: 'Critical',
+        badgeClassName: 'border-red-200 text-red-700 dark:border-red-800 dark:text-red-300',
+        panelClassName: 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/30',
+        textClassName: 'text-red-700 dark:text-red-300',
+      }
+    : overallHealthScore >= 90 && activeAlerts.length === 0 && activeThreats.length === 0
+      ? {
+          label: 'Healthy',
+          badgeClassName: 'border-emerald-200 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300',
+          panelClassName: 'border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30',
+          textClassName: 'text-emerald-700 dark:text-emerald-300',
+        }
+      : {
+          label: 'Needs Attention',
+          badgeClassName: 'border-amber-200 text-amber-700 dark:border-amber-800 dark:text-amber-300',
+          panelClassName: 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30',
+          textClassName: 'text-amber-700 dark:text-amber-300',
+        }
+  const queryErrors = [settingsError, metricsError, alertsError, healthError, threatsError, twoFactorError].filter(Boolean)
+  const currentSecurityState = settings
+    ? [
+        {
+          title: 'Authentication',
+          value: `${metricsData?.twoFactorAdoptionRate ?? 0}% 2FA adoption`,
+          detail: twoFactorSettings?.isEnabled
+            ? 'Your account is protected with 2FA'
+            : 'Your account still needs 2FA enabled',
+          icon: Shield,
+        },
+        {
+          title: 'Threat Exposure',
+          value: `${activeAlerts.length} alerts, ${activeThreats.length} active threats`,
+          detail: criticalThreats.length > 0
+            ? `${criticalThreats.length} threats need immediate action`
+            : 'No high-severity threat detections right now',
+          icon: AlertTriangle,
+        },
+        {
+          title: 'Session Guardrails',
+          value: `${settings.sessionTimeoutMinutes}m timeout / ${settings.jwtTokenLifetimeMinutes}m token`,
+          detail: settings.preventConcurrentLogin === 'Disabled'
+            ? 'Concurrent login restriction is disabled'
+            : settings.preventConcurrentLogin === 'LogoutFromAllDevices'
+              ? 'New logins terminate older sessions'
+              : 'Existing sessions block additional logins',
+          icon: Clock,
+        },
+        {
+          title: 'Login Hardening',
+          value: `${settings.maxFailedLoginAttempts} failed attempts before lockout`,
+          detail: settings.captchaEnabled
+            ? `${settings.captchaProvider} challenge is enabled`
+            : 'CAPTCHA is disabled on public auth flows',
+          icon: Lock,
+        },
+      ]
+    : []
+
+  if (settingsLoading || metricsLoading || alertsLoading || healthLoading || threatsLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center space-y-4">
@@ -420,14 +508,14 @@ export default function SecurityDashboardPage() {
         <div>
           <h1 className="text-3xl font-bold">Security Management</h1>
           <p className="text-muted-foreground">
-            Comprehensive security management and monitoring
+            Live security posture, persisted control settings, and action-ready monitoring
           </p>
         </div>
         
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-green-600 border-green-200">
+          <Badge variant="outline" className={securityPosture.badgeClassName}>
             <Shield className="h-3 w-3 mr-1" />
-            Security Status: Good
+            Security Status: {securityPosture.label}
           </Badge>
           {activeTab === 'settings' && (
             <Button 
@@ -450,6 +538,16 @@ export default function SecurityDashboardPage() {
           )}
         </div>
       </div>
+
+      {queryErrors.length > 0 && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            Some live security data could not be loaded. The page now shows only persisted data that was retrieved
+            successfully instead of falling back to mock values.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <ClientOnly fallback={<div className="p-8 text-center text-muted-foreground">Loading security dashboard...</div>}>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -497,6 +595,32 @@ export default function SecurityDashboardPage() {
               </div>
             )}
           </div>
+
+          <Card className={securityPosture.panelClassName}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Shield className="h-5 w-5" />
+                Exact Security State
+              </CardTitle>
+              <CardDescription>
+                This posture summary is derived from persisted security settings plus live alerts, threats, and 2FA state.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {currentSecurityState.map((state) => (
+                <div key={state.title} className="rounded-xl border border-white/60 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/50">
+                  <div className="mb-3 flex items-center justify-between">
+                    <state.icon className={`h-5 w-5 ${securityPosture.textClassName}`} />
+                    <Badge variant="outline" className={securityPosture.badgeClassName}>
+                      {state.title}
+                    </Badge>
+                  </div>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{state.value}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{state.detail}</p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
 
           {/* Security Alerts */}
           <Card>
@@ -555,6 +679,56 @@ export default function SecurityDashboardPage() {
                   </div>
                 )}
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Activity className="h-5 w-5" />
+                Threat Detections
+                <Badge variant={criticalThreats.length > 0 ? 'destructive' : 'secondary'}>
+                  {activeThreats.length}
+                </Badge>
+              </CardTitle>
+              <CardDescription>
+                Live threat records that are still active or under investigation.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {activeThreats.length > 0 ? (
+                activeThreats.slice(0, 4).map((threat) => (
+                  <div key={threat.id} className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-medium">{threat.title}</h4>
+                          <Badge variant={threat.severity === 'critical' || threat.severity === 'high' ? 'destructive' : 'secondary'}>
+                            {threat.severity}
+                          </Badge>
+                          <Badge variant="outline">{threat.status}</Badge>
+                        </div>
+                        <p className="mt-2 text-sm text-muted-foreground">{threat.description}</p>
+                        <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                          <span>Detected {formatTimeAgo(threat.timestamp)}</span>
+                          <span>Source: {threat.source}</span>
+                          {threat.target && <span>Target: {threat.target}</span>}
+                        </div>
+                      </div>
+                      <div className="max-w-sm text-xs text-muted-foreground">
+                        {threat.indicators.length > 0
+                          ? threat.indicators.slice(0, 3).map((indicator) => `${indicator.key}: ${indicator.value}`).join(' • ')
+                          : 'No additional indicators recorded'}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <CheckCircle className="h-12 w-12 mx-auto mb-2 text-green-600" />
+                  <p>No active threat detections</p>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -653,19 +827,25 @@ export default function SecurityDashboardPage() {
                       stroke="currentColor"
                       strokeWidth="8"
                       fill="none"
-                      strokeDasharray={351.86} // 2 * pi * 56
-                      strokeDashoffset={70.37} // 351.86 * (1 - 0.8)
-                      className="text-green-500"
+                      strokeDasharray={healthRingCircumference}
+                      strokeDashoffset={healthRingOffset}
+                      className={
+                        overallHealthScore >= 90
+                          ? 'text-green-500'
+                          : overallHealthScore >= 75
+                            ? 'text-yellow-500'
+                            : 'text-red-500'
+                      }
                       strokeLinecap="round"
                     />
                   </svg>
                   <div className="absolute inset-0 flex items-center justify-center">
                     <div className="text-center">
                       <div className={`text-3xl font-bold ${
-                        (securityHealth?.overall || 87) >= 90 ? 'text-green-600' : 
-                        (securityHealth?.overall || 87) >= 75 ? 'text-yellow-600' : 'text-red-600'
+                        overallHealthScore >= 90 ? 'text-green-600' :
+                        overallHealthScore >= 75 ? 'text-yellow-600' : 'text-red-600'
                       }`}>
-                        {securityHealth?.overall || 87}
+                        {overallHealthScore}
                       </div>
                       <div className="text-sm text-muted-foreground">Score</div>
                     </div>
@@ -673,12 +853,7 @@ export default function SecurityDashboardPage() {
                 </div>
                 
                 <div className="flex-1 space-y-3">
-                  {Object.entries(securityHealth?.categories || {
-                    passwordPolicies: 92,
-                    twoFactorAdoption: 85,
-                    sessionSecurity: 78,
-                    accessControls: 95
-                  }).map(([key, value]) => {
+                  {Object.entries(securityHealth?.categories ?? {}).map(([key, value]) => {
                     const label = key === 'passwordPolicies' ? 'Password Policies' :
                                   key === 'twoFactorAdoption' ? '2FA Adoption' :
                                   key === 'sessionSecurity' ? 'Session Security' :
@@ -705,16 +880,16 @@ export default function SecurityDashboardPage() {
               </div>
               
               <div className={`mt-6 p-4 rounded-lg ${
-                (securityHealth?.overall || 87) >= 90 ? 'bg-green-50' :
-                (securityHealth?.overall || 87) >= 75 ? 'bg-yellow-50' : 'bg-red-50'
+                overallHealthScore >= 90 ? 'bg-green-50' :
+                overallHealthScore >= 75 ? 'bg-yellow-50' : 'bg-red-50'
               }`}>
                 {securityHealth?.recommendations && securityHealth.recommendations.length > 0 ? (
                   <div className="space-y-2">
                     <p className={`text-sm font-medium ${
-                      (securityHealth?.overall || 87) >= 90 ? 'text-green-800' :
-                      (securityHealth?.overall || 87) >= 75 ? 'text-yellow-800' : 'text-red-800'
+                      overallHealthScore >= 90 ? 'text-green-800' :
+                      overallHealthScore >= 75 ? 'text-yellow-800' : 'text-red-800'
                     }`}>
-                      Security Recommendations:
+                      Security Recommendations
                     </p>
                     {securityHealth.recommendations.slice(0, 2).map((rec, index) => (
                       <div key={index} className="flex items-start gap-2">
@@ -726,8 +901,8 @@ export default function SecurityDashboardPage() {
                           {rec.priority}
                         </Badge>
                         <p className={`text-sm flex-1 ${
-                          (securityHealth?.overall || 87) >= 90 ? 'text-green-700' :
-                          (securityHealth?.overall || 87) >= 75 ? 'text-yellow-700' : 'text-red-700'
+                          overallHealthScore >= 90 ? 'text-green-700' :
+                          overallHealthScore >= 75 ? 'text-yellow-700' : 'text-red-700'
                         }`}>
                           <strong>{rec.category}:</strong> {rec.message}
                         </p>
@@ -736,8 +911,8 @@ export default function SecurityDashboardPage() {
                   </div>
                 ) : (
                   <p className="text-sm text-green-800">
-                    <strong>Excellent security posture!</strong> Your organization maintains strong security practices. 
-                    Consider increasing 2FA adoption and reviewing session policies to reach 95+ score.
+                    <strong>Security posture is stable.</strong> Weakest measured area: {weakestCategoryLabel}. Continue
+                    monitoring threat detections and 2FA adoption to keep the overall score high.
                   </p>
                 )}
               </div>
@@ -1217,9 +1392,13 @@ export default function SecurityDashboardPage() {
         {/* Two-Factor Authentication Tab */}
         <TabsContent value="2fa">
           <TwoFactorAuth 
-            userEmail="admin@company.com" 
-            isEnabled={false}
-            onStatusChange={(enabled) => console.log('2FA status changed:', enabled)}
+            userEmail={currentUser?.email}
+            isEnabled={twoFactorSettings?.isEnabled}
+            onStatusChange={() => {
+              queryClient.invalidateQueries({ queryKey: ['securityMetrics'] })
+              queryClient.invalidateQueries({ queryKey: ['securityHealthScore'] })
+              queryClient.invalidateQueries({ queryKey: ['securityTwoFactorSettings'] })
+            }}
           />
         </TabsContent>
 

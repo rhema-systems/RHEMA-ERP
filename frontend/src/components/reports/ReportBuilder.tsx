@@ -25,7 +25,7 @@ import {
   ChevronRight,
   Loader2
 } from 'lucide-react'
-import { reportsService } from '../../services/reports'
+import { CreateReportDto, CreateReportTemplateDto, reportsService } from '../../services/reports'
 import { useToast } from '../../hooks/use-toast'
 import { API_CONFIG } from '../../config/api'
 
@@ -49,6 +49,38 @@ interface ReportBuilderProps {
   onTemplateCreated?: () => void;
   editingReportId?: string;
   editingReport?: any;
+}
+
+interface DataSourceSchemaColumn {
+  name: string
+  dataType: string
+}
+
+interface DataSourceSchemaEntity {
+  name: string
+  schema?: string
+  rowCount?: number | null
+  columns: DataSourceSchemaColumn[]
+}
+
+interface DataSourceSchema {
+  tables: DataSourceSchemaEntity[]
+  views: DataSourceSchemaEntity[]
+}
+
+interface AvailableField {
+  id: string
+  name: string
+  type: string
+  table?: string
+}
+
+interface AvailableDataSource {
+  name: string
+  schema?: string
+  type: 'table' | 'view'
+  rowCount: number | null
+  columnCount: number
 }
 
 const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose, onReportCreated, onTemplateCreated, editingReportId, editingReport }) => {
@@ -87,7 +119,7 @@ const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose, onReportCreated,
     data: dataSourceSchema,
     isLoading: schemaLoading,
     error: schemaError
-  } = useQuery({
+  } = useQuery<DataSourceSchema, Error>({
     queryKey: ['erp-schema'],
     queryFn: async () => {
       const baseUrl = API_CONFIG.BASE_URL.replace('/api', '');
@@ -95,20 +127,20 @@ const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose, onReportCreated,
       if (!response.ok) {
         throw new Error('Failed to fetch schema');
       }
-      return response.json();
+      return await response.json() as DataSourceSchema;
     },
     refetchOnWindowFocus: false,
   })
 
   // Get available fields from the data source schema - filtered by selected table/view
-  const getAvailableFields = () => {
+  const getAvailableFields = (): AvailableField[] => {
     if (!dataSourceSchema || !selectedTableOrView) return []
     
-    const fields: Array<{id: string, name: string, type: string, table?: string}> = []
+    const fields: AvailableField[] = []
     
     // Find the selected table or view and return only its columns
-    const selectedTable = dataSourceSchema.tables.find(table => table.name === selectedTableOrView)
-    const selectedView = dataSourceSchema.views.find(view => view.name === selectedTableOrView)
+    const selectedTable = dataSourceSchema.tables.find((table) => table.name === selectedTableOrView)
+    const selectedView = dataSourceSchema.views.find((view) => view.name === selectedTableOrView)
     
     if (selectedTable) {
       selectedTable.columns.forEach(column => {
@@ -134,18 +166,18 @@ const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose, onReportCreated,
   }
 
   // Get available tables and views for selection
-  const getAvailableTablesAndViews = () => {
+  const getAvailableTablesAndViews = (): { tables: AvailableDataSource[]; views: AvailableDataSource[] } => {
     if (!dataSourceSchema) return { tables: [], views: [] }
     
     return {
-      tables: dataSourceSchema.tables.map(table => ({
+      tables: dataSourceSchema.tables.map((table) => ({
         name: table.name,
         schema: table.schema,
         type: 'table',
-        rowCount: table.rowCount,
+        rowCount: table.rowCount ?? null,
         columnCount: table.columns.length
       })),
-      views: dataSourceSchema.views.map(view => ({
+      views: dataSourceSchema.views.map((view) => ({
         name: view.name,
         schema: view.schema,
         type: 'view',
@@ -188,7 +220,7 @@ const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose, onReportCreated,
     }))
   }
 
-  const addField = (field: {id: string, name: string, type: string}) => {
+  const addField = (field: AvailableField) => {
     const newField: SelectedField = {
       id: `${field.id}_${Date.now()}`,
       name: field.name,
@@ -260,12 +292,12 @@ const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose, onReportCreated,
     setIsCreatingTemplate(true)
     
     try {
-      const templateData = {
+      const templateData: CreateReportTemplateDto = {
         name: `${reportName} Template`,
         description: reportDescription || `Template for ${reportName} reports`,
         category: 'custom',
         type: chartType,
-        chartType: chartType !== 'table' ? chartType : null,
+        chartType: chartType !== 'table' ? chartType : undefined,
         isCustom: true,
         tags: ['custom', chartType, 'user-created'],
         configuration: {
@@ -366,7 +398,7 @@ const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose, onReportCreated,
       
       const query = `SELECT ${selectFields.join(', ')} FROM ${fullTableName} ${whereClause}`.trim()
       
-      const reportData = {
+      const reportData: CreateReportDto = {
         name: reportName,
         description: reportDescription || `Report generated from ERP database`,
         type: chartType,
@@ -381,7 +413,7 @@ const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose, onReportCreated,
         })),
         visualization: {
           type: chartType,
-          chartType: chartType !== 'table' ? chartType : null,
+          chartType: chartType !== 'table' ? chartType : undefined,
           configuration: {}
         },
         parameters: filters.reduce((acc, filter, index) => {

@@ -19,7 +19,7 @@ import { Suspense } from 'react';
 function CreateContractForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const awardId = searchParams.get('awardId');
+  const awardId = searchParams?.get('awardId');
 
   const [award, setAward] = useState<TenderAwardDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -353,4 +353,3 @@ export default function CreateContractPage() {
     </Suspense>
   );
 }
-

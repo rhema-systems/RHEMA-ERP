@@ -38,7 +38,7 @@ function parseFields(defJson: string): FormField[] {
 export default function NewHelpdeskServiceRequestPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const scopeParam = searchParams.get('scope');
+  const scopeParam = searchParams?.get('scope');
   const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
   const [requestTypeId, setRequestTypeId] = useState<string>('');
   const [title, setTitle] = useState<string>('');

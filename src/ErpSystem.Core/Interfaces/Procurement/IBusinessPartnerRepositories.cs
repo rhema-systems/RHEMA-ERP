@@ -14,12 +14,12 @@ namespace ErpSystem.Core.Interfaces.Procurement;
 public interface IBusinessPartnerRepository : IGenericRepository<BusinessPartner>
 {
     // Basic CRUD
-    Task<BusinessPartner?> GetByIdAsync(Guid id);
+    new Task<BusinessPartner?> GetByIdAsync(Guid id);
     Task<BusinessPartner?> GetByCodeAsync(string partnerCode);
     Task<BusinessPartner?> GetByUserIdAsync(Guid userId);
     Task<BusinessPartner> CreateAsync(BusinessPartner partner);
-    Task<BusinessPartner> UpdateAsync(BusinessPartner partner);
-    Task DeleteAsync(Guid id);
+    new Task<BusinessPartner> UpdateAsync(BusinessPartner partner);
+    new Task DeleteAsync(Guid id);
 
     // Queries
     Task<PagedResult<BusinessPartner>> GetPartnersAsync(
@@ -73,11 +73,11 @@ public interface IBusinessPartnerRepository : IGenericRepository<BusinessPartner
 /// </summary>
 public interface IPartnerCategoryRepository : IGenericRepository<PartnerCategory>
 {
-    Task<PartnerCategory?> GetByIdAsync(Guid id);
+    new Task<PartnerCategory?> GetByIdAsync(Guid id);
     Task<PartnerCategory?> GetByCodeAsync(string categoryCode);
     Task<PartnerCategory> CreateAsync(PartnerCategory category);
-    Task<PartnerCategory> UpdateAsync(PartnerCategory category);
-    Task DeleteAsync(Guid id);
+    new Task<PartnerCategory> UpdateAsync(PartnerCategory category);
+    new Task DeleteAsync(Guid id);
 
     Task<IEnumerable<PartnerCategory>> GetAllCategoriesAsync(string? categoryType = null);
     Task<IEnumerable<PartnerCategory>> GetActiveCategoriesAsync(string? categoryType = null);
@@ -98,11 +98,11 @@ public interface IPartnerCategoryRepository : IGenericRepository<PartnerCategory
 /// </summary>
 public interface IContractorSpecializationRepository : IGenericRepository<ContractorSpecialization>
 {
-    Task<ContractorSpecialization?> GetByIdAsync(Guid id);
+    new Task<ContractorSpecialization?> GetByIdAsync(Guid id);
     Task<ContractorSpecialization?> GetByCodeAsync(string specializationCode);
     Task<ContractorSpecialization> CreateAsync(ContractorSpecialization specialization);
-    Task<ContractorSpecialization> UpdateAsync(ContractorSpecialization specialization);
-    Task DeleteAsync(Guid id);
+    new Task<ContractorSpecialization> UpdateAsync(ContractorSpecialization specialization);
+    new Task DeleteAsync(Guid id);
 
     Task<IEnumerable<ContractorSpecialization>> GetAllSpecializationsAsync();
     Task<IEnumerable<ContractorSpecialization>> GetActiveSpecializationsAsync();
@@ -119,11 +119,11 @@ public interface IContractorSpecializationRepository : IGenericRepository<Contra
 /// </summary>
 public interface ILicenseTypeRepository : IGenericRepository<LicenseType>
 {
-    Task<LicenseType?> GetByIdAsync(Guid id);
+    new Task<LicenseType?> GetByIdAsync(Guid id);
     Task<LicenseType?> GetByCodeAsync(string licenseCode);
     Task<LicenseType> CreateAsync(LicenseType licenseType);
-    Task<LicenseType> UpdateAsync(LicenseType licenseType);
-    Task DeleteAsync(Guid id);
+    new Task<LicenseType> UpdateAsync(LicenseType licenseType);
+    new Task DeleteAsync(Guid id);
 
     Task<IEnumerable<LicenseType>> GetAllLicenseTypesAsync();
     Task<IEnumerable<LicenseType>> GetActiveLicenseTypesAsync();
@@ -141,10 +141,10 @@ public interface ILicenseTypeRepository : IGenericRepository<LicenseType>
 /// </summary>
 public interface IBusinessPartnerLicenseRepository : IGenericRepository<BusinessPartnerLicense>
 {
-    Task<BusinessPartnerLicense?> GetByIdAsync(Guid id);
+    new Task<BusinessPartnerLicense?> GetByIdAsync(Guid id);
     Task<BusinessPartnerLicense> CreateAsync(BusinessPartnerLicense license);
-    Task<BusinessPartnerLicense> UpdateAsync(BusinessPartnerLicense license);
-    Task DeleteAsync(Guid id);
+    new Task<BusinessPartnerLicense> UpdateAsync(BusinessPartnerLicense license);
+    new Task DeleteAsync(Guid id);
 
     Task<IEnumerable<BusinessPartnerLicense>> GetLicensesByPartnerAsync(Guid businessPartnerId);
     Task<IEnumerable<BusinessPartnerLicense>> GetActiveLicensesByPartnerAsync(Guid businessPartnerId);
@@ -165,10 +165,10 @@ public interface IBusinessPartnerLicenseRepository : IGenericRepository<Business
 /// </summary>
 public interface IBusinessPartnerContactRepository : IGenericRepository<BusinessPartnerContact>
 {
-    Task<BusinessPartnerContact?> GetByIdAsync(Guid id);
+    new Task<BusinessPartnerContact?> GetByIdAsync(Guid id);
     Task<BusinessPartnerContact> CreateAsync(BusinessPartnerContact contact);
-    Task<BusinessPartnerContact> UpdateAsync(BusinessPartnerContact contact);
-    Task DeleteAsync(Guid id);
+    new Task<BusinessPartnerContact> UpdateAsync(BusinessPartnerContact contact);
+    new Task DeleteAsync(Guid id);
 
     Task<IEnumerable<BusinessPartnerContact>> GetContactsByPartnerAsync(Guid businessPartnerId);
     Task<IEnumerable<BusinessPartnerContact>> GetActiveContactsByPartnerAsync(Guid businessPartnerId);
@@ -186,10 +186,10 @@ public interface IBusinessPartnerContactRepository : IGenericRepository<Business
 /// </summary>
 public interface IBusinessPartnerDocumentRepository : IGenericRepository<BusinessPartnerDocument>
 {
-    Task<BusinessPartnerDocument?> GetByIdAsync(Guid id);
+    new Task<BusinessPartnerDocument?> GetByIdAsync(Guid id);
     Task<BusinessPartnerDocument> CreateAsync(BusinessPartnerDocument document);
-    Task<BusinessPartnerDocument> UpdateAsync(BusinessPartnerDocument document);
-    Task DeleteAsync(Guid id);
+    new Task<BusinessPartnerDocument> UpdateAsync(BusinessPartnerDocument document);
+    new Task DeleteAsync(Guid id);
 
     Task<IEnumerable<BusinessPartnerDocument>> GetDocumentsByPartnerAsync(Guid businessPartnerId);
     Task<IEnumerable<BusinessPartnerDocument>> GetDocumentsByTypeAsync(Guid businessPartnerId, string documentType);
@@ -208,10 +208,10 @@ public interface IBusinessPartnerDocumentRepository : IGenericRepository<Busines
 /// </summary>
 public interface IBusinessPartnerFinancialRepository : IGenericRepository<BusinessPartnerFinancial>
 {
-    Task<BusinessPartnerFinancial?> GetByIdAsync(Guid id);
+    new Task<BusinessPartnerFinancial?> GetByIdAsync(Guid id);
     Task<BusinessPartnerFinancial> CreateAsync(BusinessPartnerFinancial financial);
-    Task<BusinessPartnerFinancial> UpdateAsync(BusinessPartnerFinancial financial);
-    Task DeleteAsync(Guid id);
+    new Task<BusinessPartnerFinancial> UpdateAsync(BusinessPartnerFinancial financial);
+    new Task DeleteAsync(Guid id);
 
     Task<IEnumerable<BusinessPartnerFinancial>> GetFinancialsByPartnerAsync(Guid businessPartnerId);
     Task<BusinessPartnerFinancial?> GetFinancialByYearAsync(Guid businessPartnerId, int financialYear);
@@ -229,11 +229,11 @@ public interface IBusinessPartnerFinancialRepository : IGenericRepository<Busine
 /// </summary>
 public interface IBusinessPartnerRegistrationRepository : IGenericRepository<BusinessPartnerRegistration>
 {
-    Task<BusinessPartnerRegistration?> GetByIdAsync(Guid id);
+    new Task<BusinessPartnerRegistration?> GetByIdAsync(Guid id);
     Task<BusinessPartnerRegistration?> GetByApplicationNumberAsync(string applicationNumber);
     Task<BusinessPartnerRegistration> CreateAsync(BusinessPartnerRegistration registration);
-    Task<BusinessPartnerRegistration> UpdateAsync(BusinessPartnerRegistration registration);
-    Task DeleteAsync(Guid id);
+    new Task<BusinessPartnerRegistration> UpdateAsync(BusinessPartnerRegistration registration);
+    new Task DeleteAsync(Guid id);
 
     Task<PagedResult<BusinessPartnerRegistration>> GetRegistrationsAsync(
         int page,
@@ -265,10 +265,10 @@ public interface IBusinessPartnerRegistrationRepository : IGenericRepository<Bus
 /// </summary>
 public interface IBusinessPartnerRegistrationDocumentRepository : IGenericRepository<BusinessPartnerRegistrationDocument>
 {
-    Task<BusinessPartnerRegistrationDocument?> GetByIdAsync(Guid id);
+    new Task<BusinessPartnerRegistrationDocument?> GetByIdAsync(Guid id);
     Task<BusinessPartnerRegistrationDocument> CreateAsync(BusinessPartnerRegistrationDocument document);
-    Task<BusinessPartnerRegistrationDocument> UpdateAsync(BusinessPartnerRegistrationDocument document);
-    Task DeleteAsync(Guid id);
+    new Task<BusinessPartnerRegistrationDocument> UpdateAsync(BusinessPartnerRegistrationDocument document);
+    new Task DeleteAsync(Guid id);
 
     Task<IEnumerable<BusinessPartnerRegistrationDocument>> GetDocumentsByRegistrationAsync(Guid registrationId);
     Task<IEnumerable<BusinessPartnerRegistrationDocument>> GetByRegistrationIdAsync(Guid registrationId);

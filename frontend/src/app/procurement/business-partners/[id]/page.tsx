@@ -48,7 +48,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/a
 export default function BusinessPartnerDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const id = params.id as string;
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [partner, setPartner] = useState<BusinessPartnerDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -79,6 +79,9 @@ export default function BusinessPartnerDetailPage() {
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const [reviewDetailDialogOpen, setReviewDetailDialogOpen] = useState(false);
   const [selectedReview, setSelectedReview] = useState<PerformanceReviewDto | null>(null);
+
+  const getReviewYear = (review: PerformanceReviewDto) =>
+    review.reviewYear ?? new Date(review.reviewDate).getFullYear();
 
   useEffect(() => {
     loadPartner();
@@ -1091,10 +1094,10 @@ export default function BusinessPartnerDetailPage() {
                                 <tr key={review.id} className="hover:bg-gray-50">
                                   <td className="px-4 py-3 text-sm">
                                     {review.reviewPeriod === 'Monthly' && review.reviewMonth
-                                      ? format(new Date(review.reviewYear, review.reviewMonth - 1), 'MMM yyyy')
+                                      ? format(new Date(getReviewYear(review), review.reviewMonth - 1), 'MMM yyyy')
                                       : review.reviewPeriod === 'Quarterly' && review.reviewQuarter
-                                      ? `Q${review.reviewQuarter} ${review.reviewYear}`
-                                      : review.reviewYear}
+                                      ? `Q${review.reviewQuarter} ${getReviewYear(review)}`
+                                      : getReviewYear(review)}
                                   </td>
                                   <td className="px-4 py-3 text-center">
                                     <Badge variant={
@@ -1270,8 +1273,8 @@ export default function BusinessPartnerDetailPage() {
                           <div>
                             <div className="font-semibold">{review.reviewNumber}</div>
                             <div className="text-sm text-gray-600">
-                              {review.reviewPeriod} {review.reviewYear}
-                              {review.reviewMonth && ` - ${new Date(review.reviewYear, review.reviewMonth - 1).toLocaleString('default', { month: 'long' })}`}
+                              {review.reviewPeriod} {getReviewYear(review)}
+                              {review.reviewMonth && ` - ${new Date(getReviewYear(review), review.reviewMonth - 1).toLocaleString('default', { month: 'long' })}`}
                               {review.reviewQuarter && ` - Q${review.reviewQuarter}`}
                             </div>
                           </div>

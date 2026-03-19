@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { format } from 'date-fns';
+import { addDays, format } from 'date-fns';
 import { Download, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -16,9 +17,18 @@ type ReportKey =
   | 'register'
   | 'taskAging'
   | 'milestones'
+  | 'performance'
   | 'budgetActual'
+  | 'portfolioSummary'
+  | 'programSummary'
+  | 'prioritization'
+  | 'dependencyWatch'
+  | 'strategic'
+  | 'resourceCapacity'
+  | 'resourceRecommendations'
   | 'riskIssue'
   | 'billing'
+  | 'invoiceQueue'
   | 'approvals'
   | 'external'
   | 'materials'
@@ -42,9 +52,18 @@ const REPORT_OPTIONS: { value: ReportKey; label: string }[] = [
   { value: 'register', label: 'Project Register' },
   { value: 'taskAging', label: 'Task Aging' },
   { value: 'milestones', label: 'Milestone Tracker' },
+  { value: 'performance', label: 'Performance Analytics' },
   { value: 'budgetActual', label: 'Budget vs Actual' },
+  { value: 'portfolioSummary', label: 'Portfolio Summary' },
+  { value: 'programSummary', label: 'Program Summary' },
+  { value: 'prioritization', label: 'Portfolio Prioritization' },
+  { value: 'dependencyWatch', label: 'Dependency Watch' },
+  { value: 'strategic', label: 'Strategic Initiatives' },
+  { value: 'resourceCapacity', label: 'Resource Capacity' },
+  { value: 'resourceRecommendations', label: 'Resource Capacity Recommendations' },
   { value: 'riskIssue', label: 'Risk and Issue Summary' },
   { value: 'billing', label: 'Billing Summary' },
+  { value: 'invoiceQueue', label: 'Invoice Request Queue' },
   { value: 'approvals', label: 'Workflow Approval Queue' },
   { value: 'external', label: 'External Collaboration' },
   { value: 'materials', label: 'Material Reconciliation' },
@@ -64,6 +83,7 @@ const EMPTY_DATASET: ReportDataset = {
 
 const formatCurrency = (value: number | undefined) => (value ?? 0).toLocaleString();
 const formatDate = (value?: string) => (value ? format(new Date(value), 'MMM dd, yyyy') : 'n/a');
+const toInputDate = (value: Date) => format(value, 'yyyy-MM-dd');
 
 const toDisplayLabel = (key: string) =>
   key
@@ -89,16 +109,27 @@ export default function ProjectReportsPage() {
   const [selectedReport, setSelectedReport] = useState<ReportKey>('register');
   const [dataset, setDataset] = useState<ReportDataset>(EMPTY_DATASET);
   const [loading, setLoading] = useState(true);
+  const [windowStart, setWindowStart] = useState<string>(() => toInputDate(new Date()));
+  const [windowEnd, setWindowEnd] = useState<string>(() => toInputDate(addDays(new Date(), 30)));
 
   const selectedReportConfig = useMemo(
     () => REPORT_OPTIONS.find((option) => option.value === selectedReport),
     [selectedReport],
   );
+  const supportsProjectFilter = selectedReport === 'taskAging' || selectedReport === 'milestones';
+  const supportsDateRange = selectedReport === 'resourceCapacity' || selectedReport === 'resourceRecommendations';
 
   const loadReport = async (reportKey: ReportKey, projectId: string) => {
     setLoading(true);
     try {
       const projectFilter = projectId === 'all' ? undefined : projectId;
+      const rangeStart = windowStart || toInputDate(new Date());
+      const rangeEnd = windowEnd || rangeStart;
+      if ((reportKey === 'resourceCapacity' || reportKey === 'resourceRecommendations')
+        && new Date(rangeEnd).getTime() < new Date(rangeStart).getTime()) {
+        throw new Error('End date must be on or after the start date');
+      }
+
       let next: ReportDataset;
 
       switch (reportKey) {
@@ -178,6 +209,32 @@ export default function ProjectReportsPage() {
           };
           break;
         }
+        case 'performance': {
+          const items = await projectService.getPerformanceAnalyticsReport(250);
+          next = {
+            title: 'Performance Analytics',
+            description: 'Earned value, forecast posture, and delivery health across tracked projects.',
+            rows: items.map((item) => ({
+              projectCode: item.projectCode,
+              projectTitle: item.projectTitle,
+              status: item.status,
+              healthStatus: item.healthStatus,
+              budgetBaseline: formatCurrency(item.budgetBaseline),
+              plannedValue: formatCurrency(item.plannedValue),
+              earnedValue: formatCurrency(item.earnedValue),
+              actualCost: formatCurrency(item.actualCost),
+              costPerformanceIndex: item.costPerformanceIndex?.toFixed(2) ?? 'n/a',
+              estimateAtCompletion: formatCurrency(item.estimateAtCompletion),
+              projectedVariance: formatCurrency(item.projectedVariance),
+            })),
+            columns: ['projectCode', 'projectTitle', 'status', 'healthStatus', 'budgetBaseline', 'plannedValue', 'earnedValue', 'actualCost', 'costPerformanceIndex', 'estimateAtCompletion', 'projectedVariance'],
+            primaryLabel: 'Projects',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'Watch Status',
+            secondaryValue: `${items.filter((item) => item.healthStatus === 'Watch').length}`,
+          };
+          break;
+        }
         case 'budgetActual': {
           const items = await projectService.getBudgetActualReport(250);
           next = {
@@ -199,6 +256,183 @@ export default function ProjectReportsPage() {
             primaryValue: `${items.length}`,
             secondaryLabel: 'Negative Variance',
             secondaryValue: `${items.filter((item) => item.budgetVariance < 0).length}`,
+          };
+          break;
+        }
+        case 'portfolioSummary': {
+          const items = await projectService.getPortfolioSummaryReport(120);
+          next = {
+            title: 'Portfolio Summary',
+            description: 'Top-level portfolio rollups for budget, risk concentration, and active delivery load.',
+            rows: items.map((item) => ({
+              portfolioCode: item.portfolioCode,
+              portfolioName: item.portfolioName,
+              programCount: item.programCount,
+              projectCount: item.projectCount,
+              activeProjectCount: item.activeProjectCount,
+              totalEstimatedBudget: formatCurrency(item.totalEstimatedBudget),
+              totalActualCost: formatCurrency(item.totalActualCost),
+              highRiskProjectCount: item.highRiskProjectCount,
+            })),
+            columns: ['portfolioCode', 'portfolioName', 'programCount', 'projectCount', 'activeProjectCount', 'totalEstimatedBudget', 'totalActualCost', 'highRiskProjectCount'],
+            primaryLabel: 'Portfolios',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'High-Risk Portfolios',
+            secondaryValue: `${items.filter((item) => item.highRiskProjectCount > 0).length}`,
+          };
+          break;
+        }
+        case 'programSummary': {
+          const items = await projectService.getProgramSummaryReport(undefined, 150);
+          next = {
+            title: 'Program Summary',
+            description: 'Program rollups covering project count, spend, and average delivery progress.',
+            rows: items.map((item) => ({
+              programCode: item.programCode,
+              programName: item.programName,
+              portfolioName: item.portfolioName,
+              projectCount: item.projectCount,
+              activeProjectCount: item.activeProjectCount,
+              totalEstimatedBudget: formatCurrency(item.totalEstimatedBudget),
+              totalActualCost: formatCurrency(item.totalActualCost),
+              averageProgressPercent: `${item.averageProgressPercent.toFixed(2)}%`,
+            })),
+            columns: ['programCode', 'programName', 'portfolioName', 'projectCount', 'activeProjectCount', 'totalEstimatedBudget', 'totalActualCost', 'averageProgressPercent'],
+            primaryLabel: 'Programs',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'Active Programs',
+            secondaryValue: `${items.filter((item) => item.activeProjectCount > 0).length}`,
+          };
+          break;
+        }
+        case 'prioritization': {
+          const items = await projectService.getPortfolioPrioritizationReport(undefined, 150);
+          next = {
+            title: 'Portfolio Prioritization',
+            description: 'Projects ordered by delivery pressure, variance, governance load, and overdue outcomes.',
+            rows: items.map((item) => ({
+              projectCode: item.projectCode,
+              projectTitle: item.projectTitle,
+              portfolioName: item.portfolioName,
+              programName: item.programName,
+              status: item.status,
+              priorityBand: item.priorityBand,
+              priorityScore: item.priorityScore.toFixed(2),
+              healthStatus: item.healthStatus,
+              projectedVariance: formatCurrency(item.projectedVariance),
+              openRiskCount: item.openRiskCount,
+              openIssueCount: item.openIssueCount,
+              overdueMilestoneCount: item.overdueMilestoneCount,
+              recommendedAction: item.recommendedAction,
+            })),
+            columns: ['projectCode', 'projectTitle', 'portfolioName', 'programName', 'status', 'priorityBand', 'priorityScore', 'healthStatus', 'projectedVariance', 'openRiskCount', 'openIssueCount', 'overdueMilestoneCount', 'recommendedAction'],
+            primaryLabel: 'Projects',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'Stabilize',
+            secondaryValue: `${items.filter((item) => item.priorityBand === 'Stabilize').length}`,
+          };
+          break;
+        }
+        case 'dependencyWatch': {
+          const items = await projectService.getDependencyWatchReport(undefined, undefined, 150);
+          next = {
+            title: 'Dependency Watch',
+            description: 'Cross-project dependencies that need escalation, coordination, or recovery attention.',
+            rows: items.map((item) => ({
+              sourceProjectCode: item.sourceProjectCode,
+              targetProjectCode: item.targetProjectCode,
+              title: item.title,
+              dependencyType: item.dependencyType,
+              impactLevel: item.impactLevel,
+              status: item.status,
+              dueDate: formatDate(item.dueDate),
+              daysToDue: item.daysToDue,
+              coordinationState: item.coordinationState,
+            })),
+            columns: ['sourceProjectCode', 'targetProjectCode', 'title', 'dependencyType', 'impactLevel', 'status', 'dueDate', 'daysToDue', 'coordinationState'],
+            primaryLabel: 'Dependencies',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'Alerts',
+            secondaryValue: `${items.filter((item) => item.coordinationState !== 'Resolved').length}`,
+          };
+          break;
+        }
+        case 'strategic': {
+          const items = await projectService.getStrategicInitiativeReport(undefined, 120);
+          next = {
+            title: 'Strategic Initiatives',
+            description: 'Delivery grouped by strategic initiative for executive oversight and funding review.',
+            rows: items.map((item) => ({
+              initiative: item.initiative,
+              projectCount: item.projectCount,
+              activeProjectCount: item.activeProjectCount,
+              atRiskProjectCount: item.atRiskProjectCount,
+              delayedProjectCount: item.delayedProjectCount,
+              highRiskItemCount: item.highRiskItemCount,
+              totalEstimatedBudget: formatCurrency(item.totalEstimatedBudget),
+              totalActualCost: formatCurrency(item.totalActualCost),
+              averageProgressPercent: `${item.averageProgressPercent.toFixed(2)}%`,
+              portfolioNames: item.portfolioNames.join(', ') || 'n/a',
+              programNames: item.programNames.join(', ') || 'n/a',
+            })),
+            columns: ['initiative', 'projectCount', 'activeProjectCount', 'atRiskProjectCount', 'delayedProjectCount', 'highRiskItemCount', 'totalEstimatedBudget', 'totalActualCost', 'averageProgressPercent', 'portfolioNames', 'programNames'],
+            primaryLabel: 'Initiatives',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'At-Risk Projects',
+            secondaryValue: `${items.reduce((sum, item) => sum + item.atRiskProjectCount, 0)}`,
+          };
+          break;
+        }
+        case 'resourceCapacity': {
+          const items = await projectService.getResourceCapacityReport(rangeStart, rangeEnd);
+          next = {
+            title: 'Resource Capacity',
+            description: 'Capacity, leave impact, conflicts, and qualification risk across the selected planning window.',
+            rows: items.map((item) => ({
+              userDisplayName: item.userDisplayName || item.userId,
+              allocationCount: item.allocationCount,
+              totalAllocatedHours: item.totalAllocatedHours.toFixed(2),
+              totalAllocatedPercent: item.totalAllocatedPercent.toFixed(2),
+              effectiveCapacityHours: item.effectiveCapacityHours.toFixed(2),
+              approvedLeaveHours: item.approvedLeaveHours.toFixed(2),
+              approvedLeaveDays: item.approvedLeaveDays.toFixed(2),
+              capacityUtilizationPercent: `${item.capacityUtilizationPercent.toFixed(2)}%`,
+              conflictCount: item.conflictCount,
+              certifiedSkillCount: item.certifiedSkillCount,
+              expiredCertificationCount: item.expiredCertificationCount,
+              qualificationRisk: item.qualificationRisk,
+            })),
+            columns: ['userDisplayName', 'allocationCount', 'totalAllocatedHours', 'totalAllocatedPercent', 'effectiveCapacityHours', 'approvedLeaveHours', 'approvedLeaveDays', 'capacityUtilizationPercent', 'conflictCount', 'certifiedSkillCount', 'expiredCertificationCount', 'qualificationRisk'],
+            primaryLabel: 'Resources',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'Over Capacity',
+            secondaryValue: `${items.filter((item) => item.capacityUtilizationPercent > 100).length}`,
+          };
+          break;
+        }
+        case 'resourceRecommendations': {
+          const items = await projectService.getResourceCapacityRecommendations(rangeStart, rangeEnd);
+          next = {
+            title: 'Resource Capacity Recommendations',
+            description: 'Priority recommendations for overloaded or risk-exposed resources in the selected window.',
+            rows: items.map((item) => ({
+              userDisplayName: item.userDisplayName || item.userId,
+              severity: item.severity,
+              capacityUtilizationPercent: `${item.capacityUtilizationPercent.toFixed(2)}%`,
+              approvedLeaveDays: item.approvedLeaveDays.toFixed(2),
+              conflictCount: item.conflictCount,
+              qualificationRisk: item.qualificationRisk,
+              suggestedReductionHours: item.suggestedReductionHours.toFixed(2),
+              suggestedReplacement: item.suggestedReplacementUserDisplayName || 'n/a',
+              matchedSkills: item.matchedSkills.join(', ') || 'n/a',
+              projectCodes: item.projectCodes.join(', ') || 'n/a',
+              recommendation: item.recommendation,
+            })),
+            columns: ['userDisplayName', 'severity', 'capacityUtilizationPercent', 'approvedLeaveDays', 'conflictCount', 'qualificationRisk', 'suggestedReductionHours', 'suggestedReplacement', 'matchedSkills', 'projectCodes', 'recommendation'],
+            primaryLabel: 'Recommendations',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'Critical',
+            secondaryValue: `${items.filter((item) => item.severity === 'Critical').length}`,
           };
           break;
         }
@@ -244,6 +478,32 @@ export default function ProjectReportsPage() {
             primaryValue: `${items.length}`,
             secondaryLabel: 'Ready to Bill',
             secondaryValue: `${items.filter((item) => item.readyBillingScheduleCount > 0).length}`,
+          };
+          break;
+        }
+        case 'invoiceQueue': {
+          const items = await projectService.getInvoiceRequestQueueReport(250);
+          next = {
+            title: 'Invoice Request Queue',
+            description: 'Project-owned invoice requests moving through handoff, invoicing, and collection stages.',
+            rows: items.map((item) => ({
+              projectCode: item.projectCode,
+              projectTitle: item.projectTitle,
+              requestNumber: item.requestNumber,
+              status: item.status,
+              queueStage: item.queueStage,
+              requestedAmount: formatCurrency(item.requestedAmount),
+              currency: item.currency,
+              billingDate: formatDate(item.billingDate),
+              submittedAt: formatDate(item.submittedAt),
+              daysOutstanding: item.daysOutstanding,
+              externalReference: item.externalReference || 'n/a',
+            })),
+            columns: ['projectCode', 'projectTitle', 'requestNumber', 'status', 'queueStage', 'requestedAmount', 'currency', 'billingDate', 'submittedAt', 'daysOutstanding', 'externalReference'],
+            primaryLabel: 'Requests',
+            primaryValue: `${items.length}`,
+            secondaryLabel: 'Unpaid',
+            secondaryValue: `${items.filter((item) => item.status !== 'Paid').length}`,
           };
           break;
         }
@@ -374,7 +634,7 @@ export default function ProjectReportsPage() {
 
   useEffect(() => {
     void loadReport(selectedReport, selectedProjectId);
-  }, [selectedReport, selectedProjectId]);
+  }, [selectedReport, selectedProjectId, windowStart, windowEnd]);
 
   const exportReport = () => {
     if (!dataset.rows.length) {
@@ -418,9 +678,9 @@ export default function ProjectReportsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Report Controls</CardTitle>
-          <CardDescription>Select a report and narrow it where project-specific filtering applies.</CardDescription>
+          <CardDescription>Select a report and narrow it where project-specific or date-window filtering applies.</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
+        <CardContent className="grid gap-4 md:grid-cols-5">
           <div className="grid gap-2">
             <Label>Report</Label>
             <Select value={selectedReport} onValueChange={(value) => setSelectedReport(value as ReportKey)}>
@@ -439,7 +699,7 @@ export default function ProjectReportsPage() {
             <Select
               value={selectedProjectId}
               onValueChange={setSelectedProjectId}
-              disabled={!dataset.supportsProjectFilter}
+              disabled={!supportsProjectFilter}
             >
               <SelectTrigger><SelectValue placeholder="All projects" /></SelectTrigger>
               <SelectContent>
@@ -453,9 +713,21 @@ export default function ProjectReportsPage() {
             </Select>
           </div>
           <div className="grid gap-2">
+            <Label>Window Start</Label>
+            <Input type="date" value={windowStart} onChange={(event) => setWindowStart(event.target.value)} disabled={!supportsDateRange} />
+          </div>
+          <div className="grid gap-2">
+            <Label>Window End</Label>
+            <Input type="date" value={windowEnd} onChange={(event) => setWindowEnd(event.target.value)} disabled={!supportsDateRange} />
+          </div>
+          <div className="grid gap-2">
             <Label>Scope</Label>
             <div className="flex h-10 items-center rounded-md border px-3 text-sm text-muted-foreground">
-              {dataset.supportsProjectFilter ? 'Project-specific filter available' : 'Cross-project report'}
+              {supportsProjectFilter
+                ? 'Project-specific filter available'
+                : supportsDateRange
+                  ? 'Date-window filter available'
+                  : 'Cross-project report'}
             </div>
           </div>
         </CardContent>

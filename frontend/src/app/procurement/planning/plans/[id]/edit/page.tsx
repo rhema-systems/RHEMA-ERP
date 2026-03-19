@@ -20,7 +20,7 @@ import { businessPartnerService, type BusinessPartnerDto } from '@/services/busi
 export default function EditProcurementPlanPage() {
   const params = useParams();
   const router = useRouter();
-  const planId = params.id as string;
+  const planId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -968,4 +968,3 @@ export default function EditProcurementPlanPage() {
     </div>
   );
 }
-

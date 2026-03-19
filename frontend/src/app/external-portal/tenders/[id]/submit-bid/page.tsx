@@ -34,10 +34,14 @@ const STEPS = [
   { id: 5, name: 'Review', description: 'Review and submit' },
 ];
 
+type BidFormData = CreateTenderBidDto & {
+  associationType?: 'AllUsers' | 'Self' | 'SelectedUsers';
+};
+
 export default function SubmitBidPage() {
   const params = useParams();
   const router = useRouter();
-  const tenderId = params.id as string;
+  const tenderId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [tender, setTender] = useState<TenderDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,7 +53,7 @@ export default function SubmitBidPage() {
   const [selectedLotIds, setSelectedLotIds] = useState<string[]>([]);
 
   // Bid form data
-  const [bidData, setBidData] = useState<CreateTenderBidDto>({
+  const [bidData, setBidData] = useState<BidFormData>({
     tenderId: tenderId,
     deliveryDays: undefined,
     paymentTerms: '',
@@ -140,6 +144,7 @@ export default function SubmitBidPage() {
       // Check if there's an existing draft bid for this tender
       const draftBid = await tenderBidService.getMyDraftBidByTenderId(tenderId);
       if (draftBid) {
+        const draftItems = draftBid.items ?? [];
         // Load existing draft bid
         setCreatedBidId(draftBid.id);
         setBidData({
@@ -149,7 +154,7 @@ export default function SubmitBidPage() {
           warrantyTerms: draftBid.warrantyTerms || '',
           technicalProposal: draftBid.technicalProposal || '',
           commercialProposal: draftBid.commercialProposal || '',
-          items: draftBid.items.map(item => ({
+          items: draftItems.map(item => ({
             tenderItemId: item.tenderItemId,
             offeredQuantity: item.offeredQuantity,
             unitPrice: item.unitPrice,
@@ -164,7 +169,7 @@ export default function SubmitBidPage() {
         // Extract selected lot IDs from the draft bid items
         // Map bid items back to their lot IDs by finding the tender items
         const selectedLotIdsFromDraft = new Set<string>();
-        draftBid.items.forEach(bidItem => {
+        draftItems.forEach(bidItem => {
           // Find the tender item to get its lotId
           const tenderItem = data.items?.find(ti => ti.id === bidItem.tenderItemId);
           if (tenderItem?.lotId) {
@@ -182,7 +187,7 @@ export default function SubmitBidPage() {
         }
 
         // If any item has pricing, move to step 3 (Proposals)
-        const hasPricing = draftBid.items.some(item => item.unitPrice > 0);
+        const hasPricing = draftItems.some(item => item.unitPrice > 0);
         if (hasPricing) {
           startStep = 3;
         }
@@ -210,7 +215,7 @@ export default function SubmitBidPage() {
     }
   };
 
-  const updateBidData = (updates: Partial<CreateTenderBidDto>) => {
+  const updateBidData = (updates: Partial<BidFormData>) => {
     setBidData(prev => ({ ...prev, ...updates }));
   };
 
@@ -856,4 +861,3 @@ export default function SubmitBidPage() {
     </div>
   );
 }
-

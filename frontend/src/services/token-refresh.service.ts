@@ -32,6 +32,7 @@ class TokenRefreshService {
       
       // Store the new tokens
       localStorage.setItem('authToken', response.token);
+      localStorage.setItem('token', response.token);
       localStorage.setItem('refreshToken', response.refreshToken);
       
       // Update token expiry time
@@ -56,7 +57,7 @@ class TokenRefreshService {
     }
 
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-    const token = localStorage.getItem('authToken');
+    const token = localStorage.getItem('authToken') || localStorage.getItem('token');
     
     const response = await fetch(`${baseUrl}/auth/refresh`, {
       method: 'POST',
@@ -108,6 +109,7 @@ class TokenRefreshService {
    */
   clearTokens(): void {
     localStorage.removeItem('authToken');
+    localStorage.removeItem('token');
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('tokenExpiry');
   }

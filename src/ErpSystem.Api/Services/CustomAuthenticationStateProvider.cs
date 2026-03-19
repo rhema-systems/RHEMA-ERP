@@ -39,7 +39,7 @@ namespace ErpSystem.Web.Services
                 authState?.User?.Identity?.Name,
                 authState?.User?.Claims?.Count() ?? 0);
 
-            return authState;
+            return authState ?? new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity()));
         }
 
         /// <summary>
@@ -64,7 +64,7 @@ namespace ErpSystem.Web.Services
             using var scope = _scopeFactory.CreateScope();
             var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
 
-            var result = await ValidateSecurityStampAsync(userManager, authenticationState.User);
+            var result = await ValidateSecurityStampAsync(userManager, authenticationState?.User ?? new ClaimsPrincipal());
             _logger.LogInformation("ValidateSecurityStampAsync result: {Result}", result);
             return result;
         }

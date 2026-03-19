@@ -96,7 +96,7 @@ const getLandedCostTypeLabel = (costType: number) =>
 export default function EditPurchaseOrderPage() {
   const router = useRouter();
   const params = useParams();
-  const id = params.id as string;
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

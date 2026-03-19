@@ -2,6 +2,7 @@ using System.Security.Claims;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,7 +14,6 @@ public class CurrentUserService : ICurrentUserService, ICurrentUserProvider
 
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly UserManager<ApplicationUser> _userManager;
-    private ApplicationUser? _cachedUser;
 
     public CurrentUserService(
         IHttpContextAccessor httpContextAccessor,
@@ -188,11 +188,7 @@ public class CurrentUserService : ICurrentUserService, ICurrentUserProvider
     {
         get
         {
-            var authProvider = _httpContextAccessor.HttpContext?.User?.FindFirst("auth_provider")?.Value;
-
-            // External users use Local authentication
-            // Internal users use LDAP authentication
-            return authProvider == "Local";
+            return _httpContextAccessor.HttpContext?.User?.IsInRole(Constants.Roles.ExternalUser) == true;
         }
     }
 

@@ -97,7 +97,7 @@ const getLandedCostTypeLabel = (costType: number) =>
 function NewPurchaseOrderPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const fromRequisitionId = searchParams.get('fromRequisition');
+  const fromRequisitionId = searchParams?.get('fromRequisition');
   
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);

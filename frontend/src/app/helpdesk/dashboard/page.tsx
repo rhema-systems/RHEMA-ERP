@@ -37,6 +37,12 @@ import type { EhcTicketListItem, EhcTicketPriority } from '@/services/ehcTicketS
 
 type CountRow = { key: string; count: number };
 
+type TableCellProps<T> = {
+  row: {
+    original: T;
+  };
+};
+
 const priorityBadgeClassName = (p: EhcTicketPriority) => {
   switch (p) {
     case 'Critical':
@@ -68,7 +74,7 @@ export default function HelpdeskDashboardPage() {
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const [rangeDays, setRangeDays] = useState(30);
-  const scopeParam = searchParams.get('scope');
+  const scopeParam = searchParams?.get('scope');
   const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
   const isScopedDashboard = Boolean(scopeParam);
   const scopedTicketTypeFilter = scopeConfig.allowedTicketTypes.length === 1 ? scopeConfig.defaultTicketType : null;
@@ -288,7 +294,7 @@ export default function HelpdeskDashboardPage() {
         id: 'count',
         header: 'Count',
         accessorKey: 'count',
-        cell: ({ row }) => <Badge variant="secondary">{row.original.count.toLocaleString()}</Badge>,
+        cell: ({ row }: TableCellProps<CountRow>) => <Badge variant="secondary">{row.original.count.toLocaleString()}</Badge>,
       },
     ];
   }, []);
@@ -312,43 +318,43 @@ export default function HelpdeskDashboardPage() {
         id: 'totalAssigned',
         header: 'Assigned',
         accessorKey: 'totalAssigned',
-        cell: ({ row }) => <Badge variant="secondary">{row.original.totalAssigned.toLocaleString()}</Badge>,
+        cell: ({ row }: TableCellProps<EhcAgentPerformanceRow>) => <Badge variant="secondary">{row.original.totalAssigned.toLocaleString()}</Badge>,
       },
       {
         id: 'openAssigned',
         header: 'Open',
         accessorKey: 'openAssigned',
-        cell: ({ row }) => <span className="text-sm">{row.original.openAssigned.toLocaleString()}</span>,
+        cell: ({ row }: TableCellProps<EhcAgentPerformanceRow>) => <span className="text-sm">{row.original.openAssigned.toLocaleString()}</span>,
       },
       {
         id: 'resolvedAssigned',
         header: 'Resolved',
         accessorKey: 'resolvedAssigned',
-        cell: ({ row }) => <span className="text-sm">{row.original.resolvedAssigned.toLocaleString()}</span>,
+        cell: ({ row }: TableCellProps<EhcAgentPerformanceRow>) => <span className="text-sm">{row.original.resolvedAssigned.toLocaleString()}</span>,
       },
       {
         id: 'firstResponseBreaches',
         header: 'FR Breaches',
         accessorKey: 'firstResponseBreaches',
-        cell: ({ row }) => <span className="text-sm">{row.original.firstResponseBreaches.toLocaleString()}</span>,
+        cell: ({ row }: TableCellProps<EhcAgentPerformanceRow>) => <span className="text-sm">{row.original.firstResponseBreaches.toLocaleString()}</span>,
       },
       {
         id: 'resolutionBreaches',
         header: 'Res Breaches',
         accessorKey: 'resolutionBreaches',
-        cell: ({ row }) => <span className="text-sm">{row.original.resolutionBreaches.toLocaleString()}</span>,
+        cell: ({ row }: TableCellProps<EhcAgentPerformanceRow>) => <span className="text-sm">{row.original.resolutionBreaches.toLocaleString()}</span>,
       },
       {
         id: 'avgFirstResponseMinutes',
         header: 'Avg FR (min)',
         accessorKey: 'avgFirstResponseMinutes',
-        cell: ({ row }) => <span className="text-sm">{row.original.avgFirstResponseMinutes ?? '—'}</span>,
+        cell: ({ row }: TableCellProps<EhcAgentPerformanceRow>) => <span className="text-sm">{row.original.avgFirstResponseMinutes ?? '—'}</span>,
       },
       {
         id: 'avgResolutionMinutes',
         header: 'Avg Res (min)',
         accessorKey: 'avgResolutionMinutes',
-        cell: ({ row }) => <span className="text-sm">{row.original.avgResolutionMinutes ?? '—'}</span>,
+        cell: ({ row }: TableCellProps<EhcAgentPerformanceRow>) => <span className="text-sm">{row.original.avgResolutionMinutes ?? '—'}</span>,
       },
     ];
   }, []);
@@ -362,7 +368,7 @@ export default function HelpdeskDashboardPage() {
         id: 'count',
         header: 'Count',
         accessorKey: 'count',
-        cell: ({ row }) => <Badge variant="secondary">{row.original.count.toLocaleString()}</Badge>,
+        cell: ({ row }: TableCellProps<EhcEscalationReportRow>) => <Badge variant="secondary">{row.original.count.toLocaleString()}</Badge>,
       },
     ];
   }, []);
@@ -388,13 +394,13 @@ export default function HelpdeskDashboardPage() {
         id: 'avgRating',
         header: 'Avg Rating',
         accessorKey: 'avgRating',
-        cell: ({ row }) => <Badge variant="secondary">{row.original.avgRating ?? '—'}</Badge>,
+        cell: ({ row }: TableCellProps<EhcFeedbackByAgentRow>) => <Badge variant="secondary">{row.original.avgRating ?? '—'}</Badge>,
       },
       {
         id: 'feedbackCount',
         header: 'Responses',
         accessorKey: 'feedbackCount',
-        cell: ({ row }) => <span className="text-sm">{row.original.feedbackCount.toLocaleString()}</span>,
+        cell: ({ row }: TableCellProps<EhcFeedbackByAgentRow>) => <span className="text-sm">{row.original.feedbackCount.toLocaleString()}</span>,
       },
     ];
   }, []);
@@ -406,13 +412,13 @@ export default function HelpdeskDashboardPage() {
         id: 'avgRating',
         header: 'Avg Rating',
         accessorKey: 'avgRating',
-        cell: ({ row }) => <Badge variant="secondary">{row.original.avgRating ?? '—'}</Badge>,
+        cell: ({ row }: TableCellProps<EhcFeedbackByDepartmentRow>) => <Badge variant="secondary">{row.original.avgRating ?? '—'}</Badge>,
       },
       {
         id: 'feedbackCount',
         header: 'Responses',
         accessorKey: 'feedbackCount',
-        cell: ({ row }) => <span className="text-sm">{row.original.feedbackCount.toLocaleString()}</span>,
+        cell: ({ row }: TableCellProps<EhcFeedbackByDepartmentRow>) => <span className="text-sm">{row.original.feedbackCount.toLocaleString()}</span>,
       },
     ];
   }, []);
@@ -432,7 +438,7 @@ export default function HelpdeskDashboardPage() {
         id: 'problemNumber',
         header: 'Problem #',
         accessorKey: 'problemNumber',
-        cell: ({ row }) => (
+        cell: ({ row }: TableCellProps<EhcTopRecurringProblem>) => (
           <button className="text-blue-700 hover:underline" onClick={() => router.push(`/helpdesk/problems/${row.original.problemId}`)} title="Open problem">
             {row.original.problemNumber}
           </button>
@@ -443,19 +449,19 @@ export default function HelpdeskDashboardPage() {
         id: 'status',
         header: 'Status',
         accessorKey: 'status',
-        cell: ({ row }) => <Badge className={problemStatusBadgeClassName(row.original.status)}>{row.original.status}</Badge>,
+        cell: ({ row }: TableCellProps<EhcTopRecurringProblem>) => <Badge className={problemStatusBadgeClassName(row.original.status)}>{row.original.status}</Badge>,
       },
       {
         id: 'priority',
         header: 'Priority',
         accessorKey: 'priority',
-        cell: ({ row }) => <Badge className={priorityBadgeClassName(row.original.priority)}>{row.original.priority}</Badge>,
+        cell: ({ row }: TableCellProps<EhcTopRecurringProblem>) => <Badge className={priorityBadgeClassName(row.original.priority)}>{row.original.priority}</Badge>,
       },
       {
         id: 'linkedTicketsCount',
         header: 'Incidents',
         accessorKey: 'linkedTicketsCount',
-        cell: ({ row }) => <Badge variant="secondary">{row.original.linkedTicketsCount.toLocaleString()}</Badge>,
+        cell: ({ row }: TableCellProps<EhcTopRecurringProblem>) => <Badge variant="secondary">{row.original.linkedTicketsCount.toLocaleString()}</Badge>,
       },
       { id: 'departmentName', header: 'Department', accessorKey: 'departmentName' },
       { id: 'ownerName', header: 'Owner', accessorKey: 'ownerName' },

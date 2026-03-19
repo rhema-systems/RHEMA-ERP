@@ -65,6 +65,8 @@ describe('ProjectMobilePage', () => {
       costAmount: 0,
       workType: 'Field',
       status: 'PendingApproval',
+      canEdit: true,
+      canDelete: true,
     });
     vi.mocked(projectService.updateMobileWorkItemProgress).mockResolvedValue({
       id: 'task-1',
@@ -75,6 +77,8 @@ describe('ProjectMobilePage', () => {
       sortOrder: 1,
       percentComplete: 25,
       isRollupEnabled: true,
+      baselineVarianceDays: 0,
+      isOffBaseline: false,
       children: [],
     });
     vi.mocked(projectService.submitMobileExpense).mockResolvedValue({
@@ -89,14 +93,18 @@ describe('ProjectMobilePage', () => {
       taxAmount: 0,
       isBillable: false,
       status: 'PendingApproval',
+      canEdit: true,
+      canDelete: true,
     });
     vi.mocked(projectService.uploadProjectDocument).mockResolvedValue({
       id: 'doc-1',
-      projectId: 'proj-1',
       documentName: 'Configure edge device evidence',
       category: 'FieldEvidence',
       documentType: 'MobileEvidence',
       filePath: '/uploads/evidence.png',
+      versionLabel: '1.0',
+      status: 'Active',
+      isExternalVisible: false,
       createdAt: '2026-03-10T00:00:00Z',
     });
   });

@@ -20,6 +20,7 @@ import { format } from 'date-fns';
 export default function ContractDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const contractId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const [contract, setContract] = useState<ContractDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -53,8 +54,8 @@ export default function ContractDetailPage() {
   const [activateData, setActivateData] = useState({ signedByName: '', contractorSignatoryName: '' });
 
   useEffect(() => {
-    if (params.id) loadContract(params.id as string);
-  }, [params.id]);
+    if (contractId) loadContract(contractId);
+  }, [contractId]);
 
   const loadContract = async (id: string) => {
     try {
@@ -155,11 +156,13 @@ export default function ContractDetailPage() {
   };
 
   const handleCompleteMilestone = async (milestone: ContractMilestoneDto) => {
+    if (!contract) return;
     try {
+      const contractId = contract.id;
       setSaving(true);
       await contractService.updateMilestoneStatus(milestone.id, { status: 'Completed', actualDate: new Date().toISOString() });
       toast.success('Milestone marked as completed');
-      loadContract(contract!.id);
+      loadContract(contractId);
     } catch (error: any) {
       toast.error(error.message || 'Failed to complete milestone');
     } finally {
@@ -169,11 +172,13 @@ export default function ContractDetailPage() {
 
   const handleDeleteMilestone = async (milestoneId: string) => {
     if (!confirm('Are you sure you want to delete this milestone?')) return;
+    if (!contract) return;
     try {
+      const contractId = contract.id;
       setSaving(true);
       await contractService.deleteMilestone(milestoneId);
       toast.success('Milestone deleted');
-      loadContract(contract!.id);
+      loadContract(contractId);
     } catch (error: any) {
       toast.error(error.message || 'Failed to delete milestone');
     } finally {
@@ -199,11 +204,13 @@ export default function ContractDetailPage() {
   };
 
   const handleProcessAmendment = async (amendmentId: string, approved: boolean) => {
+    if (!contract) return;
     try {
+      const contractId = contract.id;
       setSaving(true);
       await contractService.processAmendment(amendmentId, { approved });
       toast.success(approved ? 'Amendment approved' : 'Amendment rejected');
-      loadContract(contract!.id);
+      loadContract(contractId);
     } catch (error: any) {
       toast.error(error.message || 'Failed to process amendment');
     } finally {
@@ -213,11 +220,13 @@ export default function ContractDetailPage() {
 
   const handleDeleteAmendment = async (amendmentId: string) => {
     if (!confirm('Are you sure you want to delete this amendment?')) return;
+    if (!contract) return;
     try {
+      const contractId = contract.id;
       setSaving(true);
       await contractService.deleteAmendment(amendmentId);
       toast.success('Amendment deleted');
-      loadContract(contract!.id);
+      loadContract(contractId);
     } catch (error: any) {
       toast.error(error.message || 'Failed to delete amendment');
     } finally {
@@ -297,11 +306,13 @@ export default function ContractDetailPage() {
 
   const handleDeleteDocument = async (documentId: string) => {
     if (!confirm('Are you sure you want to delete this document?')) return;
+    if (!contract) return;
     try {
+      const contractId = contract.id;
       setSaving(true);
       await contractService.deleteDocument(documentId);
       toast.success('Document deleted');
-      loadContract(contract!.id);
+      loadContract(contractId);
     } catch (error: any) {
       toast.error(error.message || 'Failed to delete document');
     } finally {
@@ -905,4 +916,3 @@ function InfoRow({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-

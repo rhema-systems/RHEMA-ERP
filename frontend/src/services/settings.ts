@@ -35,6 +35,11 @@ export interface SecuritySettings {
   privacyPolicyUrl: string | null;
 }
 
+export interface SessionRuntimeSettings {
+  sessionTimeoutMinutes: number;
+  jwtTokenLifetimeMinutes: number;
+}
+
 // Admin API DTO interface to match backend SecuritySettingsDto (PascalCase)
 interface AdminSecuritySettingsApiDto {
   // Password Policy
@@ -96,118 +101,75 @@ interface PublicSecuritySettingsApiDto {
   privacyPolicyUrl: string | null;
 }
 
+interface SessionRuntimeSettingsApiDto {
+  SessionTimeoutMinutes?: number;
+  sessionTimeoutMinutes?: number;
+  JwtTokenLifetimeMinutes?: number;
+  jwtTokenLifetimeMinutes?: number;
+}
+
+const mapAdminSecuritySettings = (response: AdminSecuritySettingsApiDto | Record<string, unknown>): SecuritySettings => {
+  const data = response as Record<string, unknown>;
+
+  return {
+    passwordMinLength: Number(data.PasswordMinLength ?? data.passwordMinLength ?? 8),
+    passwordRequireUppercase: Boolean(data.PasswordRequireUppercase ?? data.passwordRequireUppercase ?? true),
+    passwordRequireLowercase: Boolean(data.PasswordRequireLowercase ?? data.passwordRequireLowercase ?? true),
+    passwordRequireDigits: Boolean(data.PasswordRequireDigits ?? data.passwordRequireDigits ?? true),
+    passwordRequireSpecialChars: Boolean(data.PasswordRequireSpecialChars ?? data.passwordRequireSpecialChars ?? true),
+    passwordMaxAge: (data.PasswordMaxAge ?? data.passwordMaxAge ?? null) as number | null,
+    passwordPreventReuse: (data.PasswordPreventReuse ?? data.passwordPreventReuse ?? null) as number | null,
+    sessionTimeoutMinutes: Number(data.SessionTimeoutMinutes ?? data.sessionTimeoutMinutes ?? 30),
+    jwtTokenLifetimeMinutes: Number(data.JwtTokenLifetimeMinutes ?? data.jwtTokenLifetimeMinutes ?? 60),
+    preventConcurrentLogin: (data.PreventConcurrentLogin ?? data.preventConcurrentLogin ?? 'Disabled') as 'Disabled' | 'LogoutFromAllDevices' | 'PreventSubsequentLogins',
+    maxFailedLoginAttempts: Number(data.MaxFailedLoginAttempts ?? data.maxFailedLoginAttempts ?? 5),
+    accountLockoutMinutes: Number(data.AccountLockoutMinutes ?? data.accountLockoutMinutes ?? 30),
+    rateLimitLoginMaxAttempts: Number(data.RateLimitLoginMaxAttempts ?? data.rateLimitLoginMaxAttempts ?? 5),
+    rateLimitLoginWindowMinutes: Number(data.RateLimitLoginWindowMinutes ?? data.rateLimitLoginWindowMinutes ?? 15),
+    rateLimitLoginBlockDurationMinutes: Number(data.RateLimitLoginBlockDurationMinutes ?? data.rateLimitLoginBlockDurationMinutes ?? 30),
+    captchaEnabled: Boolean(data.CaptchaEnabled ?? data.captchaEnabled ?? false),
+    captchaProvider: (data.CaptchaProvider ?? data.captchaProvider ?? 'recaptcha') as 'recaptcha' | 'hcaptcha',
+    recaptchaSiteKey: (data.RecaptchaSiteKey ?? data.recaptchaSiteKey ?? null) as string | null,
+    recaptchaSecretKey: (data.RecaptchaSecretKey ?? data.recaptchaSecretKey ?? null) as string | null,
+    hCaptchaSiteKey: (data.HCaptchaSiteKey ?? data.hCaptchaSiteKey ?? null) as string | null,
+    hCaptchaSecretKey: (data.HCaptchaSecretKey ?? data.hCaptchaSecretKey ?? null) as string | null,
+    termsOfServiceUrl: (data.TermsOfServiceUrl ?? data.termsOfServiceUrl ?? null) as string | null,
+    privacyPolicyUrl: (data.PrivacyPolicyUrl ?? data.privacyPolicyUrl ?? null) as string | null,
+  };
+};
+
 class SettingsService {
-  async getSecuritySettings(): Promise<SecuritySettings> {
-    try {
-      // First try authenticated admin endpoint for full settings (admin pages)
-      console.log('🔄 Fetching admin security settings from /settings/security...');
-      const response = await apiService.request<AdminSecuritySettingsApiDto>('/settings/security', {
-        method: 'GET',
-      });
-      
-      console.log('✅ Admin endpoint response:', response);
+  async getSessionSettings(): Promise<SessionRuntimeSettings> {
+    const response = await apiService.request<SessionRuntimeSettingsApiDto>('/auth/session-settings', {
+      method: 'GET',
+    });
 
-      // Convert admin API response to frontend interface
-      // Handle both PascalCase and camelCase responses from backend
-      const data = response as any; // Type as any to handle both cases
-      const result = {
-        passwordMinLength: data.PasswordMinLength ?? data.passwordMinLength ?? 8,
-        passwordRequireUppercase: Boolean(data.PasswordRequireUppercase ?? data.passwordRequireUppercase ?? true),
-        passwordRequireLowercase: Boolean(data.PasswordRequireLowercase ?? data.passwordRequireLowercase ?? true),
-        passwordRequireDigits: Boolean(data.PasswordRequireDigits ?? data.passwordRequireDigits ?? true),
-        passwordRequireSpecialChars: Boolean(data.PasswordRequireSpecialChars ?? data.passwordRequireSpecialChars ?? true),
-        passwordMaxAge: data.PasswordMaxAge ?? data.passwordMaxAge,
-        passwordPreventReuse: data.PasswordPreventReuse ?? data.passwordPreventReuse,
-        sessionTimeoutMinutes: data.SessionTimeoutMinutes ?? data.sessionTimeoutMinutes ?? 30,
-        jwtTokenLifetimeMinutes: data.JwtTokenLifetimeMinutes ?? data.jwtTokenLifetimeMinutes ?? 60,
-        preventConcurrentLogin: (data.PreventConcurrentLogin ?? data.preventConcurrentLogin ?? 'Disabled') as 'Disabled' | 'LogoutFromAllDevices' | 'PreventSubsequentLogins',
-        maxFailedLoginAttempts: data.MaxFailedLoginAttempts ?? data.maxFailedLoginAttempts ?? 5,
-        accountLockoutMinutes: data.AccountLockoutMinutes ?? data.accountLockoutMinutes ?? 30,
-        rateLimitLoginMaxAttempts: data.RateLimitLoginMaxAttempts ?? data.rateLimitLoginMaxAttempts ?? 5,
-        rateLimitLoginWindowMinutes: data.RateLimitLoginWindowMinutes ?? data.rateLimitLoginWindowMinutes ?? 15,
-        rateLimitLoginBlockDurationMinutes: data.RateLimitLoginBlockDurationMinutes ?? data.rateLimitLoginBlockDurationMinutes ?? 30,
-        captchaEnabled: Boolean(data.CaptchaEnabled ?? data.captchaEnabled ?? false),
-        captchaProvider: (data.CaptchaProvider ?? data.captchaProvider ?? 'recaptcha') as 'recaptcha' | 'hcaptcha',
-        recaptchaSiteKey: data.RecaptchaSiteKey ?? data.recaptchaSiteKey ?? null,
-        recaptchaSecretKey: data.RecaptchaSecretKey ?? data.recaptchaSecretKey ?? null,
-        hCaptchaSiteKey: data.HCaptchaSiteKey ?? data.hCaptchaSiteKey ?? null,
-        hCaptchaSecretKey: data.HCaptchaSecretKey ?? data.hCaptchaSecretKey ?? null,
-        termsOfServiceUrl: data.TermsOfServiceUrl ?? data.termsOfServiceUrl ?? null,
-        privacyPolicyUrl: data.PrivacyPolicyUrl ?? data.privacyPolicyUrl ?? null,
-      };
-      
-      console.log('\u2705 Converted settings for frontend:', result);
-      return result;
-    } catch (adminError) {
-      console.warn('Failed to fetch admin security settings, trying public endpoint:', adminError);
-      
-      try {
-        // Fallback to public endpoint (for registration page)
-        const publicResponse = await apiService.publicRequest<PublicSecuritySettingsApiDto>('/auth/security-settings', {
-          method: 'GET',
-        });
+    const sessionTimeoutMinutes = Number(response.SessionTimeoutMinutes ?? response.sessionTimeoutMinutes);
+    const jwtTokenLifetimeMinutes = Number(response.JwtTokenLifetimeMinutes ?? response.jwtTokenLifetimeMinutes);
 
-        // Convert public API response to frontend interface (with defaults for missing fields)
-        return {
-          passwordMinLength: publicResponse.passwordMinLength,
-          passwordRequireUppercase: publicResponse.passwordRequireUppercase,
-          passwordRequireLowercase: publicResponse.passwordRequireLowercase,
-          passwordRequireDigits: publicResponse.passwordRequireDigits,
-          passwordRequireSpecialChars: publicResponse.passwordRequireSpecialChars,
-          passwordMaxAge: null, // Not available in public endpoint
-          passwordPreventReuse: null, // Not available in public endpoint
-          sessionTimeoutMinutes: 30, // Default values for admin-only fields
-          jwtTokenLifetimeMinutes: 60,
-          preventConcurrentLogin: 'Disabled',
-          maxFailedLoginAttempts: 5,
-          accountLockoutMinutes: 30,
-          rateLimitLoginMaxAttempts: 5,
-          rateLimitLoginWindowMinutes: 15,
-          rateLimitLoginBlockDurationMinutes: 30,
-          captchaEnabled: publicResponse.captchaEnabled,
-          captchaProvider: publicResponse.captchaProvider as 'recaptcha' | 'hcaptcha',
-          recaptchaSiteKey: publicResponse.recaptchaSiteKey,
-          recaptchaSecretKey: null, // Not exposed in public endpoint
-          hCaptchaSiteKey: publicResponse.hCaptchaSiteKey,
-          hCaptchaSecretKey: null, // Not exposed in public endpoint
-          termsOfServiceUrl: publicResponse.termsOfServiceUrl,
-          privacyPolicyUrl: publicResponse.privacyPolicyUrl,
-        };
-      } catch (publicError) {
-        console.warn('Failed to fetch public security settings, using defaults:', publicError);
-        // Return default security settings for public access (registration page)
-        return {
-          passwordMinLength: 8,
-          passwordRequireUppercase: true,
-          passwordRequireLowercase: true,
-          passwordRequireDigits: true,
-          passwordRequireSpecialChars: true,
-          passwordMaxAge: 90,
-          passwordPreventReuse: 5,
-          sessionTimeoutMinutes: 30,
-          jwtTokenLifetimeMinutes: 60,
-          preventConcurrentLogin: 'Disabled',
-          maxFailedLoginAttempts: 5,
-          accountLockoutMinutes: 30,
-          rateLimitLoginMaxAttempts: 5,
-          rateLimitLoginWindowMinutes: 15,
-          rateLimitLoginBlockDurationMinutes: 30,
-          captchaEnabled: false,
-          captchaProvider: 'recaptcha',
-          recaptchaSiteKey: null,
-          recaptchaSecretKey: null,
-          hCaptchaSiteKey: null,
-          hCaptchaSecretKey: null,
-          termsOfServiceUrl: null,
-          privacyPolicyUrl: null,
-        };
-      }
+    if (!Number.isFinite(sessionTimeoutMinutes) || sessionTimeoutMinutes <= 0) {
+      throw new Error('Session timeout is missing from authenticated session settings.');
     }
+
+    if (!Number.isFinite(jwtTokenLifetimeMinutes) || jwtTokenLifetimeMinutes <= 0) {
+      throw new Error('JWT token lifetime is missing from authenticated session settings.');
+    }
+
+    return {
+      sessionTimeoutMinutes,
+      jwtTokenLifetimeMinutes,
+    };
+  }
+
+  async getSecuritySettings(): Promise<SecuritySettings> {
+    const response = await apiService.request<AdminSecuritySettingsApiDto>('/settings/security', {
+      method: 'GET',
+    });
+
+    return mapAdminSecuritySettings(response);
   }
 
   async updateSecuritySettings(settings: SecuritySettings): Promise<SecuritySettings> {
-    console.log('💾 Updating security settings - input data:', settings);
-    
     // Convert frontend interface to admin API DTO (PascalCase)
     // Handle empty strings vs null values properly
     const requestDto: AdminSecuritySettingsApiDto = {
@@ -235,56 +197,20 @@ class SettingsService {
       TermsOfServiceUrl: settings.termsOfServiceUrl || null,
       PrivacyPolicyUrl: settings.privacyPolicyUrl || null,
     };
-    
-    console.log('🔄 Sending to API (PascalCase):', requestDto);
 
     const response = await apiService.request<AdminSecuritySettingsApiDto>('/settings/security', {
       method: 'PUT',
       body: JSON.stringify(requestDto),
     });
-    
-    console.log('✅ API response from PUT:', response);
 
-    // Convert admin API response back to frontend interface with proper null handling
-    const result = {
-      passwordMinLength: response.PasswordMinLength ?? 8,
-      passwordRequireUppercase: Boolean(response.PasswordRequireUppercase ?? true),
-      passwordRequireLowercase: Boolean(response.PasswordRequireLowercase ?? true),
-      passwordRequireDigits: Boolean(response.PasswordRequireDigits ?? true),
-      passwordRequireSpecialChars: Boolean(response.PasswordRequireSpecialChars ?? true),
-      passwordMaxAge: response.PasswordMaxAge,
-      passwordPreventReuse: response.PasswordPreventReuse,
-      sessionTimeoutMinutes: response.SessionTimeoutMinutes ?? 30,
-      jwtTokenLifetimeMinutes: response.JwtTokenLifetimeMinutes ?? 60,
-      preventConcurrentLogin: (response.PreventConcurrentLogin ?? 'Disabled') as 'Disabled' | 'LogoutFromAllDevices' | 'PreventSubsequentLogins',
-      maxFailedLoginAttempts: response.MaxFailedLoginAttempts ?? 5,
-      accountLockoutMinutes: response.AccountLockoutMinutes ?? 30,
-      rateLimitLoginMaxAttempts: response.RateLimitLoginMaxAttempts ?? 5,
-      rateLimitLoginWindowMinutes: response.RateLimitLoginWindowMinutes ?? 15,
-      rateLimitLoginBlockDurationMinutes: response.RateLimitLoginBlockDurationMinutes ?? 30,
-      captchaEnabled: Boolean(response.CaptchaEnabled ?? false),
-      captchaProvider: (response.CaptchaProvider ?? 'recaptcha') as 'recaptcha' | 'hcaptcha',
-      recaptchaSiteKey: response.RecaptchaSiteKey ?? null,
-      recaptchaSecretKey: response.RecaptchaSecretKey ?? null,
-      hCaptchaSiteKey: response.HCaptchaSiteKey ?? null,
-      hCaptchaSecretKey: response.HCaptchaSecretKey ?? null,
-      termsOfServiceUrl: response.TermsOfServiceUrl ?? null,
-      privacyPolicyUrl: response.PrivacyPolicyUrl ?? null,
-    };
-    
-    console.log('✅ Converted response for frontend:', result);
-    return result;
+    return mapAdminSecuritySettings(response);
   }
 
   async getPublicSecuritySettings(): Promise<SecuritySettings> {
     try {
-      // Use public endpoint directly for login/registration pages
-      console.log('🔄 Fetching public security settings from /auth/security-settings...');
       const response = await apiService.publicRequest<PublicSecuritySettingsApiDto>('/auth/security-settings', {
         method: 'GET',
       });
-      
-      console.log('✅ Public endpoint response:', response);
 
       // Convert public API response to frontend interface
       return {

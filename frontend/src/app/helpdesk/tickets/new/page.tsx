@@ -78,7 +78,7 @@ export default function NewInternalHelpdeskTicketPage() {
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const { toast } = useToast();
-  const scopeParam = searchParams.get('scope');
+  const scopeParam = searchParams?.get('scope');
   const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
   const typeLocked = scopeConfig.allowedTicketTypes.length === 1;
   const channelOptions = useMemo<Array<{ label: string; value: EhcTicketSource }>>(

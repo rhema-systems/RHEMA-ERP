@@ -14,7 +14,7 @@ import { format } from 'date-fns';
 export default function ProcurementScheduleDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const id = params.id as string;
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const [schedule, setSchedule] = useState<ProcurementScheduleDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -172,4 +172,3 @@ export default function ProcurementScheduleDetailPage() {
     </div>
   );
 }
-

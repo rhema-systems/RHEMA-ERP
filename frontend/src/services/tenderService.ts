@@ -22,10 +22,12 @@ export interface TenderDto {
   id: string;
   tenderNumber: string;
   title: string;
+  description?: string;
   tenderType: string; // RFQ, RFP, ITB, EOI
   status: string; // Draft, Published, Closed, Awarded, Cancelled
   publishDate?: string;
   submissionDeadline?: string;
+  closingDate?: string;
   estimatedValue?: number;
   currency?: string;
   bidCount: number;
@@ -238,6 +240,7 @@ export interface TenderDocumentDto {
   fileType?: string;
   fileSize?: number;
   uploadedDate: string;
+  uploadedAt?: string;
   uploadedByName?: string;
   isPublic: boolean;
 }
@@ -253,6 +256,7 @@ export interface TenderInvitationDto {
   viewedDate?: string;
   responseDate?: string;
   declineReason?: string;
+  notificationSent?: boolean;
 }
 
 export interface TenderFeeDto {
@@ -807,8 +811,7 @@ class TenderService {
       formData.append('documentName', documentName);
     }
 
-    const headers = getAuthHeaders();
-    delete headers['Content-Type']; // Let browser set Content-Type with boundary for multipart/form-data
+    const { ['Content-Type']: _contentType, ...headers } = getAuthHeaders() as Record<string, string>;
 
     const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/documents`, {
       method: 'POST',

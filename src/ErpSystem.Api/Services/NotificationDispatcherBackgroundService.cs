@@ -57,6 +57,7 @@ public class NotificationDispatcherBackgroundService : BackgroundService
         ILogger<NotificationDispatcherBackgroundService> logger)
     {
         _serviceProvider = serviceProvider;
+        _configuration = new ConfigurationBuilder().Build();
         _logger = logger;
 
         // Initialize with default values since configuration is not provided

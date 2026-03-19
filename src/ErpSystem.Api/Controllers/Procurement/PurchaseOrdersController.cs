@@ -7,6 +7,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -42,6 +43,7 @@ public class PurchaseOrdersController : ControllerBase
     private readonly IProcurementBudgetRepository _budgetRepository;
     private readonly IProcurementPlanItemRepository _planItemRepository;
     private readonly IInventoryValuationService _inventoryValuationService;
+    private readonly IProjectService _projectService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserService;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
@@ -67,6 +69,7 @@ public class PurchaseOrdersController : ControllerBase
         IProcurementBudgetRepository budgetRepository,
         IProcurementPlanItemRepository planItemRepository,
         IInventoryValuationService inventoryValuationService,
+        IProjectService projectService,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserService,
         IWorkflowIntegrationService workflowIntegrationService,
@@ -85,6 +88,7 @@ public class PurchaseOrdersController : ControllerBase
         _budgetRepository = budgetRepository;
         _planItemRepository = planItemRepository;
         _inventoryValuationService = inventoryValuationService;
+        _projectService = projectService;
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
         _workflowIntegrationService = workflowIntegrationService;
@@ -1042,6 +1046,7 @@ public class PurchaseOrdersController : ControllerBase
 
             // Persist receipt, item quantity updates, and PO status transitions.
             await _unitOfWork.SaveChangesAsync();
+            await _projectService.SyncPurchaseReceiptMaterialCostAsync(receipt.Id);
 
             // Return the created receipt
             var receiptDto = new PurchaseOrderReceiptDto
@@ -1195,6 +1200,8 @@ public class PurchaseOrdersController : ControllerBase
             receipt.InspectionDate = DateTime.UtcNow;
             receipt.UpdatedAt = DateTime.UtcNow;
             await _purchaseOrderReceiptRepository.UpdateAsync(receipt);
+            await _unitOfWork.SaveChangesAsync();
+            await _projectService.SyncPurchaseReceiptMaterialCostAsync(receipt.Id);
 
             _logger.LogInformation("Completed inspection and posted receipt {ReceiptNumber} to inventory", receipt.ReceiptNumber);
 

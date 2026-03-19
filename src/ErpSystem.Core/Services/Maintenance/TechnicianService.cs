@@ -360,7 +360,7 @@ public class TechnicianService : ITechnicianService
                     (decimal)assignments.GroupBy(a => a.TechnicianId).Average(g => g.Count()) : 0,
                 DepartmentBreakdown = technicians.GroupBy(t => t.Department?.Name ?? "Unknown")
                     .ToDictionary(g => g.Key, g => g.Count()),
-                SpecializationBreakdown = technicians.GroupBy(t => t.Specialization)
+                SpecializationBreakdown = technicians.GroupBy(t => t.Specialization ?? "Unspecified")
                     .ToDictionary(g => g.Key, g => g.Count()),
                 WorkloadAnalysis = new WorkloadAnalysisDto
                 {

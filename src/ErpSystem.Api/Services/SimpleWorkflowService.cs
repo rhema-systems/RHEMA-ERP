@@ -557,7 +557,7 @@ public class SimpleWorkflowService : IWorkflowService
 
     private async Task<Dictionary<string, object>> BuildEntityContextAsync(WorkflowEntityType entityTypeRecord, Guid entityId)
     {
-        var context = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+        var context = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
             ["entityId"] = entityId,
             ["entityType"] = entityTypeRecord.Code ?? entityTypeRecord.Name
@@ -599,7 +599,7 @@ public class SimpleWorkflowService : IWorkflowService
         if (IsEntityType(entityTypeRecord, "FLEET_TRIP", "FleetTrip", "Fleet Trip"))
         {
             var trip = await _unitOfWork.Repository<ErpSystem.Core.Entities.Maintenance.FleetTrip>()
-                .FirstOrDefaultAsync(t => t.Id == entityId, t => t.VehicleAsset, t => t.DriverEmployee)
+                .FirstOrDefaultAsync(t => t.Id == entityId, t => t.VehicleAsset!, t => t.DriverEmployee!)
                 ?? throw new InvalidOperationException("Fleet trip not found");
 
             context["status"] = trip.Status;
@@ -818,7 +818,7 @@ public class SimpleWorkflowService : IWorkflowService
         if (IsEntityType(entityTypeRecord, "PROJECT_DELIVERABLE", "ProjectDeliverable", "Project Deliverable"))
         {
             var deliverable = await _unitOfWork.Repository<ProjectDeliverable>()
-                .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Project, x => x.Milestone, x => x.WorkItem)
+                .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Project!, x => x.Milestone!, x => x.WorkItem!)
                 ?? throw new InvalidOperationException("Project deliverable not found");
             context["projectDeliverableId"] = deliverable.Id;
             context["projectId"] = deliverable.ProjectId;
@@ -874,7 +874,8 @@ public class SimpleWorkflowService : IWorkflowService
         if (IsEntityType(entityTypeRecord, "SERVICE_REQUEST", "ServiceRequest", "Service Request"))
         {
             var repo = _unitOfWork.Repository<EhcServiceRequest>();
-            var req = await repo.GetByIdAsync(entityId, r => r.RequestType, r => r.RequesterUser);
+            var req = await repo.GetByIdAsync(entityId, r => r.RequestType, r => r.RequesterUser)
+                ?? throw new InvalidOperationException("Service request not found");
 
             context["serviceRequestId"] = req.Id;
             context["serviceRequestNumber"] = req.RequestNumber;
@@ -887,7 +888,10 @@ public class SimpleWorkflowService : IWorkflowService
             context["formDataJson"] = req.FormDataJson ?? "{}";
         }
 
-        return context;
+        return context.ToDictionary(
+            kvp => kvp.Key,
+            kvp => kvp.Value ?? string.Empty,
+            StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool IsEntityType(WorkflowEntityType entityTypeRecord, params string[] matches)
@@ -967,7 +971,8 @@ public class SimpleWorkflowService : IWorkflowService
             try
             {
                 var repo = _unitOfWork.Repository<EhcServiceRequest>();
-                var req = await repo.GetByIdAsync(entityId, r => r.RequestType);
+                var req = await repo.GetByIdAsync(entityId, r => r.RequestType)
+                    ?? throw new InvalidOperationException("Service request not found");
                 item.EntityTitle = $"{req.RequestNumber} - {req.RequestType?.Name ?? "Service Request"}";
                 item.EntityDescription = req.Title ?? string.Empty;
                 return;

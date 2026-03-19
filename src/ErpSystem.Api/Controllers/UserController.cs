@@ -53,7 +53,7 @@ public partial class UserController : ControllerBase
                 PhoneNumber = u.PhoneNumber,
                 IsActive = u.IsActive,
                 EmployeeId = u.EmployeeId?.ToString(),
-                Roles = u.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>(),
+                Roles = u.UserRoles?.Select(ur => ur.Role.Name).Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name!).ToArray() ?? Array.Empty<string>(),
                 CreatedAt = u.CreatedAt,
                 LastLoginAt = u.LastLoginDate,
                 TenantId = u.TenantId.ToString(),
@@ -113,7 +113,7 @@ public partial class UserController : ControllerBase
                 PhoneNumber = u.PhoneNumber,
                 IsActive = u.IsActive,
                 EmployeeId = u.EmployeeId?.ToString(),
-                Roles = u.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>(),
+                Roles = u.UserRoles?.Select(ur => ur.Role.Name).Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name!).ToArray() ?? Array.Empty<string>(),
                 CreatedAt = u.CreatedAt,
                 LastLoginAt = u.LastLoginDate,
                 TenantId = u.TenantId.ToString(),
@@ -164,7 +164,7 @@ public partial class UserController : ControllerBase
                 PhoneNumber = user.PhoneNumber,
                 IsActive = user.IsActive,
                 EmployeeId = user.EmployeeId?.ToString(),
-                Roles = user.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>(),
+                Roles = user.UserRoles?.Select(ur => ur.Role.Name).Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name!).ToArray() ?? Array.Empty<string>(),
                 CreatedAt = user.CreatedAt,
                 LastLoginAt = user.LastLoginDate,
                 TenantId = user.TenantId.ToString(),
@@ -204,8 +204,8 @@ public partial class UserController : ControllerBase
                 UserName = request.Username,
                 Email = request.Email,
                 PhoneNumber = request.PhoneNumber,
-                FirstName = request.FirstName,
-                LastName = request.LastName,
+                FirstName = request.FirstName ?? string.Empty,
+                LastName = request.LastName ?? string.Empty,
                 IsActive = request.IsActive,
                 TenantId = string.IsNullOrEmpty(request.TenantId) ? Guid.Empty : Guid.Parse(request.TenantId)
             };
@@ -302,14 +302,14 @@ public partial class UserController : ControllerBase
                 FirstName = user.FirstName,
                 LastName = user.LastName,
                 IsActive = user.IsActive,
-                Roles = user.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>()
+                Roles = user.UserRoles?.Select(ur => ur.Role.Name).Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name!).ToArray() ?? Array.Empty<string>()
             };
 
             user.UserName = request.Username;
             user.Email = request.Email;
             user.PhoneNumber = request.PhoneNumber;
-            user.FirstName = request.FirstName;
-            user.LastName = request.LastName;
+            user.FirstName = request.FirstName ?? string.Empty;
+            user.LastName = request.LastName ?? string.Empty;
             user.IsActive = request.IsActive;
 
             var updatedUser = await _userService.UpdateUserAsync(user);
@@ -535,7 +535,7 @@ public partial class UserController : ControllerBase
                 LastName = updatedUser.LastName,
                 PhoneNumber = updatedUser.PhoneNumber,
                 IsActive = updatedUser.IsActive,
-                Roles = updatedUser.UserRoles?.Select(ur => ur.Role.Name).ToArray() ?? Array.Empty<string>(),
+                Roles = updatedUser.UserRoles?.Select(ur => ur.Role.Name).Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name!).ToArray() ?? Array.Empty<string>(),
                 CreatedAt = updatedUser.CreatedAt,
                 LastLoginAt = updatedUser.LastLoginDate,
                 TenantId = updatedUser.TenantId.ToString()
@@ -573,7 +573,7 @@ public partial class UserController : ControllerBase
 
             // Verify current password
             var passwordHasher = new PasswordHasher<ApplicationUser>();
-            var verificationResult = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.CurrentPassword);
+            var verificationResult = passwordHasher.VerifyHashedPassword(user, user.PasswordHash ?? string.Empty, request.CurrentPassword);
 
             if (verificationResult == PasswordVerificationResult.Failed)
             {

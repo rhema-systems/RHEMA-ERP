@@ -23,5 +23,10 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "src/app/administration/identity-management/online-users/enhanced-page.tsx",
+    "src/app/administration/identity-management/online-users/page-backup.tsx",
+    "src/app/administration/workflow/page-backup.tsx"
+  ]
 }

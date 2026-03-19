@@ -145,7 +145,7 @@ export default function BusinessPartnerRegistrationPage() {
   const loadDraftRegistration = async () => {
     try {
       // Check if a specific registration ID is provided in the URL
-      const urlRegistrationId = searchParams.get('id');
+      const urlRegistrationId = searchParams?.get('id');
 
       if (urlRegistrationId) {
         // Load the specific registration from the URL
@@ -514,7 +514,9 @@ export default function BusinessPartnerRegistrationPage() {
           <div className="flex gap-2">
             <Button
               variant="outline"
-              onClick={handleSaveDraft}
+              onClick={() => {
+                void handleSaveDraft();
+              }}
               disabled={saving}
             >
               <Save className="w-4 h-4 mr-2" />

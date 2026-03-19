@@ -57,7 +57,7 @@ export default function InspectionExecutionPage() {
   const { toast } = useToast();
   const router = useRouter();
   const params = useParams();
-  const workOrderId = params.workOrderId as string;
+  const workOrderId = Array.isArray(params?.workOrderId) ? params.workOrderId[0] : params?.workOrderId ?? '';
 
   const [loading, setLoading] = useState(true);
   const [inspectionData, setInspectionData] = useState<InspectionData | null>(null);

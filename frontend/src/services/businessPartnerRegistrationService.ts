@@ -129,6 +129,7 @@ export interface RegistrationFormData {
     documentType: string;
     documentName: string;
     file?: File;
+    fileSize?: number;
   }>;
 }
 
@@ -386,10 +387,10 @@ export const businessPartnerRegistrationService = {
   /**
    * Helper: Parse registration data from JSON string
    */
-	  parseRegistrationData(registrationData?: string): RegistrationFormData | null {
+	parseRegistrationData(registrationData?: string): RegistrationFormData | null {
 	    if (!registrationData) return null;
 	    try {
-	      let topLevel: any = JSON.parse(registrationData);
+	      const topLevel: any = JSON.parse(registrationData);
 	      let raw: any = topLevel;
 
 	      // Backwards compatibility:

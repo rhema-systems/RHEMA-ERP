@@ -33,6 +33,13 @@ export interface User {
   phoneNumber?: string;
 }
 
+type TableCellProps<T> = {
+  row: {
+    original: T;
+    getValue: (columnId: string) => unknown;
+  };
+};
+
 // Sample data
 const sampleUsers: User[] = [
   {
@@ -110,7 +117,7 @@ export function UserManagementTable() {
     {
       accessorKey: 'userName',
       header: 'User',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<User>) => {
         const user = row.original;
         const initials = `${user.firstName.charAt(0)}${user.lastName.charAt(0)}`;
         
@@ -133,10 +140,10 @@ export function UserManagementTable() {
     {
       accessorKey: 'email',
       header: 'Email',
-      cell: ({ row }) => (
+      cell: ({ row }: TableCellProps<User>) => (
         <div className="flex items-center space-x-2">
           <MailIcon className="h-3 w-3 text-muted-foreground" />
-          <span>{row.getValue('email')}</span>
+          <span>{row.getValue('email') as string}</span>
         </div>
       ),
       enableSorting: true,
@@ -144,7 +151,7 @@ export function UserManagementTable() {
     {
       accessorKey: 'role',
       header: 'Role',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<User>) => {
         const role = row.getValue('role') as string;
         const roleColors = {
           'SuperAdmin': 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
@@ -169,7 +176,7 @@ export function UserManagementTable() {
     {
       accessorKey: 'isActive',
       header: 'Status',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<User>) => {
         const isActive = row.getValue('isActive') as boolean;
         return (
           <Badge variant={isActive ? 'default' : 'secondary'}>
@@ -193,7 +200,7 @@ export function UserManagementTable() {
     {
       accessorKey: 'lastLogin',
       header: 'Last Login',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<User>) => {
         const lastLogin = row.getValue('lastLogin') as string;
         if (!lastLogin) return <span className="text-muted-foreground">Never</span>;
         
@@ -208,8 +215,8 @@ export function UserManagementTable() {
     {
       accessorKey: 'createdAt',
       header: 'Created',
-      cell: ({ row }) => {
-        const createdAt = new Date(row.getValue('createdAt'));
+      cell: ({ row }: TableCellProps<User>) => {
+        const createdAt = new Date(row.getValue('createdAt') as string);
         return (
           <span className="text-sm">
             {createdAt.toLocaleDateString()}

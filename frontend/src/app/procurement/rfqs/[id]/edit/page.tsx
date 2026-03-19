@@ -22,8 +22,8 @@ export default function EditRfqPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const rfqId = params.id as string;
-  const fromRequisitionId = searchParams.get('fromRequisitionId');
+  const rfqId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
+  const fromRequisitionId = searchParams?.get('fromRequisitionId') ?? null;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -159,7 +159,7 @@ export default function EditRfqPage() {
       }
     };
     loadPartners();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [fromRequisitionId]);
 
   const toggleSupplier = (id: string) => {

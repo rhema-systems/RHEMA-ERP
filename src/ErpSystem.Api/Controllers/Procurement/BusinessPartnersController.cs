@@ -420,6 +420,142 @@ public class BusinessPartnersController : ControllerBase
     }
 
     /// <summary>
+    /// Gets contacts for a business partner
+    /// </summary>
+    [HttpGet("{id:guid}/contacts")]
+    public async Task<ActionResult<IEnumerable<BusinessPartnerContactDto>>> GetContacts(Guid id)
+    {
+        try
+        {
+            var contacts = await _partnerService.GetContactsAsync(id);
+            return Ok(contacts);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving contacts for business partner {PartnerId}", id);
+            return StatusCode(500, "An error occurred while retrieving business partner contacts");
+        }
+    }
+
+    /// <summary>
+    /// Adds a contact to a business partner
+    /// </summary>
+    [HttpPost("{id:guid}/contacts")]
+    public async Task<ActionResult<BusinessPartnerContactDto>> CreateContact(Guid id, [FromBody] CreateBusinessPartnerContactDto dto)
+    {
+        try
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var contact = await _partnerService.AddContactAsync(id, dto);
+            return CreatedAtAction(nameof(GetContacts), new { id }, contact);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating contact for business partner {PartnerId}", id);
+            return StatusCode(500, "An error occurred while creating the business partner contact");
+        }
+    }
+
+    /// <summary>
+    /// Updates a business partner contact
+    /// </summary>
+    [HttpPut("{id:guid}/contacts/{contactId:guid}")]
+    public async Task<ActionResult<BusinessPartnerContactDto>> UpdateContact(Guid id, Guid contactId, [FromBody] CreateBusinessPartnerContactDto dto)
+    {
+        try
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var contact = await _partnerService.UpdateContactAsync(id, contactId, dto);
+            return Ok(contact);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating contact {ContactId} for business partner {PartnerId}", contactId, id);
+            return StatusCode(500, "An error occurred while updating the business partner contact");
+        }
+    }
+
+    /// <summary>
+    /// Deletes a business partner contact
+    /// </summary>
+    [HttpDelete("{id:guid}/contacts/{contactId:guid}")]
+    public async Task<IActionResult> DeleteContact(Guid id, Guid contactId)
+    {
+        try
+        {
+            await _partnerService.DeleteContactAsync(id, contactId);
+            return NoContent();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting contact {ContactId} for business partner {PartnerId}", contactId, id);
+            return StatusCode(500, "An error occurred while deleting the business partner contact");
+        }
+    }
+
+    /// <summary>
+    /// Sets the primary contact for a business partner
+    /// </summary>
+    [HttpPost("{id:guid}/contacts/{contactId:guid}/set-primary")]
+    public async Task<IActionResult> SetPrimaryContact(Guid id, Guid contactId)
+    {
+        try
+        {
+            await _partnerService.SetPrimaryContactAsync(id, contactId);
+            return NoContent();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error setting primary contact {ContactId} for business partner {PartnerId}", contactId, id);
+            return StatusCode(500, "An error occurred while updating the primary business partner contact");
+        }
+    }
+
+    /// <summary>
     /// Downloads a business partner document
     /// </summary>
     [HttpGet("{id:guid}/documents/{documentId:guid}/download")]

@@ -241,6 +241,17 @@ export default function ExternalProjectDetailPage() {
     }
   };
 
+  const rejectDeliverable = async (deliverableId: string) => {
+    if (!project) return;
+    try {
+      await projectService.rejectExternalDeliverable(project.id, deliverableId, deliverableDrafts[deliverableId]?.notes);
+      await load();
+      toast.success('Changes requested for deliverable');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to request deliverable changes');
+    }
+  };
+
   const openActionItem = (item: { tab: string; targetId: string }) => {
     setActiveTab(item.tab);
     setFocusedWorkItemId(item.tab === 'plan' ? item.targetId : null);
@@ -521,7 +532,36 @@ export default function ExternalProjectDetailPage() {
                         Record Sign-off
                       </Button>
                     ) : null}
+                    {project.externalCollaborationEnabled && item.externalSignOffRequired ? (
+                      <Button
+                        variant="destructive"
+                        disabled={!item.canExternalApprove || item.status !== 'PendingExternalSignOff'}
+                        onClick={() => rejectDeliverable(item.id)}
+                      >
+                        Request Changes
+                      </Button>
+                    ) : null}
                   </div>
+                  {item.externalReviews.length ? (
+                    <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                      <div className="text-sm font-medium">External review history</div>
+                      {item.externalReviews.map((review) => (
+                        <div key={review.id} className="rounded-md border bg-background p-3 text-sm">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline">{review.decision}</Badge>
+                            <span className="text-muted-foreground">{format(new Date(review.reviewDate), 'MMM dd, yyyy HH:mm')}</span>
+                            {review.statusSnapshot ? <span className="text-muted-foreground">| status {review.statusSnapshot}</span> : null}
+                          </div>
+                          {review.submittedDocumentName ? (
+                            <div className="mt-1 text-muted-foreground">Evidence: {review.submittedDocumentName}</div>
+                          ) : null}
+                          {review.notes ? (
+                            <div className="mt-1 text-muted-foreground">{review.notes}</div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="text-xs text-muted-foreground">
                     You can link an existing document or upload evidence during submission. Sign-off continues through the internal approval process.
                   </div>

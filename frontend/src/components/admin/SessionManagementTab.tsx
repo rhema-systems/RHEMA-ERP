@@ -72,6 +72,12 @@ interface EnhancedUserSession extends UserSession {
   connectionCount?: number;
 }
 
+type TableCellProps<T> = {
+  row: {
+    original: T;
+  };
+};
+
 export function SessionManagementTab() {
   const { toast } = useToast();
   const [sessions, setSessions] = useState<EnhancedUserSession[]>([]);
@@ -197,7 +203,7 @@ export function SessionManagementTab() {
     {
       accessorKey: 'username',
       header: 'User',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const session = row.original;
         const initials = session.username.substring(0, 2).toUpperCase();
         
@@ -223,7 +229,7 @@ export function SessionManagementTab() {
     {
       accessorKey: 'role',
       header: 'Role',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const role = row.original.role;
         const roleColors = {
           'SuperAdmin': 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
@@ -246,13 +252,13 @@ export function SessionManagementTab() {
     {
       accessorKey: 'status',
       header: 'Status',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const session = row.original;
-        const status = session.status;
+        const status = session.status ?? 'inactive';
         
         return (
           <div className="flex items-center space-x-2">
-            <div className={`w-2 h-2 rounded-full ${getActivityStatusColor(status!)}`} />
+            <div className={`w-2 h-2 rounded-full ${getActivityStatusColor(status)}`} />
             <Badge variant={status === 'active' ? 'default' : 'secondary'}>
               {status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Unknown'}
             </Badge>
@@ -264,7 +270,7 @@ export function SessionManagementTab() {
     {
       accessorKey: 'deviceType',
       header: 'Device',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const deviceType = row.original.deviceType;
         
         return (
@@ -279,7 +285,7 @@ export function SessionManagementTab() {
     {
       accessorKey: 'ipAddress',
       header: 'IP Address',
-      cell: ({ row }) => (
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => (
         <code className="text-xs bg-muted px-2 py-1 rounded">
           {row.original.ipAddress}
         </code>
@@ -288,7 +294,7 @@ export function SessionManagementTab() {
     {
       accessorKey: 'sessionDuration',
       header: 'Session Duration',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const loginTime = row.original.loginTime;
         const duration = formatDistanceToNow(new Date(loginTime));
         const durationColor = getSessionDurationColor(new Date(loginTime));
@@ -305,7 +311,7 @@ export function SessionManagementTab() {
     {
       accessorKey: 'lastActivityTime',
       header: 'Last Activity',
-      cell: ({ row }) => {
+      cell: ({ row }: TableCellProps<EnhancedUserSession>) => {
         const lastActivity = new Date(row.original.lastActivityTime);
         return (
           <div className="text-sm">

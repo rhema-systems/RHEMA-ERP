@@ -45,8 +45,8 @@ function ResetPasswordContent() {
   const [recaptchaSiteKey, setRecaptchaSiteKey] = useState<string | null>(null);
   const [hCaptchaSiteKey, setHCaptchaSiteKey] = useState<string | null>(null);
 
-  const token = searchParams.get('token');
-  const email = searchParams.get('email');
+  const token = searchParams?.get('token');
+  const email = searchParams?.get('email');
 
   const {
     register,

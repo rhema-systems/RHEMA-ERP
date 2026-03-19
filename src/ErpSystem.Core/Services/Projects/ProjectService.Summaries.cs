@@ -11,6 +11,7 @@ public partial class ProjectService
     public async Task<ProjectFinancialControlSummaryDto> GetFinancialControlSummaryAsync(Guid projectId)
     {
         var project = await GetProjectForOperationAsync(projectId, ProjectAccessOperation.ManageFinancials);
+        await SyncProjectMaterialCostAsync(projectId);
         var timesheets = (await _unitOfWork.Repository<ProjectTimesheetEntry>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)).ToList();
         var expenses = (await _unitOfWork.Repository<ProjectExpense>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)).ToList();
         var schedules = (await _unitOfWork.Repository<ProjectBillingSchedule>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)).ToList();
@@ -208,10 +209,11 @@ public partial class ProjectService
     public async Task<ProjectIntegrationSummaryDto> GetIntegrationSummaryAsync(Guid projectId)
     {
         var project = await GetProjectForOperationAsync(projectId, ProjectAccessOperation.View);
+        await SyncProjectMaterialCostAsync(projectId);
         var assetLinks = (await _unitOfWork.Repository<ProjectAssetLink>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)).ToList();
         var resourceAllocations = (await _unitOfWork.Repository<ProjectResourceAllocation>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)).ToList();
         var externalPolicies = (await _unitOfWork.Repository<ProjectExternalAccessPolicy>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)).ToList();
-        var expenses = (await _unitOfWork.Repository<ProjectExpense>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)).ToList();
+        var ledgerEntries = await GetMaterialCostEntryEntitiesAsync(new[] { projectId });
         var purchaseRequisitions = (await _unitOfWork.Repository<PurchaseRequisition>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)).ToList();
         var purchaseRequisitionIds = purchaseRequisitions.Select(x => x.Id).ToHashSet();
         var purchaseOrders = (await _unitOfWork.Repository<PurchaseOrder>().FindAsync(x =>
@@ -225,21 +227,19 @@ public partial class ProjectService
                 && purchaseOrderIds.Contains(x.PurchaseOrderId)))
             .ToList();
         var inventoryRequisitions = (await _unitOfWork.Repository<InventoryRequisition>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)).ToList();
-        var issuedInventoryValue = inventoryRequisitions
-            .Where(x => x.Status == RequisitionStatus.PartiallyIssued || x.Status == RequisitionStatus.Issued || x.Status == RequisitionStatus.Completed)
-            .Sum(x => x.Items != null && x.Items.Count > 0 ? x.Items.Sum(i => i.LineValue) : x.TotalValue);
-        var trackedMaterialCost = expenses
-            .Where(x => string.Equals(x.Status, "Approved", StringComparison.OrdinalIgnoreCase)
-                && string.Equals(x.Category, "Materials", StringComparison.OrdinalIgnoreCase))
-            .Sum(x => x.Amount + x.TaxAmount);
-        var returnedInventoryValue = Math.Abs(expenses
-            .Where(x => string.Equals(x.Status, "Approved", StringComparison.OrdinalIgnoreCase)
-                && string.Equals(x.Category, "Materials", StringComparison.OrdinalIgnoreCase)
-                && (x.Amount + x.TaxAmount) < 0m)
-            .Sum(x => x.Amount + x.TaxAmount));
-        var netIssuedInventoryValue = issuedInventoryValue;
+        var issuedInventoryValue = ledgerEntries
+            .Where(x => string.Equals(x.EntryType, "InventoryIssue", StringComparison.OrdinalIgnoreCase))
+            .Sum(x => Math.Abs(x.Amount));
+        var trackedMaterialCost = ledgerEntries
+            .Where(x => x.AffectsActualCost)
+            .Sum(x => x.Amount);
+        var returnedInventoryValue = ledgerEntries
+            .Where(x => string.Equals(x.EntryType, "InventoryReturn", StringComparison.OrdinalIgnoreCase))
+            .Sum(x => Math.Abs(x.Amount));
+        var netIssuedInventoryValue = decimal.Round(issuedInventoryValue - returnedInventoryValue, 2);
         var invoiceRequests = (await _unitOfWork.Repository<ProjectInvoiceRequest>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)).ToList();
         var revenueRecognitions = (await _unitOfWork.Repository<ProjectRevenueRecognition>().FindAsync(x => x.ProjectId == projectId && x.TenantId == _currentUserProvider.TenantId)).ToList();
+        var materialExceptions = ledgerEntries.Count(x => x.HasMissingSourceLink || x.HasReversalGap);
 
         var links = new List<ProjectIntegrationLinkDto>();
         if (project.BusinessPartnerId.HasValue)
@@ -334,6 +334,10 @@ public partial class ProjectService
         if (netIssuedInventoryValue > trackedMaterialCost)
         {
             warnings.Add("Inventory has been issued to this project, but some material consumption is still not reflected in project cost tracking.");
+        }
+        if (materialExceptions > 0)
+        {
+            warnings.Add("Project material ledger contains procurement or reversal exceptions that need reconciliation.");
         }
 
         return new ProjectIntegrationSummaryDto

@@ -86,7 +86,13 @@ export function AdvancedKPICard({
   };
 
   const getColorClasses = (colorScheme: string) => {
-    const colors = {
+    const colors: Record<string, {
+      icon: string;
+      gradient: string;
+      border: string;
+      text: string;
+      progress: string;
+    }> = {
       blue: {
         icon: 'bg-blue-500',
         gradient: 'from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20',

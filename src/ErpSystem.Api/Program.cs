@@ -14,24 +14,33 @@ using Serilog;
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
 {
-    var tempBuilder = WebApplication.CreateBuilder(args);
+    var tempBuilder = CreateSeedBuilder(args);
 
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
 
     var tempApp = tempBuilder.Build();
 
-    // Run user seeding
-    await ErpSystem.Api.UserSeeder.SeedTestUsersAsync(tempApp.Services);
+    // Run user seeding through the shared database seeding service so roles/default tenant stay in sync.
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await db.Database.MigrateAsync();
+
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        await seedingService.SeedTestUsersAsync();
+    }
+
     return;
 }
 
 // Check for maintenance workflow seeding command
 if (args.Length > 0 && args[0] == "seed-maintenance")
 {
-    var tempBuilder = WebApplication.CreateBuilder(args);
+    var tempBuilder = CreateSeedBuilder(args);
 
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
@@ -56,7 +65,7 @@ if (args.Length > 0 && args[0] == "seed-maintenance")
 // Check for maintenance E2E test data seeding command
 if (args.Length > 0 && args[0] == "seed-maintenance-e2e")
 {
-    var tempBuilder = WebApplication.CreateBuilder(args);
+    var tempBuilder = CreateSeedBuilder(args);
 
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
@@ -82,7 +91,7 @@ if (args.Length > 0 && args[0] == "seed-maintenance-e2e")
 // Check for full database seeding command (roles, workflows, modules, etc.)
 if (args.Length > 0 && args[0] == "seed-db")
 {
-    var tempBuilder = WebApplication.CreateBuilder(args);
+    var tempBuilder = CreateSeedBuilder(args);
 
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
@@ -262,6 +271,20 @@ app.MapHub<ErpSystem.Api.Hubs.DashboardHub>("/api/hubs/dashboard");
 
 var skipStartupInitialization = app.Environment.IsEnvironment("Testing")
     || app.Configuration.GetValue<bool>("SkipStartupInitialization");
+var databaseConnectionTimeout = TimeSpan.FromSeconds(Math.Max(
+    1,
+    app.Configuration.GetValue("StartupInitialization:DatabaseConnectionTimeoutSeconds", 5)));
+var migrationTimeout = TimeSpan.FromSeconds(Math.Max(
+    5,
+    app.Configuration.GetValue("StartupInitialization:MigrationTimeoutSeconds", 120)));
+var failFastOnDatabaseInitializationError = app.Configuration.GetValue(
+    "StartupInitialization:FailFastOnDatabaseInitializationError",
+    true);
+var seedDevelopmentData = app.Configuration.GetValue("StartupInitialization:SeedDevelopmentData", true);
+var failFastOnDevelopmentSeedError = app.Configuration.GetValue(
+    "StartupInitialization:FailFastOnDevelopmentSeedError",
+    false);
+var databaseInitializationSucceeded = false;
 
 if (!skipStartupInitialization)
 {
@@ -269,20 +292,41 @@ if (!skipStartupInitialization)
     app.Logger.LogInformation("Starting database initialization...");
     try
     {
-        await InitializeDatabaseAsync(app);
+        await InitializeDatabaseAsync(app, databaseConnectionTimeout, migrationTimeout);
+        databaseInitializationSucceeded = true;
         app.Logger.LogInformation("Database initialization completed");
     }
     catch (Exception ex)
     {
-        app.Logger.LogError(ex, "Database initialization failed");
+        app.Logger.LogCritical(ex, "Database initialization failed");
+        if (failFastOnDatabaseInitializationError)
+        {
+            throw;
+        }
     }
 
     // Seed demo/basic data in Development to make local testing easier.
-    if (app.Environment.IsDevelopment())
+    if (app.Environment.IsDevelopment() && seedDevelopmentData && databaseInitializationSucceeded)
     {
         app.Logger.LogInformation("Starting Development data seeding...");
-        await SeedDatabaseAsync(app);
-        app.Logger.LogInformation("Development data seeding completed");
+        try
+        {
+            await SeedDatabaseAsync(app);
+            app.Logger.LogInformation("Development data seeding completed");
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Development data seeding failed");
+            if (failFastOnDevelopmentSeedError)
+            {
+                throw;
+            }
+        }
+    }
+    else if (app.Environment.IsDevelopment() && seedDevelopmentData)
+    {
+        app.Logger.LogWarning(
+            "Skipping Development data seeding because database initialization did not complete successfully.");
     }
 }
 else
@@ -294,55 +338,92 @@ else
 // Version: 2.0.0 - Full CI/CD Pipeline Integration
 app.Run();
 
-async Task InitializeDatabaseAsync(WebApplication app)
+async Task InitializeDatabaseAsync(
+    WebApplication app,
+    TimeSpan databaseConnectionTimeout,
+    TimeSpan migrationTimeout)
 {
     using var scope = app.Services.CreateScope();
     var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
+    logger.LogDebug("Testing database connection...");
+    var providerName = context.Database.ProviderName ?? "Unknown";
+    var connectionSummary = SummarizeConnectionTarget(context.Database.GetConnectionString());
+
+    using (var testCts = new CancellationTokenSource(databaseConnectionTimeout))
+    {
+        try
+        {
+            var canConnect = await context.Database.CanConnectAsync(testCts.Token);
+            if (!canConnect)
+            {
+                throw new InvalidOperationException(
+                    $"Database connection check failed for provider '{providerName}' using '{connectionSummary}'. Startup migrations cannot continue.");
+            }
+        }
+        catch (OperationCanceledException ex)
+        {
+            throw new TimeoutException(
+                $"Database connection timed out after {databaseConnectionTimeout.TotalSeconds:F0} seconds.",
+                ex);
+        }
+    }
+
+    logger.LogInformation("Database connection successful. Running migrations...");
+
+    using var migrationCts = new CancellationTokenSource(migrationTimeout);
     try
     {
-        logger.LogDebug("Testing database connection...");
-
-        // Test connection first with a short timeout
-        using var testCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var canConnect = await context.Database.CanConnectAsync(testCts.Token);
-
-        if (!canConnect)
-        {
-            logger.LogError("Database connection check failed. Skipping migrations.");
-            return;
-        }
-
-        logger.LogInformation("Database connection successful. Running migrations...");
-
-        // Add timeout to prevent hanging
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await context.Database.MigrateAsync(cts.Token);
-
-        logger.LogInformation("Database migration completed successfully");
+        await context.Database.MigrateAsync(migrationCts.Token);
     }
     catch (OperationCanceledException ex)
     {
-        logger.LogError(ex, "Database operation timed out. Check if SQL Server is running and reachable.");
+        throw new TimeoutException(
+            $"Database migration timed out after {migrationTimeout.TotalSeconds:F0} seconds.",
+            ex);
     }
-    catch (Exception ex)
+
+    logger.LogInformation("Database migration completed successfully");
+}
+
+static WebApplicationBuilder CreateSeedBuilder(string[] args)
+{
+    if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")))
     {
-        logger.LogError(ex, "An error occurred while migrating the database");
+        Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
     }
+
+    return WebApplication.CreateBuilder(args);
 }
 
 async Task SeedDatabaseAsync(WebApplication app)
 {
-    try
+    await app.Services.SeedDatabaseAsync();
+}
+
+static string SummarizeConnectionTarget(string? connectionString)
+{
+    if (string.IsNullOrWhiteSpace(connectionString))
     {
-        await app.Services.SeedDatabaseAsync();
+        return "No connection string configured";
     }
-    catch (Exception ex)
-    {
-        var logger = app.Services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred while seeding the database");
-    }
+
+    var parts = connectionString
+        .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    var safeParts = parts
+        .Where(part =>
+            part.StartsWith("Server=", StringComparison.OrdinalIgnoreCase)
+            || part.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase)
+            || part.StartsWith("Host=", StringComparison.OrdinalIgnoreCase)
+            || part.StartsWith("Database=", StringComparison.OrdinalIgnoreCase)
+            || part.StartsWith("Initial Catalog=", StringComparison.OrdinalIgnoreCase))
+        .ToArray();
+
+    return safeParts.Length == 0
+        ? "Configured connection string target unavailable"
+        : string.Join("; ", safeParts);
 }
 
 public partial class Program;

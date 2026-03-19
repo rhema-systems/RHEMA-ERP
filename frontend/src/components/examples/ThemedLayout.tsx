@@ -16,6 +16,7 @@ import {
   BellIcon,
 } from 'lucide-react';
 import useUserTheme from '@/hooks/useUserTheme';
+import { useDeviceType } from '@/hooks/useResponsive';
 import { UserManagementTable } from './UserManagementTable';
 
 // Example sidebar navigation
@@ -219,11 +220,10 @@ function ResponsiveDeviceInfo() {
   const { 
     isMobile, 
     isTablet, 
-    isDesktop, 
     isTouchDevice,
     needsLargerTapTargets,
     shouldUseMobileLayout,
-  } = useUserTheme();
+  } = useDeviceType();
 
   return (
     <>

@@ -72,9 +72,9 @@ public class EmergencyMaintenanceController : ControllerBase
                 ScheduledEndDate = DateTime.UtcNow.AddHours(createDto.EstimatedHours ?? 4),
                 EstimatedHours = createDto.EstimatedHours ?? 4,
                 EstimatedCost = createDto.EstimatedCost ?? 0m,
-                Instructions = createDto.Instructions,
-                SafetyNotes = createDto.SafetyNotes,
-                RequiredSkills = createDto.RequiredSkills,
+                Instructions = createDto.Instructions ?? string.Empty,
+                SafetyNotes = createDto.SafetyNotes ?? string.Empty,
+                RequiredSkills = createDto.RequiredSkills ?? string.Empty,
                 IsEmergency = true
             };
 
@@ -395,9 +395,9 @@ public class EmergencyMaintenanceController : ControllerBase
 
             // Send to maintenance managers and available technicians
             var emergencyContacts = GetEmergencyContactList();
-            foreach (var contact in emergencyContacts)
+            foreach (var contact in emergencyContacts.Where(contact => !string.IsNullOrWhiteSpace(contact.Email)))
             {
-                await _emailService.SendEmailAsync(contact.Email, subject, body);
+                await _emailService.SendEmailAsync(contact.Email!, subject, body);
             }
         }
         catch (Exception ex)
@@ -426,9 +426,9 @@ public class EmergencyMaintenanceController : ControllerBase
 
             // Send to senior management and maintenance directors
             var managementContacts = GetManagementContactList();
-            foreach (var contact in managementContacts)
+            foreach (var contact in managementContacts.Where(contact => !string.IsNullOrWhiteSpace(contact.Email)))
             {
-                await _emailService.SendEmailAsync(contact.Email, subject, body);
+                await _emailService.SendEmailAsync(contact.Email!, subject, body);
             }
         }
         catch (Exception ex)
@@ -466,9 +466,9 @@ public class EmergencyMaintenanceController : ControllerBase
                 ? GetEmergencyContactList()
                 : GetMaintenanceTeamContacts();
 
-            foreach (var contact in contacts)
+            foreach (var contact in contacts.Where(contact => !string.IsNullOrWhiteSpace(contact.Email)))
             {
-                await _emailService.SendEmailAsync(contact.Email, subject, body);
+                await _emailService.SendEmailAsync(contact.Email!, subject, body);
             }
         }
         catch (Exception ex)
@@ -491,11 +491,11 @@ public class EmergencyMaintenanceController : ControllerBase
         }
     }
 
-    private static async Task<AssetCriticality> DetermineAssetCriticality(Guid assetId)
+    private static Task<AssetCriticality> DetermineAssetCriticality(Guid assetId)
     {
         // This would query asset criticality from database or configuration
         // For now, return a default value
-        return AssetCriticality.High;
+        return Task.FromResult(AssetCriticality.High);
     }
 
     private static ResponseLevel DetermineResponseLevel(string severity, AssetCriticality criticality)
@@ -602,10 +602,10 @@ public class EmergencyMaintenanceController : ControllerBase
         };
     }
 
-    private static async Task<EmergencyMetricsDto> CalculateEmergencyMetrics(DateTime startDate, DateTime endDate)
+    private static Task<EmergencyMetricsDto> CalculateEmergencyMetrics(DateTime startDate, DateTime endDate)
     {
         // This would query actual emergency work orders and calculate metrics
-        return new EmergencyMetricsDto
+        return Task.FromResult(new EmergencyMetricsDto
         {
             TotalEmergencyWorkOrders = 45,
             AverageResponseTime = 23.5,
@@ -613,7 +613,7 @@ public class EmergencyMaintenanceController : ControllerBase
             ResolutionRate = 94.2,
             AverageDowntime = 2.3,
             CostImpact = 125000m
-        };
+        });
     }
 
     #endregion

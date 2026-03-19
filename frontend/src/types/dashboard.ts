@@ -7,6 +7,8 @@ export interface DashboardStats {
   ordersGrowth: number;
   customersGrowth: number;
   productsGrowth: number;
+  revenueTarget?: number;
+  ordersTarget?: number;
 }
 
 export interface SalesData {

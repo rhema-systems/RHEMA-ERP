@@ -26,7 +26,8 @@ const buildCategoryOptions = (flat: EhcAdminCategory[]) => {
   for (const c of flat) byId.set(c.id, { ...c, children: [] });
   const roots: CategoryNode[] = [];
   for (const c of byId.values()) {
-    if (c.parentCategoryId && byId.has(c.parentCategoryId)) byId.get(c.parentCategoryId)!.children!.push(c);
+    const parent = c.parentCategoryId ? byId.get(c.parentCategoryId) : undefined;
+    if (parent?.children) parent.children.push(c);
     else roots.push(c);
   }
   const sortRec = (nodes: CategoryNode[]) => {
@@ -100,10 +101,10 @@ export default function HelpdeskProblemDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const params = useParams<{ id: string }>();
-  const problemId = params?.id;
+  const problemId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const qc = useQueryClient();
   const { toast } = useToast();
-  const scopeParam = searchParams.get('scope');
+  const scopeParam = searchParams?.get('scope');
   const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
 
   const formatDateTime = (iso: string | null | undefined) => {

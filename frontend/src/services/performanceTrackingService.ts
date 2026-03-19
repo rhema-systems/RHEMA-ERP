@@ -63,6 +63,7 @@ export interface SupplierPerformanceMetricDto {
   performanceGrade: string;
   
   calculatedAt: string;
+  calculationDate?: string;
   calculatedBy?: string;
   notes?: string;
 }
@@ -126,13 +127,16 @@ export interface PerformanceReviewDto {
   overallGrade?: string;
 
   strengths?: string;
+  weaknesses?: string;
   areasForImprovement?: string;
   recommendations?: string;
   actionItems?: string;
 
   status: string;
   submittedDate?: string;
+  acknowledgedAt?: string;
   acknowledgedDate?: string;
+  finalizedAt?: string;
   supplierComments?: string;
   supplierCommentsDate?: string;
   requiresFollowUp?: boolean;
@@ -351,4 +355,3 @@ class PerformanceTrackingService {
 }
 
 export const performanceTrackingService = new PerformanceTrackingService();
-

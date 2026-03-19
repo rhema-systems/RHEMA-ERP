@@ -272,7 +272,7 @@ export default function ProjectPortfoliosPage() {
                   <div>
                     <div className="font-semibold">{item.title}</div>
                     <div className="text-sm text-muted-foreground">
-                      {item.sourceProjectCode} -> {item.targetProjectCode}
+                      {item.sourceProjectCode} to {item.targetProjectCode}
                     </div>
                   </div>
                   <div className="flex gap-2">

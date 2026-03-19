@@ -51,7 +51,7 @@ export const fieldLabelService = {
   async getFieldLabels(module: string): Promise<Record<string, string>> {
     // Check cache first
     if (labelCache.has(module)) {
-      return labelCache.get(module)!;
+      return labelCache.get(module) ?? {};
     }
 
     try {

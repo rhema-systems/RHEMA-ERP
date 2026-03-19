@@ -124,7 +124,7 @@ export default function MyAssignedTendersPage() {
                       <TableCell className="font-medium">{tender.tenderNumber}</TableCell>
                       <TableCell>{tender.title}</TableCell>
                       <TableCell>{getStatusBadge(tender.status)}</TableCell>
-                      <TableCell>{formatDate(tender.closingDate)}</TableCell>
+                      <TableCell>{formatDate(tender.closingDate || tender.submissionDeadline)}</TableCell>
                       <TableCell>
                         <Button
                           variant="ghost"
@@ -146,4 +146,3 @@ export default function MyAssignedTendersPage() {
     </div>
   );
 }
-

@@ -252,6 +252,32 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
+    title: 'CRM',
+    href: '/crm',
+    icon: Users,
+    children: [
+      { title: 'Overview', href: '/crm', icon: LayoutDashboard },
+      { title: 'Accounts', href: '/crm/accounts', icon: Building2 },
+      { title: 'Collaboration', href: '/crm/collaboration', icon: Workflow },
+      { title: 'Service', href: '/crm/service', icon: MessageSquare },
+      { title: 'Risk', href: '/crm/risk', icon: AlertTriangle },
+      { title: 'Readiness', href: '/crm/readiness', icon: ShieldCheck },
+      { title: 'Contacts', href: '/crm/contacts', icon: Mail },
+      { title: 'Leads', href: '/crm/leads', icon: Users },
+      { title: 'Campaigns', href: '/crm/campaigns', icon: Megaphone },
+      { title: 'Opportunities', href: '/crm/opportunities', icon: TrendingUp },
+      { title: 'Conversions', href: '/crm/conversions', icon: FolderTree },
+      { title: 'Renewals', href: '/crm/renewals', icon: AlertTriangle },
+      { title: 'Activities', href: '/crm/activities', icon: Activity },
+      { title: 'Quotes', href: '/crm/quotes', icon: FileText },
+      { title: 'Projects', href: '/crm/projects', icon: Briefcase },
+      { title: 'Contracts', href: '/crm/contracts', icon: FileCheck },
+      { title: 'Tenders', href: '/crm/tenders', icon: Gavel },
+      { title: 'Forecast', href: '/crm/forecast', icon: Target },
+      { title: 'Reports', href: '/crm/reports', icon: BarChart3 },
+    ],
+  },
+  {
     title: 'Sales',
     href: '/sales',
     icon: ShoppingCart,
@@ -606,7 +632,7 @@ export function Sidebar({ className }: SidebarProps) {
   const sidebarRef = useRef<HTMLDivElement>(null);
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const openTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '';
   const { hasAnyRole, hasAnyPermission } = useAuth();
 
   useEffect(() => {

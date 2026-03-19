@@ -67,6 +67,8 @@ export function Header({ className }: HeaderProps) {
     setIsUserMenuOpen(false);
   };
 
+  const userDisplayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || user?.username || 'User';
+
   return (
     <header className={cn(
       'sticky top-0 z-50 w-full border-b border-slate-200/50 dark:border-slate-800/50 bg-white/95 dark:bg-slate-900/95 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-slate-900/60',
@@ -205,11 +207,11 @@ export function Header({ className }: HeaderProps) {
 
           {/* Session Status */}
           <ClientOnly>
-            {sessionTimeout && (
+            {sessionTimeout && sessionTimeout.sessionState.sessionTimeoutMinutes > 0 && (
               <div className="hidden sm:flex items-center px-3 py-1.5 bg-slate-50/80 dark:bg-slate-800/80 rounded-xl border border-slate-200/50 dark:border-slate-700/50">
                 <Clock className="h-3 w-3 text-slate-500 mr-2" />
                 <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
-                  Session: {Math.ceil((sessionTimeout.sessionState.sessionTimeoutMinutes || 30) - 
+                  Session: {Math.ceil(sessionTimeout.sessionState.sessionTimeoutMinutes - 
                   ((Date.now() - sessionTimeout.sessionState.lastActivity) / (1000 * 60)))}m
                 </span>
               </div>
@@ -226,7 +228,7 @@ export function Header({ className }: HeaderProps) {
             >
               {/* Avatar */}
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-xs font-semibold text-white">
-                {getInitials(user?.firstName, user?.lastName) || user?.username?.[0]?.toUpperCase() || 'U'}
+                {getInitials(userDisplayName) || user?.username?.[0]?.toUpperCase() || 'U'}
               </div>
               
               {/* User Info */}
@@ -251,7 +253,7 @@ export function Header({ className }: HeaderProps) {
                 <div className="p-4 border-b border-slate-100 dark:border-slate-800">
                   <div className="flex items-center space-x-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-sm font-semibold text-white">
-                      {getInitials(user?.firstName, user?.lastName) || user?.username?.[0]?.toUpperCase() || 'U'}
+                      {getInitials(userDisplayName) || user?.username?.[0]?.toUpperCase() || 'U'}
                     </div>
                     <div>
                       <div className="text-sm font-medium text-slate-900 dark:text-white">

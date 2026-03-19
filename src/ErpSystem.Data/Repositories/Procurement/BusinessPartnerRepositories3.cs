@@ -14,7 +14,7 @@ public class BusinessPartnerDocumentRepository : GenericRepository<BusinessPartn
 {
     public BusinessPartnerDocumentRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<BusinessPartnerDocument?> GetByIdAsync(Guid id)
+    public override async Task<BusinessPartnerDocument?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(d => d.Id == id && !d.IsDeleted)
@@ -26,13 +26,13 @@ public class BusinessPartnerDocumentRepository : GenericRepository<BusinessPartn
         return await AddAsync(document);
     }
 
-    public async Task<BusinessPartnerDocument> UpdateAsync(BusinessPartnerDocument document)
+    public new async Task<BusinessPartnerDocument> UpdateAsync(BusinessPartnerDocument document)
     {
         await base.UpdateAsync(document);
         return document;
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var document = await GetByIdAsync(id);
         if (document != null)
@@ -107,7 +107,7 @@ public class BusinessPartnerFinancialRepository : GenericRepository<BusinessPart
 {
     public BusinessPartnerFinancialRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<BusinessPartnerFinancial?> GetByIdAsync(Guid id)
+    public override async Task<BusinessPartnerFinancial?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(f => f.Id == id && !f.IsDeleted)
@@ -119,13 +119,13 @@ public class BusinessPartnerFinancialRepository : GenericRepository<BusinessPart
         return await AddAsync(financial);
     }
 
-    public async Task<BusinessPartnerFinancial> UpdateAsync(BusinessPartnerFinancial financial)
+    public new async Task<BusinessPartnerFinancial> UpdateAsync(BusinessPartnerFinancial financial)
     {
         await base.UpdateAsync(financial);
         return financial;
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var financial = await GetByIdAsync(id);
         if (financial != null)
@@ -184,7 +184,7 @@ public class BusinessPartnerRegistrationRepository : GenericRepository<BusinessP
         _logger = logger;
     }
 
-    public async Task<BusinessPartnerRegistration?> GetByIdAsync(Guid id)
+    public override async Task<BusinessPartnerRegistration?> GetByIdAsync(Guid id)
     {
         // Use IgnoreQueryFilters to bypass tenant filtering for external registrations
         // External users may not have tenant context set
@@ -218,13 +218,13 @@ public class BusinessPartnerRegistrationRepository : GenericRepository<BusinessP
         return await AddAsync(registration);
     }
 
-    public async Task<BusinessPartnerRegistration> UpdateAsync(BusinessPartnerRegistration registration)
+    public new async Task<BusinessPartnerRegistration> UpdateAsync(BusinessPartnerRegistration registration)
     {
         await base.UpdateAsync(registration);
         return registration;
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var registration = await GetByIdAsync(id);
         if (registration != null)
@@ -463,7 +463,7 @@ public class BusinessPartnerRegistrationDocumentRepository : GenericRepository<B
 {
     public BusinessPartnerRegistrationDocumentRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<BusinessPartnerRegistrationDocument?> GetByIdAsync(Guid id)
+    public override async Task<BusinessPartnerRegistrationDocument?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(d => d.Id == id && !d.IsDeleted)
@@ -475,13 +475,13 @@ public class BusinessPartnerRegistrationDocumentRepository : GenericRepository<B
         return await AddAsync(document);
     }
 
-    public async Task<BusinessPartnerRegistrationDocument> UpdateAsync(BusinessPartnerRegistrationDocument document)
+    public new async Task<BusinessPartnerRegistrationDocument> UpdateAsync(BusinessPartnerRegistrationDocument document)
     {
         await base.UpdateAsync(document);
         return document;
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var document = await GetByIdAsync(id);
         if (document != null)

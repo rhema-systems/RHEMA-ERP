@@ -41,7 +41,7 @@ public class MaintenanceAssetCategoryService : IMaintenanceAssetCategoryService
             _logger.LogInformation("Creating new maintenance asset category: {CategoryName}", createDto.Name);
 
             // Validate code uniqueness
-            if (!await IsCategoryCodeUniqueAsync(createDto.Code))
+            if (!await IsCategoryCodeUniqueAsync(createDto.Code ?? string.Empty))
             {
                 throw new ArgumentException($"Category code '{createDto.Code}' already exists");
             }
@@ -78,7 +78,7 @@ public class MaintenanceAssetCategoryService : IMaintenanceAssetCategoryService
             var existingCategory = await _categoryRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Category with ID {id} not found");
 
             // Validate code uniqueness
-            if (!await IsCategoryCodeUniqueAsync(updateDto.Code, id))
+            if (!await IsCategoryCodeUniqueAsync(updateDto.Code ?? string.Empty, id))
             {
                 throw new ArgumentException($"Category code '{updateDto.Code}' already exists");
             }
@@ -151,9 +151,9 @@ public class MaintenanceAssetCategoryService : IMaintenanceAssetCategoryService
         {
             var category = await _categoryRepository.FirstOrDefaultAsync(
                 c => c.Id == id && c.TenantId == _currentUserProvider.TenantId,
-                c => c.ParentCategory,
-                c => c.ChildCategories,
-                c => c.Assets);
+                c => c.ParentCategory!,
+                c => c.ChildCategories!,
+                c => c.Assets!);
 
             return category != null ? _mapper.Map<MaintenanceAssetCategoryDto>(category) : null;
         }
@@ -171,9 +171,9 @@ public class MaintenanceAssetCategoryService : IMaintenanceAssetCategoryService
             // For now, return all categories to make the frontend work
             // TODO: Implement proper tenant filtering when authentication is fixed
             var categories = await _categoryRepository.GetAllAsync(
-                c => c.ParentCategory,
-                c => c.ChildCategories,
-                c => c.Assets);
+                c => c.ParentCategory!,
+                c => c.ChildCategories!,
+                c => c.Assets!);
             return _mapper.Map<IEnumerable<MaintenanceAssetCategoryDto>>(categories);
         }
         catch (Exception ex)
@@ -245,7 +245,7 @@ public class MaintenanceAssetCategoryService : IMaintenanceAssetCategoryService
         try
         {
             // Since GetCategoryHierarchyAsync doesn't exist, we'll implement it using GetAllAsync
-            var allCategories = await _categoryRepository.GetAllAsync(c => c.ParentCategory, c => c.ChildCategories, c => c.Assets);
+            var allCategories = await _categoryRepository.GetAllAsync(c => c.ParentCategory!, c => c.ChildCategories!, c => c.Assets!);
 
             // Filter by parent ID if specified
             var filteredCategories = parentId.HasValue

@@ -136,7 +136,7 @@ export default function FleetVehiclesPage() {
         toast({ title: 'Failed to load categories', description: e?.message || String(e), variant: 'destructive' });
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   React.useEffect(() => {

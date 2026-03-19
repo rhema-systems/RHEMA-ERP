@@ -1,12 +1,13 @@
 'use client';
 
+import { Suspense } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { AuthGuard } from '@/components/auth/auth-guard';
 import { getRequiredPermissionForHelpdeskScope } from '@/lib/helpdesk-scope';
 
-export default function HelpdeskLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+function HelpdeskLayoutContent({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname() ?? '';
   const searchParams = useSearchParams();
 
   let requiredPermissions: string[] | undefined;
@@ -20,7 +21,7 @@ export default function HelpdeskLayout({ children }: { children: React.ReactNode
   } else if (pathname.startsWith('/helpdesk/helpdesk-complaints/external')) {
     requiredPermissions = ['support.external.access'];
   } else if (pathname.startsWith('/helpdesk')) {
-    const scope = searchParams.get('scope');
+    const scope = searchParams?.get('scope');
     if (scope) {
       requiredPermissions = [getRequiredPermissionForHelpdeskScope(scope)];
     }
@@ -30,6 +31,14 @@ export default function HelpdeskLayout({ children }: { children: React.ReactNode
     <AuthGuard requiredPermissions={requiredPermissions}>
       <DashboardLayout>{children}</DashboardLayout>
     </AuthGuard>
+  );
+}
+
+export default function HelpdeskLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={null}>
+      <HelpdeskLayoutContent>{children}</HelpdeskLayoutContent>
+    </Suspense>
   );
 }
 

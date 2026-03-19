@@ -1045,6 +1045,8 @@ public class InventoryRequisitionDto
     public string? CostCenter { get; set; }
     public Guid WarehouseId { get; set; }
     public string WarehouseName { get; set; } = string.Empty;
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
     public Guid? ProjectId { get; set; }
     public string? ProjectCode { get; set; }
     public RequisitionStatus Status { get; set; }

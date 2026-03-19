@@ -178,7 +178,7 @@ class ApiService {
   constructor() {
     // Load token from localStorage if available
     if (typeof window !== 'undefined') {
-      this.token = localStorage.getItem('authToken');
+      this.token = localStorage.getItem('authToken') || localStorage.getItem('token');
     }
   }
 
@@ -188,6 +188,8 @@ class ApiService {
 
   private getHeaders(isFormData: boolean = false, includeAuth: boolean = true): HeadersInit {
     const headers: HeadersInit = {};
+
+    this.syncTokenFromStorage();
 
     // Don't set Content-Type for FormData - browser will set it with boundary
     if (!isFormData) {
@@ -207,6 +209,47 @@ class ApiService {
     }
 
     return headers;
+  }
+
+  private syncTokenFromStorage(): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const storedToken = localStorage.getItem('authToken') || localStorage.getItem('token');
+    if (storedToken !== this.token) {
+      this.token = storedToken;
+    }
+  }
+
+  private appendQueryParams(endpoint: string, query?: Record<string, unknown>): string {
+    if (!query) {
+      return endpoint;
+    }
+
+    const params = new URLSearchParams();
+
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined || value === null || value === '') {
+        continue;
+      }
+
+      if (Array.isArray(value)) {
+        value.forEach((entry) => params.append(key, String(entry)));
+        continue;
+      }
+
+      params.append(key, String(value));
+    }
+
+    const queryString = params.toString();
+    if (!queryString) {
+      return endpoint;
+    }
+
+    return endpoint.includes('?')
+      ? `${endpoint}&${queryString}`
+      : `${endpoint}?${queryString}`;
   }
 
   private async handleResponse<T>(response: Response): Promise<T> {
@@ -288,6 +331,7 @@ class ApiService {
     this.token = token;
     if (typeof window !== 'undefined') {
       localStorage.setItem('authToken', token);
+      localStorage.setItem('token', token);
     }
   }
 
@@ -295,6 +339,7 @@ class ApiService {
     this.token = null;
     if (typeof window !== 'undefined') {
       localStorage.removeItem('authToken');
+      localStorage.removeItem('token');
       localStorage.removeItem('refreshToken');
     }
   }
@@ -384,17 +429,17 @@ class ApiService {
   }
 
   // Public request method for admin service
-  public async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  public async request<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
     return this.privateRequest<T>(endpoint, options, true, false);
   }
 
   // Public request method without authentication
-  public async publicRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  public async publicRequest<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
     return this.privateRequest<T>(endpoint, options, false, false);
   }
 
   // Silent request method that doesn't log errors to console
-  public async silentRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  public async silentRequest<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
     return this.privateRequest<T>(endpoint, options, true, true);
   }
 
@@ -600,16 +645,16 @@ class ApiService {
   }
 
   // Standard HTTP methods
-  public async get<T>(endpoint: string): Promise<T> {
-    return this.privateRequest<T>(endpoint, { method: 'GET' });
+  public async get<T = any>(endpoint: string, query?: Record<string, unknown>): Promise<T> {
+    return this.privateRequest<T>(this.appendQueryParams(endpoint, query), { method: 'GET' });
   }
 
   // Silent GET method - doesn't log errors to console (useful for expected 404s)
-  public async silentGet<T>(endpoint: string): Promise<T> {
-    return this.privateRequest<T>(endpoint, { method: 'GET' }, true, true);
+  public async silentGet<T = any>(endpoint: string, query?: Record<string, unknown>): Promise<T> {
+    return this.privateRequest<T>(this.appendQueryParams(endpoint, query), { method: 'GET' }, true, true);
   }
 
-  public async post<T>(endpoint: string, data?: any): Promise<T> {
+  public async post<T = any>(endpoint: string, data?: any): Promise<T> {
     const options: RequestInit = { method: 'POST' };
     if (data) {
       options.body = JSON.stringify(data);
@@ -617,7 +662,7 @@ class ApiService {
     return this.privateRequest<T>(endpoint, options);
   }
 
-  public async put<T>(endpoint: string, data?: any): Promise<T> {
+  public async put<T = any>(endpoint: string, data?: any): Promise<T> {
     const options: RequestInit = { method: 'PUT' };
     if (data) {
       options.body = JSON.stringify(data);
@@ -625,11 +670,11 @@ class ApiService {
     return this.privateRequest<T>(endpoint, options);
   }
 
-  public async delete<T>(endpoint: string): Promise<T> {
+  public async delete<T = any>(endpoint: string): Promise<T> {
     return this.privateRequest<T>(endpoint, { method: 'DELETE' });
   }
 
-  public async patch<T>(endpoint: string, data?: any): Promise<T> {
+  public async patch<T = any>(endpoint: string, data?: any): Promise<T> {
     const options: RequestInit = { method: 'PATCH' };
     if (data) {
       options.body = JSON.stringify(data);

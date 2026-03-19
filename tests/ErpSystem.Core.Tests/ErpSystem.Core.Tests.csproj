@@ -26,7 +26,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="Services\Crm\**\*.cs" />
+    <Compile Include="Services\Procurement\**\*.cs" />
     <Compile Include="Services\Projects\**\*.cs" />
+    <Compile Include="Services\Security\**\*.cs" />
     <Compile Include="Services\Workflow\**\*.cs" />
   </ItemGroup>
 

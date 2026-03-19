@@ -16,7 +16,7 @@ import { ArrowLeft, Loader2, Send, FileText } from 'lucide-react';
 export default function SupplierRfqDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const rfqId = params.id as string;
+  const rfqId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);

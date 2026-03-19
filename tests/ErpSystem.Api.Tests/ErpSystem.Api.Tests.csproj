@@ -26,6 +26,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="Controllers\Auth\AuthControllerRouteTests.cs" />
+    <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />
+    <Compile Include="Controllers\Procurement\BusinessPartnersControllerContactRouteTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerSmokeTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerRouteTests.cs" />
     <Compile Include="Controllers\Projects\ProjectMobileControllerTests.cs" />

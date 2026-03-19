@@ -17,7 +17,7 @@ interface TenderItemsProps {
   tenderId?: string | null;
 }
 
-const formatDate = (dateString: string | undefined) => {
+const formatDate = (dateString: string | null | undefined) => {
   if (!dateString) return '-';
   try {
     const date = new Date(dateString);

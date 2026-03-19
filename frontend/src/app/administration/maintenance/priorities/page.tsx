@@ -25,7 +25,6 @@ import {
   Minus,
   Zap
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { apiService } from '@/services/api.service';
 
 // Priority level interface
@@ -51,6 +50,7 @@ interface PriorityLevel {
 export default function PriorityLevelsPage() {
   const [priorities, setPriorities] = useState<PriorityLevel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [levelFilter, setLevelFilter] = useState('all');

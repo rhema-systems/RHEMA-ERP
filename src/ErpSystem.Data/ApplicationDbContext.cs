@@ -7,6 +7,7 @@ using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Pricing;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data.Configuration;
@@ -398,6 +399,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<BusinessPartnerFinancial> BusinessPartnerFinancials { get; set; }
     public DbSet<BusinessPartnerRegistration> BusinessPartnerRegistrations { get; set; }
 
+    // Sales / CRM entities
+    public DbSet<Campaign> Campaigns { get; set; }
+    public DbSet<CampaignMember> CampaignMembers { get; set; }
+    public DbSet<Lead> Leads { get; set; }
+    public DbSet<Opportunity> Opportunities { get; set; }
+    public DbSet<Quote> Quotes { get; set; }
+    public DbSet<QuoteLineItem> QuoteLineItems { get; set; }
+    public DbSet<Activity> Activities { get; set; }
+
     // Tender Management
     public DbSet<Tender> Tenders { get; set; }
     public DbSet<TenderLot> TenderLots { get; set; }
@@ -587,11 +597,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProjectBillingSchedule> ProjectBillingSchedules { get; set; }
     public DbSet<ProjectInvoiceRequest> ProjectInvoiceRequests { get; set; }
     public DbSet<ProjectDeliverable> ProjectDeliverables { get; set; }
+    public DbSet<ProjectDeliverableExternalReview> ProjectDeliverableExternalReviews { get; set; }
     public DbSet<ProjectTaskDependency> ProjectTaskDependencies { get; set; }
     public DbSet<ProjectInterdependency> ProjectInterdependencies { get; set; }
     public DbSet<ProjectBaseline> ProjectBaselines { get; set; }
     public DbSet<ProjectTimesheetEntry> ProjectTimesheetEntries { get; set; }
     public DbSet<ProjectExpense> ProjectExpenses { get; set; }
+    public DbSet<ProjectMaterialCostEntry> ProjectMaterialCostEntries { get; set; }
     public DbSet<ProjectRevenueRecognition> ProjectRevenueRecognitions { get; set; }
     public DbSet<ProjectBudgetRevision> ProjectBudgetRevisions { get; set; }
     public DbSet<ProjectForecastVersion> ProjectForecastVersions { get; set; }
@@ -721,11 +733,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ProjectBillingScheduleConfiguration());
         builder.ApplyConfiguration(new ProjectInvoiceRequestConfiguration());
         builder.ApplyConfiguration(new ProjectDeliverableConfiguration());
+        builder.ApplyConfiguration(new ProjectDeliverableExternalReviewConfiguration());
         builder.ApplyConfiguration(new ProjectTaskDependencyConfiguration());
         builder.ApplyConfiguration(new ProjectInterdependencyConfiguration());
         builder.ApplyConfiguration(new ProjectBaselineConfiguration());
         builder.ApplyConfiguration(new ProjectTimesheetEntryConfiguration());
         builder.ApplyConfiguration(new ProjectExpenseConfiguration());
+        builder.ApplyConfiguration(new ProjectMaterialCostEntryConfiguration());
         builder.ApplyConfiguration(new ProjectRevenueRecognitionConfiguration());
         builder.ApplyConfiguration(new ProjectBudgetRevisionConfiguration());
         builder.ApplyConfiguration(new ProjectForecastVersionConfiguration());
@@ -745,6 +759,111 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new CustomerGroupConfiguration());
         builder.ApplyConfiguration(new SupplierGroupConfiguration());
         builder.ApplyConfiguration(new PriceListChangeHistoryConfiguration());
+
+        builder.Ignore<Customer>();
+        builder.Ignore<Invoice>();
+        builder.Ignore<InvoiceLineItem>();
+        builder.Ignore<Payment>();
+
+        // CRM uses BusinessPartner as the account backbone, so we keep the sales entities
+        // in the model but opt out of the legacy duplicate customer/invoice navigations.
+        builder.Entity<Campaign>(entity =>
+        {
+            entity.HasOne(x => x.Manager)
+                .WithMany()
+                .HasForeignKey(x => x.ManagerId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.Tenant)
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => new { x.TenantId, x.CampaignStatus });
+            entity.HasIndex(x => new { x.TenantId, x.CampaignType });
+        });
+
+        builder.Entity<CampaignMember>(entity =>
+        {
+            entity.Ignore(x => x.Customer);
+            entity.HasOne(x => x.Campaign)
+                .WithMany(x => x.CampaignMembers)
+                .HasForeignKey(x => x.CampaignId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Lead)
+                .WithMany()
+                .HasForeignKey(x => x.LeadId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.Tenant)
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => new { x.CampaignId, x.LeadId });
+            entity.HasIndex(x => new { x.TenantId, x.MemberStatus });
+        });
+
+        builder.Entity<Lead>(entity =>
+        {
+            entity.Ignore(x => x.ConvertedCustomer);
+            entity.HasOne(x => x.Tenant)
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Opportunity>(entity =>
+        {
+            entity.Ignore(x => x.Customer);
+            entity.HasOne(x => x.Lead)
+                .WithMany(x => x.Opportunities)
+                .HasForeignKey(x => x.LeadId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.Tenant)
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Activity>(entity =>
+        {
+            entity.Ignore(x => x.Customer);
+            entity.HasOne(x => x.Lead)
+                .WithMany(x => x.Activities)
+                .HasForeignKey(x => x.LeadId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.Opportunity)
+                .WithMany(x => x.Activities)
+                .HasForeignKey(x => x.OpportunityId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.Tenant)
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Quote>(entity =>
+        {
+            entity.Ignore(x => x.Customer);
+            entity.Ignore(x => x.ConvertedInvoice);
+            entity.HasOne(x => x.Opportunity)
+                .WithMany(x => x.Quotes)
+                .HasForeignKey(x => x.OpportunityId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Tenant)
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<QuoteLineItem>(entity =>
+        {
+            entity.HasOne(x => x.Quote)
+                .WithMany(x => x.LineItems)
+                .HasForeignKey(x => x.QuoteId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Tenant)
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         // Configure Identity tables with custom names
         builder.Entity<ApplicationUser>(entity =>
@@ -3399,16 +3518,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .HasMaxLength(1000);
 
             entity.Property(bp => bp.PolicyType)
-                .HasConversion<int>()
-                .HasDefaultValue(BenefitPolicyType.Medical);
+                .HasConversion<int>();
 
             entity.Property(bp => bp.Recipient)
-                .HasConversion<int>()
-                .HasDefaultValue(BenefitRecipient.Staff);
+                .HasConversion<int>();
 
             entity.Property(bp => bp.LimitPeriod)
-                .HasConversion<int>()
-                .HasDefaultValue(BenefitLimitPeriod.Annual);
+                .HasConversion<int>();
 
             entity.Property(bp => bp.IsActive)
                 .HasDefaultValue(true);
@@ -5519,10 +5635,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(po => po.Status);
             entity.HasIndex(po => po.OrderDate);
             entity.HasIndex(po => po.RequestedById);
+            entity.HasIndex(po => po.TenderAwardId);
 
             entity.HasOne(po => po.RequestedBy)
                 .WithMany()
                 .HasForeignKey(po => po.RequestedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(po => po.TenderAward)
+                .WithMany()
+                .HasForeignKey(po => po.TenderAwardId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
 
@@ -6043,7 +6165,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(icl => icl.IsFullyConsumed);
 
             entity.HasOne(icl => icl.InventoryItem)
-                .WithMany()
+                .WithMany(ii => ii.CostLayers)
                 .HasForeignKey(icl => icl.InventoryItemId)
                 .OnDelete(DeleteBehavior.NoAction);
 

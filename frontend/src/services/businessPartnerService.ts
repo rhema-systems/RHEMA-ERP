@@ -143,6 +143,16 @@ export interface BusinessPartnerContactDto {
   isPrimary: boolean;
 }
 
+export interface CreateBusinessPartnerContactDto {
+  contactName: string;
+  title?: string;
+  department?: string;
+  email?: string;
+  phone?: string;
+  mobile?: string;
+  isPrimary: boolean;
+}
+
 export interface BusinessPartnerDocumentDto {
   id: string;
   businessPartnerId?: string;
@@ -532,6 +542,46 @@ export const businessPartnerService = {
 
     if (!response.ok) throw new Error('Failed to fetch partner contacts');
     return response.json();
+  },
+
+  async createPartnerContact(partnerId: string, data: CreateBusinessPartnerContactDto): Promise<BusinessPartnerContactDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) throw new Error('Failed to create partner contact');
+    return response.json();
+  },
+
+  async updatePartnerContact(partnerId: string, contactId: string, data: CreateBusinessPartnerContactDto): Promise<BusinessPartnerContactDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) throw new Error('Failed to update partner contact');
+    return response.json();
+  },
+
+  async deletePartnerContact(partnerId: string, contactId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to delete partner contact');
+  },
+
+  async setPrimaryPartnerContact(partnerId: string, contactId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}/set-primary`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) throw new Error('Failed to set primary partner contact');
   },
 
   // Get partner licenses

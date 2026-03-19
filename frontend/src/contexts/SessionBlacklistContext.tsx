@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect } fr
 import { useRouter, usePathname } from 'next/navigation';
 import { authService } from '../services/auth';
 import { useQueryClient } from '@tanstack/react-query';
+import { buildLoginRedirectUrl, getCurrentRelativeUrl } from '../lib/auth-redirect';
 
 interface SessionBlacklistContextType {
   isSessionTerminated: boolean;
@@ -114,7 +115,7 @@ export function SessionBlacklistProvider({ children }: SessionBlacklistProviderP
     setHasShownAlert(false);
     
     // Redirect to login
-    router.push('/login');
+    router.push(buildLoginRedirectUrl(getCurrentRelativeUrl()));
   }, [router]);
 
   const showSessionTerminatedAlert = useCallback(() => {
@@ -166,6 +167,37 @@ export function SessionBlacklistProvider({ children }: SessionBlacklistProviderP
       }
     };
   }, [showSessionTerminatedAlert, pathname]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const handleAuthStorageChange = (event: StorageEvent) => {
+      if (!['authToken', 'token', 'refreshToken', 'user'].includes(event.key ?? '')) {
+        return;
+      }
+
+      if (authService.isAuthenticated()) {
+        setIsSessionTerminated(false);
+        setHasShownAlert(false);
+        return;
+      }
+
+      authService.clearTokens();
+      queryClient.clear();
+
+      if (pathname !== '/login' && pathname !== '/') {
+        router.push(buildLoginRedirectUrl(getCurrentRelativeUrl()));
+      }
+    };
+
+    window.addEventListener('storage', handleAuthStorageChange);
+
+    return () => {
+      window.removeEventListener('storage', handleAuthStorageChange);
+    };
+  }, [pathname, queryClient, router]);
 
   const hideSessionTerminatedAlert = useCallback(() => {
     handleRedirectToLogin();

@@ -15,7 +15,7 @@ import { format } from 'date-fns';
 export default function EvaluationReportPage() {
   const params = useParams();
   const router = useRouter();
-  const tenderId = params.id as string;
+  const tenderId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [report, setReport] = useState<EvaluationReportDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -578,4 +578,3 @@ export default function EvaluationReportPage() {
     </div>
   );
 }
-

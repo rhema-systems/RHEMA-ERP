@@ -342,7 +342,7 @@ public class UnifiedNotificationService : INotificationService
                         fileName = a.FileName,
                         contentType = a.ContentType,
                         size = a.Content?.Length ?? 0,
-                        contentBase64 = persistAttachmentBytes ? Convert.ToBase64String(a.Content) : null
+                        contentBase64 = persistAttachmentBytes && a.Content != null ? Convert.ToBase64String(a.Content) : null
                     }).ToList()
                 }
             };

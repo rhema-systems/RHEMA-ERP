@@ -17,7 +17,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Switch } from '../../../../components/ui/switch';
 import { useToast } from '../../../../hooks/use-toast';
 import { settingsService } from '../../../../services/settings';
-import { DashboardLayout } from '../../../../components/layout/dashboard-layout';
 
 const passwordPolicySchema = z.object({
   passwordMinLength: z.number().min(8, 'Password length must be at least 8 characters').max(128, 'Password length cannot exceed 128 characters'),
@@ -46,18 +45,93 @@ const lockoutSchema = z.object({
 const recaptchaSchema = z.object({
   captchaEnabled: z.boolean(),
   captchaProvider: z.enum(['recaptcha', 'hcaptcha']),
-  recaptchaSiteKey: z.string().optional().nullable().or(z.literal('')),
-  recaptchaSecretKey: z.string().optional().nullable().or(z.literal('')),
-  hCaptchaSiteKey: z.string().optional().nullable().or(z.literal('')),
-  hCaptchaSecretKey: z.string().optional().nullable().or(z.literal('')),
+  recaptchaSiteKey: z.string().nullable(),
+  recaptchaSecretKey: z.string().nullable(),
+  hCaptchaSiteKey: z.string().nullable(),
+  hCaptchaSecretKey: z.string().nullable(),
 });
 
 const legalSchema = z.object({
-  termsOfServiceUrl: z.string().url('Must be a valid URL').optional().nullable().or(z.literal('')),
-  privacyPolicyUrl: z.string().url('Must be a valid URL').optional().nullable().or(z.literal('')),
+  termsOfServiceUrl: z.union([z.string().url('Must be a valid URL'), z.literal(''), z.null()]),
+  privacyPolicyUrl: z.union([z.string().url('Must be a valid URL'), z.literal(''), z.null()]),
 });
 
-// Use the imported DTO type directly, ensuring schema matches its shape
+const securitySettingsSchema = z.object({
+  ...passwordPolicySchema.shape,
+  ...sessionSchema.shape,
+  ...lockoutSchema.shape,
+  ...recaptchaSchema.shape,
+  ...legalSchema.shape,
+});
+
+type SecuritySettingsFormValues = z.input<typeof securitySettingsSchema>
+
+const defaultSecuritySettingsFormValues = (): SecuritySettingsFormValues => ({
+  passwordMinLength: 8,
+  passwordRequireUppercase: true,
+  passwordRequireLowercase: true,
+  passwordRequireDigits: true,
+  passwordRequireSpecialChars: true,
+  passwordMaxAge: 90,
+  passwordPreventReuse: 5,
+  sessionTimeoutMinutes: 30,
+  jwtTokenLifetimeMinutes: 60,
+  preventConcurrentLogin: 'Disabled',
+  maxFailedLoginAttempts: 5,
+  accountLockoutMinutes: 30,
+  rateLimitLoginMaxAttempts: 5,
+  rateLimitLoginWindowMinutes: 15,
+  rateLimitLoginBlockDurationMinutes: 30,
+  captchaEnabled: false,
+  captchaProvider: 'recaptcha',
+  recaptchaSiteKey: '',
+  recaptchaSecretKey: '',
+  hCaptchaSiteKey: '',
+  hCaptchaSecretKey: '',
+  termsOfServiceUrl: '',
+  privacyPolicyUrl: '',
+});
+
+const toSecuritySettingsFormValues = (
+  settings?: SecuritySettingsDto | null
+): SecuritySettingsFormValues => ({
+  passwordMinLength: settings?.passwordMinLength ?? 8,
+  passwordRequireUppercase: Boolean(settings?.passwordRequireUppercase),
+  passwordRequireLowercase: Boolean(settings?.passwordRequireLowercase),
+  passwordRequireDigits: Boolean(settings?.passwordRequireDigits),
+  passwordRequireSpecialChars: Boolean(settings?.passwordRequireSpecialChars),
+  passwordMaxAge: settings?.passwordMaxAge ?? null,
+  passwordPreventReuse: settings?.passwordPreventReuse ?? null,
+  sessionTimeoutMinutes: settings?.sessionTimeoutMinutes ?? 30,
+  jwtTokenLifetimeMinutes: settings?.jwtTokenLifetimeMinutes ?? 60,
+  preventConcurrentLogin: settings?.preventConcurrentLogin ?? 'Disabled',
+  maxFailedLoginAttempts: settings?.maxFailedLoginAttempts ?? 5,
+  accountLockoutMinutes: settings?.accountLockoutMinutes ?? 30,
+  rateLimitLoginMaxAttempts: settings?.rateLimitLoginMaxAttempts ?? 5,
+  rateLimitLoginWindowMinutes: settings?.rateLimitLoginWindowMinutes ?? 15,
+  rateLimitLoginBlockDurationMinutes:
+    settings?.rateLimitLoginBlockDurationMinutes ?? 30,
+  captchaEnabled: Boolean(settings?.captchaEnabled),
+  captchaProvider: settings?.captchaProvider ?? 'recaptcha',
+  recaptchaSiteKey: settings?.recaptchaSiteKey ?? '',
+  recaptchaSecretKey: settings?.recaptchaSecretKey ?? '',
+  hCaptchaSiteKey: settings?.hCaptchaSiteKey ?? '',
+  hCaptchaSecretKey: settings?.hCaptchaSecretKey ?? '',
+  termsOfServiceUrl: settings?.termsOfServiceUrl ?? '',
+  privacyPolicyUrl: settings?.privacyPolicyUrl ?? '',
+});
+
+const toSecuritySettingsDto = (
+  data: SecuritySettingsFormValues
+): SecuritySettingsDto => ({
+  ...data,
+  recaptchaSiteKey: data.recaptchaSiteKey?.trim() || null,
+  recaptchaSecretKey: data.recaptchaSecretKey?.trim() || null,
+  hCaptchaSiteKey: data.hCaptchaSiteKey?.trim() || null,
+  hCaptchaSecretKey: data.hCaptchaSecretKey?.trim() || null,
+  termsOfServiceUrl: data.termsOfServiceUrl?.trim() || null,
+  privacyPolicyUrl: data.privacyPolicyUrl?.trim() || null,
+});
 
 export default function SecuritySettingsPage() {
   const [activeTab, setActiveTab] = useState('password');
@@ -65,20 +139,9 @@ export default function SecuritySettingsPage() {
   const queryClient = useQueryClient();
 
   // Fetch current settings
-  const { data: settings, isLoading, error } = useQuery({
+  const { data: settings, isLoading } = useQuery({
     queryKey: ['securitySettings'],
-    queryFn: () => {
-      console.log('🔄 useQuery: Calling settingsService.getSecuritySettings()');
-      return settingsService.getSecuritySettings();
-    },
-  });
-  
-  console.log('🔍 Query state:', { 
-    hasSettings: !!settings, 
-    isLoading, 
-    hasError: !!error, 
-    errorMessage: error?.message,
-    settingsData: settings 
+    queryFn: () => settingsService.getSecuritySettings(),
   });
 
   const {
@@ -88,172 +151,23 @@ export default function SecuritySettingsPage() {
     watch,
     setValue,
     reset,
-  } = useForm<SecuritySettingsDto>({
-    resolver: zodResolver(
-      z.object({
-        ...passwordPolicySchema.shape,
-        ...sessionSchema.shape,
-        ...lockoutSchema.shape,
-        ...recaptchaSchema.shape,
-        ...legalSchema.shape,
-      })
-    ),
-    defaultValues: {
-      // Password Policy
-      passwordMinLength: 8,
-      passwordRequireUppercase: true,
-      passwordRequireLowercase: true,
-      passwordRequireDigits: true,
-      passwordRequireSpecialChars: true,
-      passwordMaxAge: 90,
-      passwordPreventReuse: 5,
-
-      // Session Settings
-      sessionTimeoutMinutes: 30,
-      jwtTokenLifetimeMinutes: 60,
-      preventConcurrentLogin: 'Disabled' as const,
-
-      // Lockout Settings
-      maxFailedLoginAttempts: 5,
-      accountLockoutMinutes: 30,
-      rateLimitLoginMaxAttempts: 5,
-      rateLimitLoginWindowMinutes: 15,
-      rateLimitLoginBlockDurationMinutes: 30,
-
-      // CAPTCHA Settings
-      captchaEnabled: false,
-      captchaProvider: 'recaptcha' as const,
-      recaptchaSiteKey: null,
-      recaptchaSecretKey: null,
-      hCaptchaSiteKey: null,
-      hCaptchaSecretKey: null,
-
-      // Legal URLs
-      termsOfServiceUrl: null,
-      privacyPolicyUrl: null,
-    },
+  } = useForm<SecuritySettingsFormValues>({
+    resolver: zodResolver(securitySettingsSchema),
+    defaultValues: defaultSecuritySettingsFormValues(),
   });
 
   // Update form when settings are loaded
   useEffect(() => {
     if (!settings) {
-      console.log('❌ No settings data available yet');
       return;
     }
 
-    console.log('\n🎯 Form reset triggered - processing settings data');
-    console.log('📊 Raw settings from API:', settings);
-    
-    // Prepare clean data for form reset
-    const cleanSettings = {
-      // Password Policy
-      passwordMinLength: settings.passwordMinLength || 8,
-      passwordRequireUppercase: Boolean(settings.passwordRequireUppercase),
-      passwordRequireLowercase: Boolean(settings.passwordRequireLowercase),
-      passwordRequireDigits: Boolean(settings.passwordRequireDigits),
-      passwordRequireSpecialChars: Boolean(settings.passwordRequireSpecialChars),
-      passwordMaxAge: settings.passwordMaxAge,
-      passwordPreventReuse: settings.passwordPreventReuse,
-      
-      // Session Settings
-      sessionTimeoutMinutes: settings.sessionTimeoutMinutes || 30,
-      jwtTokenLifetimeMinutes: settings.jwtTokenLifetimeMinutes || 60,
-      preventConcurrentLogin: settings.preventConcurrentLogin || 'Disabled',
-      
-      // Lockout Settings
-      maxFailedLoginAttempts: settings.maxFailedLoginAttempts || 5,
-      accountLockoutMinutes: settings.accountLockoutMinutes || 30,
-      rateLimitLoginMaxAttempts: settings.rateLimitLoginMaxAttempts || 5,
-      rateLimitLoginWindowMinutes: settings.rateLimitLoginWindowMinutes || 15,
-      rateLimitLoginBlockDurationMinutes: settings.rateLimitLoginBlockDurationMinutes || 30,
-      
-      // CAPTCHA Settings
-      captchaEnabled: Boolean(settings.captchaEnabled),
-      captchaProvider: settings.captchaProvider || 'recaptcha',
-      recaptchaSiteKey: settings.recaptchaSiteKey || '',
-      recaptchaSecretKey: settings.recaptchaSecretKey || '',
-      hCaptchaSiteKey: settings.hCaptchaSiteKey || '',
-      hCaptchaSecretKey: settings.hCaptchaSecretKey || '',
-      
-      // Legal URLs
-      termsOfServiceUrl: settings.termsOfServiceUrl || '',
-      privacyPolicyUrl: settings.privacyPolicyUrl || '',
-    } as SecuritySettingsDto;
-    
-    console.log('🧹 Clean settings for form:', cleanSettings);
-    console.log('🔄 Calling form reset...');
-    
-    // Reset form with clean data
-    reset(cleanSettings);
-    
-    // Verify form was updated
-    setTimeout(() => {
-      const currentFormValues = watch();
-      console.log('\n✅ Form reset complete - current values:');
-      console.log('🔐 Password fields:', {
-        passwordMinLength: currentFormValues.passwordMinLength,
-        passwordRequireUppercase: currentFormValues.passwordRequireUppercase,
-        passwordMaxAge: currentFormValues.passwordMaxAge,
-      });
-      console.log('⏱️ Session fields:', {
-        sessionTimeoutMinutes: currentFormValues.sessionTimeoutMinutes,
-        preventConcurrentLogin: currentFormValues.preventConcurrentLogin,
-      });
-      console.log('🚫 Lockout fields:', {
-        maxFailedLoginAttempts: currentFormValues.maxFailedLoginAttempts,
-        accountLockoutMinutes: currentFormValues.accountLockoutMinutes,
-      });
-      console.log('🤖 CAPTCHA fields:', {
-        captchaEnabled: currentFormValues.captchaEnabled,
-        captchaProvider: currentFormValues.captchaProvider,
-        recaptchaSiteKey: currentFormValues.recaptchaSiteKey,
-      });
-      console.log('📋 Legal fields:', {
-        termsOfServiceUrl: currentFormValues.termsOfServiceUrl,
-        privacyPolicyUrl: currentFormValues.privacyPolicyUrl,
-      });
-    }, 200);
-  }, [settings, reset, watch]);
-  
-  // Debug: Log current form values to see what's actually in the form
-  const currentValues = watch();
-  
-  // Log current form values every few seconds to see if they're updating
-  useEffect(() => {
-    const interval = setInterval(() => {
-      console.log('\n🔍 CURRENT FORM VALUES SNAPSHOT:');
-      console.log('📊 All form data:', currentValues);
-      console.log('🔐 Password tab values:', {
-        passwordMinLength: currentValues.passwordMinLength,
-        passwordRequireUppercase: currentValues.passwordRequireUppercase,
-        passwordMaxAge: currentValues.passwordMaxAge,
-      });
-      console.log('🚫 Lockout tab values:', {
-        maxFailedLoginAttempts: currentValues.maxFailedLoginAttempts,
-        accountLockoutMinutes: currentValues.accountLockoutMinutes,
-      });
-      console.log('🤖 reCAPTCHA tab values:', {
-        captchaEnabled: currentValues.captchaEnabled,
-        captchaProvider: currentValues.captchaProvider,
-        recaptchaSiteKey: currentValues.recaptchaSiteKey,
-      });
-      console.log('📋 Legal tab values:', {
-        termsOfServiceUrl: currentValues.termsOfServiceUrl,
-        privacyPolicyUrl: currentValues.privacyPolicyUrl,
-      });
-    }, 5000); // Log every 5 seconds
-    
-    return () => clearInterval(interval);
-  }, [currentValues]);
+    reset(toSecuritySettingsFormValues(settings));
+  }, [settings, reset]);
 
   const updateMutation = useMutation({
-    mutationFn: (data: SecuritySettingsDto) => {
-      console.log('🚀 Submitting security settings:', data);
-      return settingsService.updateSecuritySettings(data);
-    },
-    onSuccess: (updatedData) => {
-      console.log('✅ Settings saved successfully:', updatedData);
-      
+    mutationFn: (data: SecuritySettingsDto) => settingsService.updateSecuritySettings(data),
+    onSuccess: () => {
       // Invalidate and refetch the security settings query
       queryClient.invalidateQueries({ queryKey: ['securitySettings'] });
       
@@ -264,7 +178,6 @@ export default function SecuritySettingsPage() {
       });
     },
     onError: (error: any) => {
-      console.error('❌ Failed to save settings:', error);
       toast({
         title: 'Error',
         description: error.message || 'Failed to update security settings.',
@@ -273,23 +186,8 @@ export default function SecuritySettingsPage() {
     },
   });
 
-  const onSubmit = (data: SecuritySettingsDto) => {
-    console.log('📤 Form submission - raw data:', data);
-    
-    // Clean up form data before sending to API
-    const cleanData: SecuritySettingsDto = {
-      ...data,
-      // Convert empty strings to null for optional fields
-      recaptchaSiteKey: data.recaptchaSiteKey?.trim() || null,
-      recaptchaSecretKey: data.recaptchaSecretKey?.trim() || null,
-      hCaptchaSiteKey: data.hCaptchaSiteKey?.trim() || null,
-      hCaptchaSecretKey: data.hCaptchaSecretKey?.trim() || null,
-      termsOfServiceUrl: data.termsOfServiceUrl?.trim() || null,
-      privacyPolicyUrl: data.privacyPolicyUrl?.trim() || null,
-    };
-    
-    console.log('🧹 Form submission - cleaned data:', cleanData);
-    updateMutation.mutate(cleanData);
+  const onSubmit = (data: SecuritySettingsFormValues) => {
+    updateMutation.mutate(toSecuritySettingsDto(data));
   };
 
   if (isLoading) {

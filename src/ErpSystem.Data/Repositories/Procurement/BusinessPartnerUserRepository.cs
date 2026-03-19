@@ -9,7 +9,7 @@ public class BusinessPartnerUserRepository : GenericRepository<BusinessPartnerUs
 {
     public BusinessPartnerUserRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<BusinessPartnerUser?> GetByIdAsync(Guid id)
+    public override async Task<BusinessPartnerUser?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Include(bpu => bpu.BusinessPartner)
@@ -65,13 +65,13 @@ public class BusinessPartnerUserRepository : GenericRepository<BusinessPartnerUs
         return entity;
     }
 
-    public async Task<BusinessPartnerUser> UpdateAsync(BusinessPartnerUser entity)
+    public new async Task<BusinessPartnerUser> UpdateAsync(BusinessPartnerUser entity)
     {
         _dbSet.Update(entity);
         return await Task.FromResult(entity);
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var entity = await _dbSet.FindAsync(id);
         if (entity != null)

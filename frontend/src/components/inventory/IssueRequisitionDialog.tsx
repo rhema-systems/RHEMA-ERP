@@ -35,6 +35,8 @@ interface IssueItemState {
   remainingToIssue: number;
   issuingQuantity: number;
   unitOfMeasure: string;
+  locationId?: string;
+  locationName?: string;
 }
 
 const RequisitionStatuses = [
@@ -90,7 +92,9 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
         previouslyIssued: item.issuedQuantity || 0,
         remainingToIssue: (item.approvedQuantity || item.requestedQuantity) - (item.issuedQuantity || 0),
         issuingQuantity: 0,
-        unitOfMeasure: item.unitOfMeasure
+        unitOfMeasure: item.unitOfMeasure,
+        locationId: item.locationId || detail.locationId,
+        locationName: item.locationName || detail.locationName,
       }));
       setIssueItems(items);
       setNotes('');
@@ -131,11 +135,15 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
       const dto: IssueRequisitionDto = {
         items: itemsToIssue.map(item => ({
           itemId: item.itemId,
-          issuedQuantity: item.issuingQuantity
+          issuedQuantity: item.issuingQuantity,
+          locationId: item.locationId,
         })),
         notes: notes || undefined
       };
-      await inventoryRequisitionService.issue(requisitionId!, dto);
+      if (!requisitionId) {
+        throw new Error('Requisition ID is missing');
+      }
+      await inventoryRequisitionService.issue(requisitionId, dto);
       toast({ title: 'Success', description: 'Items issued successfully' });
       onSuccess();
       onOpenChange(false);
@@ -186,6 +194,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
                   <div><span className="text-muted-foreground">Department:</span> <span className="font-medium">{requisition.departmentName}</span></div>
                   <div><span className="text-muted-foreground">Warehouse:</span> <span className="font-medium">{requisition.warehouseName}</span></div>
                   <div><span className="text-muted-foreground">Request Date:</span> <span className="font-medium">{requisition.requestDateFormatted || format(new Date(requisition.requestDate), 'dd/MM/yyyy')}</span></div>
+                  <div><span className="text-muted-foreground">Location:</span> <span className="font-medium">{requisition.locationName || 'Warehouse level'}</span></div>
                 </div>
               </CardContent>
             </Card>
@@ -205,6 +214,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
                   <TableHead className="text-center">Previously Issued</TableHead>
                   <TableHead className="text-center">Remaining</TableHead>
                   <TableHead className="text-center">Issue Qty</TableHead>
+                  <TableHead>Location</TableHead>
                   <TableHead>UoM</TableHead>
                 </TableRow>
               </TableHeader>
@@ -241,6 +251,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
                         />
                       ) : '-'}
                     </TableCell>
+                    <TableCell>{item.locationName || requisition.locationName || 'Warehouse level'}</TableCell>
                     <TableCell>{item.unitOfMeasure}</TableCell>
                   </TableRow>
                 ))}

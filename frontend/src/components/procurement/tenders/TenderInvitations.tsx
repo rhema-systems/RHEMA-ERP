@@ -31,7 +31,7 @@ export default function TenderInvitations({ formData, updateFormData, tenderId, 
 
   useEffect(() => {
     loadBusinessPartners();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [fromRequisitionId]);
 
   useEffect(() => {

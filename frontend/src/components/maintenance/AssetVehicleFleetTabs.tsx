@@ -171,7 +171,6 @@ export default function AssetVehicleFleetTabs({ vehicleAssetId }: { vehicleAsset
     };
 
     ensure();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, vehicleAssetId]);
 
   return (

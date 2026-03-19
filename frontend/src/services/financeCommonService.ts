@@ -221,7 +221,9 @@ export const currencyService = {
   },
 };
 
-export default {
+const financeCommonService = {
   paymentTerms: paymentTermService,
   currencies: currencyService,
 };
+
+export default financeCommonService;

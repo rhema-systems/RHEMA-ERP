@@ -770,8 +770,8 @@ export default function MaintenanceTypesPage() {
                       <Badge className={type.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
                         {type.isActive ? 'Active' : 'Inactive'}
                       </Badge>
-                      <Badge className={getPriorityColor(type.priority)}>
-                        {type.priority}
+                      <Badge className={getPriorityColor(type.priority ?? 'Medium')}>
+                        {type.priority ?? 'Medium'}
                       </Badge>
                       <Badge variant="secondary">{type.category}</Badge>
                     </div>

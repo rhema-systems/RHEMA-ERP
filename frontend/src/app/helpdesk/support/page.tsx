@@ -18,7 +18,7 @@ export default function HelpdeskSupportPage() {
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const { toast } = useToast();
-  const scopeParam = searchParams.get('scope');
+  const scopeParam = searchParams?.get('scope');
   const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
 
   const { data, isLoading } = useQuery({

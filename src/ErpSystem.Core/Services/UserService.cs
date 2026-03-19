@@ -9,6 +9,7 @@ public interface IUserService
 {
     Task<IEnumerable<ApplicationUser>> GetAllUsersAsync();
     Task<ApplicationUser?> GetUserByIdAsync(Guid userId);
+    Task<IEnumerable<ApplicationUser>> GetUsersByIdsAsync(IEnumerable<Guid> userIds);
     Task<ApplicationUser?> GetUserByUsernameAsync(string username);
     Task<ApplicationUser?> GetUserByEmailAsync(string email);
     Task<ApplicationUser> CreateUserAsync(ApplicationUser user, string password);
@@ -51,6 +52,25 @@ public class UserService : IUserService
             .Include(u => u.UserRoles)
             .ThenInclude(ur => ur.Role)
             .FirstOrDefaultAsync(u => u.Id == userId);
+    }
+
+    public async Task<IEnumerable<ApplicationUser>> GetUsersByIdsAsync(IEnumerable<Guid> userIds)
+    {
+        var distinctUserIds = userIds
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        if (distinctUserIds.Count == 0)
+        {
+            return [];
+        }
+
+        return await _userManager.Users
+            .Include(u => u.UserRoles)
+            .ThenInclude(ur => ur.Role)
+            .Where(u => distinctUserIds.Contains(u.Id))
+            .ToListAsync();
     }
 
     public async Task<ApplicationUser?> GetUserByUsernameAsync(string username)

@@ -249,7 +249,7 @@ export default function BidDocumentsStep({
                               ✓ {uploadedDoc.documentName}
                             </p>
                             <p className="text-xs text-gray-500">
-                              ({(uploadedDoc.fileSize / 1024).toFixed(1)} KB)
+                              ({((uploadedDoc.fileSize ?? 0) / 1024).toFixed(1)} KB)
                             </p>
                           </div>
                         )}
@@ -370,4 +370,3 @@ export default function BidDocumentsStep({
     </div>
   );
 }
-

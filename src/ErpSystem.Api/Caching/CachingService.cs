@@ -256,7 +256,7 @@ public class CachingService : ICachingService
 
             foreach (var key in keys)
             {
-                await RemoveAsync(key, cancellationToken);
+                await RemoveAsync(key.ToString(), cancellationToken);
             }
         }
         catch (Exception ex)

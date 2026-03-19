@@ -112,7 +112,7 @@ export function ThemeProvider({
     // Re-enable transitions
     if (disableTransitionOnChange && mounted) {
       // Force reflow
-      root.offsetHeight;
+      void root.offsetHeight;
       root.style.removeProperty('transition');
     }
   }, [actualTheme, attribute, disableTransitionOnChange, mounted]);

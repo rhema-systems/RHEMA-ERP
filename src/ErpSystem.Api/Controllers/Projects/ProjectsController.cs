@@ -126,6 +126,10 @@ public class ProjectsController : ControllerBase
     public async Task<ActionResult<IEnumerable<ProjectMaterialReconciliationReportItemDto>>> GetMaterialReconciliationReport([FromQuery] int take = 200, [FromQuery] string? reconciliationStatus = null)
         => await ExecuteProjectReadAsync(() => _projectService.GetMaterialReconciliationReportAsync(take, reconciliationStatus), "Error loading material reconciliation report");
 
+    [HttpGet("reports/material-cost-ledger")]
+    public async Task<ActionResult<IEnumerable<ProjectMaterialCostEntryDto>>> GetMaterialCostLedgerReport([FromQuery] Guid? projectId = null, [FromQuery] int take = 300, [FromQuery] string? sourceDocumentType = null, [FromQuery] string? postingState = null, [FromQuery] bool? isReversed = null, [FromQuery] bool? exceptionsOnly = null)
+        => await ExecuteProjectReadAsync(() => _projectService.GetMaterialCostLedgerReportAsync(projectId, take, sourceDocumentType, postingState, isReversed, exceptionsOnly), "Error loading material cost ledger report");
+
     [HttpGet("reports/procurement-reconciliation")]
     public async Task<ActionResult<IEnumerable<ProjectProcurementReconciliationReportItemDto>>> GetProcurementReconciliationReport([FromQuery] int take = 200, [FromQuery] string? reconciliationStatus = null)
         => await ExecuteProjectReadAsync(() => _projectService.GetProcurementReconciliationReportAsync(take, reconciliationStatus), "Error loading procurement reconciliation report");
@@ -194,6 +198,11 @@ public class ProjectsController : ControllerBase
 
         return Ok(await _inventoryRequisitionService.GetByProjectAsync(id));
     }
+
+    [Authorize(Policy = "InternalOnly")]
+    [HttpGet("{id:guid}/materials/cost-entries")]
+    public async Task<ActionResult<IEnumerable<ProjectMaterialCostEntryDto>>> GetProjectMaterialCostEntries(Guid id)
+        => await ExecuteProjectReadAsync(() => _projectService.GetMaterialCostEntriesAsync(id), "Error loading project material cost entries");
 
     [Authorize(Policy = "InternalOnly")]
     [HttpGet("{id:guid}/financial-control-summary")]
@@ -1077,6 +1086,23 @@ public class ProjectsController : ControllerBase
         try
         {
             return Ok(await _projectService.ApproveExternalDeliverableAsync(projectId, deliverableId, request?.Comments, _currentUserProvider.UserId));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPost("external/my-projects/{projectId:guid}/deliverables/{deliverableId:guid}/reject")]
+    public async Task<ActionResult<ProjectDeliverableDto>> RejectExternalDeliverable(Guid projectId, Guid deliverableId, [FromBody] RejectProjectRequest? request = null)
+    {
+        try
+        {
+            return Ok(await _projectService.RejectExternalDeliverableAsync(projectId, deliverableId, request?.Comments ?? request?.Reason, _currentUserProvider.UserId));
         }
         catch (UnauthorizedAccessException)
         {

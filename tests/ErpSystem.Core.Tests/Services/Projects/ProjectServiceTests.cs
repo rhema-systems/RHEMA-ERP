@@ -16,6 +16,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Projects;
+using ErpSystem.Core.Services;
 using ErpSystem.Core.Services.Projects;
 using ErpSystem.Core.Services.Workflow;
 using ErpSystem.Shared;
@@ -214,6 +215,91 @@ public class ProjectServiceTests
 
         result.SortOrder.Should().Be(1);
         project.ProgressPercent.Should().Be(50m);
+    }
+
+    [Fact]
+    public async Task GetResourceAllocationsAsync_ShouldPopulateRequirementRoutingInsights()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-2026-0201",
+            Title = "Routing",
+            Status = ProjectStatuses.Planned
+        };
+        var assignedUserId = Guid.NewGuid();
+        var backupUserId = Guid.NewGuid();
+        var scheduleSkillId = Guid.NewGuid();
+        var certificationSkillId = Guid.NewGuid();
+
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.Projects.Add(project);
+        fixture.Employees.Add(new Employee { Id = assignedUserId, TenantId = tenantId, FirstName = "Alex", LastName = "Assigned", EmployeeNumber = "EMP-001" });
+        fixture.Employees.Add(new Employee { Id = backupUserId, TenantId = tenantId, FirstName = "Bailey", LastName = "Backup", EmployeeNumber = "EMP-002" });
+        fixture.Skills.Add(new Skill { Id = scheduleSkillId, TenantId = tenantId, Name = "Primavera P6" });
+        fixture.Skills.Add(new Skill { Id = certificationSkillId, TenantId = tenantId, Name = "PMP" });
+        fixture.EmployeeSkills.Add(new EmployeeSkill
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            EmployeeId = assignedUserId,
+            SkillId = scheduleSkillId,
+            IsVerified = true
+        });
+        fixture.EmployeeSkills.Add(new EmployeeSkill
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            EmployeeId = backupUserId,
+            SkillId = scheduleSkillId,
+            IsVerified = true
+        });
+        fixture.EmployeeSkills.Add(new EmployeeSkill
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            EmployeeId = backupUserId,
+            SkillId = certificationSkillId,
+            IsVerified = true,
+            IsCertified = true,
+            CertificationDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-30)),
+            CertificationExpiryDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(180))
+        });
+        fixture.ResourceAllocations.Add(new ProjectResourceAllocation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            UserId = assignedUserId,
+            AllocationRole = "Planner",
+            AllocationType = "Hours",
+            AllocationValue = 40m,
+            PlannedHours = 40m,
+            StartDate = DateTime.UtcNow.Date,
+            EndDate = DateTime.UtcNow.Date.AddDays(10),
+            BookingType = "Soft",
+            Status = "Requested",
+            RequiredSkillsJson = "[\"Primavera P6\"]",
+            RequiredCertificationsJson = "[\"PMP\"]",
+            RoutingPolicy = "CertifiedFirst"
+        });
+
+        var service = fixture.CreateService();
+
+        var result = (await service.GetResourceAllocationsAsync(project.Id)).ToList();
+
+        result.Should().ContainSingle();
+        result[0].RequiredSkills.Should().ContainSingle("Primavera P6");
+        result[0].RequiredCertifications.Should().ContainSingle("PMP");
+        result[0].MissingCertifications.Should().ContainSingle("PMP");
+        result[0].QualificationRisk.Should().Be("Critical");
+        result[0].QualificationMatchPercent.Should().Be(50m);
+        result[0].RecommendedUserId.Should().Be(backupUserId);
+        result[0].RecommendedUserDisplayName.Should().Contain("Bailey");
+        result[0].RoutingRecommendation.Should().Contain("CertifiedFirst");
     }
 
     [Fact]
@@ -1159,7 +1245,7 @@ public class ProjectServiceTests
         var result = await service.GetFinancialControlSummaryAsync(projectId);
 
         result.ProjectId.Should().Be(projectId);
-        result.ActualCost.Should().Be(25m);
+        result.BudgetBaseline.Should().Be(100m);
     }
 
     [Fact]
@@ -1186,6 +1272,192 @@ public class ProjectServiceTests
 
         await FluentActions.Invoking(() => service.GetFinancialControlSummaryAsync(projectId))
             .Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    [Fact]
+    public async Task AddResourceAllocationAsync_ShouldAllowExecutionProjectMember()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var assignedUserId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.SetRoles();
+        fixture.Projects.Add(new Project
+        {
+            Id = projectId,
+            TenantId = tenantId,
+            ProjectCode = "PRJ-EXEC-ALLOW",
+            Title = "Execution Access Project",
+            CreatedById = Guid.NewGuid(),
+            ProjectManagerId = Guid.NewGuid(),
+            SponsorId = Guid.NewGuid()
+        });
+        fixture.Members.Add(new ProjectMember
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = projectId,
+            UserId = userId,
+            Role = "TeamMember",
+            IsActive = true,
+            JoinedAt = DateTime.UtcNow
+        });
+        fixture.Employees.Add(new Employee
+        {
+            Id = assignedUserId,
+            TenantId = tenantId,
+            FirstName = "Taylor",
+            LastName = "Resource",
+            EmployeeNumber = "EMP-EXEC-1"
+        });
+
+        var service = fixture.CreateService();
+
+        var result = await service.AddResourceAllocationAsync(projectId, new CreateProjectResourceAllocationDto
+        {
+            UserId = assignedUserId,
+            AllocationRole = "Engineer",
+            AllocationType = "Hours",
+            AllocationValue = 24m,
+            PlannedHours = 24m,
+            StartDate = new DateTime(2026, 3, 16),
+            EndDate = new DateTime(2026, 3, 20),
+            BookingType = "Soft",
+            Status = "Requested"
+        });
+
+        result.ProjectId.Should().Be(projectId);
+        result.UserId.Should().Be(assignedUserId);
+        fixture.ResourceAllocations.Should().ContainSingle(x =>
+            x.ProjectId == projectId
+            && x.UserId == assignedUserId
+            && x.AllocationRole == "Engineer");
+    }
+
+    [Fact]
+    public async Task GetFinancialControlSummaryAsync_ShouldDenyExecutionOnlyProjectMember()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.SetRoles();
+        fixture.Projects.Add(new Project
+        {
+            Id = projectId,
+            TenantId = tenantId,
+            ProjectCode = "PRJ-FIN-SPLIT",
+            Title = "Finance Split Project",
+            CreatedById = Guid.NewGuid(),
+            ProjectManagerId = Guid.NewGuid(),
+            SponsorId = Guid.NewGuid(),
+            ApprovedBudget = 1000m
+        });
+        fixture.Members.Add(new ProjectMember
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = projectId,
+            UserId = userId,
+            Role = "TeamMember",
+            IsActive = true,
+            JoinedAt = DateTime.UtcNow
+        });
+
+        var service = fixture.CreateService();
+
+        await FluentActions.Invoking(() => service.GetFinancialControlSummaryAsync(projectId))
+            .Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    [Fact]
+    public async Task AddRiskAsync_ShouldAllowGovernanceProjectMember()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.SetRoles();
+        fixture.Projects.Add(new Project
+        {
+            Id = projectId,
+            TenantId = tenantId,
+            ProjectCode = "PRJ-GOV-ALLOW",
+            Title = "Governance Access Project",
+            CreatedById = Guid.NewGuid(),
+            ProjectManagerId = Guid.NewGuid(),
+            SponsorId = Guid.NewGuid()
+        });
+        fixture.Members.Add(new ProjectMember
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = projectId,
+            UserId = userId,
+            Role = "RiskOfficer",
+            IsActive = true,
+            JoinedAt = DateTime.UtcNow
+        });
+
+        var service = fixture.CreateService();
+
+        var result = await service.AddRiskAsync(projectId, new CreateProjectRiskDto
+        {
+            Title = "Regulatory control gap",
+            Status = "Open",
+            Category = "Compliance",
+            Probability = 4,
+            Impact = 5,
+            ResponseStrategy = "Mitigate"
+        });
+
+        result.Id.Should().NotBeEmpty();
+        result.Title.Should().Be("Regulatory control gap");
+        result.Exposure.Should().Be(20);
+        fixture.Risks.Should().ContainSingle(x =>
+            x.ProjectId == projectId
+            && x.Title == "Regulatory control gap"
+            && x.Exposure == 20);
+    }
+
+    [Fact]
+    public async Task AddRiskAsync_ShouldDenyFinanceOnlyProjectMember()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.SetRoles();
+        fixture.Projects.Add(new Project
+        {
+            Id = projectId,
+            TenantId = tenantId,
+            ProjectCode = "PRJ-GOV-DENY",
+            Title = "Governance Restricted Project",
+            CreatedById = Guid.NewGuid(),
+            ProjectManagerId = Guid.NewGuid(),
+            SponsorId = Guid.NewGuid()
+        });
+        fixture.Members.Add(new ProjectMember
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = projectId,
+            UserId = userId,
+            Role = "Finance Officer",
+            IsActive = true,
+            JoinedAt = DateTime.UtcNow
+        });
+
+        var service = fixture.CreateService();
+
+        await FluentActions.Invoking(() => service.AddRiskAsync(projectId, new CreateProjectRiskDto
+        {
+            Title = "Unauthorized governance edit",
+            Probability = 2,
+            Impact = 3
+        })).Should().ThrowAsync<UnauthorizedAccessException>();
     }
 
     [Fact]
@@ -1297,6 +1569,8 @@ public class ProjectServiceTests
         var tenantId = Guid.NewGuid();
         var userId = Guid.NewGuid();
         var projectId = Guid.NewGuid();
+        var issuedItemId = Guid.NewGuid();
+        var issueRequisitionId = Guid.NewGuid();
         var fixture = new ProjectServiceFixture(tenantId, userId);
         fixture.Projects.Add(new Project
         {
@@ -1306,9 +1580,17 @@ public class ProjectServiceTests
             Title = "Materials Reconciliation",
             Status = ProjectStatuses.InProgress
         });
+        fixture.InventoryItems.Add(new InventoryItem
+        {
+            Id = issuedItemId,
+            TenantId = tenantId,
+            ItemCode = "MAT-001",
+            Name = "Concrete Mix",
+            UnitOfMeasure = "Bag"
+        });
         fixture.InventoryRequisitions.Add(new InventoryRequisition
         {
-            Id = Guid.NewGuid(),
+            Id = issueRequisitionId,
             TenantId = tenantId,
             ProjectId = projectId,
             ProjectCode = "PRJ-MAT-001",
@@ -1321,7 +1603,7 @@ public class ProjectServiceTests
                 {
                     Id = Guid.NewGuid(),
                     TenantId = tenantId,
-                    InventoryItemId = Guid.NewGuid(),
+                    InventoryItemId = issuedItemId,
                     RequestedQuantity = 10m,
                     ApprovedQuantity = 10m,
                     IssuedQuantity = 10m,
@@ -1340,29 +1622,33 @@ public class ProjectServiceTests
             Status = RequisitionStatus.Approved,
             TotalValue = 120m
         });
-        fixture.Expenses.Add(new ProjectExpense
+        fixture.StockMovements.Add(new StockMovement
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            ProjectId = projectId,
-            UserId = userId,
-            ExpenseDate = DateTime.UtcNow.Date,
-            Category = "Materials",
-            Amount = 220m,
-            TaxAmount = 0m,
-            Status = "Approved"
+            InventoryItemId = issuedItemId,
+            MovementType = "Issue",
+            Quantity = 10m,
+            UnitCost = 30m,
+            TotalValue = 300m,
+            MovementDate = DateTime.UtcNow.Date,
+            ReferenceType = ReferenceType.Requisition,
+            ReferenceId = issueRequisitionId,
+            ReferenceNumber = "IR-MAT-001"
         });
-        fixture.Expenses.Add(new ProjectExpense
+        fixture.StockMovements.Add(new StockMovement
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            ProjectId = projectId,
-            UserId = userId,
-            ExpenseDate = DateTime.UtcNow.Date,
-            Category = "Materials",
-            Amount = -20m,
-            TaxAmount = 0m,
-            Status = "Approved"
+            InventoryItemId = issuedItemId,
+            MovementType = "Return",
+            Quantity = 1m,
+            UnitCost = 20m,
+            TotalValue = 20m,
+            MovementDate = DateTime.UtcNow.Date.AddDays(1),
+            ReferenceType = ReferenceType.Requisition,
+            ReferenceId = issueRequisitionId,
+            ReferenceNumber = "IR-MAT-001"
         });
 
         var service = fixture.CreateService();
@@ -1377,9 +1663,9 @@ public class ProjectServiceTests
         result.IssuedValue.Should().Be(300m);
         result.ReturnedValue.Should().Be(20m);
         result.NetIssuedValue.Should().Be(280m);
-        result.TrackedMaterialCost.Should().Be(200m);
-        result.MaterialCostVariance.Should().Be(80m);
-        result.ReconciliationStatus.Should().Be("UnderTracked");
+        result.TrackedMaterialCost.Should().Be(280m);
+        result.MaterialCostVariance.Should().Be(0m);
+        result.ReconciliationStatus.Should().Be("Balanced");
     }
 
     [Fact]
@@ -1392,6 +1678,8 @@ public class ProjectServiceTests
         var purchaseOrderId = Guid.NewGuid();
         var purchaseOrderItemId = Guid.NewGuid();
         var receiptId = Guid.NewGuid();
+        var inventoryRequisitionId = Guid.NewGuid();
+        var inventoryItemId = Guid.NewGuid();
         var fixture = new ProjectServiceFixture(tenantId, userId);
         fixture.Projects.Add(new Project
         {
@@ -1400,6 +1688,14 @@ public class ProjectServiceTests
             ProjectCode = "PRJ-PROC-001",
             Title = "Procurement Reconciliation",
             Status = ProjectStatuses.InProgress
+        });
+        fixture.InventoryItems.Add(new InventoryItem
+        {
+            Id = inventoryItemId,
+            TenantId = tenantId,
+            ItemCode = "PIPE-001",
+            Name = "Process Pipe",
+            UnitOfMeasure = "EA"
         });
         fixture.PurchaseRequisitions.Add(new PurchaseRequisition
         {
@@ -1427,6 +1723,7 @@ public class ProjectServiceTests
             Id = purchaseOrderItemId,
             TenantId = tenantId,
             PurchaseOrderId = purchaseOrderId,
+            InventoryItemId = inventoryItemId,
             OrderedQuantity = 8m,
             UnitPrice = 100m,
             LineTotal = 800m
@@ -1452,25 +1749,41 @@ public class ProjectServiceTests
         });
         fixture.InventoryRequisitions.Add(new InventoryRequisition
         {
-            Id = Guid.NewGuid(),
+            Id = inventoryRequisitionId,
             TenantId = tenantId,
             ProjectId = projectId,
             ProjectCode = "PRJ-PROC-001",
             RequisitionNumber = "IR-4001",
             Status = RequisitionStatus.Issued,
-            TotalValue = 450m
+            TotalValue = 450m,
+            Items =
+            {
+                new InventoryRequisitionItem
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    InventoryItemId = inventoryItemId,
+                    RequestedQuantity = 5m,
+                    ApprovedQuantity = 5m,
+                    IssuedQuantity = 5m,
+                    UnitCost = 90m,
+                    LineValue = 450m
+                }
+            }
         });
-        fixture.Expenses.Add(new ProjectExpense
+        fixture.StockMovements.Add(new StockMovement
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            ProjectId = projectId,
-            UserId = userId,
-            ExpenseDate = DateTime.UtcNow.Date,
-            Category = "Materials",
-            Amount = 300m,
-            TaxAmount = 0m,
-            Status = "Approved"
+            InventoryItemId = inventoryItemId,
+            MovementType = "Issue",
+            Quantity = 5m,
+            UnitCost = 90m,
+            TotalValue = 450m,
+            MovementDate = DateTime.UtcNow.Date,
+            ReferenceType = ReferenceType.Requisition,
+            ReferenceId = inventoryRequisitionId,
+            ReferenceNumber = "IR-4001"
         });
 
         var service = fixture.CreateService();
@@ -1486,9 +1799,9 @@ public class ProjectServiceTests
         result.PendingInspectionAmount.Should().Be(100m);
         result.IssuedInventoryValue.Should().Be(450m);
         result.NetIssuedInventoryValue.Should().Be(450m);
-        result.PostedMaterialCost.Should().Be(300m);
+        result.PostedMaterialCost.Should().Be(450m);
         result.ReceiptToIssueVariance.Should().Be(50m);
-        result.IssueToPostingVariance.Should().Be(150m);
+        result.IssueToPostingVariance.Should().Be(0m);
         result.ReconciliationStatus.Should().Be("PendingInspection");
     }
 
@@ -3124,6 +3437,142 @@ public class ProjectServiceTests
     }
 
     [Fact]
+    public async Task GetProjectByIdAsync_ShouldRecalculateActualCostForApprovedEntriesRegardlessOfStatusCasing()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-CASE-1",
+            Title = "Status Casing Project",
+            ActualCost = 0m,
+            CreatedById = userId
+        };
+
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.Projects.Add(project);
+        fixture.TimesheetEntries.Add(new ProjectTimesheetEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            UserId = userId,
+            Hours = 6m,
+            HourlyRate = 20m,
+            CostAmount = 120m,
+            Status = "approved"
+        });
+        fixture.Expenses.Add(new ProjectExpense
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            UserId = userId,
+            Category = "Travel",
+            Amount = 80m,
+            TaxAmount = 20m,
+            ExpenseDate = DateTime.UtcNow.Date,
+            Status = "APPROVED",
+            Notes = "Site visit"
+        });
+
+        var service = fixture.CreateService();
+
+        var result = await service.GetProjectByIdAsync(project.Id);
+
+        result.Should().NotBeNull();
+        result!.ActualCost.Should().Be(220m);
+        fixture.Projects.Single(x => x.Id == project.Id).ActualCost.Should().Be(220m);
+    }
+
+    [Fact]
+    public async Task GetMobileSummaryAsync_ShouldExcludeApprovedEntriesRegardlessOfStatusCasing()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var workItemId = Guid.NewGuid();
+
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.Projects.Add(new Project
+        {
+            Id = projectId,
+            TenantId = tenantId,
+            ProjectCode = "PRJ-MOB-1",
+            Title = "Mobile Summary Project"
+        });
+        fixture.WorkItems.Add(new ProjectWorkItem
+        {
+            Id = workItemId,
+            TenantId = tenantId,
+            ProjectId = projectId,
+            Title = "Assigned Task",
+            NodeType = ProjectWorkItemNodeTypes.Task,
+            AssignedToUserId = userId,
+            PlannedEndDate = DateTime.UtcNow.Date.AddDays(1)
+        });
+        fixture.TimesheetEntries.Add(new ProjectTimesheetEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = projectId,
+            WorkItemId = workItemId,
+            UserId = userId,
+            Hours = 8m,
+            HourlyRate = 25m,
+            CostAmount = 200m,
+            Status = "approved"
+        });
+        fixture.TimesheetEntries.Add(new ProjectTimesheetEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = projectId,
+            WorkItemId = workItemId,
+            UserId = userId,
+            Hours = 3m,
+            HourlyRate = 25m,
+            CostAmount = 75m,
+            Status = "Submitted"
+        });
+        fixture.Expenses.Add(new ProjectExpense
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = projectId,
+            UserId = userId,
+            Category = "Travel",
+            Amount = 50m,
+            TaxAmount = 5m,
+            ExpenseDate = DateTime.UtcNow.Date,
+            Status = "APPROVED",
+            Notes = "Approved expense"
+        });
+        fixture.Expenses.Add(new ProjectExpense
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = projectId,
+            UserId = userId,
+            Category = "Meals",
+            Amount = 40m,
+            TaxAmount = 4m,
+            ExpenseDate = DateTime.UtcNow.Date,
+            Status = "Draft",
+            Notes = "Pending expense"
+        });
+
+        var service = fixture.CreateService();
+
+        var result = await service.GetMobileSummaryAsync(userId);
+
+        result.PendingHours.Should().Be(3m);
+        result.PendingExpenses.Should().Be(44m);
+    }
+
+    [Fact]
     public async Task GetProjectByIdAsync_ShouldRejectUserWithoutProjectAccess()
     {
         var tenantId = Guid.NewGuid();
@@ -3147,6 +3596,176 @@ public class ProjectServiceTests
 
         await FluentActions.Invoking(() => service.GetProjectByIdAsync(project.Id))
             .Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    [Fact]
+    public async Task GetProjectByIdAsync_ShouldPopulateUserDisplayNamesForProjectWorkspace()
+    {
+        var tenantId = Guid.NewGuid();
+        var currentUserId = Guid.NewGuid();
+        var projectManagerId = Guid.NewGuid();
+        var sponsorId = Guid.NewGuid();
+        var memberUserId = Guid.NewGuid();
+        var assigneeUserId = Guid.NewGuid();
+        var riskOwnerId = Guid.NewGuid();
+        var approverUserId = Guid.NewGuid();
+
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-DISPLAY-1",
+            Title = "Display Names",
+            ProjectManagerId = projectManagerId,
+            SponsorId = sponsorId
+        };
+
+        var fixture = new ProjectServiceFixture(tenantId, currentUserId);
+        fixture.Projects.Add(project);
+        fixture.Users.AddRange(
+        [
+            new ApplicationUser { Id = projectManagerId, TenantId = tenantId, UserName = "pm.user", FirstName = "Project", LastName = "Manager", Email = "pm@example.com" },
+            new ApplicationUser { Id = sponsorId, TenantId = tenantId, UserName = "sponsor.user", FirstName = "Program", LastName = "Sponsor", Email = "sponsor@example.com" },
+            new ApplicationUser { Id = memberUserId, TenantId = tenantId, UserName = "member.user", FirstName = "Delivery", LastName = "Lead", Email = "member@example.com" },
+            new ApplicationUser { Id = assigneeUserId, TenantId = tenantId, UserName = "task.user", FirstName = "Task", LastName = "Owner", Email = "task@example.com" },
+            new ApplicationUser { Id = riskOwnerId, TenantId = tenantId, UserName = "risk.user", FirstName = "Risk", LastName = "Owner", Email = "risk@example.com" },
+            new ApplicationUser { Id = approverUserId, TenantId = tenantId, UserName = "approver.user", FirstName = "Approval", LastName = "User", Email = "approver@example.com" },
+        ]);
+        fixture.Members.Add(new ProjectMember
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            UserId = memberUserId,
+            Role = "Team Member",
+            IsActive = true,
+            JoinedAt = DateTime.UtcNow
+        });
+        fixture.WorkItems.Add(new ProjectWorkItem
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            NodeType = ProjectWorkItemNodeTypes.Task,
+            Title = "Assigned Task",
+            Status = "Assigned",
+            SortOrder = 0,
+            AssignedToUserId = assigneeUserId
+        });
+        fixture.ResourceAllocations.Add(new ProjectResourceAllocation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            UserId = assigneeUserId,
+            AllocationRole = "Engineer",
+            AllocationType = "Hours",
+            AllocationValue = 40m,
+            StartDate = DateTime.UtcNow.Date,
+            EndDate = DateTime.UtcNow.Date.AddDays(5),
+            RoutingPolicy = "Balanced",
+            Status = "Requested",
+            BookingType = "Soft"
+        });
+        fixture.Risks.Add(new ProjectRisk
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Title = "Named risk",
+            Status = "Open",
+            Category = "Schedule",
+            Probability = 3,
+            Impact = 4,
+            Exposure = 12,
+            OwnerId = riskOwnerId
+        });
+        fixture.QualityCheckpoints.Add(new ProjectQualityCheckpoint
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Title = "QA sign-off",
+            Status = "SignedOff",
+            RequiresQaSignOff = true,
+            QaOwnerId = assigneeUserId,
+            SignedOffById = approverUserId,
+            SignedOffAt = DateTime.UtcNow
+        });
+        fixture.TimesheetEntries.Add(new ProjectTimesheetEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            UserId = assigneeUserId,
+            EntryDate = DateTime.UtcNow.Date,
+            Hours = 8m,
+            HourlyRate = 100m,
+            CostAmount = 800m,
+            WorkType = "Standard",
+            Status = "Approved",
+            ApprovedById = approverUserId,
+            ApprovedAt = DateTime.UtcNow
+        });
+        fixture.Decisions.Add(new ProjectDecision
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Title = "Go live",
+            DecisionDate = DateTime.UtcNow.Date,
+            ApproverId = approverUserId,
+            Status = "Approved"
+        });
+        fixture.Meetings.Add(new ProjectMeetingMinute
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Title = "Weekly sync",
+            MeetingDate = DateTime.UtcNow.Date,
+            FacilitatorId = assigneeUserId,
+            MeetingType = "Status"
+        });
+        fixture.ActionItems.Add(new ProjectActionItem
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Title = "Follow up",
+            OwnerId = assigneeUserId,
+            Status = "Open",
+            Priority = "High"
+        });
+
+        var service = fixture.CreateService();
+
+        var result = await service.GetProjectByIdAsync(project.Id);
+
+        result.Should().NotBeNull();
+        fixture.UserService.Verify(
+            x => x.GetUsersByIdsAsync(It.Is<IEnumerable<Guid>>(ids =>
+                ids.Contains(projectManagerId)
+                && ids.Contains(sponsorId)
+                && ids.Contains(memberUserId)
+                && ids.Contains(assigneeUserId)
+                && ids.Contains(riskOwnerId)
+                && ids.Contains(approverUserId))),
+            Times.Once);
+        fixture.UserService.Verify(x => x.GetUserByIdAsync(It.IsAny<Guid>()), Times.Never);
+        result!.ProjectManagerDisplayName.Should().Be("Project Manager (pm.user)");
+        result.SponsorDisplayName.Should().Be("Program Sponsor (sponsor.user)");
+        result.Members.Single().UserDisplayName.Should().Be("Delivery Lead (member.user)");
+        result.WorkItems.Single().AssignedToUserDisplayName.Should().Be("Task Owner (task.user)");
+        result.ResourceAllocations.Single().UserDisplayName.Should().Be("Task Owner (task.user)");
+        result.Risks.Single().OwnerDisplayName.Should().Be("Risk Owner (risk.user)");
+        result.QualityCheckpoints.Single().QaOwnerDisplayName.Should().Be("Task Owner (task.user)");
+        result.QualityCheckpoints.Single().SignedOffByDisplayName.Should().Be("Approval User (approver.user)");
+        result.TimesheetEntries.Single().UserDisplayName.Should().Be("Task Owner (task.user)");
+        result.TimesheetEntries.Single().ApprovedByDisplayName.Should().Be("Approval User (approver.user)");
+        result.Decisions.Single().ApproverDisplayName.Should().Be("Approval User (approver.user)");
+        result.Meetings.Single().FacilitatorDisplayName.Should().Be("Task Owner (task.user)");
+        result.ActionItems.Single().OwnerDisplayName.Should().Be("Task Owner (task.user)");
     }
 
     [Fact]
@@ -3273,16 +3892,22 @@ public class ProjectServiceTests
         public List<PurchaseOrderItem> PurchaseOrderItems { get; } = new();
         public List<PurchaseOrderReceipt> PurchaseOrderReceipts { get; } = new();
         public List<PurchaseOrderReceiptItem> PurchaseOrderReceiptItems { get; } = new();
+        public List<PurchaseReturn> PurchaseReturns { get; } = new();
         public List<InventoryRequisition> InventoryRequisitions { get; } = new();
+        public List<StockMovement> StockMovements { get; } = new();
+        public List<InventoryItem> InventoryItems { get; } = new();
         public List<MaintenanceAsset> MaintenanceAssets { get; } = new();
         public List<CompanyAsset> CompanyAssets { get; } = new();
         public List<JobCard> JobCards { get; } = new();
         public List<Employee> Employees { get; } = new();
+        public List<Skill> Skills { get; } = new();
         public List<EmployeeSkill> EmployeeSkills { get; } = new();
         public List<LeaveRequest> LeaveRequests { get; } = new();
         public List<Invoice> Invoices { get; } = new();
         public List<Payment> Payments { get; } = new();
         public List<ProjectComment> Comments { get; } = new();
+        public List<ProjectMaterialCostEntry> MaterialCostEntries { get; } = new();
+        public List<ApplicationUser> Users { get; } = new();
 
         public Mock<IProjectRepository> ProjectRepository { get; } = new();
         public Mock<IProjectManagementSettingsRepository> SettingsRepository { get; } = new();
@@ -3295,6 +3920,7 @@ public class ProjectServiceTests
         public Mock<IWorkflowIntegrationService> WorkflowIntegrationService { get; } = new();
         public Mock<IWorkflowStatusAdapterRegistry> WorkflowStatusAdapterRegistry { get; } = new();
         public Mock<IWorkflowService> WorkflowService { get; } = new();
+        public Mock<IUserService> UserService { get; } = new();
         public Mock<IUnitOfWork> UnitOfWork { get; } = new();
         public Mock<ICurrentUserProvider> CurrentUserProvider { get; } = new();
         public Mock<IAppEventBus> AppEventBus { get; } = new();
@@ -3337,16 +3963,21 @@ public class ProjectServiceTests
         private readonly Mock<IGenericRepository<PurchaseOrderItem>> _purchaseOrderItemRepository;
         private readonly Mock<IGenericRepository<PurchaseOrderReceipt>> _purchaseOrderReceiptRepository;
         private readonly Mock<IGenericRepository<PurchaseOrderReceiptItem>> _purchaseOrderReceiptItemRepository;
+        private readonly Mock<IGenericRepository<PurchaseReturn>> _purchaseReturnRepository;
         private readonly Mock<IGenericRepository<InventoryRequisition>> _inventoryRequisitionRepository;
+        private readonly Mock<IGenericRepository<StockMovement>> _stockMovementRepository;
+        private readonly Mock<IGenericRepository<InventoryItem>> _inventoryItemRepository;
         private readonly Mock<IGenericRepository<MaintenanceAsset>> _maintenanceAssetRepository;
         private readonly Mock<IGenericRepository<CompanyAsset>> _companyAssetRepository;
         private readonly Mock<IGenericRepository<JobCard>> _jobCardRepository;
         private readonly Mock<IGenericRepository<Employee>> _employeeRepository;
+        private readonly Mock<IGenericRepository<Skill>> _skillRepository;
         private readonly Mock<IGenericRepository<EmployeeSkill>> _employeeSkillRepository;
         private readonly Mock<IGenericRepository<LeaveRequest>> _leaveRequestRepository;
         private readonly Mock<IGenericRepository<Invoice>> _invoiceRepository;
         private readonly Mock<IGenericRepository<Payment>> _paymentRepository;
         private readonly Mock<IGenericRepository<ProjectComment>> _commentRepository;
+        private readonly Mock<IGenericRepository<ProjectMaterialCostEntry>> _materialCostEntryRepository;
 
         public ProjectServiceFixture(Guid tenantId, Guid userId)
         {
@@ -3384,16 +4015,21 @@ public class ProjectServiceTests
             _purchaseOrderItemRepository = CreateRepository(PurchaseOrderItems);
             _purchaseOrderReceiptRepository = CreateRepository(PurchaseOrderReceipts);
             _purchaseOrderReceiptItemRepository = CreateRepository(PurchaseOrderReceiptItems);
+            _purchaseReturnRepository = CreateRepository(PurchaseReturns);
             _inventoryRequisitionRepository = CreateRepository(InventoryRequisitions);
+            _stockMovementRepository = CreateRepository(StockMovements);
+            _inventoryItemRepository = CreateRepository(InventoryItems);
             _maintenanceAssetRepository = CreateRepository(MaintenanceAssets);
             _companyAssetRepository = CreateRepository(CompanyAssets);
             _jobCardRepository = CreateRepository(JobCards);
             _employeeRepository = CreateRepository(Employees);
+            _skillRepository = CreateRepository(Skills);
             _employeeSkillRepository = CreateRepository(EmployeeSkills);
             _leaveRequestRepository = CreateRepository(LeaveRequests);
             _invoiceRepository = CreateRepository(Invoices);
             _paymentRepository = CreateRepository(Payments);
             _commentRepository = CreateRepository(Comments);
+            _materialCostEntryRepository = CreateRepository(MaterialCostEntries);
 
             ProjectRepository
                 .Setup(x => x.LookupAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int>()))
@@ -3417,6 +4053,8 @@ public class ProjectServiceTests
                     project.Milestones = Milestones.Where(x => x.ProjectId == id).OrderBy(x => x.TargetDate).ToList();
                     project.InitiationVersions = InitiationVersions.Where(x => x.ProjectId == id).OrderByDescending(x => x.VersionNumber).ToList();
                     project.ResourceAllocations = ResourceAllocations.Where(x => x.ProjectId == id).OrderBy(x => x.StartDate).ToList();
+                    project.Risks = Risks.Where(x => x.ProjectId == id).OrderByDescending(x => x.Exposure).ToList();
+                    project.Issues = Issues.Where(x => x.ProjectId == id).OrderBy(x => x.TargetResolutionDate).ToList();
                     project.QualityCheckpoints = QualityCheckpoints.Where(x => x.ProjectId == id).OrderBy(x => x.DueDate).ToList();
                     project.NonConformances = NonConformances.Where(x => x.ProjectId == id).OrderByDescending(x => x.ReportedAt).ToList();
                     project.BillingSchedules = BillingSchedules.Where(x => x.ProjectId == id).OrderBy(x => x.BillingDate).ToList();
@@ -3425,6 +4063,9 @@ public class ProjectServiceTests
                     project.Baselines = Baselines.Where(x => x.ProjectId == id).OrderByDescending(x => x.CreatedOn).ToList();
                     project.TimesheetEntries = TimesheetEntries.Where(x => x.ProjectId == id).OrderByDescending(x => x.EntryDate).ToList();
                     project.Expenses = Expenses.Where(x => x.ProjectId == id).OrderByDescending(x => x.ExpenseDate).ToList();
+                    project.Decisions = Decisions.Where(x => x.ProjectId == id).OrderByDescending(x => x.DecisionDate).ToList();
+                    project.Meetings = Meetings.Where(x => x.ProjectId == id).OrderByDescending(x => x.MeetingDate).ToList();
+                    project.ActionItems = ActionItems.Where(x => x.ProjectId == id).OrderBy(x => x.DueDate).ToList();
                     project.RevenueRecognitions = RevenueRecognitions.Where(x => x.ProjectId == id).OrderByDescending(x => x.RecognitionPeriod).ToList();
                     project.AssetLinks = AssetLinks.Where(x => x.ProjectId == id).ToList();
                     project.ExternalAccessPolicies = ExternalAccessPolicies.Where(x => x.ProjectId == id).ToList();
@@ -3477,6 +4118,19 @@ public class ProjectServiceTests
                         Status = WorkflowInstanceStatus.InProgress
                     },
                     WorkflowOutcome.Pending));
+            UserService
+                .Setup(x => x.GetUserByIdAsync(It.IsAny<Guid>()))
+                .ReturnsAsync((Guid id) => Users.SingleOrDefault(x => x.Id == id));
+            UserService
+                .Setup(x => x.GetUsersByIdsAsync(It.IsAny<IEnumerable<Guid>>()))
+                .ReturnsAsync((IEnumerable<Guid> ids) =>
+                {
+                    var lookup = ids
+                        .Where(id => id != Guid.Empty)
+                        .Distinct()
+                        .ToHashSet();
+                    return Users.Where(user => lookup.Contains(user.Id)).ToList();
+                });
 
             UnitOfWork.Setup(x => x.Repository<Project>()).Returns(_projectEntityRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectMember>()).Returns(_memberRepository.Object);
@@ -3512,16 +4166,21 @@ public class ProjectServiceTests
             UnitOfWork.Setup(x => x.Repository<PurchaseOrderItem>()).Returns(_purchaseOrderItemRepository.Object);
             UnitOfWork.Setup(x => x.Repository<PurchaseOrderReceipt>()).Returns(_purchaseOrderReceiptRepository.Object);
             UnitOfWork.Setup(x => x.Repository<PurchaseOrderReceiptItem>()).Returns(_purchaseOrderReceiptItemRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<PurchaseReturn>()).Returns(_purchaseReturnRepository.Object);
             UnitOfWork.Setup(x => x.Repository<InventoryRequisition>()).Returns(_inventoryRequisitionRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<StockMovement>()).Returns(_stockMovementRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<InventoryItem>()).Returns(_inventoryItemRepository.Object);
             UnitOfWork.Setup(x => x.Repository<MaintenanceAsset>()).Returns(_maintenanceAssetRepository.Object);
             UnitOfWork.Setup(x => x.Repository<CompanyAsset>()).Returns(_companyAssetRepository.Object);
             UnitOfWork.Setup(x => x.Repository<JobCard>()).Returns(_jobCardRepository.Object);
             UnitOfWork.Setup(x => x.Repository<Employee>()).Returns(_employeeRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<Skill>()).Returns(_skillRepository.Object);
             UnitOfWork.Setup(x => x.Repository<EmployeeSkill>()).Returns(_employeeSkillRepository.Object);
             UnitOfWork.Setup(x => x.Repository<LeaveRequest>()).Returns(_leaveRequestRepository.Object);
             UnitOfWork.Setup(x => x.Repository<Invoice>()).Returns(_invoiceRepository.Object);
             UnitOfWork.Setup(x => x.Repository<Payment>()).Returns(_paymentRepository.Object);
             UnitOfWork.Setup(x => x.Repository<ProjectComment>()).Returns(_commentRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectMaterialCostEntry>()).Returns(_materialCostEntryRepository.Object);
             UnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
             AppEventBus
                 .Setup(x => x.PublishAsync(It.IsAny<EntityActivityEvent>(), It.IsAny<CancellationToken>()))
@@ -3548,6 +4207,7 @@ public class ProjectServiceTests
                 WorkflowIntegrationService.Object,
                 WorkflowStatusAdapterRegistry.Object,
                 WorkflowService.Object,
+                UserService.Object,
                 UnitOfWork.Object,
                 CurrentUserProvider.Object,
                 AppEventBus.Object,
@@ -3589,6 +4249,14 @@ public class ProjectServiceTests
                     return entity;
                 });
             repository
+                .Setup(x => x.AddRangeAsync(It.IsAny<IEnumerable<T>>()))
+                .ReturnsAsync((IEnumerable<T> entities) =>
+                {
+                    var entityList = entities.ToList();
+                    items.AddRange(entityList);
+                    return entityList.AsEnumerable();
+                });
+            repository
                 .Setup(x => x.UpdateAsync(It.IsAny<T>()))
                 .Returns(Task.CompletedTask);
             repository
@@ -3604,6 +4272,17 @@ public class ProjectServiceTests
                 {
                     var entity = items.FirstOrDefault(x => x.Id == id);
                     if (entity != null)
+                    {
+                        items.Remove(entity);
+                    }
+
+                    return Task.CompletedTask;
+                });
+            repository
+                .Setup(x => x.HardDeleteRangeAsync(It.IsAny<IEnumerable<T>>()))
+                .Returns((IEnumerable<T> entities) =>
+                {
+                    foreach (var entity in entities.ToList())
                     {
                         items.Remove(entity);
                     }

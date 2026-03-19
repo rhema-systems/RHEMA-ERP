@@ -11,7 +11,7 @@ public class Notification : TenantEntity
     /// <summary>
     /// Unique identifier for the notification
     /// </summary>
-    public Guid Id { get; set; }
+    public new Guid Id { get; set; }
 
     /// <summary>
     /// Type of notification (e.g., "JobCardSubmitted", "GeneralAlert", etc.)

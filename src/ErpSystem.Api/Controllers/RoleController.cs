@@ -50,9 +50,9 @@ public class RoleController : ControllerBase
             var roleDtos = roles.Select(r => new RoleDto
             {
                 Id = r.Id.ToString(),
-                Name = r.Name,
-                Description = r.Description,
-                Permissions = r.RolePermissions.Select(rp => rp.Permission.Name).ToArray(),
+                Name = r.Name ?? string.Empty,
+                Description = r.Description ?? string.Empty,
+                Permissions = r.RolePermissions.Select(rp => rp.Permission.Name).Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name!).ToArray(),
                 IsSystemRole = r.IsSystemRole,
                 CreatedAt = r.CreatedAt,
                 UpdatedAt = r.UpdatedAt
@@ -85,9 +85,9 @@ public class RoleController : ControllerBase
             var roleDto = new RoleDto
             {
                 Id = role.Id.ToString(),
-                Name = role.Name,
-                Description = role.Description,
-                Permissions = role.RolePermissions.Select(rp => rp.Permission.Name).ToArray(),
+                Name = role.Name ?? string.Empty,
+                Description = role.Description ?? string.Empty,
+                Permissions = role.RolePermissions.Select(rp => rp.Permission.Name).Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name!).ToArray(),
                 IsSystemRole = role.IsSystemRole,
                 CreatedAt = role.CreatedAt,
                 UpdatedAt = role.UpdatedAt
@@ -167,9 +167,9 @@ public class RoleController : ControllerBase
             var roleDto = new RoleDto
             {
                 Id = createdRole.Id.ToString(),
-                Name = createdRole.Name,
-                Description = createdRole.Description,
-                Permissions = roleWithPermissions?.RolePermissions.Select(rp => rp.Permission.Name).ToArray() ?? Array.Empty<string>(),
+                Name = createdRole.Name ?? string.Empty,
+                Description = createdRole.Description ?? string.Empty,
+                Permissions = roleWithPermissions?.RolePermissions.Select(rp => rp.Permission.Name).Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name!).ToArray() ?? Array.Empty<string>(),
                 IsSystemRole = createdRole.IsSystemRole,
                 CreatedAt = createdRole.CreatedAt,
                 UpdatedAt = createdRole.UpdatedAt
@@ -265,9 +265,9 @@ public class RoleController : ControllerBase
             var roleDto = new RoleDto
             {
                 Id = updatedRole.Id.ToString(),
-                Name = updatedRole.Name,
-                Description = updatedRole.Description,
-                Permissions = roleWithPermissions?.RolePermissions.Select(rp => rp.Permission.Name).ToArray() ?? Array.Empty<string>(),
+                Name = updatedRole.Name ?? string.Empty,
+                Description = updatedRole.Description ?? string.Empty,
+                Permissions = roleWithPermissions?.RolePermissions.Select(rp => rp.Permission.Name).Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name!).ToArray() ?? Array.Empty<string>(),
                 IsSystemRole = updatedRole.IsSystemRole,
                 CreatedAt = updatedRole.CreatedAt,
                 UpdatedAt = updatedRole.UpdatedAt

@@ -84,6 +84,7 @@ const DEFAULT_METHODOLOGIES = ['Waterfall', 'Agile', 'Hybrid', 'Program', 'Inter
 const DEFAULT_BILLING_TYPES = ['Milestone', 'FixedPrice', 'TimeAndMaterials', 'Retainer', 'CostPlus', 'NonBillable'];
 const DEFAULT_FUNDING_SOURCES = ['Customer Contract', 'Internal Budget', 'Capex Allocation', 'Grant Funding', 'Department Allocation'];
 const DEFAULT_RESOURCE_ROLES = ['ProjectManager', 'TeamMember', 'TaskOwner', 'FinanceOfficer', 'RiskOfficer', 'ProcurementOfficer', 'ExternalContributor'];
+const DEFAULT_RESOURCE_ROUTING_POLICIES = ['Balanced', 'BestMatch', 'CertifiedFirst', 'AvailabilityFirst'];
 const DEFAULT_MEMBER_ROLES = ['Sponsor', 'Project Manager', 'Team Member', 'Task Owner', 'Finance Officer', 'External Contributor'];
 const DEFAULT_TASK_STATUSES = ['New', 'Assigned', 'InProgress', 'Blocked', 'PendingReview', 'Completed', 'Closed', 'Cancelled'];
 const DEFAULT_TASK_PRIORITIES = ['Low', 'Medium', 'High', 'Critical'];
@@ -164,7 +165,7 @@ const resolveCatalogOptions = (entries: ProjectCatalogEntryDto[], fallbackValues
 const memberInit: AddProjectMemberDto = { userId: '', role: 'Team Member' };
 const workInit: CreateProjectWorkItemDto = { nodeType: 'Task', title: '', status: 'New', percentComplete: 0, isRollupEnabled: true };
 const milestoneInit: CreateProjectMilestoneDto = { title: '', targetDate: '', status: 'Draft', requiresApproval: false };
-const resourceInit: CreateProjectResourceAllocationDto = { userId: '', allocationRole: 'TeamMember', allocationType: 'Hours', allocationValue: 40, plannedHours: 40, startDate: today(), endDate: today(), bookingType: 'Soft', status: 'Requested' };
+const resourceInit: CreateProjectResourceAllocationDto = { userId: '', allocationRole: 'TeamMember', allocationType: 'Hours', allocationValue: 40, plannedHours: 40, startDate: today(), endDate: today(), bookingType: 'Soft', status: 'Requested', requiredSkills: [], requiredCertifications: [], routingPolicy: 'Balanced' };
 const riskInit: CreateProjectRiskDto = { title: '', status: 'Open', probability: 1, impact: 1 };
 const issueInit: CreateProjectIssueDto = { title: '', status: 'Open', severity: 'Medium' };
 const qualityCheckpointInit: CreateProjectQualityCheckpointDto = { title: '', status: 'Open', requiresQaSignOff: false };
@@ -215,6 +216,7 @@ const flatten = (
 const formatDateLabel = (value?: string) => (value ? format(new Date(value), 'MMM dd, yyyy') : 'N/A');
 const boolValue = (value?: boolean) => (value ? 'true' : 'false');
 const formatCurrencyLabel = (currency: CurrencyListDto) => `${currency.code} | ${currency.name}`;
+const parseTagList = (value: string) => value.split(',').map((item) => item.trim()).filter(Boolean);
 const formatTrackerHours = (hours?: number) => {
   if (!hours || hours <= 0) return '-';
   const wholeHours = Math.floor(hours);
@@ -1042,7 +1044,7 @@ export default function ProjectDetailPage() {
 
     const leftColumnHeaders = ['WBS', 'Task', 'Status', 'Owner', 'Start', 'End', 'Dur', 'Notes'];
     const leftColumnCount = leftColumnHeaders.length;
-    const projectManagerLabel = project.projectManagerId ? userLookup.get(project.projectManagerId) || project.projectManagerId : 'Not assigned';
+    const projectManagerLabel = getResolvedUserLabel(project.projectManagerId, project.projectManagerDisplayName, 'Not assigned');
     const scheduleStart = formatDateLabel(new Date(timelineBounds.min).toISOString());
     const scheduleEnd = formatDateLabel(new Date(timelineBounds.max).toISOString());
     const totalColumns = leftColumnCount + ganttColumns.length;
@@ -1104,7 +1106,7 @@ export default function ProjectDetailPage() {
       const linkedMilestones = project.milestones.filter((milestone) => milestone.workItemId === item.id);
       const ganttCells = ganttColumns.map(() => '');
       const durationDays = Math.max(1, Math.round((end - start) / 86400000) + 1);
-      const assignedTo = item.assignedToUserId ? userLookup.get(item.assignedToUserId) || item.assignedToUserId : 'Unassigned';
+      const assignedTo = getResolvedUserLabel(item.assignedToUserId, item.assignedToUserDisplayName);
       const rowIndex = bodyStartRowIndex + rows.length - bodyStartRowIndex;
       const startOffset = Math.max(0, Math.round((start - timelineBounds.min) / 86400000));
       const endOffset = Math.min(ganttColumns.length - 1, Math.max(startOffset, Math.round((end - timelineBounds.min) / 86400000)));
@@ -1341,7 +1343,7 @@ export default function ProjectDetailPage() {
       const itemEnd = new Date(item.plannedEndDate as string).setHours(0, 0, 0, 0);
       const durationDays = Math.max(1, Math.round((itemEnd - itemStart) / 86400000) + 1);
       const linkedMilestones = project.milestones.filter((milestone) => milestone.workItemId === item.id && milestone.targetDate);
-      const itemAssignee = item.assignedToUserId ? userLookup.get(item.assignedToUserId) || item.assignedToUserId : 'Unassigned';
+      const itemAssignee = getResolvedUserLabel(item.assignedToUserId, item.assignedToUserDisplayName);
       const commentsLabel = linkedMilestones.length > 0 ? linkedMilestones.map((milestone) => `${milestone.title} (${formatDateLabel(milestone.targetDate)})`).join(', ') : item.nodeType;
 
       for (let columnIndex = 0; columnIndex < leftColumnCount; columnIndex += 1) {
@@ -1581,6 +1583,17 @@ export default function ProjectDetailPage() {
     () => new Map(users.map((user) => [user.id, formatUserLabel(user)])),
     [users],
   );
+  const getResolvedUserLabel = (userId?: string, displayName?: string, fallback: string = 'Unassigned') => {
+    if (displayName?.trim()) {
+      return displayName;
+    }
+
+    if (userId) {
+      return userLookup.get(userId) || 'Unknown user';
+    }
+
+    return fallback;
+  };
   const orderedMaterialRequisitions = useMemo(
     () =>
       [...materialRequisitions].sort((left, right) => {
@@ -1615,7 +1628,7 @@ export default function ProjectDetailPage() {
     }
   }, [externalPolicy.artifactType, flat, project]);
 
-  const act = async (fn: () => Promise<void>, message: string, reset?: () => void) => {
+  const act = async (fn: () => Promise<unknown>, message: string, reset?: () => void) => {
     try {
       await fn();
       reset?.();
@@ -1627,7 +1640,7 @@ export default function ProjectDetailPage() {
   };
 
   const submitInvoiceRequest = async (invoiceRequestId: string) => {
-    await act(() => projectService.submitInvoiceRequest(invoiceRequestId).then(() => Promise.resolve()), 'Invoice request submitted');
+    await act(() => projectService.submitInvoiceRequest(invoiceRequestId), 'Invoice request submitted');
   };
 
   const sendInvoiceRequestToFinance = async (invoiceRequest: ProjectInvoiceRequestDto) => {
@@ -1918,7 +1931,7 @@ export default function ProjectDetailPage() {
                 </div>
                 <div className="flex items-end"><Button onClick={() => act(() => projectService.addMember(project.id, member).then(() => Promise.resolve()), 'Member added', () => setMember(memberInit))}><Plus className="mr-2 h-4 w-4" />Add</Button></div>
               </div>
-              {project.members.map((x) => <div key={x.id} className="flex items-center justify-between rounded-lg border p-4"><div><div className="font-medium">{userLookup.get(x.userId) || x.userId}</div><div className="text-sm text-muted-foreground">{x.role}</div></div><Button variant="ghost" size="sm" onClick={() => act(() => projectService.removeMember(x.id), 'Member removed')}><Trash2 className="h-4 w-4" /></Button></div>)}
+              {project.members.map((x) => <div key={x.id} className="flex items-center justify-between rounded-lg border p-4"><div><div className="font-medium">{getResolvedUserLabel(x.userId, x.userDisplayName)}</div><div className="text-sm text-muted-foreground">{x.role}</div></div><Button variant="ghost" size="sm" onClick={() => act(() => projectService.removeMember(x.id), 'Member removed')}><Trash2 className="h-4 w-4" /></Button></div>)}
             </CardContent>
           </Card>
           <Card>
@@ -2019,9 +2032,9 @@ export default function ProjectDetailPage() {
                           showStepBadge
                           canSubmit={x.status === 'Draft' || x.status === 'Rejected'}
                           canApproveReject={x.status === 'PendingApproval'}
-                          onSubmit={() => projectService.submitBudgetRevision(x.id)}
-                          onApprove={(comments) => projectService.approveBudgetRevision(x.id, comments)}
-                          onReject={(comments) => projectService.rejectBudgetRevision(x.id, comments || 'Rejected', comments)}
+                          onSubmit={async () => { await projectService.submitBudgetRevision(x.id); }}
+                          onApprove={async (comments) => { await projectService.approveBudgetRevision(x.id, comments); }}
+                          onReject={async (comments) => { await projectService.rejectBudgetRevision(x.id, comments || 'Rejected', comments); }}
                           onAfterAction={async () => load()}
                           onOpenWorkflows={() => router.push('/administration/workflow')}
                         />
@@ -2249,9 +2262,12 @@ export default function ProjectDetailPage() {
                 <div className="grid gap-2"><Label>Work Item</Label><Select value={resource.workItemId || 'none'} onValueChange={(value) => setResource((p) => ({ ...p, workItemId: value === 'none' ? undefined : value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Project level</SelectItem>{flat.map((x) => <SelectItem key={x.id} value={x.id}>{x.title}</SelectItem>)}</SelectContent></Select></div>
                 <div className="grid gap-2"><Label>Start Date</Label><Input type="date" value={String(resource.startDate).slice(0, 10)} onChange={(e) => setResource((p) => ({ ...p, startDate: e.target.value }))} /></div>
                 <div className="grid gap-2"><Label>End Date</Label><Input type="date" value={String(resource.endDate).slice(0, 10)} onChange={(e) => setResource((p) => ({ ...p, endDate: e.target.value }))} /></div>
+                <div className="grid gap-2"><Label>Routing Policy</Label><Select value={resource.routingPolicy || DEFAULT_RESOURCE_ROUTING_POLICIES[0]} onValueChange={(value) => setResource((p) => ({ ...p, routingPolicy: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{DEFAULT_RESOURCE_ROUTING_POLICIES.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent></Select></div>
+                <div className="grid gap-2 md:col-span-2"><Label>Required Skills</Label><Textarea rows={2} value={(resource.requiredSkills || []).join(', ')} onChange={(e) => setResource((p) => ({ ...p, requiredSkills: parseTagList(e.target.value) }))} placeholder="e.g. Electrical Design, Primavera P6" /></div>
+                <div className="grid gap-2 md:col-span-2"><Label>Required Certifications</Label><Textarea rows={2} value={(resource.requiredCertifications || []).join(', ')} onChange={(e) => setResource((p) => ({ ...p, requiredCertifications: parseTagList(e.target.value) }))} placeholder="e.g. PMP, OSHA 30" /></div>
                 <div className="flex items-end"><Button onClick={() => act(() => projectService.addResourceAllocation(project.id, resource).then(() => Promise.resolve()), 'Resource allocation added', () => setResource(resourceInit))}><Plus className="mr-2 h-4 w-4" />Add Allocation</Button></div>
               </div>
-              {project.resourceAllocations.map((x) => <div key={x.id} className="flex items-center justify-between rounded-lg border p-4"><div><div className="font-medium">{userLookup.get(x.userId) || x.userId} | {x.allocationRole}</div><div className="text-sm text-muted-foreground">{formatDateLabel(x.startDate)} - {formatDateLabel(x.endDate)} | {x.allocationValue} {x.allocationType} | {x.capacityUtilizationPercent}%</div></div><div className="flex gap-2">{x.status !== 'Approved' && <Button variant="outline" size="sm" onClick={() => act(() => projectService.approveResourceAllocation(x.id).then(() => Promise.resolve()), 'Resource allocation approved')}>Approve</Button>}<Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteResourceAllocation(x.id), 'Resource allocation deleted')}><Trash2 className="h-4 w-4" /></Button></div></div>)}
+              {project.resourceAllocations.map((x) => <div key={x.id} className="rounded-lg border p-4"><div className="flex items-start justify-between gap-3"><div><div className="font-medium">{getResolvedUserLabel(x.userId, x.userDisplayName)} | {x.allocationRole}</div><div className="text-sm text-muted-foreground">{formatDateLabel(x.startDate)} - {formatDateLabel(x.endDate)} | {x.allocationValue} {x.allocationType} | {x.capacityUtilizationPercent}% capacity | {x.qualificationMatchPercent}% fit</div><div className="mt-2 flex flex-wrap gap-2"><Badge variant="outline">{formatCatalogLabel(x.routingPolicy)}</Badge><Badge variant={x.qualificationRisk === 'Critical' ? 'destructive' : x.qualificationRisk === 'High' ? 'secondary' : 'outline'}>{x.qualificationRisk}</Badge>{x.hasConflict ? <Badge variant="secondary">Capacity conflict</Badge> : null}{x.requiredSkills.map((item) => <Badge key={`${x.id}-skill-${item}`} variant="outline">{item}</Badge>)}{x.requiredCertifications.map((item) => <Badge key={`${x.id}-cert-${item}`} variant="outline">Cert: {item}</Badge>)}</div>{x.missingSkills.length ? <div className="mt-2 text-sm text-amber-700">Missing skills: {x.missingSkills.join(', ')}</div> : null}{x.missingCertifications.length ? <div className="mt-1 text-sm text-red-700">Missing certifications: {x.missingCertifications.join(', ')}</div> : null}{x.routingRecommendation ? <div className="mt-2 text-sm text-muted-foreground">{x.routingRecommendation}</div> : null}{x.recommendedUserDisplayName ? <div className="mt-1 text-sm text-muted-foreground">Suggested backup: {x.recommendedUserDisplayName}</div> : null}</div><div className="flex gap-2">{x.status !== 'Approved' && <Button variant="outline" size="sm" onClick={() => act(() => projectService.approveResourceAllocation(x.id).then(() => Promise.resolve()), 'Resource allocation approved')}>Approve</Button>}<Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteResourceAllocation(x.id), 'Resource allocation deleted')}><Trash2 className="h-4 w-4" /></Button></div></div></div>)}
             </CardContent>
           </Card>
         </TabsContent>
@@ -2301,9 +2317,9 @@ export default function ProjectDetailPage() {
                           showStepBadge
                           canSubmit={x.status === 'Draft' || x.status === 'Rejected'}
                           canApproveReject={x.status === 'PendingApproval'}
-                          onSubmit={() => projectService.submitDeliverable(x.id, { notes: 'Submitted from workspace' })}
-                          onApprove={(comments) => projectService.approveDeliverable(x.id, comments)}
-                          onReject={(comments) => projectService.rejectDeliverable(x.id, comments || 'Rejected from workspace')}
+                          onSubmit={async () => { await projectService.submitDeliverable(x.id, { notes: 'Submitted from workspace' }); }}
+                          onApprove={async (comments) => { await projectService.approveDeliverable(x.id, comments); }}
+                          onReject={async (comments) => { await projectService.rejectDeliverable(x.id, comments || 'Rejected from workspace'); }}
                           onAfterAction={async () => load()}
                           onOpenWorkflows={() => router.push('/administration/workflow')}
                         />
@@ -2323,6 +2339,22 @@ export default function ProjectDetailPage() {
                       </div>
                     ) : null}
                     {x.acceptanceNotes ? <div className="mt-2 text-sm text-muted-foreground">{x.acceptanceNotes}</div> : null}
+                    {x.externalReviews.length ? (
+                      <div className="mt-3 space-y-2 rounded-md border bg-muted/20 p-3">
+                        <div className="text-sm font-medium">External Review Trail</div>
+                        {x.externalReviews.map((review) => (
+                          <div key={review.id} className="rounded-md border bg-background p-3 text-sm">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="outline">{review.decision}</Badge>
+                              <span className="text-muted-foreground">{formatDateLabel(review.reviewDate)}</span>
+                              {review.statusSnapshot ? <span className="text-muted-foreground">| status {review.statusSnapshot}</span> : null}
+                            </div>
+                            {review.submittedDocumentName ? <div className="mt-1 text-muted-foreground">Evidence: {review.submittedDocumentName}</div> : null}
+                            {review.notes ? <div className="mt-1 text-muted-foreground">{review.notes}</div> : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                     {expandedDeliverableHistoryId === x.id ? (
                       <div className="mt-4">
                         <WorkflowApprovalHistoryPanel entityType="ProjectDeliverable" entityId={x.id} />
@@ -2358,7 +2390,7 @@ export default function ProjectDetailPage() {
               </div>
               <div className="space-y-3">
                 {project.timesheetEntries.length === 0 ? <div className="text-sm text-muted-foreground">No timesheet entries are available.</div> : null}
-                {project.timesheetEntries.map((x) => <div key={x.id} className="flex items-center justify-between rounded-lg border p-4"><div><div className="font-medium">{userLookup.get(x.userId) || x.userId} | {x.hours}h</div><div className="text-sm text-muted-foreground">{formatDateLabel(x.entryDate)} | {x.workType} | {x.status} | cost {x.costAmount.toLocaleString()}</div></div>{x.status !== 'Approved' ? <Button variant="outline" size="sm" onClick={() => act(() => projectService.approveTimesheet(x.id).then(() => Promise.resolve()), 'Timesheet approved')}>Approve</Button> : null}</div>)}
+                {project.timesheetEntries.map((x) => <div key={x.id} className="flex items-center justify-between rounded-lg border p-4"><div><div className="font-medium">{getResolvedUserLabel(x.userId, x.userDisplayName)} | {x.hours}h</div><div className="text-sm text-muted-foreground">{formatDateLabel(x.entryDate)} | {x.workType} | {x.status} | cost {x.costAmount.toLocaleString()}{x.approvedById ? ` | approved by ${getResolvedUserLabel(x.approvedById, x.approvedByDisplayName)}` : ''}</div></div>{x.status !== 'Approved' ? <Button variant="outline" size="sm" onClick={() => act(() => projectService.approveTimesheet(x.id).then(() => Promise.resolve()), 'Timesheet approved')}>Approve</Button> : null}</div>)}
               </div>
             </CardContent>
           </Card>
@@ -2403,7 +2435,7 @@ export default function ProjectDetailPage() {
               </div>
               <div className="space-y-3">
                 {project.expenses.length === 0 ? <div className="text-sm text-muted-foreground">No expense entries are available.</div> : null}
-                {project.expenses.map((x) => <div key={x.id} className="flex items-center justify-between rounded-lg border p-4"><div><div className="font-medium">{userLookup.get(x.userId) || x.userId} | {x.currency} {(x.amount + x.taxAmount).toLocaleString()}</div><div className="text-sm text-muted-foreground">{formatDateLabel(x.expenseDate)} | {x.category} | {x.status}</div></div>{x.status !== 'Approved' ? <Button variant="outline" size="sm" onClick={() => act(() => projectService.approveExpense(x.id).then(() => Promise.resolve()), 'Expense approved')}>Approve</Button> : null}</div>)}
+                {project.expenses.map((x) => <div key={x.id} className="flex items-center justify-between rounded-lg border p-4"><div><div className="font-medium">{getResolvedUserLabel(x.userId, x.userDisplayName)} | {x.currency} {(x.amount + x.taxAmount).toLocaleString()}</div><div className="text-sm text-muted-foreground">{formatDateLabel(x.expenseDate)} | {x.category} | {x.status}{x.approvedById ? ` | approved by ${getResolvedUserLabel(x.approvedById, x.approvedByDisplayName)}` : ''}</div></div>{x.status !== 'Approved' ? <Button variant="outline" size="sm" onClick={() => act(() => projectService.approveExpense(x.id).then(() => Promise.resolve()), 'Expense approved')}>Approve</Button> : null}</div>)}
               </div>
             </CardContent>
           </Card>
@@ -2411,7 +2443,7 @@ export default function ProjectDetailPage() {
 
         <TabsContent value="analysis" className="space-y-6">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between"><CardTitle>Schedule Analysis</CardTitle><Button variant="outline" size="sm" onClick={() => act(() => loadAdvanced(project.id), 'Schedule analysis refreshed')}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button></CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between"><CardTitle>Schedule Analysis</CardTitle><Button variant="outline" size="sm" onClick={() => act(() => loadAnalysisData(project.id), 'Schedule analysis refreshed')}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button></CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-4">
                 <div><div className="text-sm text-muted-foreground">Dependencies</div><div className="text-2xl font-semibold">{scheduleAnalysis?.dependencyCount ?? 0}</div></div>
@@ -2508,7 +2540,7 @@ export default function ProjectDetailPage() {
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between"><CardTitle>AI Insights</CardTitle><Button variant="outline" size="sm" onClick={() => act(() => loadAdvanced(project.id), 'AI insights refreshed')}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button></CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between"><CardTitle>AI Insights</CardTitle><Button variant="outline" size="sm" onClick={() => act(() => loadAnalysisData(project.id), 'AI insights refreshed')}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button></CardHeader>
             <CardContent className="space-y-3">
               {aiInsights.map((item, index) => <div key={`${item.category}-${index}`} className="rounded-lg border p-4"><div className="flex items-center gap-2"><Badge variant="outline">{item.category}</Badge><Badge>{item.severity}</Badge></div><div className="mt-2 font-medium">{item.title}</div><div className="mt-1 text-sm text-muted-foreground">{item.recommendation}</div></div>)}
             </CardContent>
@@ -2583,7 +2615,7 @@ export default function ProjectDetailPage() {
                             ) : null}
                           </div>
                           <div className="text-sm text-muted-foreground">
-                            Warehouse {requisition.warehouseName} | Request {formatDateLabel(requisition.requestDate)} | Required {formatDateLabel(requisition.requiredDate)}
+                            Warehouse {requisition.warehouseName}{requisition.locationName ? ` | Location ${requisition.locationName}` : ''} | Request {formatDateLabel(requisition.requestDate)} | Required {formatDateLabel(requisition.requiredDate)}
                           </div>
                           <div className="text-sm text-muted-foreground">
                             Items {requisition.totalItems} | Quantity {requisition.totalQuantity} | Value {requisition.totalValue.toLocaleString()}
@@ -2655,8 +2687,8 @@ export default function ProjectDetailPage() {
               )}
             </CardContent>
           </Card>
-          <Card><CardHeader><CardTitle>Risks</CardTitle></CardHeader><CardContent className="space-y-4"><div className="grid gap-4 md:grid-cols-4"><div className="grid gap-2 md:col-span-2"><Label>Title</Label><Input value={risk.title} onChange={(e) => setRisk((p) => ({ ...p, title: e.target.value }))} /></div><div className="grid gap-2"><Label>Status</Label><Select value={risk.status || riskStatusOptions[0]} onValueChange={(value) => setRisk((p) => ({ ...p, status: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{riskStatusOptions.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent></Select></div><div className="grid gap-2"><Label>Category</Label><Select value={risk.category || riskCategoryOptions[0]} onValueChange={(value) => setRisk((p) => ({ ...p, category: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{riskCategoryOptions.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent></Select></div><div className="grid gap-2"><Label>Owner</Label><Select value={risk.ownerId || 'none'} onValueChange={(value) => setRisk((p) => ({ ...p, ownerId: value === 'none' ? undefined : value }))}><SelectTrigger><SelectValue placeholder="Select owner" /></SelectTrigger><SelectContent><SelectItem value="none">No owner</SelectItem>{activeUsers.map((user) => <SelectItem key={user.id} value={user.id}>{formatUserLabel(user)}</SelectItem>)}</SelectContent></Select></div><div className="grid gap-2"><Label>Probability</Label><Input type="number" value={risk.probability ?? 1} onChange={(e) => setRisk((p) => ({ ...p, probability: Number(e.target.value || '1') }))} /></div><div className="grid gap-2"><Label>Impact</Label><Input type="number" value={risk.impact ?? 1} onChange={(e) => setRisk((p) => ({ ...p, impact: Number(e.target.value || '1') }))} /></div><div className="grid gap-2 md:col-span-2"><Label>Response Strategy</Label><Select value={risk.responseStrategy || riskResponseStrategyOptions[0]} onValueChange={(value) => setRisk((p) => ({ ...p, responseStrategy: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{riskResponseStrategyOptions.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent></Select></div></div><div className="flex justify-end"><Button onClick={() => act(() => projectService.addRisk(project.id, risk).then(() => Promise.resolve()), 'Risk added', () => setRisk(riskInit))}><Plus className="mr-2 h-4 w-4" />Add Risk</Button></div>{project.risks.map((x) => <div key={x.id} className="flex items-center justify-between rounded-lg border p-4"><div><div className="font-medium">{x.title}</div><div className="text-sm text-muted-foreground">{x.status} | {x.category || 'General'} | Exposure {x.exposure}{x.ownerId ? ` | ${userLookup.get(x.ownerId) || x.ownerId}` : ''}</div></div><Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteRisk(x.id), 'Risk deleted')}><Trash2 className="h-4 w-4" /></Button></div>)}</CardContent></Card>
-          <Card><CardHeader><CardTitle>Issues</CardTitle></CardHeader><CardContent className="space-y-4"><div className="grid gap-4 md:grid-cols-4"><div className="grid gap-2 md:col-span-2"><Label>Title</Label><Input value={issue.title} onChange={(e) => setIssue((p) => ({ ...p, title: e.target.value }))} /></div><div className="grid gap-2"><Label>Status</Label><Select value={issue.status || issueStatusOptions[0]} onValueChange={(value) => setIssue((p) => ({ ...p, status: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{issueStatusOptions.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent></Select></div><div className="grid gap-2"><Label>Severity</Label><Select value={issue.severity || issueSeverityOptions[0]} onValueChange={(value) => setIssue((p) => ({ ...p, severity: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{issueSeverityOptions.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent></Select></div><div className="grid gap-2"><Label>Owner</Label><Select value={issue.ownerId || 'none'} onValueChange={(value) => setIssue((p) => ({ ...p, ownerId: value === 'none' ? undefined : value }))}><SelectTrigger><SelectValue placeholder="Select owner" /></SelectTrigger><SelectContent><SelectItem value="none">No owner</SelectItem>{activeUsers.map((user) => <SelectItem key={user.id} value={user.id}>{formatUserLabel(user)}</SelectItem>)}</SelectContent></Select></div></div><div className="flex justify-end"><Button onClick={() => act(() => projectService.addIssue(project.id, issue).then(() => Promise.resolve()), 'Issue added', () => setIssue(issueInit))}><Plus className="mr-2 h-4 w-4" />Add Issue</Button></div>{project.issues.map((x) => <div key={x.id} className="flex items-center justify-between rounded-lg border p-4"><div><div className="font-medium">{x.title}</div><div className="text-sm text-muted-foreground">{x.status} | {x.severity || 'Unspecified'}{x.ownerId ? ` | ${userLookup.get(x.ownerId) || x.ownerId}` : ''}</div></div><Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteIssue(x.id), 'Issue deleted')}><Trash2 className="h-4 w-4" /></Button></div>)}</CardContent></Card>
+          <Card><CardHeader><CardTitle>Risks</CardTitle></CardHeader><CardContent className="space-y-4"><div className="grid gap-4 md:grid-cols-4"><div className="grid gap-2 md:col-span-2"><Label>Title</Label><Input value={risk.title} onChange={(e) => setRisk((p) => ({ ...p, title: e.target.value }))} /></div><div className="grid gap-2"><Label>Status</Label><Select value={risk.status || riskStatusOptions[0]} onValueChange={(value) => setRisk((p) => ({ ...p, status: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{riskStatusOptions.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent></Select></div><div className="grid gap-2"><Label>Category</Label><Select value={risk.category || riskCategoryOptions[0]} onValueChange={(value) => setRisk((p) => ({ ...p, category: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{riskCategoryOptions.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent></Select></div><div className="grid gap-2"><Label>Owner</Label><Select value={risk.ownerId || 'none'} onValueChange={(value) => setRisk((p) => ({ ...p, ownerId: value === 'none' ? undefined : value }))}><SelectTrigger><SelectValue placeholder="Select owner" /></SelectTrigger><SelectContent><SelectItem value="none">No owner</SelectItem>{activeUsers.map((user) => <SelectItem key={user.id} value={user.id}>{formatUserLabel(user)}</SelectItem>)}</SelectContent></Select></div><div className="grid gap-2"><Label>Probability</Label><Input type="number" value={risk.probability ?? 1} onChange={(e) => setRisk((p) => ({ ...p, probability: Number(e.target.value || '1') }))} /></div><div className="grid gap-2"><Label>Impact</Label><Input type="number" value={risk.impact ?? 1} onChange={(e) => setRisk((p) => ({ ...p, impact: Number(e.target.value || '1') }))} /></div><div className="grid gap-2 md:col-span-2"><Label>Response Strategy</Label><Select value={risk.responseStrategy || riskResponseStrategyOptions[0]} onValueChange={(value) => setRisk((p) => ({ ...p, responseStrategy: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{riskResponseStrategyOptions.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent></Select></div></div><div className="flex justify-end"><Button onClick={() => act(() => projectService.addRisk(project.id, risk).then(() => Promise.resolve()), 'Risk added', () => setRisk(riskInit))}><Plus className="mr-2 h-4 w-4" />Add Risk</Button></div>{project.risks.map((x) => <div key={x.id} className="flex items-center justify-between rounded-lg border p-4"><div><div className="font-medium">{x.title}</div><div className="text-sm text-muted-foreground">{x.status} | {x.category || 'General'} | Exposure {x.exposure}{x.ownerId ? ` | ${getResolvedUserLabel(x.ownerId, x.ownerDisplayName)}` : ''}</div></div><Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteRisk(x.id), 'Risk deleted')}><Trash2 className="h-4 w-4" /></Button></div>)}</CardContent></Card>
+          <Card><CardHeader><CardTitle>Issues</CardTitle></CardHeader><CardContent className="space-y-4"><div className="grid gap-4 md:grid-cols-4"><div className="grid gap-2 md:col-span-2"><Label>Title</Label><Input value={issue.title} onChange={(e) => setIssue((p) => ({ ...p, title: e.target.value }))} /></div><div className="grid gap-2"><Label>Status</Label><Select value={issue.status || issueStatusOptions[0]} onValueChange={(value) => setIssue((p) => ({ ...p, status: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{issueStatusOptions.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent></Select></div><div className="grid gap-2"><Label>Severity</Label><Select value={issue.severity || issueSeverityOptions[0]} onValueChange={(value) => setIssue((p) => ({ ...p, severity: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{issueSeverityOptions.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent></Select></div><div className="grid gap-2"><Label>Owner</Label><Select value={issue.ownerId || 'none'} onValueChange={(value) => setIssue((p) => ({ ...p, ownerId: value === 'none' ? undefined : value }))}><SelectTrigger><SelectValue placeholder="Select owner" /></SelectTrigger><SelectContent><SelectItem value="none">No owner</SelectItem>{activeUsers.map((user) => <SelectItem key={user.id} value={user.id}>{formatUserLabel(user)}</SelectItem>)}</SelectContent></Select></div></div><div className="flex justify-end"><Button onClick={() => act(() => projectService.addIssue(project.id, issue).then(() => Promise.resolve()), 'Issue added', () => setIssue(issueInit))}><Plus className="mr-2 h-4 w-4" />Add Issue</Button></div>{project.issues.map((x) => <div key={x.id} className="flex items-center justify-between rounded-lg border p-4"><div><div className="font-medium">{x.title}</div><div className="text-sm text-muted-foreground">{x.status} | {x.severity || 'Unspecified'}{x.ownerId ? ` | ${getResolvedUserLabel(x.ownerId, x.ownerDisplayName)}` : ''}</div></div><Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteIssue(x.id), 'Issue deleted')}><Trash2 className="h-4 w-4" /></Button></div>)}</CardContent></Card>
           <Card>
             <CardHeader><CardTitle>Quality Checkpoints</CardTitle></CardHeader>
             <CardContent className="space-y-4">
@@ -2673,7 +2705,7 @@ export default function ProjectDetailPage() {
               <div className="flex justify-end"><Button onClick={() => act(() => projectService.addQualityCheckpoint(project.id, qualityCheckpoint).then(() => Promise.resolve()), 'Quality checkpoint added', () => setQualityCheckpoint(qualityCheckpointInit))}><Plus className="mr-2 h-4 w-4" />Add Checkpoint</Button></div>
               <div className="space-y-3">
                 {project.qualityCheckpoints.length === 0 ? <div className="text-sm text-muted-foreground">No quality checkpoints have been defined.</div> : null}
-                {project.qualityCheckpoints.map((x) => <div key={x.id} className="flex items-start justify-between rounded-lg border p-4"><div><div className="flex items-center gap-2"><div className="font-medium">{x.title}</div><Badge variant="outline">{x.status}</Badge></div><div className="text-sm text-muted-foreground">{x.dueDate ? formatDateLabel(x.dueDate) : 'No due date'}{x.qaOwnerId ? ` | ${userLookup.get(x.qaOwnerId) || x.qaOwnerId}` : ''}{x.requiresQaSignOff ? ' | sign-off required' : ''}</div>{x.description ? <div className="mt-2 text-sm text-muted-foreground">{x.description}</div> : null}{x.signedOffAt ? <div className="mt-1 text-sm text-muted-foreground">Signed off {formatDateLabel(x.signedOffAt)}{x.signOffNotes ? ` | ${x.signOffNotes}` : ''}</div> : null}</div><div className="flex gap-2">{x.requiresQaSignOff && !x.signedOffAt ? <Button size="sm" variant="outline" onClick={() => act(() => projectService.signOffQualityCheckpoint(x.id, 'Signed off from workspace'), 'Quality checkpoint signed off')}>Sign Off</Button> : null}<Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteQualityCheckpoint(x.id), 'Quality checkpoint deleted')}><Trash2 className="h-4 w-4" /></Button></div></div>)}
+                {project.qualityCheckpoints.map((x) => <div key={x.id} className="flex items-start justify-between rounded-lg border p-4"><div><div className="flex items-center gap-2"><div className="font-medium">{x.title}</div><Badge variant="outline">{x.status}</Badge></div><div className="text-sm text-muted-foreground">{x.dueDate ? formatDateLabel(x.dueDate) : 'No due date'}{x.qaOwnerId ? ` | ${getResolvedUserLabel(x.qaOwnerId, x.qaOwnerDisplayName)}` : ''}{x.requiresQaSignOff ? ' | sign-off required' : ''}</div>{x.description ? <div className="mt-2 text-sm text-muted-foreground">{x.description}</div> : null}{x.signedOffAt ? <div className="mt-1 text-sm text-muted-foreground">Signed off {formatDateLabel(x.signedOffAt)}{x.signedOffById ? ` by ${getResolvedUserLabel(x.signedOffById, x.signedOffByDisplayName)}` : ''}{x.signOffNotes ? ` | ${x.signOffNotes}` : ''}</div> : null}</div><div className="flex gap-2">{x.requiresQaSignOff && !x.signedOffAt ? <Button size="sm" variant="outline" onClick={() => act(() => projectService.signOffQualityCheckpoint(x.id, 'Signed off from workspace'), 'Quality checkpoint signed off')}>Sign Off</Button> : null}<Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteQualityCheckpoint(x.id), 'Quality checkpoint deleted')}><Trash2 className="h-4 w-4" /></Button></div></div>)}
               </div>
             </CardContent>
           </Card>
@@ -2695,7 +2727,7 @@ export default function ProjectDetailPage() {
               <div className="flex justify-end"><Button onClick={() => act(() => projectService.addNonConformance(project.id, nonConformance).then(() => Promise.resolve()), 'Non-conformance added', () => setNonConformance(nonConformanceInit))}><Plus className="mr-2 h-4 w-4" />Add Non-Conformance</Button></div>
               <div className="space-y-3">
                 {project.nonConformances.length === 0 ? <div className="text-sm text-muted-foreground">No non-conformances have been logged.</div> : null}
-                {project.nonConformances.map((x) => <div key={x.id} className="flex items-start justify-between rounded-lg border p-4"><div><div className="flex items-center gap-2"><div className="font-medium">{x.title}</div><Badge variant={x.status === 'Resolved' ? 'outline' : x.severity === 'Critical' ? 'destructive' : 'secondary'}>{x.status}</Badge></div><div className="text-sm text-muted-foreground">{x.severity} | reported {formatDateLabel(x.reportedAt)}{x.ownerId ? ` | ${userLookup.get(x.ownerId) || x.ownerId}` : ''}</div>{x.description ? <div className="mt-2 text-sm text-muted-foreground">{x.description}</div> : null}{x.correctiveAction ? <div className="mt-1 text-sm text-muted-foreground">Corrective: {x.correctiveAction}</div> : null}{x.preventiveAction ? <div className="mt-1 text-sm text-muted-foreground">Preventive: {x.preventiveAction}</div> : null}{x.resolutionNotes ? <div className="mt-1 text-sm text-muted-foreground">Resolution: {x.resolutionNotes}</div> : null}</div><div className="flex gap-2">{x.status !== 'Resolved' ? <Button size="sm" variant="outline" onClick={() => act(() => projectService.resolveNonConformance(x.id, 'Resolved from workspace'), 'Non-conformance resolved')}>Resolve</Button> : null}<Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteNonConformance(x.id), 'Non-conformance deleted')}><Trash2 className="h-4 w-4" /></Button></div></div>)}
+                {project.nonConformances.map((x) => <div key={x.id} className="flex items-start justify-between rounded-lg border p-4"><div><div className="flex items-center gap-2"><div className="font-medium">{x.title}</div><Badge variant={x.status === 'Resolved' ? 'outline' : x.severity === 'Critical' ? 'destructive' : 'secondary'}>{x.status}</Badge></div><div className="text-sm text-muted-foreground">{x.severity} | reported {formatDateLabel(x.reportedAt)}{x.ownerId ? ` | ${getResolvedUserLabel(x.ownerId, x.ownerDisplayName)}` : ''}</div>{x.description ? <div className="mt-2 text-sm text-muted-foreground">{x.description}</div> : null}{x.correctiveAction ? <div className="mt-1 text-sm text-muted-foreground">Corrective: {x.correctiveAction}</div> : null}{x.preventiveAction ? <div className="mt-1 text-sm text-muted-foreground">Preventive: {x.preventiveAction}</div> : null}{x.resolutionNotes ? <div className="mt-1 text-sm text-muted-foreground">Resolution: {x.resolutionNotes}</div> : null}</div><div className="flex gap-2">{x.status !== 'Resolved' ? <Button size="sm" variant="outline" onClick={() => act(() => projectService.resolveNonConformance(x.id, 'Resolved from workspace'), 'Non-conformance resolved')}>Resolve</Button> : null}<Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteNonConformance(x.id), 'Non-conformance deleted')}><Trash2 className="h-4 w-4" /></Button></div></div>)}
               </div>
             </CardContent>
           </Card>
@@ -2714,7 +2746,7 @@ export default function ProjectDetailPage() {
               <div className="flex justify-end"><Button onClick={() => act(() => projectService.addDecision(project.id, decision).then(() => Promise.resolve()), 'Decision logged', () => setDecision({ ...decisionInit, approverId: currentUserId || undefined }))}><Plus className="mr-2 h-4 w-4" />Add Decision</Button></div>
               <div className="space-y-3">
                 {project.decisions.length === 0 ? <div className="text-sm text-muted-foreground">No decisions have been logged yet.</div> : null}
-                {project.decisions.map((x) => <div key={x.id} className="flex items-start justify-between rounded-lg border p-4"><div><div className="flex items-center gap-2"><div className="font-medium">{x.title}</div><Badge variant="outline">{x.status}</Badge></div><div className="text-sm text-muted-foreground">{formatDateLabel(x.decisionDate)}{x.approvedAt ? ` | approved ${formatDateLabel(x.approvedAt)}` : ''}</div>{x.rationale ? <div className="mt-2 text-sm text-muted-foreground">{x.rationale}</div> : null}{x.impactSummary ? <div className="mt-1 text-sm text-muted-foreground">{x.impactSummary}</div> : null}</div><Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteDecision(x.id), 'Decision deleted')}><Trash2 className="h-4 w-4" /></Button></div>)}
+                {project.decisions.map((x) => <div key={x.id} className="flex items-start justify-between rounded-lg border p-4"><div><div className="flex items-center gap-2"><div className="font-medium">{x.title}</div><Badge variant="outline">{x.status}</Badge></div><div className="text-sm text-muted-foreground">{formatDateLabel(x.decisionDate)}{x.approverId ? ` | approver ${getResolvedUserLabel(x.approverId, x.approverDisplayName)}` : ''}{x.approvedAt ? ` | approved ${formatDateLabel(x.approvedAt)}` : ''}</div>{x.rationale ? <div className="mt-2 text-sm text-muted-foreground">{x.rationale}</div> : null}{x.impactSummary ? <div className="mt-1 text-sm text-muted-foreground">{x.impactSummary}</div> : null}</div><Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteDecision(x.id), 'Decision deleted')}><Trash2 className="h-4 w-4" /></Button></div>)}
               </div>
             </CardContent>
           </Card>
@@ -2731,7 +2763,7 @@ export default function ProjectDetailPage() {
               <div className="flex justify-end"><Button onClick={() => act(() => projectService.addMeeting(project.id, meeting).then(() => Promise.resolve()), 'Meeting logged', () => setMeeting({ ...meetingInit, facilitatorId: currentUserId || undefined }))}><Plus className="mr-2 h-4 w-4" />Add Meeting</Button></div>
               <div className="space-y-3">
                 {project.meetings.length === 0 ? <div className="text-sm text-muted-foreground">No meeting minutes have been captured yet.</div> : null}
-                {project.meetings.map((x) => <div key={x.id} className="flex items-start justify-between rounded-lg border p-4"><div><div className="flex items-center gap-2"><div className="font-medium">{x.title}</div><Badge variant="outline">{x.meetingType}</Badge></div><div className="text-sm text-muted-foreground">{formatDateLabel(x.meetingDate)}</div>{x.minutes ? <div className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap">{x.minutes}</div> : null}</div><Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteMeeting(x.id), 'Meeting deleted')}><Trash2 className="h-4 w-4" /></Button></div>)}
+                {project.meetings.map((x) => <div key={x.id} className="flex items-start justify-between rounded-lg border p-4"><div><div className="flex items-center gap-2"><div className="font-medium">{x.title}</div><Badge variant="outline">{x.meetingType}</Badge></div><div className="text-sm text-muted-foreground">{formatDateLabel(x.meetingDate)}{x.facilitatorId ? ` | facilitator ${getResolvedUserLabel(x.facilitatorId, x.facilitatorDisplayName)}` : ''}</div>{x.minutes ? <div className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap">{x.minutes}</div> : null}</div><Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteMeeting(x.id), 'Meeting deleted')}><Trash2 className="h-4 w-4" /></Button></div>)}
               </div>
             </CardContent>
           </Card>
@@ -2760,7 +2792,7 @@ export default function ProjectDetailPage() {
               <div className="flex justify-end"><Button onClick={() => act(() => projectService.addActionItem(project.id, actionItem).then(() => Promise.resolve()), 'Action item added', () => setActionItem({ ...actionItemInit, ownerId: currentUserId || undefined }))}><Plus className="mr-2 h-4 w-4" />Add Action</Button></div>
               <div className="space-y-3">
                 {project.actionItems.length === 0 ? <div className="text-sm text-muted-foreground">No action items have been captured yet.</div> : null}
-                {project.actionItems.map((x) => <div key={x.id} className="flex items-start justify-between rounded-lg border p-4"><div><div className="flex items-center gap-2"><div className="font-medium">{x.title}</div><Badge variant={x.status === 'Completed' || x.status === 'Closed' ? 'secondary' : 'outline'}>{x.status}</Badge><Badge variant="outline">{x.priority}</Badge></div><div className="text-sm text-muted-foreground">{x.meetingTitle || 'General'}{x.workItemTitle ? ` | ${x.workItemTitle}` : ''}{x.ownerId ? ` | ${userLookup.get(x.ownerId) || x.ownerId}` : ''}{x.dueDate ? ` | due ${formatDateLabel(x.dueDate)}` : ''}</div>{x.description ? <div className="mt-2 text-sm text-muted-foreground">{x.description}</div> : null}</div><Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteActionItem(x.id), 'Action item deleted')}><Trash2 className="h-4 w-4" /></Button></div>)}
+                {project.actionItems.map((x) => <div key={x.id} className="flex items-start justify-between rounded-lg border p-4"><div><div className="flex items-center gap-2"><div className="font-medium">{x.title}</div><Badge variant={x.status === 'Completed' || x.status === 'Closed' ? 'secondary' : 'outline'}>{x.status}</Badge><Badge variant="outline">{x.priority}</Badge></div><div className="text-sm text-muted-foreground">{x.meetingTitle || 'General'}{x.workItemTitle ? ` | ${x.workItemTitle}` : ''}{x.ownerId ? ` | ${getResolvedUserLabel(x.ownerId, x.ownerDisplayName)}` : ''}{x.dueDate ? ` | due ${formatDateLabel(x.dueDate)}` : ''}</div>{x.description ? <div className="mt-2 text-sm text-muted-foreground">{x.description}</div> : null}</div><Button variant="ghost" size="sm" onClick={() => act(() => projectService.deleteActionItem(x.id), 'Action item deleted')}><Trash2 className="h-4 w-4" /></Button></div>)}
               </div>
             </CardContent>
           </Card>
@@ -3281,7 +3313,7 @@ export default function ProjectDetailPage() {
                                 </div>
                             <div className="flex items-center justify-center border-r px-2">
                               {(() => {
-                                const assigneeLabel = item.assignedToUserId ? userLookup.get(item.assignedToUserId) || item.assignedToUserId : 'Unassigned';
+                                const assigneeLabel = getResolvedUserLabel(item.assignedToUserId, item.assignedToUserDisplayName);
                                 return (
                                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary" title={assigneeLabel}>
                                     {item.assignedToUserId ? getUserInitials(assigneeLabel) : '--'}

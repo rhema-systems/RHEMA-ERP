@@ -648,6 +648,225 @@ public class ProjectsControllerRouteTests
     }
 
     [Fact]
+    public async Task MaterialCostLedgerReport_ShouldReturnLedgerEntries()
+    {
+        var projectId = Guid.NewGuid();
+        var entryId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetMaterialCostLedgerReportAsync(projectId, 150, "PurchaseReceipt", "Posted", false, true))
+            .ReturnsAsync(new[]
+            {
+                new ProjectMaterialCostEntryDto
+                {
+                    Id = entryId,
+                    ProjectId = projectId,
+                    ProjectCode = "PRJ-LED-1",
+                    ProjectTitle = "Ledger Project",
+                    EntryDate = new DateTime(2026, 3, 10),
+                    EntryType = "ReceiptPosting",
+                    PostingState = "Posted",
+                    AffectsActualCost = true,
+                    IsReversed = false,
+                    SourceDocumentType = "PurchaseReceipt",
+                    SourceDocumentNumber = "PRC-1001",
+                    Amount = 420m,
+                    Currency = "USD",
+                    HasMissingSourceLink = false,
+                    HasReversalGap = true
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/reports/material-cost-ledger?projectId={projectId}&take=150&sourceDocumentType=PurchaseReceipt&postingState=Posted&isReversed=false&exceptionsOnly=true");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var report = await response.Content.ReadFromJsonAsync<List<ProjectMaterialCostEntryDto>>();
+        report.Should().NotBeNull();
+        report.Should().ContainSingle();
+        report![0].Id.Should().Be(entryId);
+        report[0].HasReversalGap.Should().BeTrue();
+        report[0].PostingState.Should().Be("Posted");
+    }
+
+    [Fact]
+    public async Task ResourceCapacityReport_ShouldReturnCapacityRows()
+    {
+        var userId = Guid.NewGuid();
+        var allocationId = Guid.NewGuid();
+        var startDate = new DateTime(2026, 3, 9);
+        var endDate = new DateTime(2026, 3, 14);
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetResourceCapacityReportAsync(startDate, endDate, userId))
+            .ReturnsAsync(new[]
+            {
+                new ProjectResourceCapacityReportItemDto
+                {
+                    UserId = userId,
+                    UserDisplayName = "Alex Planner",
+                    CapacityUtilizationPercent = 112.5m,
+                    EffectiveCapacityHours = 32m,
+                    TotalAllocatedHours = 36m,
+                    ApprovedLeaveHours = 8m,
+                    LeaveRequestCount = 1,
+                    ConflictCount = 1,
+                    QualificationRisk = "High",
+                    AllocationIds = new List<Guid> { allocationId }
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/reports/resource-capacity?startDate={startDate:O}&endDate={endDate:O}&userId={userId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var report = await response.Content.ReadFromJsonAsync<List<ProjectResourceCapacityReportItemDto>>();
+        report.Should().NotBeNull();
+        report.Should().ContainSingle();
+        report![0].CapacityUtilizationPercent.Should().Be(112.5m);
+        report[0].AllocationIds.Should().Contain(allocationId);
+    }
+
+    [Fact]
+    public async Task ResourceCapacityRecommendations_ShouldReturnRecommendations()
+    {
+        var userId = Guid.NewGuid();
+        var replacementUserId = Guid.NewGuid();
+        var startDate = new DateTime(2026, 3, 9);
+        var endDate = new DateTime(2026, 3, 14);
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetResourceCapacityRecommendationsAsync(startDate, endDate, userId))
+            .ReturnsAsync(new[]
+            {
+                new ProjectResourceCapacityRecommendationDto
+                {
+                    UserId = userId,
+                    UserDisplayName = "Casey Analyst",
+                    CapacityUtilizationPercent = 118m,
+                    EffectiveCapacityHours = 30m,
+                    SuggestedReductionHours = 6m,
+                    Severity = "Critical",
+                    Recommendation = "Shift 6h to backup analyst.",
+                    SuggestedReplacementUserId = replacementUserId,
+                    SuggestedReplacementUserDisplayName = "Jordan Backup",
+                    ProjectCodes = new List<string> { "PRJ-CAP-1" },
+                    MatchedSkills = new List<string> { "PMP" }
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/reports/resource-capacity-recommendations?startDate={startDate:O}&endDate={endDate:O}&userId={userId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var report = await response.Content.ReadFromJsonAsync<List<ProjectResourceCapacityRecommendationDto>>();
+        report.Should().NotBeNull();
+        report.Should().ContainSingle();
+        report![0].Severity.Should().Be("Critical");
+        report[0].SuggestedReplacementUserId.Should().Be(replacementUserId);
+    }
+
+    [Fact]
+    public async Task ResourceOptimizationReport_ShouldReturnSuggestions()
+    {
+        var userId = Guid.NewGuid();
+        var replacementUserId = Guid.NewGuid();
+        var startDate = new DateTime(2026, 3, 9);
+        var endDate = new DateTime(2026, 3, 14);
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetResourceOptimizationSuggestionsAsync(startDate, endDate))
+            .ReturnsAsync(new[]
+            {
+                new ProjectResourceOptimizationSuggestionDto
+                {
+                    UserId = userId,
+                    UserDisplayName = "Primary Engineer",
+                    SuggestedReplacementUserId = replacementUserId,
+                    SuggestedReplacementUserDisplayName = "Backup Engineer",
+                    Severity = "High",
+                    MatchedSkills = new List<string> { "Azure", "PowerShell" },
+                    MatchedSkillCount = 2,
+                    ReplacementVerifiedSkillCount = 4,
+                    AffectedAllocationIds = new List<Guid> { Guid.NewGuid() },
+                    Recommendation = "Move the allocation to Backup Engineer."
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/reports/resource-optimization?startDate={startDate:O}&endDate={endDate:O}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var report = await response.Content.ReadFromJsonAsync<List<ProjectResourceOptimizationSuggestionDto>>();
+        report.Should().NotBeNull();
+        report.Should().ContainSingle();
+        report![0].SuggestedReplacementUserId.Should().Be(replacementUserId);
+        report[0].MatchedSkills.Should().Contain("Azure");
+    }
+
+    [Fact]
+    public async Task BillingSummaryReport_ShouldReturnMarginSummary()
+    {
+        var projectId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetBillingSummaryReportAsync(75))
+            .ReturnsAsync(new[]
+            {
+                new ProjectBillingSummaryReportItemDto
+                {
+                    ProjectId = projectId,
+                    ProjectCode = "PRJ-BILL-1",
+                    ProjectTitle = "Billing Project",
+                    ReadyBillingScheduleCount = 1,
+                    ScheduledBillingAmount = 1500m,
+                    InvoiceRequestedAmount = 1200m,
+                    CollectedCashAmount = 800m,
+                    ActualCost = 500m,
+                    MarginAmount = 700m,
+                    MarginPercent = 58.33m
+                }
+            });
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/api/projects/reports/billing-summary?take=75");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var report = await response.Content.ReadFromJsonAsync<List<ProjectBillingSummaryReportItemDto>>();
+        report.Should().NotBeNull();
+        report.Should().ContainSingle();
+        report![0].ProjectId.Should().Be(projectId);
+        report[0].MarginPercent.Should().Be(58.33m);
+    }
+
+    [Fact]
+    public async Task MaterialCostLedgerReport_ShouldReturnForbiddenWhenServiceDeniesAccess()
+    {
+        var projectId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.GetMaterialCostLedgerReportAsync(projectId, 150, "PurchaseReceipt", "Posted", false, true))
+            .ThrowsAsync(new UnauthorizedAccessException("Forbidden"));
+
+        using var factory = CreateFactory(projectService);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/projects/reports/material-cost-ledger?projectId={projectId}&take=150&sourceDocumentType=PurchaseReceipt&postingState=Posted&isReversed=false&exceptionsOnly=true");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
     public async Task FinancialControlSummary_ShouldReturnForbiddenWhenServiceDeniesAccess()
     {
         var projectId = Guid.NewGuid();
@@ -958,6 +1177,41 @@ public class ProjectsControllerRouteTests
         deliverable!.Id.Should().Be(deliverableId);
         deliverable.Status.Should().Be("In Review");
         deliverable.AcceptanceNotes.Should().Be("Portal submission");
+    }
+
+    [Fact]
+    public async Task RejectExternalDeliverable_ShouldForwardCurrentUserAndComments()
+    {
+        var projectId = Guid.NewGuid();
+        var deliverableId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var projectService = new Mock<IProjectService>();
+        projectService
+            .Setup(service => service.RejectExternalDeliverableAsync(projectId, deliverableId, "Need updated evidence", userId))
+            .ReturnsAsync(new ProjectDeliverableDto
+            {
+                Id = deliverableId,
+                ProjectId = projectId,
+                Title = "Customer Sign-off",
+                Status = "Rejected",
+                ExternalSignOffRequired = true,
+                IsExternalVisible = true,
+                ExternalApprovalNotes = "Need updated evidence"
+            });
+
+        using var factory = CreateFactory(projectService, userId);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/projects/external/my-projects/{projectId}/deliverables/{deliverableId}/reject",
+            new { comments = "Need updated evidence" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var deliverable = await response.Content.ReadFromJsonAsync<ProjectDeliverableDto>();
+        deliverable.Should().NotBeNull();
+        deliverable!.Status.Should().Be("Rejected");
+        deliverable.ExternalApprovalNotes.Should().Be("Need updated evidence");
+        projectService.Verify(service => service.RejectExternalDeliverableAsync(projectId, deliverableId, "Need updated evidence", userId), Times.Once);
     }
 
     private static WebApplicationFactory<Program> CreateFactory(Mock<IProjectService> projectService, Guid? userId = null)

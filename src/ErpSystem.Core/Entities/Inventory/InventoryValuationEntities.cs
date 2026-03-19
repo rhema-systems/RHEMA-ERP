@@ -141,7 +141,7 @@ public class InventoryMovement : TenantEntity
     /// <summary>
     /// User who created this movement
     /// </summary>
-    public Guid? CreatedById { get; set; }
+    public new Guid? CreatedById { get; set; }
 
     /// <summary>
     /// User who approved/posted this movement
@@ -179,7 +179,7 @@ public class InventoryMovement : TenantEntity
     public virtual Warehouse Warehouse { get; set; } = null!;
     public virtual WarehouseLocation? Location { get; set; }
     public virtual InventoryLayer? CostLayer { get; set; }
-    public virtual ApplicationUser? CreatedBy { get; set; }
+    public new virtual ApplicationUser? CreatedBy { get; set; }
     public virtual ApplicationUser? PostedBy { get; set; }
     public virtual InventoryMovement? ReversedMovement { get; set; }
 }

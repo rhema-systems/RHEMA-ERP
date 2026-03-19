@@ -55,7 +55,7 @@ public class MobileWorkOrderController : ControllerBase
                     Id = wo.Id,
                     WorkOrderNumber = wo.WorkOrderNumber,
                     Title = wo.Title,
-                    Description = wo.Description,
+                    Description = wo.Description ?? string.Empty,
                     Priority = wo.Priority,
                     Status = wo.Status,
                     AssetName = wo.AssetName,
@@ -107,10 +107,10 @@ public class MobileWorkOrderController : ControllerBase
                 Id = workOrder.Id,
                 WorkOrderNumber = workOrder.WorkOrderNumber,
                 Title = workOrder.Title,
-                Description = workOrder.Description,
+                Description = workOrder.Description ?? string.Empty,
                 Priority = workOrder.Priority,
                 Status = workOrder.Status,
-                Type = workOrder.Type,
+                Type = workOrder.Type ?? string.Empty,
                 AssetId = workOrder.AssetId,
                 AssetName = workOrder.AssetName,
                 AssetNumber = workOrder.AssetNumber,
@@ -234,7 +234,7 @@ public class MobileWorkOrderController : ControllerBase
     /// Updates work order progress from mobile device
     /// </summary>
     [HttpPost("{id:guid}/update-progress")]
-    public async Task<ActionResult> UpdateProgress(Guid id, [FromBody] UpdateProgressMobileDto progressDto)
+    public ActionResult UpdateProgress(Guid id, [FromBody] UpdateProgressMobileDto progressDto)
     {
         try
         {
@@ -280,7 +280,7 @@ public class MobileWorkOrderController : ControllerBase
                     Title = wo.Title,
                     AssetName = wo.AssetName,
                     AssetLocation = "", // WorkOrderListDto does not contain AssetLocation
-                    ScheduledStartTime = wo.ScheduledStartDate?.ToString("HH:mm"),
+                    ScheduledStartTime = wo.ScheduledStartDate?.ToString("HH:mm") ?? string.Empty,
                     EstimatedDuration = $"{wo.EstimatedHours:F1}h",
                     Priority = wo.Priority,
                     Status = wo.Status,

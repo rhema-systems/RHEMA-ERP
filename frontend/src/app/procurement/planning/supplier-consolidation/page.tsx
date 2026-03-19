@@ -65,8 +65,8 @@ export default function SupplierConsolidationPage() {
       const exportData = consolidations.map(c => ({
         'Consolidation #': c.consolidationNumber, 'Title': c.title, 'Category': c.itemCategory,
         'Status': c.status, 'Strategy': c.consolidationStrategy, 'Current Suppliers': c.currentSupplierCount,
-        'Target Suppliers': c.targetSupplierCount, 'Current Spend': c.currentAnnualSpend,
-        'Projected Savings': c.projectedSavings, 'Currency': c.currency,
+        'Target Suppliers': c.targetSupplierCount, 'Current Spend': c.currentAnnualSpend ?? c.totalSpend,
+        'Projected Savings': c.projectedSavings ?? c.potentialSavings, 'Currency': c.currency,
       }));
       const ws = XLSX.utils.json_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
@@ -148,8 +148,8 @@ export default function SupplierConsolidationPage() {
                       <TableCell>{c.itemCategory}</TableCell>
                       <TableCell>{getStatusBadge(c.status)}</TableCell>
                       <TableCell><div className="flex items-center gap-2"><Users className="h-4 w-4" /><span>{c.currentSupplierCount} → {c.targetSupplierCount}</span></div></TableCell>
-                      <TableCell>{formatCurrency(c.currentAnnualSpend, c.currency)}</TableCell>
-                      <TableCell className="text-green-600 font-medium">{formatCurrency(c.projectedSavings, c.currency)}</TableCell>
+                      <TableCell>{formatCurrency(c.currentAnnualSpend ?? c.totalSpend, c.currency)}</TableCell>
+                      <TableCell className="text-green-600 font-medium">{formatCurrency(c.projectedSavings ?? c.potentialSavings, c.currency)}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
                           <Button variant="ghost" size="sm" onClick={() => handleViewDetails(c.id)} title="View"><Eye className="h-4 w-4" /></Button>
@@ -168,4 +168,3 @@ export default function SupplierConsolidationPage() {
     </div>
   );
 }
-

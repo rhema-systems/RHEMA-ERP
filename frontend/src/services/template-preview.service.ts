@@ -14,7 +14,7 @@ export interface TemplateVariable {
 }
 
 class TemplatePreviewService {
-  private sampleDataCache: Map<string, Record<string, any>> = new Map();
+  private sampleDataCache: Map<string, string> = new Map();
 
   /**
    * Generate preview data for a template with realistic sample values

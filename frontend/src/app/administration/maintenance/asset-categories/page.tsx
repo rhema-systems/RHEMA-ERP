@@ -21,7 +21,6 @@ import {
   Settings,
   Tag
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 
 // Asset categories interface
 interface AssetCategory {
@@ -47,6 +46,36 @@ interface AssetCategory {
   secondaryMaintenanceUnit?: string;
 }
 
+type MaintenanceType = 'Time' | 'Distance' | 'Usage' | 'Cycles';
+
+interface AssetCategoryFormData {
+  name: string;
+  code: string;
+  description: string;
+  parentCategory: string | null;
+  isActive: boolean;
+  autoGenerateSchedules: boolean;
+  assetType: string;
+  maintenanceScheduleType: string;
+  maintenanceType: string;
+  maintenanceFrequency: string;
+  maintenanceValue: string;
+  maintenanceUnit: string;
+  secondaryMaintenanceType: string;
+  secondaryMaintenanceFrequency: string;
+  secondaryMaintenanceValue: string;
+  secondaryMaintenanceUnit: string;
+  color: string;
+  icon: string;
+}
+
+const maintenanceDefaults: Record<MaintenanceType, { unit: string; value: string }> = {
+  Time: { unit: 'months', value: '' },
+  Distance: { unit: 'km', value: '' },
+  Usage: { unit: 'hours', value: '' },
+  Cycles: { unit: 'cycles', value: '' }
+};
+
 export default function AssetCategoriesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -60,11 +89,11 @@ export default function AssetCategoriesPage() {
   const [error, setError] = useState<string | null>(null);
   
   // Form state
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<AssetCategoryFormData>({
     name: '',
     code: '',
     description: '',
-    parentCategory: '',
+    parentCategory: null,
     isActive: true,
     autoGenerateSchedules: true,
     assetType: 'Equipment', // Default asset type
@@ -81,6 +110,14 @@ export default function AssetCategoriesPage() {
     color: '#3b82f6',
     icon: 'package'
   });
+
+  const buildHeaders = (token: string | null): Record<string, string> => ({
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  });
+
+  const getMaintenanceTypeDefaults = (type: string, fallbackUnit: string) =>
+    maintenanceDefaults[type as MaintenanceType] ?? { unit: fallbackUnit, value: '' };
 
   // Fetch asset categories from API
   const fetchAssetCategories = async () => {
@@ -102,15 +139,8 @@ export default function AssetCategoriesPage() {
       //   return;
       // }
       
-      const headers = {
-        'Content-Type': 'application/json'
-      };
-      
-      // Only add Authorization header if token exists
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      
+      const headers = buildHeaders(token);
+
       const response = await fetch('http://localhost:5000/api/maintenance/asset-categories?pageSize=1000', {
         headers
       });
@@ -152,7 +182,7 @@ export default function AssetCategoriesPage() {
       if (error instanceof TypeError && error.message.includes('fetch')) {
         setError('Unable to connect to the server. Please check if the API is running on http://localhost:5000');
       } else {
-        setError(`Failed to load asset categories: ${error.message}`);
+        setError(`Failed to load asset categories: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
       
       setAssetCategoriesData([]);
@@ -220,14 +250,8 @@ export default function AssetCategoriesPage() {
 
       console.log('Sending create request:', createDto);
 
-      const headers = {
-        'Content-Type': 'application/json'
-      };
-      
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      
+      const headers = buildHeaders(token);
+
       const response = await fetch('http://localhost:5000/api/maintenance/asset-categories', {
         method: 'POST',
         headers,
@@ -303,14 +327,8 @@ export default function AssetCategoriesPage() {
 
       console.log('Sending update request:', updateDto);
 
-      const headers = {
-        'Content-Type': 'application/json'
-      };
-      
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      
+      const headers = buildHeaders(token);
+
       const response = await fetch(`http://localhost:5000/api/maintenance/asset-categories/${selectedCategory.id}`, {
         method: 'PUT',
         headers,
@@ -341,14 +359,8 @@ export default function AssetCategoriesPage() {
 
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('authToken');
-      const headers = {
-        'Content-Type': 'application/json'
-      };
-      
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      
+      const headers = buildHeaders(token);
+
       const response = await fetch(`http://localhost:5000/api/maintenance/asset-categories/${id}`, {
         method: 'DELETE',
         headers
@@ -371,7 +383,7 @@ export default function AssetCategoriesPage() {
       name: '',
       code: '',
       description: '',
-      parentCategory: '',
+      parentCategory: null,
       isActive: true,
       autoGenerateSchedules: true,
       assetType: 'Equipment',
@@ -390,9 +402,9 @@ export default function AssetCategoriesPage() {
     setSelectedCategory(null);
   };
 
-  const getParentCategoryName = (parentId: number | null) => {
+  const getParentCategoryName = (parentId: AssetCategory['parentCategory']) => {
     if (!parentId) return 'Root Category';
-    const parent = assetCategoriesData.find(cat => cat.id === parentId);
+    const parent = assetCategoriesData.find(cat => String(cat.id) === String(parentId));
     return parent ? parent.name : 'Unknown';
   };
 
@@ -500,7 +512,7 @@ export default function AssetCategoriesPage() {
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="parent">Parent Category</Label>
-                  <Select value={formData.parentCategory || 'none'} onValueChange={(value) => setFormData({...formData, parentCategory: value === 'none' ? null : value})}>
+                  <Select value={formData.parentCategory ?? 'none'} onValueChange={(value) => setFormData({...formData, parentCategory: value === 'none' ? null : value})}>
                     <SelectTrigger>
                       <SelectValue placeholder="None (root level)" />
                     </SelectTrigger>
@@ -575,13 +587,8 @@ export default function AssetCategoriesPage() {
                   <div className="space-y-2">
                     <Label htmlFor="maintenanceType">Type</Label>
                     <Select value={formData.maintenanceType} onValueChange={(value) => {
-                      const defaults = {
-                        'Time': { unit: 'months', value: '' },
-                        'Distance': { unit: 'km', value: '' },
-                        'Usage': { unit: 'hours', value: '' },
-                        'Cycles': { unit: 'cycles', value: '' }
-                      };
-                      setFormData({...formData, maintenanceType: value, maintenanceUnit: defaults[value]?.unit || 'months', maintenanceValue: defaults[value]?.value || ''});
+                      const defaults = getMaintenanceTypeDefaults(value, 'months');
+                      setFormData({...formData, maintenanceType: value, maintenanceUnit: defaults.unit, maintenanceValue: defaults.value});
                     }}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select type" />
@@ -674,13 +681,8 @@ export default function AssetCategoriesPage() {
                     <div className="space-y-2">
                       <Label htmlFor="secondaryMaintenanceType">Type</Label>
                       <Select value={formData.secondaryMaintenanceType} onValueChange={(value) => {
-                        const defaults = {
-                          'Time': { unit: 'months', value: '' },
-                          'Distance': { unit: 'km', value: '' },
-                          'Usage': { unit: 'hours', value: '' },
-                          'Cycles': { unit: 'cycles', value: '' }
-                        };
-                        setFormData({...formData, secondaryMaintenanceType: value, secondaryMaintenanceUnit: defaults[value]?.unit || 'km', secondaryMaintenanceValue: defaults[value]?.value || ''});
+                        const defaults = getMaintenanceTypeDefaults(value, 'km');
+                        setFormData({...formData, secondaryMaintenanceType: value, secondaryMaintenanceUnit: defaults.unit, secondaryMaintenanceValue: defaults.value});
                       }}>
                         <SelectTrigger>
                           <SelectValue placeholder="Select type" />
@@ -888,7 +890,7 @@ export default function AssetCategoriesPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-2xl font-bold">
-                  {filteredData.reduce((sum, cat) => sum + cat.assetCount, 0)}
+                  {filteredData.reduce((sum, cat) => sum + (cat.assetCount ?? 0), 0)}
                 </p>
                 <p className="text-sm text-muted-foreground">Total Assets</p>
               </div>
@@ -1097,7 +1099,7 @@ export default function AssetCategoriesPage() {
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="edit-parent">Parent Category</Label>
-                <Select value={formData.parentCategory || 'none'} onValueChange={(value) => setFormData({...formData, parentCategory: value === 'none' ? null : value})}>
+                <Select value={formData.parentCategory ?? 'none'} onValueChange={(value) => setFormData({...formData, parentCategory: value === 'none' ? null : value})}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select parent (optional)" />
                   </SelectTrigger>
@@ -1172,13 +1174,8 @@ export default function AssetCategoriesPage() {
                 <div className="space-y-2">
                   <Label htmlFor="edit-maintenanceType">Type</Label>
                   <Select value={formData.maintenanceType} onValueChange={(value) => {
-                    const defaults = {
-                      'Time': { unit: 'months', value: '' },
-                      'Distance': { unit: 'km', value: '' },
-                      'Usage': { unit: 'hours', value: '' },
-                      'Cycles': { unit: 'cycles', value: '' }
-                    };
-                    setFormData({...formData, maintenanceType: value, maintenanceUnit: defaults[value]?.unit || 'months', maintenanceValue: defaults[value]?.value || ''});
+                    const defaults = getMaintenanceTypeDefaults(value, 'months');
+                    setFormData({...formData, maintenanceType: value, maintenanceUnit: defaults.unit, maintenanceValue: defaults.value});
                   }}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select type" />
@@ -1271,13 +1268,8 @@ export default function AssetCategoriesPage() {
                   <div className="space-y-2">
                     <Label htmlFor="edit-secondaryMaintenanceType">Type</Label>
                     <Select value={formData.secondaryMaintenanceType} onValueChange={(value) => {
-                      const defaults = {
-                        'Time': { unit: 'months', value: '' },
-                        'Distance': { unit: 'km', value: '' },
-                        'Usage': { unit: 'hours', value: '' },
-                        'Cycles': { unit: 'cycles', value: '' }
-                      };
-                      setFormData({...formData, secondaryMaintenanceType: value, secondaryMaintenanceUnit: defaults[value]?.unit || 'km', secondaryMaintenanceValue: defaults[value]?.value || ''});
+                      const defaults = getMaintenanceTypeDefaults(value, 'km');
+                      setFormData({...formData, secondaryMaintenanceType: value, secondaryMaintenanceUnit: defaults.unit, secondaryMaintenanceValue: defaults.value});
                     }}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select type" />

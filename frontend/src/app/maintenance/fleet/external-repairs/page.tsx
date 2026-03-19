@@ -50,7 +50,7 @@ export default function FleetExternalRepairsPage() {
   const loadVendors = React.useCallback(async () => {
     try {
       const res = await businessPartnerService.getPartners({ page: 1, pageSize: 100, partnerType: 'Supplier', status: 'Active' });
-      setVendors(res.items ?? res.data ?? []);
+      setVendors(res.items ?? []);
     } catch (e) {
       console.error(e);
       setVendors([]);
@@ -344,7 +344,7 @@ export default function FleetExternalRepairsPage() {
                   <SelectItem value="none">No vendor</SelectItem>
                   {vendors.map((v) => (
                     <SelectItem key={v.id} value={v.id}>
-                      {v.name}
+                      {v.partnerName}
                     </SelectItem>
                   ))}
                 </SelectContent>

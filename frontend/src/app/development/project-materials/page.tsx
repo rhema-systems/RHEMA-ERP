@@ -12,7 +12,7 @@ import { ReturnRequisitionDialog } from '@/components/inventory/ReturnRequisitio
 import { RequisitionDialog } from '@/components/inventory/RequisitionDialog';
 import { inventoryManagementService, type WarehouseDto } from '@/services/inventoryManagementService';
 import { inventoryRequisitionService, type InventoryRequisitionDto, RequisitionStatusMap } from '@/services/inventoryRequisitionService';
-import { projectService, type ProjectMaterialReconciliationReportItemDto, type ProjectProcurementReconciliationReportItemDto } from '@/services/projectService';
+import { projectService, type ProjectMaterialCostEntryDto, type ProjectMaterialReconciliationReportItemDto, type ProjectProcurementReconciliationReportItemDto } from '@/services/projectService';
 import { toast } from 'sonner';
 
 const normalizeStatus = (status: number | string) => {
@@ -36,9 +36,14 @@ export default function ProjectMaterialsPage() {
   const [requisitions, setRequisitions] = useState<InventoryRequisitionDto[]>([]);
   const [reconciliation, setReconciliation] = useState<ProjectMaterialReconciliationReportItemDto[]>([]);
   const [procurementReconciliation, setProcurementReconciliation] = useState<ProjectProcurementReconciliationReportItemDto[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<ProjectMaterialCostEntryDto[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [ledgerPostingFilter, setLedgerPostingFilter] = useState('all');
+  const [ledgerSourceFilter, setLedgerSourceFilter] = useState('all');
+  const [ledgerExceptionFilter, setLedgerExceptionFilter] = useState('all');
+  const [ledgerReversalFilter, setLedgerReversalFilter] = useState('all');
   const [selectedRequisitionId, setSelectedRequisitionId] = useState<string | undefined>();
   const [dialogMode, setDialogMode] = useState<'create' | 'edit' | 'view'>('view');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -50,11 +55,12 @@ export default function ProjectMaterialsPage() {
   const load = async () => {
     try {
       setLoading(true);
-      const [requisitionResult, warehouseResult, reconciliationResult, procurementReconciliationResult] = await Promise.all([
+      const [requisitionResult, warehouseResult, reconciliationResult, procurementReconciliationResult, ledgerResult] = await Promise.all([
         inventoryRequisitionService.getAll(),
         inventoryManagementService.getWarehouses(),
         projectService.getMaterialReconciliationReport(100),
         projectService.getProcurementReconciliationReport(100),
+        projectService.getMaterialCostLedgerReport(undefined, 150),
       ]);
 
       setRequisitions(
@@ -65,6 +71,7 @@ export default function ProjectMaterialsPage() {
       setWarehouses(warehouseResult);
       setReconciliation(reconciliationResult);
       setProcurementReconciliation(procurementReconciliationResult);
+      setLedgerEntries(ledgerResult);
     } catch (error: any) {
       toast.error(error.message || 'Failed to load project materials oversight');
     } finally {
@@ -109,6 +116,29 @@ export default function ProjectMaterialsPage() {
     receiptToIssueVariance: procurementReconciliation.reduce((sum, item) => sum + item.receiptToIssueVariance, 0),
     issueToPostingVariance: procurementReconciliation.reduce((sum, item) => sum + item.issueToPostingVariance, 0),
   }), [procurementReconciliation]);
+
+  const filteredLedgerEntries = useMemo(
+    () =>
+      ledgerEntries.filter((item) => {
+        const matchesPosting = ledgerPostingFilter === 'all' || item.postingState === ledgerPostingFilter;
+        const matchesSource = ledgerSourceFilter === 'all' || item.sourceDocumentType === ledgerSourceFilter;
+        const matchesExceptions = ledgerExceptionFilter === 'all'
+          || (ledgerExceptionFilter === 'exceptions' && (item.hasMissingSourceLink || item.hasReversalGap))
+          || (ledgerExceptionFilter === 'clean' && !item.hasMissingSourceLink && !item.hasReversalGap);
+        const matchesReversal = ledgerReversalFilter === 'all'
+          || (ledgerReversalFilter === 'reversed' && item.isReversed)
+          || (ledgerReversalFilter === 'active' && !item.isReversed);
+        return matchesPosting && matchesSource && matchesExceptions && matchesReversal;
+      }),
+    [ledgerEntries, ledgerExceptionFilter, ledgerPostingFilter, ledgerReversalFilter, ledgerSourceFilter],
+  );
+
+  const ledgerStats = useMemo(() => ({
+    movements: ledgerEntries.length,
+    exceptionCount: ledgerEntries.filter((item) => item.hasMissingSourceLink || item.hasReversalGap).length,
+    reversedCount: ledgerEntries.filter((item) => item.isReversed).length,
+    actualCostImpact: ledgerEntries.filter((item) => item.affectsActualCost).reduce((sum, item) => sum + item.amount, 0),
+  }), [ledgerEntries]);
 
   const openDialog = (mode: 'create' | 'edit' | 'view', requisitionId?: string) => {
     setDialogMode(mode);
@@ -155,6 +185,13 @@ export default function ProjectMaterialsPage() {
         <Card><CardHeader className="pb-2"><CardDescription>Pending Inspection</CardDescription><CardTitle>{procurementStats.pendingInspection}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Receipt To Issue Variance</CardDescription><CardTitle>{procurementStats.receiptToIssueVariance.toLocaleString()}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Issue To Posting Variance</CardDescription><CardTitle>{procurementStats.issueToPostingVariance.toLocaleString()}</CardTitle></CardHeader></Card>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card><CardHeader className="pb-2"><CardDescription>Ledger Movements</CardDescription><CardTitle>{ledgerStats.movements}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Exceptions</CardDescription><CardTitle>{ledgerStats.exceptionCount}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Reversed Entries</CardDescription><CardTitle>{ledgerStats.reversedCount}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Actual Cost Impact</CardDescription><CardTitle>{ledgerStats.actualCostImpact.toLocaleString()}</CardTitle></CardHeader></Card>
       </div>
 
       <Card>
@@ -228,7 +265,7 @@ export default function ProjectMaterialsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Material Reconciliation</CardTitle>
-          <CardDescription>Net issued inventory against tracked project material cost.</CardDescription>
+          <CardDescription>Project issue and return postings reconciled against the material ledger.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {loading ? <div className="py-10 text-center text-muted-foreground">Loading reconciliation...</div> : null}
@@ -248,6 +285,9 @@ export default function ProjectMaterialsPage() {
                   <div className="text-sm text-muted-foreground">
                     Tracked Material Cost {item.trackedMaterialCost.toLocaleString()} | Variance {item.materialCostVariance.toLocaleString()} | Pending Requisitions {item.pendingRequisitionCount}
                   </div>
+                  <div className="text-sm text-muted-foreground">
+                    Ledger Entries {item.materialLedgerEntryCount} | Missing Links {item.missingSourceLinkCount} | Reversal Gaps {item.reversalGapCount}
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button asChild variant="ghost" size="sm">
@@ -263,7 +303,7 @@ export default function ProjectMaterialsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Procurement Reconciliation</CardTitle>
-          <CardDescription>Purchase requisitions, receipts, issues, and posted material cost aligned per project.</CardDescription>
+          <CardDescription>Receipts, supplier returns, project issues, and posted material cost aligned per project.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {loading ? <div className="py-10 text-center text-muted-foreground">Loading procurement reconciliation...</div> : null}
@@ -283,13 +323,95 @@ export default function ProjectMaterialsPage() {
                     PR {item.purchaseRequisitionCount} | PO {item.purchaseOrderCount} | Receipts {item.purchaseReceiptCount} | Open PO {item.openPurchaseOrderCount}
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    Received {item.receivedAmount.toLocaleString()} | Accepted {item.acceptedReceiptAmount.toLocaleString()} | Pending Inspection {item.pendingInspectionAmount.toLocaleString()}
+                    Received {item.receivedAmount.toLocaleString()} | Accepted {item.acceptedReceiptAmount.toLocaleString()} | Pending Inspection {item.pendingInspectionAmount.toLocaleString()} | Supplier Return {item.supplierReturnAmount.toLocaleString()}
                   </div>
                   <div className="text-sm text-muted-foreground">
                     Issued {item.issuedInventoryValue.toLocaleString()} | Net Issued {item.netIssuedInventoryValue.toLocaleString()} | Posted {item.postedMaterialCost.toLocaleString()}
                   </div>
                   <div className="text-sm text-muted-foreground">
                     Receipt to Issue Variance {item.receiptToIssueVariance.toLocaleString()} | Issue to Posting Variance {item.issueToPostingVariance.toLocaleString()}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Ledger Entries {item.procurementLedgerEntryCount} | Missing Links {item.missingSourceLinkCount} | Reversal Gaps {item.reversalGapCount}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild variant="ghost" size="sm">
+                    <Link href={`/development/projects/${item.projectId}`}>Open Project</Link>
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Project Cost Movement Ledger</CardTitle>
+          <CardDescription>Auditable project material postings from receipt, issue, return, and reversal paths.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-4">
+            <Select value={ledgerPostingFilter} onValueChange={setLedgerPostingFilter}>
+              <SelectTrigger><SelectValue placeholder="Posting state" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All posting states</SelectItem>
+                <SelectItem value="Posted">Posted</SelectItem>
+                <SelectItem value="PendingInspection">Pending inspection</SelectItem>
+                <SelectItem value="PendingReversal">Pending reversal</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={ledgerSourceFilter} onValueChange={setLedgerSourceFilter}>
+              <SelectTrigger><SelectValue placeholder="Source document" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All sources</SelectItem>
+                <SelectItem value="InventoryRequisition">Inventory requisition</SelectItem>
+                <SelectItem value="PurchaseReceipt">Purchase receipt</SelectItem>
+                <SelectItem value="PurchaseReturn">Purchase return</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={ledgerReversalFilter} onValueChange={setLedgerReversalFilter}>
+              <SelectTrigger><SelectValue placeholder="Reversal state" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All movements</SelectItem>
+                <SelectItem value="active">Active only</SelectItem>
+                <SelectItem value="reversed">Reversals only</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={ledgerExceptionFilter} onValueChange={setLedgerExceptionFilter}>
+              <SelectTrigger><SelectValue placeholder="Exception state" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All entries</SelectItem>
+                <SelectItem value="exceptions">Exceptions only</SelectItem>
+                <SelectItem value="clean">Clean only</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {loading ? <div className="py-10 text-center text-muted-foreground">Loading project material ledger...</div> : null}
+          {!loading && filteredLedgerEntries.length === 0 ? <div className="py-10 text-center text-muted-foreground">No material cost ledger entries match the current filter.</div> : null}
+          {filteredLedgerEntries.map((item) => (
+            <div key={item.id} className="rounded-lg border p-4">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="font-medium">{item.projectCode || 'Uncoded project'}</div>
+                    <Badge variant="secondary">{item.projectTitle}</Badge>
+                    <Badge variant="outline">{item.entryType}</Badge>
+                    <Badge variant={item.postingState === 'Posted' ? 'outline' : 'secondary'}>{item.postingState}</Badge>
+                    {item.isReversed ? <Badge variant="secondary">Reversed</Badge> : null}
+                    {item.hasMissingSourceLink ? <Badge variant="destructive">Missing Link</Badge> : null}
+                    {item.hasReversalGap ? <Badge variant="destructive">Reversal Gap</Badge> : null}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {new Date(item.entryDate).toLocaleString()} | {item.sourceDocumentType || 'Source'} {item.sourceDocumentNumber || item.sourceDocumentId || 'Unlinked'}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Item {(item.inventoryItemCode || item.inventoryItemName || 'Unlinked item')} | Qty {item.quantity.toLocaleString()} {item.unitOfMeasure || ''} | Unit Cost {item.unitCost.toLocaleString()} | Amount {item.amount.toLocaleString()} {item.currency}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Affects Actual Cost {item.affectsActualCost ? 'Yes' : 'No'}{item.notes ? ` | ${item.notes}` : ''}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">

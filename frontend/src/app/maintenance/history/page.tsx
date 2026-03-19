@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import type { DateRange } from 'react-day-picker';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -8,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Calendar, DateRange } from '@/components/ui/calendar';
+import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
@@ -67,7 +68,7 @@ export default function MaintenanceHistoryPage() {
   const [technicianFilter, setTechnicianFilter] = useState('all');
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [filteredData, setFilteredData] = useState<MaintenanceHistoryItem[]>([]);
-  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [selectedRecord, setSelectedRecord] = useState<MaintenanceHistoryItem | null>(null);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
 
   // Load maintenance history from API
@@ -128,9 +129,10 @@ export default function MaintenanceHistoryPage() {
     }
 
     if (dateRange?.from && dateRange?.to) {
+      const { from, to } = dateRange;
       filtered = filtered.filter(item => {
         const itemDate = new Date(item.completedDate);
-        return itemDate >= dateRange.from! && itemDate <= dateRange.to!;
+        return itemDate >= from && itemDate <= to;
       });
     }
 
@@ -192,7 +194,7 @@ export default function MaintenanceHistoryPage() {
     return Math.round((totalRating / filteredData.length) * 10) / 10;
   };
 
-  const handleViewDetails = (record: any) => {
+  const handleViewDetails = (record: MaintenanceHistoryItem) => {
     setSelectedRecord(record);
     setIsDetailDialogOpen(true);
   };

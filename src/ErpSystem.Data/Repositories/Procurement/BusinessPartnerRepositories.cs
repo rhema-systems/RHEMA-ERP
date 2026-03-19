@@ -25,7 +25,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         _logger = logger;
     }
 
-    public async Task<BusinessPartner?> GetByIdAsync(Guid id)
+    public override async Task<BusinessPartner?> GetByIdAsync(Guid id)
     {
         if (id == Guid.Empty)
         {
@@ -68,14 +68,14 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         return created;
     }
 
-    public async Task<BusinessPartner> UpdateAsync(BusinessPartner partner)
+    public new async Task<BusinessPartner> UpdateAsync(BusinessPartner partner)
     {
         await base.UpdateAsync(partner);
         await _context.SaveChangesAsync();
         return partner;
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var partner = await GetByIdAsync(id);
         if (partner != null)
@@ -523,7 +523,7 @@ public class PartnerCategoryRepository : GenericRepository<PartnerCategory>, IPa
 {
     public PartnerCategoryRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<PartnerCategory?> GetByIdAsync(Guid id)
+    public override async Task<PartnerCategory?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(c => c.Id == id && !c.IsDeleted)
@@ -542,13 +542,13 @@ public class PartnerCategoryRepository : GenericRepository<PartnerCategory>, IPa
         return await AddAsync(category);
     }
 
-    public async Task<PartnerCategory> UpdateAsync(PartnerCategory category)
+    public new async Task<PartnerCategory> UpdateAsync(PartnerCategory category)
     {
         await base.UpdateAsync(category);
         return category;
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var category = await GetByIdAsync(id);
         if (category != null)
@@ -647,7 +647,7 @@ public class ContractorSpecializationRepository : GenericRepository<ContractorSp
 {
     public ContractorSpecializationRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<ContractorSpecialization?> GetByIdAsync(Guid id)
+    public override async Task<ContractorSpecialization?> GetByIdAsync(Guid id)
     {
         return await _dbSet
             .Where(s => s.Id == id && !s.IsDeleted)
@@ -666,13 +666,13 @@ public class ContractorSpecializationRepository : GenericRepository<ContractorSp
         return await AddAsync(specialization);
     }
 
-    public async Task<ContractorSpecialization> UpdateAsync(ContractorSpecialization specialization)
+    public new async Task<ContractorSpecialization> UpdateAsync(ContractorSpecialization specialization)
     {
         await base.UpdateAsync(specialization);
         return specialization;
     }
 
-    public async Task DeleteAsync(Guid id)
+    public override async Task DeleteAsync(Guid id)
     {
         var specialization = await GetByIdAsync(id);
         if (specialization != null)

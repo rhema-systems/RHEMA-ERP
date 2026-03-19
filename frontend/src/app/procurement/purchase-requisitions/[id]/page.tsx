@@ -66,7 +66,7 @@ const PRPriorities = [
 export default function PurchaseRequisitionDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const id = params.id as string;
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   
   const [requisition, setRequisition] = useState<PurchaseRequisitionDetailDto | null>(null);
   const [loading, setLoading] = useState(true);

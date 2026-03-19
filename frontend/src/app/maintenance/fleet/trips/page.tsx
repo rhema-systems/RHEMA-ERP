@@ -115,7 +115,7 @@ export default function FleetTripsPage() {
 function FleetTripsPageContent() {
   const { toast } = useToast();
   const searchParams = useSearchParams();
-  const initialOpenId = searchParams.get('id');
+  const initialOpenId = searchParams?.get('id');
 
   const [loading, setLoading] = React.useState(true);
   const [vehicles, setVehicles] = React.useState<FleetVehicleListDto[]>([]);
@@ -272,7 +272,6 @@ function FleetTripsPageContent() {
         toast({ title: 'Failed to load inspection template', description: e?.message || String(e), variant: 'destructive' });
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [completeInspectionOpen, selectedInspection?.inspectionTemplateId]);
 
   const [dispatchOpen, setDispatchOpen] = React.useState(false);
@@ -364,7 +363,6 @@ function FleetTripsPageContent() {
 
   React.useEffect(() => {
     loadLookups();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   React.useEffect(() => {

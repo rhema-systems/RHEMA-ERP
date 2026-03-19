@@ -86,6 +86,11 @@ interface SecurityConfig {
   }
 }
 
+type SecuritySection = keyof SecurityConfig
+type SecurityArrayField<S extends SecuritySection> = {
+  [K in keyof SecurityConfig[S]]: SecurityConfig[S][K] extends string[] ? K : never
+}[keyof SecurityConfig[S]]
+
 export function SecuritySettings() {
   const [activeTab, setActiveTab] = useState('general')
   const [showSensitive, setShowSensitive] = useState(false)
@@ -144,7 +149,11 @@ export function SecuritySettings() {
     }
   })
 
-  const updateConfig = (section: keyof SecurityConfig, field: string, value: any) => {
+  const updateConfig = <S extends SecuritySection, K extends keyof SecurityConfig[S]>(
+    section: S,
+    field: K,
+    value: SecurityConfig[S][K]
+  ) => {
     setConfig(prev => ({
       ...prev,
       [section]: {
@@ -155,7 +164,11 @@ export function SecuritySettings() {
     setHasChanges(true)
   }
 
-  const addArrayItem = (section: keyof SecurityConfig, field: string, value: string) => {
+  const addArrayItem = <S extends SecuritySection, K extends SecurityArrayField<S>>(
+    section: S,
+    field: K,
+    value: string
+  ) => {
     if (!value.trim()) return
     
     setConfig(prev => ({
@@ -168,7 +181,11 @@ export function SecuritySettings() {
     setHasChanges(true)
   }
 
-  const removeArrayItem = (section: keyof SecurityConfig, field: string, index: number) => {
+  const removeArrayItem = <S extends SecuritySection, K extends SecurityArrayField<S>>(
+    section: S,
+    field: K,
+    index: number
+  ) => {
     setConfig(prev => ({
       ...prev,
       [section]: {
@@ -550,7 +567,7 @@ export function SecuritySettings() {
                   <Label htmlFor="strengthReq">Strength Requirement</Label>
                   <Select
                     value={config.passwordPolicy.strengthRequirement}
-                    onValueChange={(value) => updateConfig('passwordPolicy', 'strengthRequirement', value)}
+                    onValueChange={(value) => updateConfig('passwordPolicy', 'strengthRequirement', value as SecurityConfig['passwordPolicy']['strengthRequirement'])}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -568,10 +585,10 @@ export function SecuritySettings() {
                 <Label className="text-base">Character Requirements</Label>
                 <div className="grid grid-cols-2 gap-4">
                   {[
-                    { key: 'requireUppercase', label: 'Uppercase Letters' },
-                    { key: 'requireLowercase', label: 'Lowercase Letters' },
-                    { key: 'requireNumbers', label: 'Numbers' },
-                    { key: 'requireSpecialChars', label: 'Special Characters' }
+                    { key: 'requireUppercase' as const, label: 'Uppercase Letters' },
+                    { key: 'requireLowercase' as const, label: 'Lowercase Letters' },
+                    { key: 'requireNumbers' as const, label: 'Numbers' },
+                    { key: 'requireSpecialChars' as const, label: 'Special Characters' }
                   ].map(({ key, label }) => (
                     <div key={key} className="flex items-center justify-between">
                       <Label className="text-sm">{label}</Label>
@@ -798,7 +815,7 @@ export function SecuritySettings() {
                   <Label htmlFor="encryptionLevel">Encryption Level</Label>
                   <Select
                     value={config.advanced.encryptionLevel}
-                    onValueChange={(value) => updateConfig('advanced', 'encryptionLevel', value)}
+                    onValueChange={(value) => updateConfig('advanced', 'encryptionLevel', value as SecurityConfig['advanced']['encryptionLevel'])}
                   >
                     <SelectTrigger>
                       <SelectValue />

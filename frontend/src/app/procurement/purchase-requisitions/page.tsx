@@ -135,7 +135,9 @@ export default function PurchaseRequisitionsPage() {
   const rejectedCount = requisitions.filter(pr => pr.status === 'Rejected').length;
 
   // Get unique departments for filter
-  const departments = Array.from(new Set(requisitions.map(pr => pr.department).filter(Boolean)));
+  const departments = Array.from(
+    new Set(requisitions.map(pr => pr.department).filter((dept): dept is string => Boolean(dept)))
+  );
   
   const totalPages = Math.ceil(totalCount / pageSize);
 
@@ -287,7 +289,7 @@ export default function PurchaseRequisitionsPage() {
                 <SelectContent>
                   <SelectItem value="all">All Departments</SelectItem>
                   {departments.map(dept => (
-                    <SelectItem key={dept} value={dept!}>{dept}</SelectItem>
+                    <SelectItem key={dept} value={dept}>{dept}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

@@ -17,6 +17,12 @@ import { useToast } from '@/hooks/use-toast';
 import { ehcAdminService, type CreateEhcCannedResponseAdmin, type EhcCannedResponseAdmin } from '@/services/ehcAdminService';
 import type { EhcTicketType } from '@/services/ehcTicketService';
 
+type TableCellProps<T> = {
+  row: {
+    original: T;
+  };
+};
+
 const ticketTypeOptions: Array<{ value: string; label: string }> = [
   { value: '__any', label: 'Any' },
   { value: 'Enquiry', label: 'Enquiry' },
@@ -121,7 +127,7 @@ export default function HelpdeskCannedResponsesAdminPage() {
         id: 'code',
         header: 'Code',
         accessorKey: 'code',
-        cell: ({ row }) => (
+        cell: ({ row }: TableCellProps<EhcCannedResponseAdmin>) => (
           <button className="text-blue-600 hover:underline" onClick={() => startEdit(row.original)} title="Edit">
             {row.original.code}
           </button>
@@ -132,26 +138,26 @@ export default function HelpdeskCannedResponsesAdminPage() {
         id: 'appliesToType',
         header: 'Type',
         accessorKey: 'appliesToType',
-        cell: ({ row }) => (row.original.appliesToType ? String(row.original.appliesToType) : 'Any'),
+        cell: ({ row }: TableCellProps<EhcCannedResponseAdmin>) => (row.original.appliesToType ? String(row.original.appliesToType) : 'Any'),
       },
       {
         id: 'categoryId',
         header: 'Category',
         accessorKey: 'categoryId',
-        cell: ({ row }) => (row.original.categoryId ? categoryNameById.get(row.original.categoryId) || row.original.categoryId : 'Any'),
+        cell: ({ row }: TableCellProps<EhcCannedResponseAdmin>) => (row.original.categoryId ? categoryNameById.get(row.original.categoryId) || row.original.categoryId : 'Any'),
       },
       {
         id: 'isActive',
         header: 'Active',
         accessorKey: 'isActive',
-        cell: ({ row }) => (row.original.isActive ? 'Yes' : 'No'),
+        cell: ({ row }: TableCellProps<EhcCannedResponseAdmin>) => (row.original.isActive ? 'Yes' : 'No'),
       },
       {
         id: 'actions',
         header: '',
         accessorKey: 'id',
         enableHiding: false,
-        cell: ({ row }) => (
+        cell: ({ row }: TableCellProps<EhcCannedResponseAdmin>) => (
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="icon" onClick={() => startEdit(row.original)} title="Edit">
               <Pencil className="h-4 w-4" />

@@ -46,6 +46,7 @@ export default function MarketAnalysisPage() {
   const handleViewDetails = (id: string) => router.push(`/procurement/planning/market-analysis/${id}`);
   const handleEdit = (id: string) => router.push(`/procurement/planning/market-analysis/${id}/edit`);
   const handleCreateNew = () => router.push('/procurement/planning/market-analysis/new');
+  const getAnalysisDate = (analysis: MarketAnalysisDto) => analysis.analysisDate || analysis.preparedDate || analysis.createdAt;
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this analysis?')) return;
@@ -64,10 +65,10 @@ export default function MarketAnalysisPage() {
       if (analyses.length === 0) { toast.error('No data to export'); return; }
       const exportData = analyses.map(a => ({
         'Analysis #': a.analysisNumber, 'Item Name': a.itemName, 'Category': a.itemCategory,
-        'Status': a.status, 'Current Price': a.currentMarketPrice, 'Avg Price': a.averagePrice,
-        'Min Price': a.minimumPrice, 'Max Price': a.maximumPrice, 'Trend': a.priceTrend,
+        'Status': a.status, 'Current Price': a.currentMarketPrice, 'Avg Price': a.averagePrice ?? a.historicalAveragePrice,
+        'Min Price': a.minimumPrice ?? a.currentMarketPrice, 'Max Price': a.maximumPrice ?? a.forecastedPrice, 'Trend': a.priceTrend,
         'Forecast': a.forecastedPrice, 'Currency': a.currency,
-        'Analysis Date': format(new Date(a.analysisDate), 'yyyy-MM-dd'),
+        'Analysis Date': getAnalysisDate(a) ? format(new Date(getAnalysisDate(a) || ''), 'yyyy-MM-dd') : '',
       }));
       const ws = XLSX.utils.json_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
@@ -171,4 +172,3 @@ export default function MarketAnalysisPage() {
     </div>
   );
 }
-

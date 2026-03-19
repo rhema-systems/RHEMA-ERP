@@ -22,7 +22,7 @@ import {
   AddRequisitionItemDto, UpdateRequisitionItemDto, DepartmentDto,
   RequisitionStatusMap, RequisitionTypeMap
 } from '@/services/inventoryRequisitionService';
-import { inventoryManagementService, WarehouseDto, WarehouseInventoryItemDto } from '@/services/inventoryManagementService';
+import { inventoryManagementService, WarehouseDto, WarehouseInventoryItemDto, WarehouseLocationDto, BinStockDto } from '@/services/inventoryManagementService';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 
@@ -47,6 +47,7 @@ interface FormData {
   departmentName: string;
   costCenter: string;
   warehouseId: string;
+  locationId: string;
   requisitionType: number;
   priority: string;
   requiredDate: string;
@@ -56,6 +57,7 @@ interface FormData {
 
 interface ItemFormData {
   inventoryItemId: string;
+  locationId: string;
   requestedQuantity: number;
   lotNumber: string;
   serialNumber: string;
@@ -110,7 +112,11 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
   const [requisitionDetail, setRequisitionDetail] = useState<InventoryRequisitionDetailDto | null>(null);
   const [departments, setDepartments] = useState<DepartmentDto[]>([]);
   const [warehouseInventoryItems, setWarehouseInventoryItems] = useState<WarehouseInventoryItemDto[]>([]);
+  const [warehouseLocations, setWarehouseLocations] = useState<WarehouseLocationDto[]>([]);
+  const [locationStockItems, setLocationStockItems] = useState<BinStockDto[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
+  const [loadingLocations, setLoadingLocations] = useState(false);
+  const [loadingLocationStock, setLoadingLocationStock] = useState(false);
   const [itemSearchTerm, setItemSearchTerm] = useState('');
   const [showAddItem, setShowAddItem] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -122,6 +128,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
     departmentName: '',
     costCenter: '',
     warehouseId: '',
+    locationId: '',
     requisitionType: 1,
     priority: 'Normal',
     requiredDate: '',
@@ -131,6 +138,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
 
   const [itemFormData, setItemFormData] = useState<ItemFormData>({
     inventoryItemId: '',
+    locationId: '',
     requestedQuantity: 1,
     lotNumber: '',
     serialNumber: '',
@@ -150,12 +158,16 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
     if (open) {
       setActiveTab('details');
       setPendingItems([]);
+      setShowAddItem(false);
+      setItemSearchTerm('');
+      setItemFormData({ inventoryItemId: '', locationId: '', requestedQuantity: 1, lotNumber: '', serialNumber: '', notes: '' });
       if (mode === 'create') {
         setFormData({
           departmentId: projectContext?.departmentId || '',
           departmentName: projectContext?.departmentName || '',
           costCenter: '',
           warehouseId: '',
+          locationId: '',
           requisitionType: projectContext ? 2 : 1,
           priority: 'Normal',
           requiredDate: '',
@@ -163,6 +175,8 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
           notes: '',
         });
         setRequisitionDetail(null);
+        setWarehouseLocations([]);
+        setLocationStockItems([]);
       }
       loadDepartments();
     }
@@ -177,10 +191,43 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
 
   // Load warehouse items when warehouse changes
   useEffect(() => {
-    if (formData.warehouseId && canEdit) {
-      loadWarehouseItems(formData.warehouseId);
+    if (!formData.warehouseId) {
+      setWarehouseInventoryItems([]);
+      setWarehouseLocations([]);
+      setLocationStockItems([]);
+      return;
+    }
+
+    void loadWarehouseLocations(formData.warehouseId);
+    if (canEdit) {
+      void loadWarehouseItems(formData.warehouseId);
     }
   }, [formData.warehouseId, canEdit]);
+
+  useEffect(() => {
+    if (!canEdit || !formData.warehouseId || !formData.locationId) {
+      setLocationStockItems([]);
+      return;
+    }
+
+    void loadLocationStock(formData.warehouseId, formData.locationId);
+  }, [formData.locationId, formData.warehouseId, canEdit]);
+
+  useEffect(() => {
+    setItemFormData((current) => ({
+      ...current,
+      locationId: formData.locationId || '',
+    }));
+
+    if (isCreateMode) {
+      setPendingItems((current) =>
+        current.map((item) => ({
+          ...item,
+          locationId: formData.locationId || undefined,
+        })),
+      );
+    }
+  }, [formData.locationId, isCreateMode]);
 
   const loadDepartments = async () => {
     try {
@@ -202,6 +249,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
         departmentName: detail.departmentName || '',
         costCenter: detail.costCenter || '',
         warehouseId: detail.warehouseId || '',
+        locationId: detail.locationId || '',
         requisitionType: detail.requisitionType || 1,
         priority: detail.priority || 'Normal',
         requiredDate: detail.requiredDate ? format(new Date(detail.requiredDate), 'yyyy-MM-dd') : '',
@@ -228,6 +276,38 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
     }
   };
 
+  const loadWarehouseLocations = async (warehouseId: string) => {
+    try {
+      setLoadingLocations(true);
+      const locations = await inventoryManagementService.getWarehouseLocations(warehouseId);
+      setWarehouseLocations(locations.filter((location) => location.isActive));
+    } catch (err) {
+      console.error('Error loading warehouse locations:', err);
+      setWarehouseLocations([]);
+    } finally {
+      setLoadingLocations(false);
+    }
+  };
+
+  const loadLocationStock = async (warehouseId: string, locationId: string) => {
+    try {
+      setLoadingLocationStock(true);
+      const result = await inventoryManagementService.getBinStock({
+        warehouseId,
+        locationId,
+        includeZero: false,
+        page: 1,
+        pageSize: 200,
+      });
+      setLocationStockItems(result.items || []);
+    } catch (err) {
+      console.error('Error loading location stock:', err);
+      setLocationStockItems([]);
+    } finally {
+      setLoadingLocationStock(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!formData.departmentId || !formData.warehouseId) {
       toast({ title: 'Validation Error', description: 'Please select department and warehouse', variant: 'destructive' });
@@ -241,6 +321,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
           departmentName: formData.departmentName,
           costCenter: formData.costCenter,
           warehouseId: formData.warehouseId,
+          locationId: formData.locationId || undefined,
           projectId: projectContext?.projectId,
           projectCode: projectContext?.projectCode,
           requisitionType: formData.requisitionType,
@@ -258,6 +339,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
           departmentName: formData.departmentName,
           costCenter: formData.costCenter,
           warehouseId: formData.warehouseId,
+          locationId: formData.locationId || undefined,
           projectId: projectContext?.projectId,
           projectCode: projectContext?.projectCode,
           requiredDate: formData.requiredDate || undefined,
@@ -283,22 +365,33 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
       return;
     }
     try {
+      const selectedItem = selectableItems.find((item) => item.inventoryItemId === itemFormData.inventoryItemId);
+      if (!selectedItem) {
+        toast({
+          title: 'Validation Error',
+          description: formData.locationId
+            ? 'Please choose an item that is available in the selected warehouse location.'
+            : 'Please choose an item that is available in the selected warehouse.',
+          variant: 'destructive'
+        });
+        return;
+      }
+
       if (isCreateMode) {
         // Add to pending items for create mode
-        const selectedItem = warehouseInventoryItems.find(i => i.inventoryItemId === itemFormData.inventoryItemId);
-        if (selectedItem) {
-          setPendingItems([...pendingItems, {
+        setPendingItems((current) => [...current, {
             inventoryItemId: itemFormData.inventoryItemId,
             requestedQuantity: itemFormData.requestedQuantity,
+            locationId: itemFormData.locationId || formData.locationId || undefined,
             lotNumber: itemFormData.lotNumber || undefined,
             serialNumber: itemFormData.serialNumber || undefined,
             notes: itemFormData.notes || undefined
           }]);
-        }
       } else if (requisitionId) {
         const dto: AddRequisitionItemDto = {
           inventoryItemId: itemFormData.inventoryItemId,
           requestedQuantity: itemFormData.requestedQuantity,
+          locationId: itemFormData.locationId || formData.locationId || undefined,
           lotNumber: itemFormData.lotNumber || undefined,
           serialNumber: itemFormData.serialNumber || undefined,
           notes: itemFormData.notes || undefined
@@ -307,7 +400,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
         await loadRequisitionDetail();
         toast({ title: 'Success', description: 'Item added successfully' });
       }
-      setItemFormData({ inventoryItemId: '', requestedQuantity: 1, lotNumber: '', serialNumber: '', notes: '' });
+      setItemFormData({ inventoryItemId: '', locationId: formData.locationId || '', requestedQuantity: 1, lotNumber: '', serialNumber: '', notes: '' });
       setShowAddItem(false);
     } catch (err) {
       console.error('Error adding item:', err);
@@ -352,21 +445,23 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
     if (isCreateMode) {
       // Update pending items for create mode
       const idx = parseInt(editingItemId);
-      const updatedItems = [...pendingItems];
-      if (updatedItems[idx]) {
-        updatedItems[idx] = {
-          ...updatedItems[idx],
-          requestedQuantity: editingItemData.requestedQuantity,
-          notes: editingItemData.notes || undefined
-        };
-        setPendingItems(updatedItems);
-      }
+        const updatedItems = [...pendingItems];
+        if (updatedItems[idx]) {
+          updatedItems[idx] = {
+            ...updatedItems[idx],
+            requestedQuantity: editingItemData.requestedQuantity,
+            locationId: formData.locationId || updatedItems[idx].locationId,
+            notes: editingItemData.notes || undefined
+          };
+          setPendingItems(updatedItems);
+        }
       setEditingItemId(null);
       setEditingItemData({ requestedQuantity: 1, notes: '' });
     } else if (requisitionId) {
       try {
         const dto: UpdateRequisitionItemDto = {
           requestedQuantity: editingItemData.requestedQuantity,
+          locationId: formData.locationId || undefined,
           notes: editingItemData.notes || undefined
         };
         await inventoryRequisitionService.updateItem(requisitionId, editingItemId, dto);
@@ -391,9 +486,40 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
     item.itemCode.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
     item.itemName.toLowerCase().includes(itemSearchTerm.toLowerCase())
   );
+  const filteredLocationStockItems = locationStockItems.filter(item =>
+    item.itemCode.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
+    item.itemName.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
+    item.locationCode.toLowerCase().includes(itemSearchTerm.toLowerCase())
+  );
+  const locationLookup = new Map(warehouseLocations.map((location) => [location.id, location]));
+  const selectedLocation = formData.locationId ? locationLookup.get(formData.locationId) : undefined;
+  const selectableItems = formData.locationId
+    ? filteredLocationStockItems.map((item) => ({
+        inventoryItemId: item.inventoryItemId,
+        itemCode: item.itemCode,
+        itemName: item.itemName,
+        unitOfMeasure: item.unitOfMeasure,
+        availableStock: item.availableQuantity,
+        unitCost: item.averageCost,
+        locationId: item.locationId,
+        locationLabel: item.locationCode,
+      }))
+    : filteredWarehouseItems.map((item) => ({
+        inventoryItemId: item.inventoryItemId,
+        itemCode: item.itemCode,
+        itemName: item.itemName,
+        unitOfMeasure: item.unitOfMeasure,
+        availableStock: item.availableStock,
+        unitCost: item.unitCost,
+        locationId: '',
+        locationLabel: '',
+      }));
 
   const displayItems = isCreateMode ? pendingItems.map((item, idx) => {
-    const invItem = warehouseInventoryItems.find(i => i.inventoryItemId === item.inventoryItemId);
+    const invItem =
+      selectableItems.find((inventoryItem) => inventoryItem.inventoryItemId === item.inventoryItemId) ||
+      warehouseInventoryItems.find((inventoryItem) => inventoryItem.inventoryItemId === item.inventoryItemId);
+    const location = item.locationId ? locationLookup.get(item.locationId) : undefined;
     return {
       id: idx.toString(),
       inventoryItemId: item.inventoryItemId,
@@ -405,6 +531,8 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
       unitOfMeasure: invItem?.unitOfMeasure || '',
       unitCost: invItem?.unitCost || 0,
       totalCost: (invItem?.unitCost || 0) * item.requestedQuantity,
+      locationId: item.locationId,
+      locationName: location?.name || location?.locationCode || selectedLocation?.name || selectedLocation?.locationCode,
       notes: item.notes
     };
   }) : (requisitionDetail?.items || []);
@@ -485,10 +613,24 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                   </div>
                   <div className="space-y-2">
                     <Label>Warehouse *</Label>
-                    <Select value={formData.warehouseId} onValueChange={(v) => setFormData({ ...formData, warehouseId: v })} disabled={!canEdit}>
+                    <Select value={formData.warehouseId} onValueChange={(v) => setFormData({ ...formData, warehouseId: v, locationId: '' })} disabled={!canEdit}>
                       <SelectTrigger><SelectValue placeholder="Select warehouse" /></SelectTrigger>
                       <SelectContent>
                         {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Warehouse Location</Label>
+                    <Select value={formData.locationId || '__none__'} onValueChange={(v) => setFormData({ ...formData, locationId: v === '__none__' ? '' : v })} disabled={!formData.warehouseId || !canEdit || loadingLocations}>
+                      <SelectTrigger><SelectValue placeholder={loadingLocations ? 'Loading locations...' : 'All locations'} /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">All locations</SelectItem>
+                        {warehouseLocations.map(location => (
+                          <SelectItem key={location.id} value={location.id}>
+                            {location.locationCode}{location.name ? ` - ${location.name}` : ''}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -542,6 +684,11 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                   <Card>
                     <CardHeader><CardTitle className="text-sm">Add Item</CardTitle></CardHeader>
                     <CardContent className="space-y-4">
+                      <div className="rounded-md border border-dashed bg-muted/30 p-3 text-sm text-muted-foreground">
+                        {formData.locationId
+                          ? `Showing stock from ${selectedLocation?.locationCode || 'selected location'}${selectedLocation?.name ? ` - ${selectedLocation.name}` : ''}.`
+                          : 'Showing warehouse-level stock. Select a warehouse location above to filter items by bin/location and view exact available quantities there.'}
+                      </div>
                       <div className="relative">
                         <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                         <Input placeholder="Search items..." className="pl-8" value={itemSearchTerm} onChange={(e) => setItemSearchTerm(e.target.value)} />
@@ -549,13 +696,25 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                       <Select value={itemFormData.inventoryItemId} onValueChange={(v) => setItemFormData({ ...itemFormData, inventoryItemId: v })}>
                         <SelectTrigger><SelectValue placeholder="Select item" /></SelectTrigger>
                         <SelectContent>
-                          {filteredWarehouseItems.map(item => (
-                            <SelectItem key={item.inventoryItemId} value={item.inventoryItemId}>
-                              {item.itemCode} - {item.itemName} (Avail: {item.availableStock})
+                          {selectableItems.map(item => (
+                            <SelectItem key={`${item.inventoryItemId}:${item.locationId || 'warehouse'}`} value={item.inventoryItemId}>
+                              {item.itemCode} - {item.itemName} (Avail: {item.availableStock}{item.locationLabel ? ` | ${item.locationLabel}` : ''})
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
+                      {(loadingItems || loadingLocationStock) ? (
+                        <div className="text-sm text-muted-foreground">
+                          Loading stock availability...
+                        </div>
+                      ) : null}
+                      {!loadingItems && !loadingLocationStock && selectableItems.length === 0 ? (
+                        <div className="text-sm text-muted-foreground">
+                          {formData.locationId
+                            ? 'No stocked items are currently available in the selected warehouse location.'
+                            : 'No stocked items are currently available in the selected warehouse.'}
+                        </div>
+                      ) : null}
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label>Quantity</Label>
@@ -575,6 +734,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                   <TableHeader>
                     <TableRow>
                       <TableHead>Item</TableHead>
+                      <TableHead>Location</TableHead>
                       <TableHead>Requested</TableHead>
                       <TableHead>Approved</TableHead>
                       <TableHead>Issued</TableHead>
@@ -586,11 +746,12 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                   </TableHeader>
                   <TableBody>
                     {displayItems.length === 0 ? (
-                      <TableRow><TableCell colSpan={canEdit ? 8 : 7} className="text-center text-muted-foreground">No items added</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={canEdit ? 9 : 8} className="text-center text-muted-foreground">No items added</TableCell></TableRow>
                     ) : (
                       displayItems.map((item) => (
                         <TableRow key={item.id}>
                           <TableCell><div className="font-medium">{item.itemCode}</div><div className="text-sm text-muted-foreground">{item.itemName}</div></TableCell>
+                          <TableCell>{item.locationName || (requisitionDetail?.locationName ?? 'Warehouse level')}</TableCell>
                           <TableCell>
                             {editingItemId === item.id ? (
                               <Input

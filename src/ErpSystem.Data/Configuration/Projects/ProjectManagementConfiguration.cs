@@ -276,6 +276,31 @@ public sealed class ProjectDeliverableConfiguration : IEntityTypeConfiguration<P
     }
 }
 
+public sealed class ProjectDeliverableExternalReviewConfiguration : IEntityTypeConfiguration<ProjectDeliverableExternalReview>
+{
+    public void Configure(EntityTypeBuilder<ProjectDeliverableExternalReview> builder)
+    {
+        builder.HasIndex(x => new { x.ProjectId, x.DeliverableId, x.ReviewDate });
+        builder.HasIndex(x => new { x.ProjectId, x.Decision, x.StatusSnapshot });
+
+        builder.HasOne(x => x.Deliverable)
+            .WithMany(x => x.ExternalReviews)
+            .HasForeignKey(x => x.DeliverableId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Avoid a SQL Server multiple-cascade-path conflict because Deliverable already rolls up to Project.
+        builder.HasOne(x => x.Project)
+            .WithMany()
+            .HasForeignKey(x => x.ProjectId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.SubmittedDocument)
+            .WithMany()
+            .HasForeignKey(x => x.SubmittedDocumentId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
 public sealed class ProjectTaskDependencyConfiguration : IEntityTypeConfiguration<ProjectTaskDependency>
 {
     public void Configure(EntityTypeBuilder<ProjectTaskDependency> builder)
@@ -326,6 +351,16 @@ public sealed class ProjectExpenseConfiguration : IEntityTypeConfiguration<Proje
     {
         builder.HasIndex(x => new { x.ProjectId, x.UserId, x.ExpenseDate });
         builder.HasIndex(x => new { x.ProjectId, x.Status });
+    }
+}
+
+public sealed class ProjectMaterialCostEntryConfiguration : IEntityTypeConfiguration<ProjectMaterialCostEntry>
+{
+    public void Configure(EntityTypeBuilder<ProjectMaterialCostEntry> builder)
+    {
+        builder.HasIndex(x => new { x.ProjectId, x.EntryDate });
+        builder.HasIndex(x => new { x.ProjectId, x.EntryType, x.PostingState });
+        builder.HasIndex(x => new { x.TenantId, x.SourceTransactionType, x.SourceTransactionId }).IsUnique();
     }
 }
 

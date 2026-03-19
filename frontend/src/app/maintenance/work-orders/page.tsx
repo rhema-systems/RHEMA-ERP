@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, Suspense } from 'react';
+import type { DateRange } from 'react-day-picker';
 import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,7 +14,6 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, ChevronDown, User, Users, ClipboardList, ClipboardCheck, History, FileText, Wrench, Package, Trash2, Pencil, FlaskConical, CalendarClock, DollarSign, HelpCircle, ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, CalendarIcon, ShieldCheck, Camera, Image, X, Receipt } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
-import { DateRange } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -44,7 +44,16 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import maintenanceApiService, { Employee, Asset, WorkOrderType, PriorityLevel, MaintenanceStaffSchedule, MaintenanceExpense } from '@/services/maintenanceApiService';
+import maintenanceApiService, {
+  Asset,
+  JobCard as ApiJobCard,
+  MaintenanceExpense,
+  MaintenanceStaffSchedule,
+  PriorityLevel,
+  WorkOrder as ApiWorkOrder,
+  WorkOrderTask as ApiWorkOrderTask,
+  WorkOrderType,
+} from '@/services/maintenanceApiService';
 import { maintenanceDataService } from '@/services/maintenanceDataService';
 import qualityControlService, { QualityValidationResult } from '@/services/qualityControlService';
 import workOrderToolService, { WorkOrderToolDto, WorkOrderToolSummaryDto, AllocateWorkOrderToolDto, CheckoutWorkOrderToolDto, ReturnWorkOrderToolDto } from '@/services/workOrderToolService';
@@ -57,61 +66,35 @@ import workOrderLaborService, { WorkOrderLaborDto, CreateWorkOrderLaborDto } fro
 import assetAdmissionService from '@/services/assetAdmissionService';
 import assetConditionService, { AssetConditionRecordDto } from '@/services/assetConditionService';
 
-interface WorkOrderTask {
+interface Employee {
   id: string;
-  taskName: string;
-  description?: string;
-  status: string;
-  assignedTechnicianId?: string;
-  assignedTechnician?: {
-    fullName: string;
-  };
-  estimatedHours: number;
-  actualHours: number;
-  completedAt?: string;
-  isRequired: boolean;
+  firstName: string;
+  lastName: string;
+  email: string;
+  department?: string;
+  position?: string;
+  isActive: boolean;
 }
 
-interface WorkOrder {
-  id: string;
-  workOrderNumber: string;
-  title: string;
-  description?: string;
-  assetName: string;
-  assignedTechnicianName: string;
-  assignedTechnicianId?: string;
-  status: 'Draft' | 'Open' | 'Approved' | 'InProgress' | 'OnHold' | 'Completed' | 'Cancelled';
-  priority: string;
-  type: string; // Work order type name
-  maintenanceLocation?: string; // Internal, External, Onsite, Offsite
-  createdAt: string;
+type WorkOrderTask = ApiWorkOrderTask;
+
+type WorkOrder = Omit<ApiWorkOrder, 'status' | 'workOrderTypeId' | 'maintenanceTypeId' | 'priorityLevelId'> & {
+  workOrderTypeId?: string;
+  maintenanceTypeId?: string;
+  priorityLevelId?: string;
+  assignedTechnicianName?: string;
+  type?: string;
+  maintenanceLocation?: string;
   requestedCompletionDate?: string;
-  actualCompletionDate?: string;
-  actualStartDate?: string;
-  estimatedHours?: number;
-  actualHours?: number;
-  estimatedCost?: number;
   jobCardId?: string;
   jobCardNumber?: string;
-  tasks?: WorkOrderTask[];
-  // Additional backend properties
-  assetId?: string;
-  workOrderTypeId?: string;
-  priorityLevelId?: string;
-  maintenanceTypeId?: string;
   maintenanceTypeName?: string;
-  // Billing properties
   billingType?: 'Maintenance' | 'Repairs';
   fixedAmount?: number;
-}
+  status: ApiWorkOrder['status'] | 'Draft' | 'Approved';
+};
 
-interface JobCard {
-  id: string;
-  jobCardNumber: string;
-  assetName: string;
-  description: string;
-  status: string;
-}
+type JobCard = ApiJobCard;
 
 type BillingLineItemType = 'part' | 'labor' | 'tool' | 'expense';
 
@@ -132,6 +115,44 @@ interface BillingLineItem {
   totalAmount: number;
   canDelete: boolean;
 }
+
+const isDefined = <T,>(value: T | null | undefined): value is T => value !== null && value !== undefined;
+const isTempId = (id?: string): boolean => Boolean(id?.startsWith('temp-'));
+
+const getDisplayName = (employee: Employee): string => `${employee.firstName} ${employee.lastName}`.trim();
+
+const normalizeWorkOrderTool = (tool: Partial<WorkOrderToolDto> & { id: string; workOrderId: string; toolId: string }): WorkOrderToolDto => ({
+  id: tool.id,
+  workOrderId: tool.workOrderId,
+  toolId: tool.toolId,
+  toolCode: tool.toolCode ?? '',
+  toolName: tool.toolName ?? '',
+  description: tool.description,
+  category: tool.category ?? '',
+  currentLocation: tool.currentLocation,
+  isRequired: tool.isRequired ?? false,
+  isAllocated: tool.isAllocated ?? false,
+  allocationDate: tool.allocationDate,
+  checkoutId: tool.checkoutId,
+  isCheckedOut: tool.isCheckedOut ?? false,
+  checkoutDate: tool.checkoutDate,
+  expectedReturnDate: tool.expectedReturnDate,
+  actualReturnDate: tool.actualReturnDate,
+  checkoutStatus: tool.checkoutStatus,
+  checkedOutById: tool.checkedOutById,
+  checkedOutByName: tool.checkedOutByName,
+  dailyRentalRate: tool.dailyRentalRate ?? 0,
+  requiresCertification: tool.requiresCertification ?? false,
+  requiresTraining: tool.requiresTraining ?? false,
+  safetyNotes: tool.safetyNotes,
+  notes: tool.notes,
+  isExcludedFromBilling: tool.isExcludedFromBilling,
+  billingExclusionReason: tool.billingExclusionReason,
+  billingExcludedAt: tool.billingExcludedAt,
+  billingExcludedBy: tool.billingExcludedBy,
+  createdAt: tool.createdAt ?? new Date().toISOString(),
+  updatedAt: tool.updatedAt,
+});
 
 
 function WorkOrdersPageContent() {
@@ -430,8 +451,8 @@ function WorkOrdersPageContent() {
 
   // Handle URL parameters to auto-open a work order (by id or workOrderNumber)
   useEffect(() => {
-    const urlWorkOrderId = searchParams.get('id');
-    const urlWorkOrderNumber = searchParams.get('workOrderNumber');
+    const urlWorkOrderId = searchParams?.get('id');
+    const urlWorkOrderNumber = searchParams?.get('workOrderNumber');
 
     if (deepLinkHandled || (!urlWorkOrderId && !urlWorkOrderNumber) || workOrders.length === 0) {
       return;
@@ -474,7 +495,7 @@ function WorkOrdersPageContent() {
       setExpenses([]);
 
       try {
-        const workOrderDetails = await maintenanceApiService.getWorkOrderById(workOrder!.id);
+        const workOrderDetails = (await maintenanceApiService.getWorkOrderById(workOrder.id)) as WorkOrder;
 
         if (workOrderDetails.labor && Array.isArray(workOrderDetails.labor)) {
           setWorkOrderLabor(workOrderDetails.labor);
@@ -489,7 +510,7 @@ function WorkOrdersPageContent() {
             setWorkOrderParts(workOrderDetails.parts);
           }
           if (workOrderDetails.tools && Array.isArray(workOrderDetails.tools)) {
-            setWorkOrderTools(workOrderDetails.tools);
+            setWorkOrderTools(workOrderDetails.tools.map(normalizeWorkOrderTool));
           }
         } else {
           try {
@@ -562,7 +583,8 @@ function WorkOrdersPageContent() {
     }
 
     if (dateRange?.from) {
-      filtered = filtered.filter(order => new Date(order.createdAt) >= dateRange.from!);
+      const { from } = dateRange;
+      filtered = filtered.filter((order) => new Date(order.createdAt) >= from);
     }
 
     if (dateRange?.to) {
@@ -600,8 +622,9 @@ function WorkOrdersPageContent() {
 
     // Get unique technician names from schedules (prefer full name if available)
     const technicianNames = enrichedSchedules
-      .map(s => s.technicianFullName || s.technicianName)
-      .filter((name, index, self) => name && self.indexOf(name) === index);
+      .map((s) => s.technicianFullName || s.technicianName)
+      .filter(isDefined)
+      .filter((name, index, self) => self.indexOf(name) === index);
 
     if (technicianNames.length === 0) {
       return 'No technicians assigned';
@@ -644,7 +667,7 @@ function WorkOrdersPageContent() {
       const selectedAsset = assets.find(a => a.name === newWorkOrder.assetName);
       const selectedWorkOrderType = (Array.isArray(workOrderTypes) ? workOrderTypes : []).find(wot => wot.name === newWorkOrder.workOrderType);
       const selectedPriority = (Array.isArray(priorityLevels) ? priorityLevels : []).find(pl => pl.name === newWorkOrder.priority);
-      const selectedTechnician = technicians.find(t => `${t.firstName} ${t.lastName}` === newWorkOrder.assignedTechnician);
+        const selectedTechnician = technicians.find((t) => getDisplayName(t) === newWorkOrder.assignedTechnician);
 
       if (!selectedAsset || !selectedWorkOrderType || !selectedPriority) {
         console.error('Missing required selections');
@@ -931,14 +954,14 @@ function WorkOrdersPageContent() {
     });
 
     const expenseLines: BillingLineItem[] = expenses
-      .filter(expense => !!expense.id)
+      .filter((expense): expense is MaintenanceExpense & { id: string } => Boolean(expense.id))
       .map(expense => {
         const amount = Number(expense.amount || 0);
         const description = expense.description || expense.expenseType || 'Expense';
 
         return {
           key: `expense-${expense.id}`,
-          id: expense.id!,
+          id: expense.id,
           type: 'expense',
           category: 'Expense',
           description,
@@ -1664,7 +1687,7 @@ function WorkOrdersPageContent() {
 
                           try {
                             console.log('Fetching work order details for ID:', order.id);
-                            const workOrderDetails = await maintenanceApiService.getWorkOrderById(order.id);
+                            const workOrderDetails = (await maintenanceApiService.getWorkOrderById(order.id)) as WorkOrder;
                             console.log('Work order details received:', workOrderDetails);
                             console.log('Tasks in response:', workOrderDetails.tasks);
                             console.log('Parts in response:', workOrderDetails.parts);
@@ -4038,12 +4061,19 @@ function WorkOrdersPageContent() {
                                   itemCode: item.itemCode,
                                   name: item.itemName,
                                   availableStock: item.availableStock,
-                                  unitOfMeasure: item.unitOfMeasure,
+                                  currentStock: item.currentStock,
+                                  unitOfMeasure: item.unitOfMeasure ?? '',
                                   unitCost: item.unitCost,
                                   listPrice: item.unitCost,
+                                  salePrice: item.unitCost,
                                   standardCost: item.unitCost,
-                                  category: item.categoryName || ''
-                                } as InventoryItemDto);
+                                  averageCost: item.unitCost,
+                                  isSerialTracked: false,
+                                  isLotTracked: false,
+                                  itemType: item.itemType,
+                                  status: 1,
+                                  categoryName: item.categoryName || '',
+                                });
                               }
                               setConsumableSearchTerm(''); // Clear search after selection
                             }}
@@ -4414,8 +4444,12 @@ function WorkOrdersPageContent() {
                                     onClick={() => {
                                       if (!schedule.id) return;
                                       // If it's not a temp ID, mark for bulk deletion on save
-                                      if (!schedule.id.startsWith('temp-')) {
-                                        setPendingScheduleDeletes(prev => [...prev, schedule.id!]);
+                                      const scheduleId = schedule.id;
+                                      if (!scheduleId) {
+                                        return;
+                                      }
+                                      if (!isTempId(scheduleId)) {
+                                        setPendingScheduleDeletes((prev) => [...prev, scheduleId]);
                                       }
                                       // Remove from local state immediately for UI feedback
                                       setStaffSchedules(prev => prev.filter(s => s.id !== schedule.id));
@@ -4624,11 +4658,15 @@ function WorkOrdersPageContent() {
                                         onClick={() => {
                                           if (!expense.id || !confirm('Delete this expense?')) return;
                                           // Mark for bulk deletion if not a temp item
-                                          if (!expense.id.startsWith('temp-')) {
-                                            setPendingExpenseDeletes((prev) => [...prev, expense.id]);
+                                          const expenseId = expense.id;
+                                          if (!expenseId) {
+                                            return;
+                                          }
+                                          if (!isTempId(expenseId)) {
+                                            setPendingExpenseDeletes((prev) => [...prev, expenseId]);
                                           }
                                           // Remove from local state
-                                          setExpenses((prev) => prev.filter((e) => e.id !== expense.id));
+                                          setExpenses((prev) => prev.filter((e) => e.id !== expenseId));
                                           toast({
                                             title: 'Success',
                                             description: 'Expense deleted (will be removed on "Save Changes")',
@@ -4737,7 +4775,7 @@ function WorkOrdersPageContent() {
               // Save consumables to backend using bulk endpoint
               if (workOrderParts.length > 0 && selectedOrder?.id) {
                 // Filter only new parts (with temp IDs)
-                const newParts = workOrderParts.filter(part => part.id.startsWith('temp-'));
+                const newParts = workOrderParts.filter((part) => isTempId(part.id));
 
                 if (newParts.length > 0) {
                   try {
@@ -4776,11 +4814,13 @@ function WorkOrdersPageContent() {
               console.log('🗓️ All schedules in state:', staffSchedules);
               if (staffSchedules.length > 0 && selectedOrder?.id) {
                 // New schedules (with temp IDs)
-                const newSchedules = staffSchedules.filter(schedule => schedule.id.startsWith('temp-'));
+                const newSchedules = staffSchedules.filter((schedule): schedule is MaintenanceStaffSchedule & { id: string } => isTempId(schedule.id));
                 console.log('🗓️ New schedules to save (temp IDs):', newSchedules);
 
                 // Existing schedules that were loaded from DB (need to update)
-                const existingSchedules = staffSchedules.filter(schedule => !schedule.id.startsWith('temp-'));
+                const existingSchedules = staffSchedules.filter(
+                  (schedule): schedule is MaintenanceStaffSchedule & { id: string } => Boolean(schedule.id) && !isTempId(schedule.id)
+                );
                 console.log('🗓️ Existing schedules to update:', existingSchedules);
 
                 // Save new schedules
@@ -4796,7 +4836,7 @@ function WorkOrdersPageContent() {
                       address: schedule.address,
                       requiresTravel: schedule.requiresTravel,
                       transportationType: schedule.transportationType,
-                      assignedVehicleId: schedule.assignedVehicleId && schedule.assignedVehicleId !== 'none' ? schedule.assignedVehicleId : null,
+                      assignedVehicleId: schedule.assignedVehicleId && schedule.assignedVehicleId !== 'none' ? schedule.assignedVehicleId : undefined,
                       notes: schedule.notes
                     }));
                     console.log('🗓️ Saving new schedules to backend:', schedulesToSave);
@@ -4823,12 +4863,12 @@ function WorkOrdersPageContent() {
                       address: schedule.address,
                       requiresTravel: schedule.requiresTravel,
                       transportationType: schedule.transportationType,
-                      assignedVehicleId: schedule.assignedVehicleId && schedule.assignedVehicleId !== 'none' ? schedule.assignedVehicleId : null,
+                      assignedVehicleId: schedule.assignedVehicleId && schedule.assignedVehicleId !== 'none' ? schedule.assignedVehicleId : undefined,
                       notes: schedule.notes
                     }));
                     console.log('🗓️ Updating existing schedules in backend:', schedulesToUpdate);
 
-                    await Promise.all(schedulesToUpdate.map(s => maintenanceApiService.updateStaffSchedule(s.id, s)));
+                    await Promise.all(schedulesToUpdate.map((s) => maintenanceApiService.updateStaffSchedule(s.id, s)));
                     successMessages.push(`${existingSchedules.length} schedule(s) updated`);
                   } catch (error) {
                     console.error('Error updating schedules:', error);
@@ -4856,11 +4896,13 @@ function WorkOrdersPageContent() {
               console.log('💰 All expenses in state:', expenses);
               if (expenses.length > 0 && selectedOrder?.id) {
                 // New expenses (with temp IDs)
-                const newExpenses = expenses.filter(expense => expense.id.startsWith('temp-'));
+                const newExpenses = expenses.filter((expense): expense is MaintenanceExpense & { id: string } => isTempId(expense.id));
                 console.log('💰 New expenses to save (temp IDs):', newExpenses);
 
                 // Existing expenses that were loaded from DB (need to update)
-                const existingExpenses = expenses.filter(expense => !expense.id.startsWith('temp-'));
+                const existingExpenses = expenses.filter(
+                  (expense): expense is MaintenanceExpense & { id: string } => Boolean(expense.id) && !isTempId(expense.id)
+                );
                 console.log('💰 Existing expenses to update:', existingExpenses);
 
                 // Save new expenses
@@ -4875,7 +4917,7 @@ function WorkOrdersPageContent() {
                       expenseDate: expense.expenseDate,
                       mileageDriven: expense.mileageDriven,
                       mileageRate: expense.mileageRate,
-                      vehicleId: expense.vehicleUsed || null, // Send vehicleId to backend
+                      vehicleId: expense.vehicleUsed || undefined, // Send vehicleId to backend
                       vendorName: expense.vendor, // Backend expects vendorName
                       referenceNumber: expense.receiptNumber, // Backend expects referenceNumber
                       receiptPath: expense.receiptPath,
@@ -4904,7 +4946,7 @@ function WorkOrdersPageContent() {
                       expenseDate: expense.expenseDate,
                       mileageDriven: expense.mileageDriven,
                       mileageRate: expense.mileageRate,
-                      vehicleId: expense.vehicleUsed || null, // Send vehicleId to backend
+                      vehicleId: expense.vehicleUsed || undefined, // Send vehicleId to backend
                       vendorName: expense.vendor, // Backend expects vendorName
                       referenceNumber: expense.receiptNumber, // Backend expects referenceNumber
                       receiptPath: expense.receiptPath,
@@ -4912,7 +4954,7 @@ function WorkOrdersPageContent() {
                     }));
                     console.log('💰 Updating existing expenses in backend:', expensesToUpdate);
 
-                    await Promise.all(expensesToUpdate.map(e => maintenanceApiService.updateExpense(e.id, e)));
+                    await Promise.all(expensesToUpdate.map((e) => maintenanceApiService.updateExpense(e.id, e)));
                     successMessages.push(`${existingExpenses.length} expense(s) updated`);
                   } catch (error) {
                     console.error('Error updating expenses:', error);
@@ -5915,7 +5957,7 @@ function WorkOrdersPageContent() {
                       ...expenseData,
                       workOrderId: selectedOrder?.id || '',
                       technicianId: selectedOrder?.assignedTechnicianId || '',
-                      technicianName: selectedOrder?.assignedTechnician || '',
+                      technicianName: selectedOrder?.assignedTechnicianName || '',
                       status: 'Pending',
                       isApproved: false,
                       approvedById: '',

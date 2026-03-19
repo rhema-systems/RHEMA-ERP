@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 
 namespace ErpSystem.Data;
@@ -39,6 +40,9 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Applicatio
         {
             sql.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName);
         });
+
+        optionsBuilder.ConfigureWarnings(warnings =>
+            warnings.Ignore(CoreEventId.PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning));
 
         // Create context without tenant filter for migrations
         return new ApplicationDbContext(optionsBuilder.Options);

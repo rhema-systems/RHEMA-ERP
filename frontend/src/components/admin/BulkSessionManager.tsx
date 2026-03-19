@@ -100,9 +100,12 @@ const bulkCriteriaSchema = z.object({
   reason: z.string().min(3, 'Reason must be at least 3 characters').max(500, 'Reason cannot exceed 500 characters')
 });
 
-type FilterFormData = z.infer<typeof filterSchema>;
-type TerminateReasonFormData = z.infer<typeof terminateReasonSchema>;
-type BulkCriteriaFormData = z.infer<typeof bulkCriteriaSchema>;
+type FilterFormValues = z.input<typeof filterSchema>;
+type FilterFormData = z.output<typeof filterSchema>;
+type TerminateReasonFormValues = z.input<typeof terminateReasonSchema>;
+type TerminateReasonFormData = z.output<typeof terminateReasonSchema>;
+type BulkCriteriaFormValues = z.input<typeof bulkCriteriaSchema>;
+type BulkCriteriaFormData = z.output<typeof bulkCriteriaSchema>;
 
 interface BulkSessionManagerProps {
   className?: string;
@@ -123,7 +126,7 @@ export function BulkSessionManager({ className }: BulkSessionManagerProps) {
   const [lastOperationResult, setLastOperationResult] = useState<BulkSessionOperationResponse | null>(null);
 
   // Form instances
-  const filterForm = useForm<FilterFormData>({
+  const filterForm = useForm<FilterFormValues, any, FilterFormData>({
     resolver: zodResolver(filterSchema),
     defaultValues: {
       username: '',
@@ -134,14 +137,14 @@ export function BulkSessionManager({ className }: BulkSessionManagerProps) {
     }
   });
 
-  const terminateReasonForm = useForm<TerminateReasonFormData>({
+  const terminateReasonForm = useForm<TerminateReasonFormValues, any, TerminateReasonFormData>({
     resolver: zodResolver(terminateReasonSchema),
     defaultValues: {
       reason: ''
     }
   });
 
-  const bulkCriteriaForm = useForm<BulkCriteriaFormData>({
+  const bulkCriteriaForm = useForm<BulkCriteriaFormValues, any, BulkCriteriaFormData>({
     resolver: zodResolver(bulkCriteriaSchema),
     defaultValues: {
       ipAddressPattern: '',

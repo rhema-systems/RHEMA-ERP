@@ -31,7 +31,7 @@ const statusBadgeClassName = (s: EhcServiceRequestStatus) => {
 export default function HelpdeskServiceRequestsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const scopeParam = searchParams.get('scope');
+  const scopeParam = searchParams?.get('scope');
   const scopeConfig = useMemo(() => getHelpdeskScopeConfig(scopeParam), [scopeParam]);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<EhcServiceRequestStatus | ''>('');

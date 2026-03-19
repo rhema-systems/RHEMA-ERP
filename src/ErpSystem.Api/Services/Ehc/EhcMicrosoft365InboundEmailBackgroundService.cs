@@ -441,12 +441,14 @@ public sealed class EhcMicrosoft365InboundEmailBackgroundService : BackgroundSer
         }
         else
         {
-            ticket = await db.EhcTickets.FirstOrDefaultAsync(t => t.Id == ticketId.Value && t.TenantId == channel.TenantId && !t.IsDeleted, cancellationToken);
-            if (ticket == null)
+            var existingTicket = await db.EhcTickets.FirstOrDefaultAsync(t => t.Id == ticketId.Value && t.TenantId == channel.TenantId && !t.IsDeleted, cancellationToken);
+            if (existingTicket == null)
             {
                 ticketId = null;
                 return false;
             }
+
+            ticket = existingTicket;
 
             ticket.UpdatedAt = DateTime.UtcNow;
             ticket.UpdatedBy = "EmailIngest";
