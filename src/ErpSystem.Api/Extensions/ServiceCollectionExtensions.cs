@@ -599,7 +599,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // Finance - Common services (Payment Terms, Currency)
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IPaymentTermService, ErpSystem.Core.Services.Finance.PaymentTermService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICurrencyService, ErpSystem.Api.Services.Finance.MultiCurrency.CurrencyService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICurrencyService, ErpSystem.Core.Services.Finance.CurrencyService>();
 
             // Phase 1: Core Maintenance Services - workflow-ready implementation - NOW ENABLED
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IWorkOrderService, ErpSystem.Core.Services.Maintenance.WorkOrderService>();
@@ -847,197 +847,6 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 ErpSystem.Core.Services.Maintenance.MaintenanceEscalationService>();
             services.AddScoped<ErpSystem.Core.Services.Maintenance.IDeadLetterNotificationService,
                 ErpSystem.Core.Services.Maintenance.DeadLetterNotificationService>();
-
-            // Sales Order Management Services
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderService, ErpSystem.Core.Services.Sales.SalesOrderService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.IDeliveryService, ErpSystem.Core.Services.Sales.DeliveryService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesAgreementService, ErpSystem.Api.Services.Sales.SalesAgreementService>();
-
-            // CRM Services
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ILeadService, ErpSystem.Core.Services.Sales.LeadService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.IOpportunityService, ErpSystem.Core.Services.Sales.OpportunityService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.IQuoteService, ErpSystem.Core.Services.Sales.QuoteService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.IActivityService, ErpSystem.Core.Services.Sales.ActivityService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ICampaignService, ErpSystem.Core.Services.Sales.CampaignService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.IProductCatalogService, ErpSystem.Core.Services.Sales.ProductCatalogService>();
-
-            // Return Order / Credit Note / Refund Services
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.IReturnOrderService, ErpSystem.Core.Services.Sales.ReturnOrderService>();
-
-            // Collections & Debt Management Services
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ICollectionService, ErpSystem.Core.Services.Sales.CollectionService>();
-
-            // Commission Management Services
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ICommissionService, ErpSystem.Core.Services.Sales.CommissionService>();
-
-            // Sales Forecasting Services
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.IForecastService, ErpSystem.Core.Services.Sales.ForecastService>();
-
-            // Competitor Intelligence Services
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ICompetitorService, ErpSystem.Core.Services.Sales.CompetitorService>();
-
-            // Sales Reporting Services
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesReportingService, ErpSystem.Core.Services.Sales.SalesReportingService>();
-
-            // Sales Journal Template Services
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesJournalTemplateService, ErpSystem.Core.Services.Sales.SalesJournalTemplateService>();
-
-            // ─── Finance Module Services ───
-            services.AddScoped<ErpSystem.Core.Interfaces.ITenantSettingsService,
-                ErpSystem.Api.Services.TenantSettingsService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFiscalPeriodService,
-                ErpSystem.Api.Services.Finance.Fiscal.FiscalPeriodService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.IGeneralLedgerService,
-                ErpSystem.Api.Services.Finance.GL.GeneralLedgerService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalEntryService,
-                ErpSystem.Api.Services.Finance.GL.JournalEntryService>();
-
-            // Fixed Assets
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetService,
-                ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetCategoryService,
-                ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetCategoryService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetDepreciationService,
-                ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetDepreciationService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAssetTransferService,
-                ErpSystem.Api.Services.Finance.FixedAssets.AssetTransferService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAssetDisposalService,
-                ErpSystem.Api.Services.Finance.FixedAssets.AssetDisposalService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAssetVerificationService,
-                ErpSystem.Api.Services.Finance.FixedAssets.AssetVerificationService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetReportsService,
-                ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetReportsService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAssetValuationService,
-                ErpSystem.Api.Services.Finance.FixedAssets.AssetValuationService>();
-
-            // Capital Projects (AUC)
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICapitalProjectService,
-                ErpSystem.Api.Services.Finance.FixedAssets.CapitalProjectService>();
-
-            // Lease Accounting (IFRS 16)
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ILeaseAccountingService,
-                ErpSystem.Api.Services.Finance.FixedAssets.LeaseAccountingService>();
-
-            // Finance Settings
-            services.AddScoped<ErpSystem.Core.Interfaces.IFinanceSettingsService,
-                ErpSystem.Api.Services.Finance.Settings.FinanceSettingsService>();
-
-            // GL Account Services
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountService,
-                ErpSystem.Api.Services.Finance.GL.AccountService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountCombinationService,
-                ErpSystem.Api.Services.Finance.Segments.AccountCombinationService>();
-
-            // Segment Services
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISegmentStructureService,
-                ErpSystem.Api.Services.Finance.Segments.SegmentStructureService>();
-            services.AddScoped<ErpSystem.Core.Services.Finance.ISegmentLookupValueService,
-                ErpSystem.Api.Services.Finance.Segments.SegmentLookupValueService>();
-
-            // Accounts Payable (AP)
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorInvoiceService,
-                ErpSystem.Api.Services.Finance.AP.VendorInvoiceService>();
-
-            // Accounts Receivable (AR)
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICustomerService,
-                ErpSystem.Api.Services.Finance.AR.CustomerService>();
-
-            // Cash Management
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBankAccountService,
-                ErpSystem.Api.Services.Finance.Cash.BankAccountService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBankReconciliationService,
-                ErpSystem.Api.Services.Finance.Cash.BankReconciliationService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICashTransactionService,
-                ErpSystem.Api.Services.Finance.Cash.CashTransactionService>();
-            services.AddScoped<ErpSystem.Api.Services.Finance.Cash.BankReconciliationEngine>();
-
-            // Subledger Posting (needed by AP/AR services)
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISubledgerPostingService,
-                ErpSystem.Api.Services.Finance.GL.SubledgerPostingService>();
-
-            // Budgeting
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBudgetService,
-                ErpSystem.Api.Services.Finance.Budget.BudgetService>();
-
-            // Taxation
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ITaxConfigurationService,
-                ErpSystem.Api.Services.Finance.Taxation.TaxConfigurationService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ITaxCalculationEngine,
-                ErpSystem.Api.Services.Finance.Taxation.TaxCalculationEngine>();
-
-            // Unit Accounting
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAllocationService,
-                ErpSystem.Api.Services.Finance.UnitAccounting.AllocationService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitTypeService,
-                ErpSystem.Api.Services.Finance.UnitAccounting.UnitTypeService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IRatioDefinitionService,
-                ErpSystem.Api.Services.Finance.UnitAccounting.RatioDefinitionService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitAccountService,
-                ErpSystem.Api.Services.Finance.UnitAccounting.UnitAccountService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitBudgetService,
-                ErpSystem.Api.Services.Finance.UnitAccounting.UnitBudgetService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitJournalEntryService,
-                ErpSystem.Api.Services.Finance.UnitAccounting.UnitJournalEntryService>();
-
-            // Account Segment Structure
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountSegmentStructureService,
-                ErpSystem.Api.Services.Finance.Segments.AccountSegmentStructureService>();
-
-            // Multi-Currency
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICurrencyRevaluationService,
-                ErpSystem.Api.Services.Finance.MultiCurrency.CurrencyRevaluationService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IExchangeRateService,
-                ErpSystem.Api.Services.Finance.MultiCurrency.ExchangeRateService>();
-
-            // AP Reports & Vendor Payments
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IApReportsService,
-                ErpSystem.Api.Services.Finance.AP.ApReportsService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorPaymentService,
-                ErpSystem.Api.Services.Finance.AP.VendorPaymentService>();
-
-            // AR Invoice, Payment & Reports
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IInvoiceService,
-                ErpSystem.Api.Services.Finance.AR.InvoiceService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IPaymentService,
-                ErpSystem.Api.Services.Finance.AR.PaymentService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IArReportsService,
-                ErpSystem.Api.Services.Finance.AR.ArReportsService>();
-
-            // Procurement Repositories
-            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierContactRepository,
-                ErpSystem.Data.Repositories.Procurement.SupplierContactRepository>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierItemCatalogRepository,
-                ErpSystem.Data.Repositories.Procurement.SupplierItemCatalogRepository>();
-
-            // ── Sales & Marketing Services ──
-            // CRM (P1-P4): Lead, Opportunity, Quote, Activity, Campaign
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ILeadService,
-                ErpSystem.Core.Services.Sales.LeadService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.IOpportunityService,
-                ErpSystem.Core.Services.Sales.OpportunityService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.IQuoteService,
-                ErpSystem.Core.Services.Sales.QuoteService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.IActivityService,
-                ErpSystem.Core.Services.Sales.ActivityService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ICampaignService,
-                ErpSystem.Core.Services.Sales.CampaignService>();
-
-            // P8-P12: Commission, Forecast, Competitor, Reporting, Journal Templates
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ICommissionService,
-                ErpSystem.Core.Services.Sales.CommissionService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.IForecastService,
-                ErpSystem.Core.Services.Sales.ForecastService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ICompetitorService,
-                ErpSystem.Core.Services.Sales.CompetitorService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesReportingService,
-                ErpSystem.Core.Services.Sales.SalesReportingService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesJournalTemplateService,
-                ErpSystem.Core.Services.Sales.SalesJournalTemplateService>();
-
-            // NOTE: ICachingService (Redis), IFileStorageService (Azure Blob), and
-            // IApplicationWarmupService are NOT registered here — they require external
-            // infrastructure (Redis, Azure, etc.) and should be registered conditionally
-            // based on environment configuration.
 
             // Add AutoMapper - using assembly scanning approach
             services.AddAutoMapper(
@@ -1312,40 +1121,25 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             var redisConnectionString = configuration.GetConnectionString("Redis");
             if (!string.IsNullOrEmpty(redisConnectionString))
             {
-                // Try to connect to Redis gracefully — don't crash the app if Redis is unavailable
-                try
+                var redisConfigurationOptions = BuildRedisConfigurationOptions(redisConnectionString, configuration);
+
+                // Add Redis connection multiplexer for advanced operations
+                services.AddSingleton<IConnectionMultiplexer>(sp =>
+                    ConnectionMultiplexer.Connect(redisConfigurationOptions));
+
+                // Add StackExchange Redis cache
+                services.AddStackExchangeRedisCache(options =>
                 {
-                    var redisOptions = ConfigurationOptions.Parse(redisConnectionString);
-                    redisOptions.AbortOnConnectFail = false; // Retry silently instead of throwing
+                    options.ConfigurationOptions = redisConfigurationOptions;
+                    options.InstanceName = "ErpSystem";
+                });
 
-                    var multiplexer = ConnectionMultiplexer.Connect(redisOptions);
-
-                    services.AddSingleton<IConnectionMultiplexer>(multiplexer);
-
-                    services.AddStackExchangeRedisCache(options =>
-                    {
-                        options.Configuration = redisConnectionString;
-                        options.InstanceName = "ErpSystem";
-                    });
-
-                    services.AddScoped<IRedisService>(sp =>
-                        new RedisService(
-                            sp.GetRequiredService<IDistributedCache>(),
-                            sp.GetRequiredService<ILogger<RedisService>>(),
-                            sp.GetRequiredService<IConnectionMultiplexer>()));
-                }
-                catch (Exception ex)
-                {
-                    // Redis unavailable — fall back to in-memory cache
-                    var logger = LoggerFactory.Create(b => b.AddConsole()).CreateLogger("Startup");
-                    logger.LogWarning("Redis unavailable ({Message}). Falling back to in-memory cache.", ex.Message);
-
-                    services.AddDistributedMemoryCache();
-                    services.AddScoped<IRedisService>(sp =>
-                        new RedisService(
-                            sp.GetRequiredService<IDistributedCache>(),
-                            sp.GetRequiredService<ILogger<RedisService>>()));
-                }
+                // Register Redis service with connection multiplexer
+                services.AddScoped<IRedisService>(sp =>
+                    new RedisService(
+                        sp.GetRequiredService<IDistributedCache>(),
+                        sp.GetRequiredService<ILogger<RedisService>>(),
+                        sp.GetRequiredService<IConnectionMultiplexer>()));
             }
             else
             {
@@ -1366,6 +1160,29 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             });
 
             return services;
+        }
+
+        private static ConfigurationOptions BuildRedisConfigurationOptions(string connectionString, IConfiguration configuration)
+        {
+            var options = ConfigurationOptions.Parse(connectionString, ignoreUnknown: true);
+            var environmentName =
+                Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
+                Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ??
+                configuration["Application:EnvironmentName"] ??
+                configuration["Application:Environment"] ??
+                Environments.Production;
+
+            var isDevelopment = string.Equals(environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase);
+
+            if (isDevelopment)
+            {
+                // Let local startup continue even if Redis is not installed or not running yet.
+                options.AbortOnConnectFail = false;
+                options.ConnectRetry = Math.Max(options.ConnectRetry, 3);
+                options.ReconnectRetryPolicy ??= new ExponentialRetry(5000);
+            }
+
+            return options;
         }
 
         public static IServiceCollection AddErpSystemWebFarm(this IServiceCollection services, IConfiguration configuration)

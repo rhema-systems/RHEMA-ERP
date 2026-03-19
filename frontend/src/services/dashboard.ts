@@ -1,5 +1,5 @@
 import { apiService } from './api.service'
-import { crmService, type CrmOverviewDto, type CrmReportingDto } from './crmService'
+import { crmService, type CrmConversionsDto, type CrmOverviewDto, type CrmReportingDto } from './crmService'
 import { inventoryRequisitionService, type InventoryRequisitionDto } from './inventoryRequisitionService'
 import { projectService, type ProjectDashboardDto } from './projectService'
 import { purchasingService, type PurchaseOrderSummaryDto, type PurchaseRequisitionSummaryDto } from './purchasingService'
@@ -55,6 +55,7 @@ export interface MaintenanceScheduleDto {
 export interface EnterpriseDashboardData {
   crmOverview: CrmOverviewDto | null
   crmReporting: CrmReportingDto | null
+  crmConversions: CrmConversionsDto | null
   projectDashboard: ProjectDashboardDto | null
   pendingPurchaseRequisitions: PurchaseRequisitionSummaryDto[]
   openPurchaseOrders: PurchaseOrderSummaryDto[]
@@ -113,6 +114,7 @@ class DashboardService {
     const [
       crmOverviewResult,
       crmReportingResult,
+      crmConversionsResult,
       projectDashboardResult,
       purchaseRequisitionsResult,
       purchaseOrdersResult,
@@ -126,6 +128,7 @@ class DashboardService {
     ] = await Promise.all([
       this.loadModule('CRM Overview', () => crmService.getOverview(8), null, 'CRM overview is unavailable'),
       this.loadModule('CRM Reporting', () => crmService.getReporting(8), null, 'CRM reporting is unavailable'),
+      this.loadModule('CRM Conversions', () => crmService.getConversions({ months: 6 }), null, 'CRM conversions are unavailable'),
       this.loadModule('Projects', () => projectService.getDashboard(), null, 'Project dashboard is unavailable'),
       this.loadModule(
         'Purchase Requisitions',
@@ -195,6 +198,7 @@ class DashboardService {
     return {
       crmOverview: crmOverviewResult.data,
       crmReporting: crmReportingResult.data,
+      crmConversions: crmConversionsResult.data,
       projectDashboard: projectDashboardResult.data,
       pendingPurchaseRequisitions: purchaseRequisitionsResult.data,
       openPurchaseOrders: purchaseOrdersResult.data,
@@ -208,6 +212,7 @@ class DashboardService {
       moduleStatus: [
         crmOverviewResult.status,
         crmReportingResult.status,
+        crmConversionsResult.status,
         projectDashboardResult.status,
         purchaseRequisitionsResult.status,
         purchaseOrdersResult.status,
